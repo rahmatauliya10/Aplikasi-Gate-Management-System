@@ -95,87 +95,87 @@
         <div class="absolute inset-0 pointer-events-none opacity-[0.08]" 
           style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
         
-        <transition-group name="list" tag="div" class="relative z-10 space-y-4">
+        <transition-group name="list" tag="div" class="relative z-10 space-y-3">
           <div v-for="(truck, i) in registeredTrucks" :key="truck.id"
-            class="group relative bg-white/70 backdrop-blur-md p-5 rounded-[2rem] border border-white hover:border-indigo-400 hover:border-opacity-40 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_15px_40px_rgba(74,139,223,0.12)] hover:-translate-y-1.5 transition-all duration-500 flex flex-col lg:flex-row lg:items-center justify-between gap-6 overflow-hidden"
+            class="group relative bg-white/70 backdrop-blur-md rounded-[1.75rem] border border-white hover:border-indigo-400 hover:border-opacity-40 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_15px_40px_rgba(74,139,223,0.12)] hover:-translate-y-1 transition-all duration-500 overflow-hidden"
+            style="height: 80px;"
           >
             <!-- Animated Gradient Border Glow -->
             <div class="absolute inset-0 bg-gradient-to-r from-transparent via-[#4A8BDF] to-transparent opacity-0 group-hover:opacity-5 transition-opacity duration-700"></div>
             
-            <!-- Process Accent Line (Premium Gradient) -->
-            <div class="absolute left-0 top-0 bottom-0 w-1.5 transition-all duration-500 opacity-80 group-hover:opacity-100"
+            <!-- Process Accent Line -->
+            <div class="absolute left-0 top-0 bottom-0 w-1.5 transition-all duration-500 opacity-80 group-hover:opacity-100 rounded-l-[1.75rem]"
                  :style="{ background: truck.processType === 'GBB' ? 'linear-gradient(to bottom, #A0006D, #800057)' : 'linear-gradient(to bottom, #4A8BDF, #3A6ABF)' }"></div>
             
-            <div class="flex flex-col lg:flex-row lg:items-center flex-1 gap-6 relative z-10">
-              <!-- Left Section: Identity -->
-              <div class="flex items-center space-x-5 lg:w-[25%]">
-                <div class="relative">
-                  <div class="bg-slate-900 px-5 py-3 rounded-2xl shadow-xl border border-slate-700 group-hover:scale-105 transition-transform duration-500">
-                    <span class="text-lg font-mono font-black text-white tracking-[0.15em]">{{ truck.plateNumber }}</span>
-                  </div>
-                  <div class="absolute -right-2 -top-2 w-6 h-6 rounded-full bg-[#4A8BDF] flex items-center justify-center border-2 border-white shadow-lg scale-0 group-hover:scale-100 transition-transform duration-500 delay-100">
-                    <span class="material-icons text-white text-[12px]">verified</span>
-                  </div>
-                </div>
-                <div class="flex flex-col">
-                  <span class="text-base font-black text-slate-800 tracking-tight group-hover:text-[#4A8BDF] transition-colors">{{ truck.driverName }}</span>
-                  <div class="flex items-center space-x-1.5 mt-0.5">
-                    <span class="material-icons text-[14px] text-slate-400">business</span>
-                    <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{{ truck.vendor }}</span>
-                  </div>
-                </div>
-              </div>
+            <!-- Card Body: strict flex row, vertically centered, fixed height -->
+            <div class="h-full flex items-center gap-0 px-5 pl-7 relative z-10">
 
-              <!-- Middle Section: Process & Time -->
-              <div class="flex items-center space-x-8 lg:w-[45%]">
-                <div class="flex flex-col items-center">
-                  <span class="px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-sm border transition-all duration-500 group-hover:shadow-md"
-                        :style="{ 
-                          backgroundColor: truck.processType === 'GBB' ? 'rgba(160,0,109,0.08)' : 'rgba(74,139,223,0.08)',
-                          borderColor: truck.processType === 'GBB' ? 'rgba(160,0,109,0.2)' : 'rgba(74,139,223,0.2)',
-                          color: truck.processType === 'GBB' ? '#A0006D' : '#3A6ABF'
-                        }">
-                    {{ truck.processType }}
+              <!-- COL 1: Plate Number — fixed 130px -->
+              <div class="flex-shrink-0 w-[130px]">
+                <div class="w-[110px] h-[42px] bg-slate-900 flex items-center justify-center rounded-xl shadow-lg border border-slate-700 group-hover:scale-105 transition-transform duration-500 overflow-hidden px-2">
+                  <span class="font-mono font-black text-white text-center leading-none w-full"
+                        :style="{ fontSize: truck.plateNumber.length > 8 ? '10px' : truck.plateNumber.length > 6 ? '12px' : '14px' }">
+                    {{ truck.plateNumber }}
                   </span>
-                  <span class="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-tighter">PROCESS TYPE</span>
-                </div>
-
-                <!-- Modern Time Display (Inspired by User Screenshot) -->
-                <div class="flex items-center space-x-3 bg-slate-50/80 px-4 py-2.5 rounded-[1.25rem] border border-slate-100 group-hover:bg-indigo-50/50 group-hover:border-indigo-100 transition-all duration-500">
-                  <div class="w-9 h-9 rounded-xl bg-white flex items-center justify-center shadow-sm border border-slate-100 group-hover:text-indigo-600 transition-colors">
-                    <span class="material-icons text-[#4A8BDF] text-lg">schedule</span>
-                  </div>
-                  <div class="flex flex-col">
-                    <span class="text-sm font-black text-slate-700 font-mono tracking-wider">{{ formatTime(truck.timestamps.entry) }}</span>
-                    <span class="text-[9px] font-black text-slate-400 uppercase">Registered</span>
-                  </div>
-                </div>
-
-                <!-- Phase Indicator -->
-                <div class="flex flex-col">
-                  <div class="flex items-center space-x-2">
-                    <div class="flex space-x-1">
-                      <div class="w-1 h-1 rounded-full bg-[#4A8BDF]"></div>
-                      <div class="w-1 h-1 rounded-full bg-slate-200"></div>
-                      <div class="w-1 h-1 rounded-full bg-slate-200"></div>
-                    </div>
-                    <span class="text-[11px] font-black text-slate-600 uppercase tracking-widest bg-white px-3 py-1 rounded-full border border-slate-100 shadow-sm">
-                      {{ truck.step.replace('_', ' ') }}
-                    </span>
-                  </div>
-                  <span class="text-[9px] font-bold text-slate-400 mt-2 ml-7 uppercase tracking-tighter">CURRENT STAGE</span>
                 </div>
               </div>
 
-              <!-- Right Section: Actions -->
-              <div class="flex items-center justify-end lg:flex-1 gap-3">
-                <button @click="viewDetails(truck)" class="relative overflow-hidden group/btn px-6 py-3 rounded-2xl bg-white border border-slate-200 hover:border-[#4A8BDF] hover:shadow-[0_10px_20px_-5px_rgba(74,139,223,0.2)] transition-all duration-300">
-                  <div class="flex items-center space-x-2 relative z-10">
-                    <span class="text-[11px] font-black text-slate-600 group-hover/btn:text-[#4A8BDF] uppercase tracking-[0.2em] transition-colors">INSPECT DATA</span>
-                    <span class="material-icons text-[18px] text-slate-400 group-hover/btn:text-[#4A8BDF] group-hover/btn:translate-x-1 transition-all duration-300">rocket_launch</span>
+              <!-- COL 2: Driver & Vendor — fixed 180px -->
+              <div class="flex-shrink-0 w-[180px] flex flex-col justify-center min-w-0">
+                <span class="text-sm font-black text-slate-800 tracking-tight group-hover:text-[#4A8BDF] transition-colors truncate leading-tight">{{ truck.driverName }}</span>
+                <div class="flex items-center gap-1 mt-0.5">
+                  <span class="material-icons text-[12px] text-slate-400 flex-shrink-0">business</span>
+                  <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wide truncate">{{ truck.vendor }}</span>
+                </div>
+              </div>
+
+              <!-- COL 3: Process Type — fixed 90px, centered -->
+              <div class="flex-shrink-0 w-[90px] flex flex-col items-center justify-center">
+                <span class="w-full text-center px-2 py-1 rounded-xl text-[10px] font-black uppercase tracking-[0.1em] shadow-sm border"
+                      :style="{ 
+                        backgroundColor: truck.processType === 'GBB' ? 'rgba(160,0,109,0.08)' : 'rgba(74,139,223,0.08)',
+                        borderColor: truck.processType === 'GBB' ? 'rgba(160,0,109,0.2)' : 'rgba(74,139,223,0.2)',
+                        color: truck.processType === 'GBB' ? '#A0006D' : '#3A6ABF'
+                      }">
+                  {{ truck.processType }}
+                </span>
+                <span class="text-[8px] font-bold text-slate-400 mt-1 uppercase tracking-tighter whitespace-nowrap">PROCESS TYPE</span>
+              </div>
+
+              <!-- COL 4: Time — fixed 150px -->
+              <div class="flex-shrink-0 w-[150px] flex items-center gap-2.5 bg-slate-50/80 px-3 py-2 rounded-2xl border border-slate-100 group-hover:bg-indigo-50/50 group-hover:border-indigo-100 transition-all duration-500">
+                <div class="w-7 h-7 rounded-lg bg-white flex items-center justify-center shadow-sm border border-slate-100 flex-shrink-0">
+                  <span class="material-icons text-[#4A8BDF] text-[16px]">schedule</span>
+                </div>
+                <div class="flex flex-col">
+                  <span class="text-sm font-black text-slate-700 font-mono tracking-wider whitespace-nowrap">{{ formatTime(truck.timestamps.entry) }}</span>
+                  <span class="text-[8px] font-black text-slate-400 uppercase">Registered</span>
+                </div>
+              </div>
+
+              <!-- COL 5: Stage — flexible -->
+              <div class="flex flex-col flex-1 min-w-0 px-4">
+                <div class="flex items-center gap-1.5">
+                  <div class="flex gap-0.5">
+                    <div class="w-1 h-1 rounded-full bg-[#4A8BDF]"></div>
+                    <div class="w-1 h-1 rounded-full bg-slate-200"></div>
+                    <div class="w-1 h-1 rounded-full bg-slate-200"></div>
                   </div>
+                  <span class="text-[10px] font-black text-slate-600 uppercase tracking-widest bg-white px-2.5 py-1 rounded-full border border-slate-100 shadow-sm whitespace-nowrap truncate">
+                    {{ truck.step.replace('_', ' ') }}
+                  </span>
+                </div>
+                <span class="text-[8px] font-bold text-slate-400 mt-1 ml-6 uppercase tracking-tighter">CURRENT STAGE</span>
+              </div>
+
+              <!-- COL 6: Action — fixed -->
+              <div class="flex-shrink-0">
+                <button @click="viewDetails(truck)" class="group/btn px-5 py-2.5 rounded-2xl bg-white border border-slate-200 hover:border-[#4A8BDF] hover:shadow-[0_8px_20px_-5px_rgba(74,139,223,0.2)] transition-all duration-300 flex items-center gap-2 whitespace-nowrap">
+                  <span class="text-[11px] font-black text-slate-600 group-hover/btn:text-[#4A8BDF] uppercase tracking-[0.15em] transition-colors">INSPECT DATA</span>
+                  <span class="material-icons text-[16px] text-slate-400 group-hover/btn:text-[#4A8BDF] group-hover/btn:translate-x-1 transition-all duration-300">rocket_launch</span>
                 </button>
               </div>
+
             </div>
           </div>
           
