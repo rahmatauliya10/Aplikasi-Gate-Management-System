@@ -1,0 +1,7 @@
+services:
+  frontend:
+    build: .
+    ports:
+      - "80:80"
+    container_name: gate-system-frontend
+    restart: always

@@ -1,0 +1,566 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   GOOGLE FONTS — JetBrains Mono for mono text
+   ============================================ */
+
+/* ============================================
+   BASE — Futuristic Dark Foundation
+   ============================================ */
+@layer base {
+  body {
+    @apply bg-canvas text-text-dark antialiased font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3 {
+    @apply font-bold text-text-dark;
+    letter-spacing: -0.02em;
+  }
+
+  p, span, label {
+    line-height: 1.6;
+  }
+}
+
+/* ============================================
+   UTILITIES — Cyber Glass Card System
+   ============================================ */
+@layer utilities {
+  /* Light mode cards (views) */
+  .ind-card {
+    @apply bg-white/90 backdrop-blur-sm rounded-card shadow-card border border-white/70;
+    transition: transform 0.4s cubic-bezier(0.165, 0.84, 0.44, 1),
+                box-shadow 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+  }
+
+  .ind-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 40px rgba(99, 102, 241, 0.12);
+  }
+
+  .ind-container {
+    @apply bg-white/95 backdrop-blur-sm rounded-card shadow-card border border-slate-100/80;
+    transition: box-shadow 0.3s ease;
+  }
+
+  /* Dark Glass Panel (sidebar/header context) */
+  .glass-dark {
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(99, 102, 241, 0.12);
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+  }
+
+  /* ── Premium Buttons ── */
+  .btn-primary {
+    @apply text-white px-6 py-2.5 rounded-xl font-bold transition-all relative flex items-center justify-center space-x-2 text-sm tracking-wide overflow-hidden;
+    background: linear-gradient(135deg, #6366F1 0%, #4F46E5 50%, #4338CA 100%);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+
+  .btn-primary::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+
+  .btn-primary:hover::before { opacity: 1; }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(99, 102, 241, 0.55), inset 0 1px 0 rgba(255,255,255,0.15);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0) scale(0.97);
+    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-text-dark border-2 border-slate-200 px-6 py-2.5 rounded-xl font-bold transition-all relative flex items-center justify-center space-x-2 text-sm tracking-wide;
+  }
+
+  .btn-secondary:hover {
+    @apply bg-primary-50 text-primary;
+    border-color: #C7D2FE;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.1);
+  }
+
+  .btn-secondary:active {
+    transform: translateY(0) scale(0.97);
+    transition: transform 0.1s ease;
+  }
+
+  /* Cyber Glow Button */
+  .btn-cyber {
+    @apply text-white px-6 py-2.5 rounded-xl font-bold transition-all relative flex items-center justify-center space-x-2 text-sm tracking-wide overflow-hidden;
+    background: linear-gradient(135deg, #06B6D4 0%, #0891B2 100%);
+    box-shadow: 0 4px 14px rgba(6, 182, 212, 0.4);
+  }
+
+  .btn-cyber:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(6, 182, 212, 0.55);
+  }
+}
+
+/* ============================================
+   VUE ROUTER PAGE TRANSITIONS — Premium Slide
+   ============================================ */
+.page-enter-active {
+  transition: opacity 0.45s ease-out, transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.page-leave-active {
+  transition: opacity 0.2s ease-in, transform 0.2s ease-in;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-10px) scale(1.005);
+}
+
+/* ============================================
+   MODAL TRANSITIONS — Spring Physics
+   ============================================ */
+.modal-enter-active {
+  transition: opacity 0.35s ease-out;
+}
+.modal-leave-active {
+  transition: opacity 0.2s ease-in;
+}
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+.modal-enter-active .modal-panel {
+  animation: modalSpringUp 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.modal-leave-active .modal-panel {
+  animation: modalSlideDown 0.2s ease-in forwards;
+}
+
+@keyframes modalSpringUp {
+  0%   { opacity: 0; transform: translateY(40px) scale(0.92); }
+  60%  { opacity: 1; transform: translateY(-4px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes modalSlideDown {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(20px) scale(0.97); }
+}
+
+/* ============================================
+   BACKDROP BLUR ANIMATION
+   ============================================ */
+.backdrop-animate {
+  animation: backdropBlurIn 0.35s ease-out forwards;
+}
+@keyframes backdropBlurIn {
+  from { backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px); background: rgba(2,8,23,0); }
+  to   { backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); background: rgba(2,8,23,0.72); }
+}
+
+/* ============================================
+   INTERNAL COMPONENT TRANSITIONS
+   ============================================ */
+.fade-slide-enter-active {
+  transition: opacity 0.4s ease-out, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.fade-slide-leave-active {
+  transition: opacity 0.2s ease-in, transform 0.2s ease-in;
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+/* ============================================
+   LIST TRANSITIONS — Spring
+   ============================================ */
+.list-move {
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.list-enter-active {
+  transition: opacity 0.4s ease-out, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.list-leave-active {
+  transition: opacity 0.18s ease-in;
+  position: absolute;
+}
+.list-enter-from {
+  opacity: 0;
+  transform: translateX(-12px) scale(0.97);
+}
+.list-leave-to {
+  opacity: 0;
+}
+
+/* ============================================
+   FADE TRANSITION (Simple)
+   ============================================ */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* ============================================
+   FORM EXPAND — Spring
+   ============================================ */
+.modern-expand-enter-active {
+  transition: opacity 0.45s ease-out, transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: top center;
+}
+.modern-expand-leave-active {
+  transition: opacity 0.2s ease-in, transform 0.2s ease-in;
+  transform-origin: top center;
+}
+.modern-expand-enter-from {
+  opacity: 0;
+  transform: translateY(-14px) scaleY(0.94);
+}
+.modern-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* ============================================
+   SCROLLBAR — Cyber Minimal
+   ============================================ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 100px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.6);
+}
+
+/* ============================================
+   GLOBAL FOCUS RING
+   ============================================ */
+*:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.6);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ============================================
+   CYBER GRID BACKGROUND PATTERN
+   ============================================ */
+.cyber-grid {
+  background-image:
+    linear-gradient(rgba(99, 102, 241, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ============================================
+   GLOW RING ANIMATION
+   ============================================ */
+@keyframes ringPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
+}
+.ring-pulse { animation: ringPulse 2s ease-in-out infinite; }
+
+/* ============================================
+   NUMBER COUNTER ANIMATION
+   ============================================ */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.count-animate { animation: countUp 0.5s ease-out forwards; }
+
+/* ============================================
+   TABLE ROW HOVER ENHANCEMENT
+   ============================================ */
+.table-row-hover {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+.table-row-hover::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #6366F1, #06B6D4);
+  border-radius: 0 4px 4px 0;
+  opacity: 0;
+  transform: scaleY(0);
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.table-row-hover:hover {
+  background: linear-gradient(90deg, rgba(99,102,241,0.04) 0%, rgba(6,182,212,0.02) 100%);
+}
+.table-row-hover:hover::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+/* ============================================
+   STAGGERED ENTRANCE ANIMATIONS
+   ============================================ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes fadeInRight {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes scaleSpringIn {
+  0%   { opacity: 0; transform: scale(0.85); }
+  60%  { opacity: 1; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes slideDownSpring {
+  0%   { opacity: 0; transform: translateY(-20px) scaleY(0.9); }
+  60%  { opacity: 1; transform: translateY(3px) scaleY(1.02); }
+  100% { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fadeInLeft {
+  animation: fadeInLeft 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fadeInRight {
+  animation: fadeInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-scaleSpringIn {
+  animation: scaleSpringIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.animate-slideDownSpring {
+  animation: slideDownSpring 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Stagger delay classes */
+.stagger-1 { animation-delay: 50ms; }
+.stagger-2 { animation-delay: 100ms; }
+.stagger-3 { animation-delay: 150ms; }
+.stagger-4 { animation-delay: 200ms; }
+.stagger-5 { animation-delay: 250ms; }
+.stagger-6 { animation-delay: 300ms; }
+.stagger-7 { animation-delay: 350ms; }
+.stagger-8 { animation-delay: 400ms; }
+
+/* ============================================
+   SHIMMER SWEEP EFFECT
+   ============================================ */
+@keyframes shimmerSweep {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer-effect {
+  background: linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.15) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: shimmerSweep 2.5s ease-in-out infinite;
+}
+
+/* ============================================
+   RIPPLE CLICK EFFECT
+   ============================================ */
+@keyframes rippleOut {
+  from { transform: scale(0); opacity: 0.4; }
+  to   { transform: scale(4); opacity: 0; }
+}
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 60%);
+  transform: scale(0);
+  opacity: 0;
+  pointer-events: none;
+}
+.btn-primary:active::after {
+  animation: rippleOut 0.5s ease-out;
+}
+
+/* ============================================
+   BREATHING / FLOAT ANIMATIONS
+   ============================================ */
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50%      { transform: scale(1.05); opacity: 1; }
+}
+.animate-breathe {
+  animation: breathe 3s ease-in-out infinite;
+}
+
+@keyframes gentleFloat {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
+}
+.animate-gentle-float {
+  animation: gentleFloat 3s ease-in-out infinite;
+}
+
+/* ============================================
+   CARD SELECTION GLOW
+   ============================================ */
+@keyframes selectionGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(99,102,241,0.3); }
+  50%  { box-shadow: 0 0 0 6px rgba(99,102,241,0); }
+  100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+}
+.animate-selection-glow {
+  animation: selectionGlow 0.6s ease-out;
+}
+
+/* ============================================
+   SHAKE ANIMATION (For alerts)
+   ============================================ */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+  20%, 40%, 60%, 80% { transform: translateX(3px); }
+}
+.animate-shake {
+  animation: shake 0.6s ease-in-out;
+}
+
+/* ============================================
+   TAB INDICATOR SLIDE
+   ============================================ */
+.tab-indicator {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+              width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ============================================
+   PROGRESS BAR FILL ANIMATION
+   ============================================ */
+@keyframes fillWidth {
+  from { width: 0%; }
+}
+.animate-fill {
+  animation: fillWidth 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ============================================
+   NUMBER POP
+   ============================================ */
+@keyframes numberPop {
+  0%   { transform: scale(0.7); opacity: 0; }
+  60%  { transform: scale(1.08); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-number-pop {
+  animation: numberPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ============================================
+   BORDER GLOW PULSE
+   ============================================ */
+@keyframes borderGlow {
+  0%, 100% { border-color: rgba(99,102,241,0.2); }
+  50%      { border-color: rgba(99,102,241,0.5); }
+}
+.animate-border-glow {
+  animation: borderGlow 2s ease-in-out infinite;
+}
+
+/* ============================================
+   CHECK BOUNCE
+   ============================================ */
+@keyframes checkBounce {
+  0%   { transform: scale(0); }
+  50%  { transform: scale(1.3); }
+  70%  { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+.animate-check-bounce {
+  animation: checkBounce 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ============================================
+   SMOOTH HEIGHT TRANSITION
+   ============================================ */
+.smooth-height {
+  transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.3s ease;
+  overflow: hidden;
+}
+
+/* 2026 Floating Label Styles */
+.floating-group {
+  @apply relative pt-4;
+}
+.floating-input {
+  @apply w-full h-12 px-4 rounded-xl text-sm text-slate-900 bg-slate-50/50 border-2 border-slate-200 outline-none transition-all duration-300 font-bold placeholder-transparent;
+}
+.floating-input:focus, .floating-input:not(:placeholder-shown) {
+  @apply bg-white border-indigo-400;
+  box-shadow: 0 0 0 4px rgba(99,102,241,0.08);
+}
+.floating-label {
+  @apply absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm font-medium transition-all duration-300 pointer-events-none;
+}
+.floating-input:focus ~ .floating-label,
+.floating-input:not(:placeholder-shown) ~ .floating-label {
+  @apply -top-1 left-3 px-1 text-[10px] font-black tracking-widest uppercase bg-white text-indigo-600;
+}
+
+/* Horizontal Scrollbar Hiding */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Wizard Transitions */
+.wizard-next-enter-active, .wizard-prev-enter-active {
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.wizard-next-leave-active, .wizard-prev-leave-active {
+  transition: all 0.3s cubic-bezier(0.55, 0, 1, 0.45);
+}
+.wizard-next-enter-from { opacity: 0; transform: translateX(40px) scale(0.98); }
+.wizard-next-leave-to   { opacity: 0; transform: translateX(-40px) scale(0.98); }
+.wizard-prev-enter-from { opacity: 0; transform: translateX(-40px) scale(0.98); }
+.wizard-prev-leave-to   { opacity: 0; transform: translateX(40px) scale(0.98); }
