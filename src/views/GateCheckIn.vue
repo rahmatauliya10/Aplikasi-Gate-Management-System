@@ -61,7 +61,7 @@
     <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" />
 
     <!-- List -->
-    <div class="ind-container overflow-hidden bg-slate-50 bg-opacity-40 backdrop-blur-xl border-slate-200 border-opacity-50 shadow-[0_20px_50px_rgba(0,0,0,0.05)] relative">
+    <div class="ind-container flex flex-col h-[700px] overflow-hidden bg-slate-50 bg-opacity-40 backdrop-blur-xl border-slate-200 border-opacity-50 shadow-[0_20px_50px_rgba(0,0,0,0.05)] relative">
       <!-- Glossy Overlay -->
       <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-white/20 pointer-events-none"></div>
       
@@ -90,13 +90,13 @@
         </div>
       </div>
       
-      <div class="p-6 space-y-5 relative min-h-[500px]">
+      <div class="flex-1 overflow-y-auto p-6 space-y-5 relative hide-scrollbar">
         <!-- Modern Grid Background -->
-        <div class="absolute inset-0 pointer-events-none opacity-[0.08]" 
-          style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
+        <div class="absolute inset-0 pointer-events-none opacity-[0.03]" 
+          style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
         
         <transition-group name="list" tag="div" class="relative z-10 space-y-3">
-          <div v-for="(truck, i) in registeredTrucks" :key="truck.id"
+          <div v-for="(truck, i) in paginatedRegisteredTrucks" :key="truck.id"
             class="group relative bg-white/70 backdrop-blur-md rounded-[1.75rem] border border-white hover:border-indigo-400 hover:border-opacity-40 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_15px_40px_rgba(74,139,223,0.12)] hover:-translate-y-1 transition-all duration-500 overflow-hidden"
             style="height: 80px;"
           >
@@ -193,6 +193,9 @@
           </div>
         </transition-group>
       </div>
+      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="registeredTrucks.length > 0">
+        <Pagination :current-page="currentPage" :total-items="registeredTrucks.length" @update:current-page="currentPage = $event" />
+      </div>
     </div>
   </div>
 </template>
@@ -204,13 +207,20 @@ import { useToast } from '../composables/useToast'
 import TruckForm from '../components/TruckForm.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import PageHeader from '../components/PageHeader.vue'
+import Pagination from '../components/Pagination.vue'
 
 const truckStore = useTruckStore()
 const toast = useToast()
 const isModalOpen = ref(false)
 const showDetailsModal = ref(false)
 const selectedTruck = ref(null)
-const registeredTrucks = computed(() => [...truckStore.trucks].reverse().slice(0, 10))
+const currentPage = ref(1)
+const registeredTrucks = computed(() => [...truckStore.trucks].reverse())
+const paginatedRegisteredTrucks = computed(() => {
+  const start = (currentPage.value - 1) * 10
+  const end = start + 10
+  return registeredTrucks.value.slice(start, end)
+})
 
 const openModal = () => { isModalOpen.value = true }
 const closeModal = () => { isModalOpen.value = false }

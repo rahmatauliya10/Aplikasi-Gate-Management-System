@@ -281,8 +281,8 @@
    ============================================ */
 .cyber-grid {
   background-image:
-    linear-gradient(rgba(99, 102, 241, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99, 102, 241, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(99, 102, 241, 0.02) 0.5px, transparent 0.5px),
+    linear-gradient(90deg, rgba(99, 102, 241, 0.02) 0.5px, transparent 0.5px);
   background-size: 40px 40px;
 }
 

@@ -82,10 +82,10 @@
           
           <div class="flex-1 overflow-y-auto p-6 space-y-5 hide-scrollbar relative">
             <!-- Background Decoration -->
-            <div class="absolute inset-0 pointer-events-none opacity-[0.08]" style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
+            <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
             
             <transition-group name="list" tag="div" class="relative z-10 space-y-3">
-              <div v-for="(truck, i) in queueTrucks" :key="truck.id"
+              <div v-for="(truck, i) in paginatedQueueTrucks" :key="truck.id"
                 @click="selectTruck(truck)"
                 class="group relative bg-white/70 backdrop-blur-md p-5 rounded-[2rem] cursor-pointer transition-all duration-500 border border-white shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden"
                 :class="selectedTruck?.id === truck.id ? 'border-[#4A8BDF] shadow-[0_15px_40px_rgba(74,139,223,0.15)] -translate-y-1.5 bg-white/90' : 'hover:border-indigo-400 hover:border-opacity-40 hover:shadow-[0_15px_40px_rgba(74,139,223,0.12)] hover:-translate-y-1.5'"
@@ -134,6 +134,9 @@
               </div>
             </transition-group>
           </div>
+          <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="queueTrucks.length > 0">
+            <Pagination :current-page="currentPage" :total-items="queueTrucks.length" @update:current-page="currentPage = $event" />
+          </div>
         </div>
       </div>
     </div>
@@ -150,14 +153,21 @@ import PageHeader from '../components/PageHeader.vue'
 import StepTimeline from '../components/StepTimeline.vue'
 import WeightInput from '../components/WeightInput.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import Pagination from '../components/Pagination.vue'
 
 const router = useRouter()
 const truckStore = useTruckStore()
 const toast = useToast()
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
+const currentPage = ref(1)
 
 const queueTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'weighbridge_in' || t.step === 'weighbridge_out'))
+const paginatedQueueTrucks = computed(() => {
+  const start = (currentPage.value - 1) * 10
+  const end = start + 10
+  return queueTrucks.value.slice(start, end)
+})
 
 const truckInfoRows = computed(() => {
   if (!selectedTruck.value) return []

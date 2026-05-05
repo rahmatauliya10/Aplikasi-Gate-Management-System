@@ -120,7 +120,7 @@
                   Investigasi Aktif ({{ alertList.length }})
                 </h3>
                 <div v-if="alertList.length > 0" class="overflow-hidden rounded-xl relative" style="background:white;border:1px solid #E8EEF7">
-                  <div class="absolute inset-0 pointer-events-none opacity-[0.08]" style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
+                  <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
                   <table class="min-w-full relative z-10">
                     <thead>
                       <tr style="background:#FAFBFF;border-bottom:1px solid #E8EEF7">
@@ -130,7 +130,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="alert in alertList" :key="alert.id" class="transition-colors hover:bg-slate-50/60" style="border-top:1px solid #F1F5F9">
+                      <tr v-for="alert in alertList" :key="alert.id" class="transition-colors hover:bg-slate-50/60" style="border-top:1px solid rgba(241,245,249,0.5)">
                         <td class="px-5 py-3.5 whitespace-nowrap">
                           <span class="text-xs font-black text-[#4A8BDF] bg-[#E6F0FA] px-2 py-1 rounded-lg">{{ alert.plate }}</span>
                         </td>
@@ -225,7 +225,7 @@
         </div>
       </div>
       <div class="overflow-x-auto relative">
-        <div class="absolute inset-0 pointer-events-none opacity-[0.08]" style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
+        <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
         <table class="min-w-full table-fixed relative z-10">
           <thead>
             <tr style="background:white;border-bottom:1px solid #F1F5F9">
@@ -238,7 +238,7 @@
               <th class="w-[10%] px-8 py-4 text-right text-[10px] font-black text-slate-500 uppercase tracking-widest">Action</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-50">
+          <tbody class="divide-y divide-slate-50/50">
             <tr v-for="truck in activeTrucks" :key="truck.id" class="transition-colors hover:bg-[#E6F0FA]/30 group">
               <td class="px-8 py-5 whitespace-nowrap">
                 <div class="inline-flex items-center justify-center bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)]">

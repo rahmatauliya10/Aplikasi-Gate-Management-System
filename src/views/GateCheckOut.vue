@@ -33,10 +33,10 @@
       </div>
 
       <div class="flex-1 overflow-y-auto p-6 space-y-5 hide-scrollbar relative">
-        <div class="absolute inset-0 pointer-events-none opacity-[0.08]" style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
+        <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
         
         <transition-group name="list" tag="div" class="relative z-10 space-y-4">
-          <div v-for="(truck, i) in completedTrucks" :key="truck.id"
+          <div v-for="(truck, i) in paginatedCompletedTrucks" :key="truck.id"
             class="group relative bg-white/70 backdrop-blur-md p-5 rounded-[2rem] transition-all duration-500 border border-white hover:border-emerald-400 hover:border-opacity-40 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_15px_40px_rgba(16,185,129,0.12)] hover:-translate-y-1.5 overflow-hidden"
           >
             <div class="absolute left-0 top-4 bottom-4 w-1.5 rounded-r-full transition-all duration-300 bg-[#4A8BDF] opacity-70 group-hover:opacity-100"></div>
@@ -102,6 +102,9 @@
           </div>
         </transition-group>
       </div>
+      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="completedTrucks.length > 0">
+        <Pagination :current-page="currentPage" :total-items="completedTrucks.length" @update:current-page="currentPage = $event" />
+      </div>
     </div>
 
     <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" />
@@ -115,13 +118,20 @@ import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import PageHeader from '../components/PageHeader.vue'
+import Pagination from '../components/Pagination.vue'
 
 const truckStore = useTruckStore()
 const toast = useToast()
 const { confirm } = useConfirm()
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
+const currentPage = ref(1)
 const completedTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'gate_out'))
+const paginatedCompletedTrucks = computed(() => {
+  const start = (currentPage.value - 1) * 10
+  const end = start + 10
+  return completedTrucks.value.slice(start, end)
+})
 const processExit = async (truck) => {
   const ok = await confirm({ title: 'Konfirmasi Gate Out', message: `Konfirmasi exit untuk ${truck.plateNumber}?`, type: 'success', confirmText: 'Check Out' })
   if (ok) {

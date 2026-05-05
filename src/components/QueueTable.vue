@@ -6,20 +6,20 @@
     </div>
     
     <div class="overflow-x-auto p-4 pt-0 relative">
-      <div class="absolute inset-0 pointer-events-none opacity-[0.08]" style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
+      <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
       <table class="min-w-full relative z-10">
         <thead>
           <tr>
-            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100">Plate No</th>
-            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100">Driver</th>
-            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100">Vendor</th>
-            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100">Type</th>
-            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100">Status</th>
-            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100">Time In</th>
-            <th scope="col" class="px-6 py-4 text-right text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100">Action</th>
+            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100/60">Plate No</th>
+            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100/60">Driver</th>
+            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100/60">Vendor</th>
+            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100/60">Type</th>
+            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100/60">Status</th>
+            <th scope="col" class="px-6 py-4 text-left text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100/60">Time In</th>
+            <th scope="col" class="px-6 py-4 text-right text-[10px] font-black text-slate-600 uppercase tracking-[0.2em] border-b border-slate-100/60">Action</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-50">
+        <tbody class="divide-y divide-slate-50/50">
           <tr v-for="(truck, index) in trucks" :key="truck.id" class="hover:bg-white/40 transition-all duration-300 group hover:scale-[1.01] hover:shadow-md relative z-0 hover:z-10 cursor-pointer table-row-hover animate-fadeInUp" :style="{ animationDelay: `${(index % 10) * 60}ms` }">
             <td class="px-6 py-5 whitespace-nowrap text-sm font-black text-hajster-card">{{ truck.plateNumber }}</td>
             <td class="px-6 py-5 whitespace-nowrap text-sm font-medium text-slate-800">{{ truck.driverName }}</td>

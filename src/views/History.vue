@@ -62,7 +62,7 @@
       </div>
       
       <div class="overflow-x-auto hide-scrollbar p-6 relative z-10">
-        <div class="absolute inset-0 pointer-events-none opacity-[0.08]" style="background-image: linear-gradient(#4A8BDF 1.5px, transparent 1.5px), linear-gradient(90deg, #4A8BDF 1.5px, transparent 1.5px); background-size: 30px 30px;"></div>
+        <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
         <table class="min-w-full border-separate relative z-10" style="border-spacing: 0 12px;">
           <thead>
             <tr>
@@ -85,7 +85,7 @@
             </tr>
           </thead>
           <transition-group name="list" tag="tbody">
-            <tr v-for="(truck, i) in analyzedTrucks" :key="truck.id"
+            <tr v-for="(truck, i) in paginatedAnalyzedTrucks" :key="truck.id"
               class="group bg-white hover:bg-slate-50 transition-all duration-300 shadow-sm hover:shadow-md"
               :class="currentMode==='fraud'&&truck.fraud.status==='CRITICAL' ? 'shadow-[0_4px_15px_rgba(239,68,68,0.2)] border-red-200' : 'hover:-translate-y-0.5'">
               
@@ -161,6 +161,9 @@
           </transition-group>
         </table>
       </div>
+      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="analyzedTrucks.length > 0">
+        <Pagination :current-page="currentPage" :total-items="analyzedTrucks.length" @update:current-page="currentPage = $event" />
+      </div>
     </div>
 
     <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" />
@@ -171,8 +174,8 @@
 import { ref, computed } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
-  import PageHeader from '../components/PageHeader.vue'
-
+import PageHeader from '../components/PageHeader.vue'
+import Pagination from '../components/Pagination.vue'
 import { useToast } from '../composables/useToast'
 
 const truckStore = useTruckStore()
@@ -183,12 +186,18 @@ const selectedTruck = ref({})
 
 const completedTrucks = computed(() => [...truckStore.completedTrucks].sort((a, b) => new Date(b.timestamps.exit) - new Date(a.timestamps.exit)))
 
+const currentPage = ref(1)
 const analyzedTrucks = computed(() => completedTrucks.value.map(truck => {
   const durations = calculateDurations(truck)
   const bottleneck = Object.keys(durations).reduce((a, b) => (durations[a] > durations[b] && b !== 'total') ? a : b)
   const fraud = calculateFraudMetrics(truck)
   return { ...truck, durations, bottleneck, fraud }
 }))
+const paginatedAnalyzedTrucks = computed(() => {
+  const start = (currentPage.value - 1) * 10
+  const end = start + 10
+  return analyzedTrucks.value.slice(start, end)
+})
 
 const calculateFraudMetrics = (truck) => {
   const net = truck.weights?.net || 0; const roll = truck.weights?.rollWeight || 0
