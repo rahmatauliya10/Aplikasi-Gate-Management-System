@@ -1,12 +1,12 @@
 <template>
   <transition name="modal">
-    <div v-if="isOpen && truck" class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 backdrop-animate"
+    <div v-if="isOpen && truck" class="fixed inset-0 z-50 flex items-start justify-center pt-2 sm:pt-4 p-4 sm:p-6 backdrop-animate"
       @click.self="close">
-      <div class="modal-panel rounded-[1.5rem] overflow-hidden flex flex-col max-h-[90vh] transition-all duration-500 w-[95vw] sm:w-[90vw] lg:w-[85vw] max-w-7xl mx-auto"
+      <div class="modal-panel rounded-[1.5rem] overflow-hidden flex flex-col max-h-[96vh] transition-all duration-500 w-[95vw] sm:w-[90vw] lg:w-[85vw] max-w-7xl mx-auto"
         style="background: white; box-shadow: 0 25px 80px rgba(0,0,0,0.4), 0 0 0 1px rgba(74,139,223,0.1);">
 
         <!-- Header -->
-        <div class="px-8 py-5 flex justify-between items-center sticky top-0 z-10"
+        <div class="px-6 py-3 flex justify-between items-center sticky top-0 z-10"
           style="background: linear-gradient(135deg, #FFFFFF, #E6F0FA); border-bottom: 1px solid rgba(74,139,223,0.15);">
           <div class="flex items-center space-x-4 animate-fadeInLeft">
             <div class="w-12 h-12 rounded-xl flex items-center justify-center"
@@ -36,18 +36,18 @@
         </div>
 
         <!-- Body -->
-        <div class="p-8 overflow-y-auto flex-1 relative" style="background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);">
+        <div class="p-5 overflow-y-auto flex-1 relative" style="background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);">
           <!-- Background Grid Overlay -->
           <div class="absolute inset-0 pointer-events-none opacity-[0.02]" 
             style="background-image: radial-gradient(#4A8BDF 1px, transparent 1px); background-size: 20px 20px;"></div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 relative z-10">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 relative z-10">
 
             <!-- Left: Identity & QC -->
-            <div class="space-y-8">
+            <div class="space-y-5">
               <!-- Identity Card (Glass Style) -->
-              <div class="rounded-[2.5rem] overflow-hidden animate-fadeInUp shadow-[0_10px_40px_rgba(15,23,42,0.04)] border border-white" style="background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px);">
-                <div class="px-8 py-5 flex items-center justify-between border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
+              <div class="rounded-[1.5rem] overflow-hidden animate-fadeInUp shadow-[0_10px_40px_rgba(15,23,42,0.04)] border border-white" style="background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px);">
+                <div class="px-6 py-3 flex items-center justify-between border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
                   <div class="flex items-center space-x-3">
                     <div class="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center border border-indigo-100">
                       <span class="material-icons text-[#4A8BDF] text-lg">badge</span>
@@ -59,7 +59,7 @@
                     <span class="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em] leading-none">Security Verified</span>
                   </div>
                 </div>
-                <div class="p-8 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-6">
+                <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                   <div v-for="(field, idx) in identityFields" :key="field.label" class="flex flex-col animate-fadeInLeft group p-3 -m-3 rounded-2xl transition-colors duration-300 hover:bg-white/60 cursor-default" :style="{ animationDelay: `${idx * 50}ms` }">
                     <span class="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 group-hover:text-[#4A8BDF] transition-colors">{{ field.label }}</span>
                     <div class="flex items-center space-x-2">
@@ -71,16 +71,16 @@
               </div>
 
               <!-- QC Results (High-Tech Style) -->
-              <div v-if="truck.qcDetails" class="rounded-[2.5rem] overflow-hidden animate-fadeInUp shadow-[0_15px_50px_rgba(74,139,223,0.08)] border border-white" 
+              <div v-if="truck.qcDetails" class="rounded-[1.5rem] overflow-hidden animate-fadeInUp shadow-[0_15px_50px_rgba(74,139,223,0.08)] border border-white" 
                    style="background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px); animation-delay: 0.1s;">
-                <div class="px-8 py-5 flex items-center space-x-3 border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
+                <div class="px-6 py-3 flex items-center space-x-3 border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
                   <div class="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center border border-blue-100">
                     <span class="material-icons text-blue-500 text-lg">biotech</span>
                   </div>
                   <h3 class="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Quality Analysis</h3>
                 </div>
-                <div class="p-8">
-                  <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="p-5">
+                  <div class="grid grid-cols-2 gap-3 mb-4">
                     <div v-for="item in qcMetrics" :key="item.label" 
                          class="p-4 rounded-3xl bg-white border border-slate-100 hover:shadow-lg hover:-translate-y-1 transition-all duration-500 group">
                       <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 group-hover:text-blue-500 transition-colors">{{ item.label }}</div>
@@ -109,10 +109,10 @@
 
               <!-- Fraud Recon (Policy Integration) -->
               <div v-if="fraudMetrics.status !== 'NOT_RECORDED'"
-                class="rounded-[2.5rem] overflow-hidden relative animate-fadeInUp shadow-[0_10px_40px_rgba(15,23,42,0.04)] border border-white"
+                class="rounded-[1.5rem] overflow-hidden relative animate-fadeInUp shadow-[0_10px_40px_rgba(15,23,42,0.04)] border border-white"
                 :style="{ background: fraudMetrics.status === 'CRITICAL' ? 'rgba(254, 242, 242, 0.6)' : fraudMetrics.status === 'WARNING' ? 'rgba(255, 251, 235, 0.6)' : 'rgba(240, 253, 244, 0.6)', backdropFilter: 'blur(10px)' }"
               >
-                <div class="px-8 py-5 flex items-center space-x-3 border-b border-slate-100">
+                <div class="px-6 py-3 flex items-center space-x-3 border-b border-slate-100">
                   <span class="material-icons text-lg"
                     :style="fraudMetrics.status === 'CRITICAL' ? 'color:#EF4444' : fraudMetrics.status === 'WARNING' ? 'color:#800057' : 'color:#3A6ABF'">policy</span>
                   <h3 class="text-xs font-black uppercase tracking-[0.2em]"
@@ -120,9 +120,9 @@
                     Integrity Reconciliation
                   </h3>
                 </div>
-                <div class="p-8 space-y-4">
+                <div class="p-5 space-y-3">
                   <div class="flex items-center justify-between p-5 rounded-3xl bg-white border border-slate-100">
-                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Rasio Timbangan</span>
+                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Scale Ratio</span>
                     <div class="flex items-center space-x-2">
                       <span class="text-2xl font-black font-mono"
                         :style="fraudMetrics.status === 'CRITICAL' ? 'color:#EF4444' : fraudMetrics.status === 'WARNING' ? 'color:#800057' : 'color:#3A6ABF'">
@@ -131,7 +131,7 @@
                     </div>
                   </div>
                   <div class="flex items-center justify-between p-5 rounded-3xl bg-white border border-slate-100">
-                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selisih Berat</span>
+                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Weight Deviation</span>
                     <div class="flex items-center space-x-2">
                       <span class="material-icons text-lg" :class="fraudMetrics.direction === '+' ? 'text-emerald-500' : fraudMetrics.direction === '-' ? 'text-red-500' : 'text-slate-400'">{{ fraudMetrics.direction === '+' ? 'arrow_upward' : fraudMetrics.direction === '-' ? 'arrow_downward' : 'remove' }}</span>
                       <span class="text-2xl font-black font-mono"
@@ -141,7 +141,7 @@
                     </div>
                   </div>
                   <div class="flex items-center justify-between p-5 rounded-3xl bg-white border border-slate-100">
-                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Deviasi</span>
+                    <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Deviation</span>
                     <span class="text-2xl font-black font-mono"
                       :style="fraudMetrics.status === 'CRITICAL' ? 'color:#EF4444' : fraudMetrics.status === 'WARNING' ? 'color:#800057' : 'color:#3A6ABF'">
                       {{ fraudMetrics.direction }}{{ fraudMetrics.deviationPercent.toFixed(2) }}%
@@ -153,12 +153,12 @@
                     <div class="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 pointer-events-none"></div>
                     <div class="flex items-center mb-1">
                       <span class="material-icons text-white/80 mr-2 text-sm">{{ fraudMetrics.status === 'SAFE' ? 'verified_user' : 'report_problem' }}</span>
-                      <span class="font-black text-xs tracking-widest uppercase">{{ fraudMetrics.status === 'CRITICAL' ? 'KRITIS' : fraudMetrics.status === 'WARNING' ? 'PERINGATAN' : 'AMAN' }}</span>
+                      <span class="font-black text-xs tracking-widest uppercase">{{ fraudMetrics.status === 'CRITICAL' ? 'CRITICAL' : fraudMetrics.status === 'WARNING' ? 'WARNING' : 'SAFE' }}</span>
                     </div>
                     <p class="text-[11px] font-bold text-white/90">
-                      {{ fraudMetrics.status === 'CRITICAL' ? 'Selisih signifikan terdeteksi (>5%). Perlu investigasi segera.' : 
-                         fraudMetrics.status === 'WARNING' ? 'Penyusutan di ambang peringatan (>2%). Periksa kemungkinan kesalahan data.' : 
-                         'Realisasi dalam batas toleransi yang diterima (<2%).' }}
+                      {{ fraudMetrics.status === 'CRITICAL' ? 'Significant deviation detected (>5%). Immediate investigation required.' : 
+                         fraudMetrics.status === 'WARNING' ? 'Shrinkage at warning threshold (>2%). Check for possible data errors.' : 
+                         'Realization within accepted tolerance (<2%).' }}
                     </p>
                   </div>
                 </div>
@@ -166,18 +166,18 @@
             </div>
 
             <!-- Right: Weights & Timeline -->
-            <div class="space-y-8">
+            <div class="space-y-5">
               <!-- Weight Analysis (Premium Card) -->
-              <div class="rounded-[2.5rem] overflow-hidden animate-fadeInUp shadow-[0_15px_50px_rgba(16,185,129,0.08)] border border-white" 
+              <div class="rounded-[1.5rem] overflow-hidden animate-fadeInUp shadow-[0_15px_50px_rgba(16,185,129,0.08)] border border-white" 
                    style="background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px); animation-delay: 0.15s;">
-                <div class="px-8 py-5 flex items-center space-x-3 border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
+                <div class="px-6 py-3 flex items-center space-x-3 border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
                   <div class="w-10 h-10 rounded-2xl bg-emerald-50 flex items-center justify-center border border-emerald-100">
                     <span class="material-icons text-emerald-500 text-lg">scale</span>
                   </div>
                   <h3 class="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Tonnage Analytics</h3>
                 </div>
-                <div class="p-8">
-                  <div class="grid grid-cols-2 gap-4 mb-6">
+                <div class="p-5">
+                  <div class="grid grid-cols-2 gap-3 mb-4">
                     <div class="p-5 rounded-3xl bg-white border border-slate-100 relative group overflow-hidden">
                       <div class="absolute bottom-0 left-0 right-0 h-1 bg-blue-400/20"></div>
                       <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Gross (IN)</span>
@@ -191,7 +191,7 @@
                   </div>
                   
                   <!-- Main Result -->
-                  <div class="p-8 rounded-[2.5rem] relative overflow-hidden group shadow-2xl transition-all duration-700 hover:scale-[1.02]" 
+                  <div class="p-5 rounded-[1.5rem] relative overflow-hidden group shadow-2xl transition-all duration-700 hover:scale-[1.02]" 
                        style="background: linear-gradient(135deg, #10B981, #059669);">
                     <div class="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/10 to-white/0 pointer-events-none"></div>
                     <div class="absolute -right-6 -bottom-6 opacity-10 group-hover:rotate-12 transition-transform duration-1000"><span class="material-icons text-9xl text-white">analytics</span></div>
@@ -210,15 +210,15 @@
               </div>
 
               <!-- Activity Roadmap (Timeline) -->
-              <div class="rounded-[2.5rem] overflow-hidden animate-fadeInUp shadow-[0_10px_40px_rgba(15,23,42,0.04)] border border-white" 
+              <div class="rounded-[1.5rem] overflow-hidden animate-fadeInUp shadow-[0_10px_40px_rgba(15,23,42,0.04)] border border-white" 
                    style="background: rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px); animation-delay: 0.2s;">
-                <div class="px-8 py-5 flex items-center space-x-3 border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
+                <div class="px-6 py-3 flex items-center space-x-3 border-b border-slate-100" style="background: rgba(255, 255, 255, 0.4);">
                   <div class="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center border border-indigo-100">
                     <span class="material-icons text-[#4A8BDF] text-lg">route</span>
                   </div>
                   <h3 class="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Operational Roadmap</h3>
                 </div>
-                <div class="p-8">
+                <div class="p-5">
                   <div class="relative pl-8 border-l-2 border-indigo-100 space-y-8">
                     <div v-for="(ts, idx) in timestampRows" :key="ts.label" class="relative group animate-fadeInLeft" :style="{ animationDelay: `${idx * 70}ms` }">
                       <!-- Active dot -->
@@ -246,7 +246,7 @@
             style="background: linear-gradient(135deg, #4A8BDF, #3A6ABF); box-shadow: 0 2px 8px rgba(74,139,223,0.25);">
             <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none"></div>
             <span class="material-icons text-white/80 text-[16px] relative z-10 group-hover:translate-x-0.5 transition-transform duration-300">logout</span>
-            <span class="relative z-10 text-[11px] font-black text-white uppercase tracking-[0.15em]">Tutup</span>
+            <span class="relative z-10 text-[11px] font-black text-white uppercase tracking-[0.15em]">Close</span>
           </button>
         </div>
       </div>
@@ -267,7 +267,7 @@ const close = () => emit('close')
 
 const identityFields = computed(() => [
   { label: 'Carrier Vendor', value: props.truck?.vendor },
-  { label: 'Surat Jalan ID', value: props.truck?.suratJalanNumber, highlight: true },
+  { label: 'Delivery Note ID', value: props.truck?.suratJalanNumber, highlight: true },
   { label: 'Logistics PO', value: props.truck?.poNumber, highlight: true },
   { label: 'Security Remarks', value: props.truck?.remarks },
 ])
@@ -283,7 +283,7 @@ const timestampRows = computed(() => [
   { label: 'Initial Gate Entry', value: props.truck?.timestamps?.entry },
   { label: 'Inbound Weighing', value: props.truck?.timestamps?.weighbridge_in },
   { label: 'Warehouse Processing', value: props.truck?.timestamps?.warehouse_start },
-  { label: 'QC Verification', value: props.truck?.timestamps?.qc },
+  { label: 'QC Verification', value: props.truck?.timestamps?.qc_end || props.truck?.timestamps?.qc_start },
   { label: 'Outbound Weighing', value: props.truck?.timestamps?.weighbridge_out },
   { label: 'Final Dispatch', value: props.truck?.timestamps?.exit || props.truck?.timestamps?.gate_out },
 ])
@@ -312,7 +312,7 @@ const formatWeight = (val) => {
 const formatTimeFull = (isoString) => {
   if (!isoString) return '-'
   const d = new Date(isoString)
-  return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB, ' + d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ', ' + d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 </script>
 

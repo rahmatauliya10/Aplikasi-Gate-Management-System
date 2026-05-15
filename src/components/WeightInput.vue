@@ -76,7 +76,7 @@
       >
         <div v-if="isValid" class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none"></div>
         <span class="material-icons font-bold text-[16px] relative z-10 transition-transform group-hover:scale-110">fingerprint</span>
-        <span class="uppercase font-black tracking-widest text-[10px] relative z-10">Simpan Timbangan</span>
+        <span class="uppercase font-black tracking-widest text-[10px] relative z-10">Save Weight</span>
       </button>
     </div>
   </div>

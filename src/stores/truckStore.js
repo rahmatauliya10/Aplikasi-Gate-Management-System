@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useNotificationStore } from './notificationStore'
 
 export const useTruckStore = defineStore('truck', () => {
     // State
@@ -32,6 +33,8 @@ export const useTruckStore = defineStore('truck', () => {
                 rollWeight: 0
             }
         })
+        const notificationStore = useNotificationStore()
+        notificationStore.addNotification('New Truck Registered', `Truck ${truck.licensePlate || 'New'} has been added to the system.`, 'success')
     }
 
     const updateTruckStatus = (id, status, step) => {
@@ -47,9 +50,16 @@ export const useTruckStore = defineStore('truck', () => {
             if (status === 'waiting' && step === 'qc') truck.timestamps.warehouse_end = now // Finished warehouse, waiting for QC
             if (status === 'processing' && step === 'qc') truck.timestamps.qc_start = now
             if (status === 'waiting' && step === 'weighbridge_out') truck.timestamps.qc_end = now
+            if (status === 'completed' && step === 'qc') {
+                truck.timestamps.qc_end = now
+                truck.timestamps.exit = now
+            }
             if (step === 'weighbridge_out') truck.timestamps.weighbridge_out = now
             if (step === 'gate_out') truck.timestamps.gate_out = now
-            if (step === 'completed') truck.timestamps.exit = now
+            if (step === 'completed' && step !== 'qc') truck.timestamps.exit = now
+            
+            const notificationStore = useNotificationStore()
+            notificationStore.addNotification('Truck Status Updated', `Truck ${truck.licensePlate || id} is now ${status} at ${step}.`, 'info')
         }
     }
 
@@ -65,6 +75,9 @@ export const useTruckStore = defineStore('truck', () => {
             if (truck.weights.gross && truck.weights.tare) {
                 truck.weights.net = Math.abs(truck.weights.gross - truck.weights.tare)
             }
+            
+            const notificationStore = useNotificationStore()
+            notificationStore.addNotification('Weight Recorded', `${type} weight for truck ${truck.licensePlate || id} recorded as ${weight}kg.`, 'info')
         }
     }
 
@@ -72,6 +85,9 @@ export const useTruckStore = defineStore('truck', () => {
         const truck = trucks.value.find(t => t.id === id)
         if (truck) {
             Object.assign(truck, details)
+            
+            const notificationStore = useNotificationStore()
+            notificationStore.addNotification('Truck Details Updated', `Details for truck ${truck.licensePlate || id} have been updated.`, 'info')
         }
     }
 

@@ -7,7 +7,7 @@
       <!-- Glossy Overlay -->
       <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-white/20 pointer-events-none"></div>
       
-      <div class="px-8 py-6 bg-white/60 backdrop-blur-md border-b border-slate-100 flex justify-between items-center z-10 relative">
+      <div class="px-8 py-6 bg-white/60 backdrop-blur-md border-b border-slate-100 flex flex-wrap justify-between items-center gap-4 z-10 relative">
         <div class="flex items-center space-x-4">
           <div class="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center border border-indigo-100 shadow-inner group cursor-help">
             <span class="material-icons text-[#4A8BDF] group-hover:scale-125 transition-transform duration-500">exit_to_app</span>
@@ -21,13 +21,20 @@
             </div>
           </div>
         </div>
-        <div class="flex flex-col items-end">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="relative">
+            <input v-model="searchQuery" type="text" placeholder="Search Plate Number..." class="w-56 h-10 pl-10 pr-10 bg-white/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-2 focus:ring-[#4A8BDF]/20 transition-all shadow-sm">
+            <span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+            <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+              <span class="material-icons text-[16px]">close</span>
+            </button>
+          </div>
           <div class="flex items-center space-x-2 px-4 py-2 rounded-2xl bg-white shadow-sm border border-slate-100">
             <div class="relative">
               <span class="block w-2.5 h-2.5 rounded-full bg-[#4A8BDF]"></span>
               <span class="absolute inset-0 rounded-full bg-[#4A8BDF] animate-ping opacity-40"></span>
             </div>
-            <span class="text-xs font-black text-slate-700 tracking-wider">{{ completedTrucks.length }} ACTIVE LOGS</span>
+            <span class="text-xs font-black text-slate-700 tracking-wider">{{ filteredTrucks.length }} ACTIVE LOGS</span>
           </div>
         </div>
       </div>
@@ -102,8 +109,8 @@
           </div>
         </transition-group>
       </div>
-      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="completedTrucks.length > 0">
-        <Pagination :current-page="currentPage" :total-items="completedTrucks.length" @update:current-page="currentPage = $event" />
+      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="filteredTrucks.length > 0">
+        <Pagination :current-page="currentPage" :total-items="filteredTrucks.length" @update:current-page="currentPage = $event" />
       </div>
     </div>
 
@@ -112,7 +119,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
@@ -126,17 +133,23 @@ const { confirm } = useConfirm()
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const currentPage = ref(1)
+const searchQuery = ref('')
 const completedTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'gate_out'))
+const filteredTrucks = computed(() => {
+  if (!searchQuery.value) return completedTrucks.value
+  return completedTrucks.value.filter(t => t.plateNumber.toLowerCase().includes(searchQuery.value.toLowerCase()))
+})
 const paginatedCompletedTrucks = computed(() => {
   const start = (currentPage.value - 1) * 10
   const end = start + 10
-  return completedTrucks.value.slice(start, end)
+  return filteredTrucks.value.slice(start, end)
 })
+watch(searchQuery, () => { currentPage.value = 1 })
 const processExit = async (truck) => {
-  const ok = await confirm({ title: 'Konfirmasi Gate Out', message: `Konfirmasi exit untuk ${truck.plateNumber}?`, type: 'success', confirmText: 'Check Out' })
+  const ok = await confirm({ title: 'Confirm Gate Out', message: `Confirm exit for ${truck.plateNumber}?`, type: 'success', confirmText: 'Check Out' })
   if (ok) {
     truckStore.updateTruckStatus(truck.id, 'completed', 'completed')
-    toast.success(`${truck.plateNumber} berhasil check out!`)
+    toast.success(`${truck.plateNumber} checked out successfully!`)
   }
 }
 </script>

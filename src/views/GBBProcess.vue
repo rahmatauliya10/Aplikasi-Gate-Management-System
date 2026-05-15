@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <PageHeader title="GBB Warehouse (Raw Material)" subtitle="Unloading Operations" />
+    <PageHeader title="Raw Material Warehouse" subtitle="Unloading Operations" />
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
       <transition name="fade-slide" mode="out-in" appear>
         <div v-if="selectedTruck" :key="selectedTruck.id" class="space-y-5 w-full">
@@ -31,7 +31,7 @@
               </div>
               
               <div class="bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-300 backdrop-blur-sm">
-                <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em] mb-1.5">Surat Jalan</span>
+                <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em] mb-1.5">Delivery Note</span>
                 <span class="text-sm font-black text-slate-800 truncate">{{ selectedTruck.suratJalanNumber || '-' }}</span>
               </div>
               
@@ -55,7 +55,7 @@
               <button @click="showDetailsModal = true" class="relative w-full overflow-hidden flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl transition-all duration-300 text-xs font-black uppercase tracking-widest text-indigo-600 bg-[#E6F0FA] border border-[#CCE0F5] hover:border-indigo-300 hover:shadow-[0_4px_20px_rgba(74,139,223,0.2)] group">
                 <div class="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-200/50 to-transparent -translate-x-full group-hover:animate-shimmer pointer-events-none"></div>
                 <span class="material-icons text-[18px]">travel_explore</span>
-                <span>LIHAT ANALISA LENGKAP</span>
+                <span>VIEW FULL ANALYSIS</span>
               </button>
             </div>
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9"><StepTimeline :current-step="selectedTruck.step" :process-type="selectedTruck.processType" /></div>
@@ -65,11 +65,11 @@
               <div v-if="selectedTruck.status === 'waiting' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
                 <div class="flex items-center space-x-2 text-[#800057] mb-2">
                   <span class="material-icons text-lg">warning_amber</span>
-                  <span class="text-[11px] font-black uppercase tracking-wider">Lengkapi Data Security</span>
+                  <span class="text-[11px] font-black uppercase tracking-wider">Complete Security Data</span>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div class="space-y-1.5" v-if="!selectedTruck.suratJalanNumber">
-                    <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">No Surat Jalan *</label>
+                    <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">Delivery Note No. *</label>
                     <input v-model="suratJalanInput" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="SJ-XXXXX">
                   </div>
                   <div class="space-y-1.5" v-if="!selectedTruck.poNumber">
@@ -77,18 +77,17 @@
                     <input v-model="poNumberInput" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="PO-XXXXX">
                   </div>
                 </div>
-                <button @click="saveSecurityInfo" class="w-full btn-primary py-2.5 mt-2">Simpan Data Security</button>
+                <button @click="saveSecurityInfo" class="w-full btn-primary py-2.5 mt-2">Save Security Data</button>
               </div>
 
               <!-- Roll Weight Input (processing) -->
               <div v-if="selectedTruck.status === 'processing'">
-                <WeightInput label="Input Bobot Roll GBB (KG)" @save="handleWeightSave" />
+                <WeightInput label="Input Roll Weight GBB (KG)" @save="handleWeightSave" />
               </div>
 
-              <!-- Inspeksi Kendaraan & Mutu Button -->
               <div v-if="selectedTruck.status === 'waiting' && selectedTruck.suratJalanNumber && selectedTruck.poNumber && !samplingDecision" class="mt-6">
-                <button @click="openInspection" class="w-full py-4 rounded-xl flex items-center justify-center space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;">
-                  <span class="material-icons text-xl animate-pulse">fact_check</span><span class="font-black tracking-widest uppercase">Mulai Inspeksi Kendaraan & Mutu</span>
+                <button @click="openInspection" class="w-full py-4 rounded-xl flex items-center justify-center space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;transform:translateZ(0)">
+                  <span class="material-icons text-xl">fact_check</span><span class="font-black tracking-widest uppercase">Start Vehicle & Quality Inspection</span>
                 </button>
               </div>
 
@@ -96,8 +95,8 @@
               <div v-if="samplingDecision === 'rejected'" class="mt-4 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2)">
                 <span class="material-icons text-red-500 text-2xl">cancel</span>
                 <div>
-                  <p class="text-sm font-black text-red-700">Sampling DITOLAK</p>
-                  <p class="text-[11px] text-red-500">Truck diarahkan ke timbangan keluar tanpa bongkar.</p>
+                  <p class="text-sm font-black text-red-700">Sampling REJECTED</p>
+                  <p class="text-[11px] text-red-500">Truck redirected to outbound weighbridge without unloading.</p>
                 </div>
               </div>
             </div>
@@ -119,7 +118,7 @@
           <!-- Glossy Overlay -->
           <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-white/20 pointer-events-none z-[2]"></div>
           
-          <div class="px-8 py-6 bg-white/60 backdrop-blur-md border-b border-slate-100 flex justify-between items-center z-10 relative">
+          <div class="px-8 py-6 bg-white/60 backdrop-blur-md border-b border-slate-100 flex flex-wrap justify-between items-center gap-4 z-10 relative">
             <div class="flex items-center space-x-4">
               <div class="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center border border-indigo-100 shadow-inner group cursor-help">
                 <span class="material-icons text-[#4A8BDF] group-hover:scale-125 transition-transform duration-500">warehouse</span>
@@ -133,13 +132,20 @@
                 </div>
               </div>
             </div>
-            <div class="flex flex-col items-end">
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="relative">
+                <input v-model="searchQuery" type="text" placeholder="Search Plate Number..." class="w-56 h-10 pl-10 pr-10 bg-white/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-2 focus:ring-[#4A8BDF]/20 transition-all shadow-sm">
+                <span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+                <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                  <span class="material-icons text-[16px]">close</span>
+                </button>
+              </div>
               <div class="flex items-center space-x-2 px-4 py-2 rounded-2xl bg-white shadow-sm border border-slate-100">
                 <div class="relative">
                   <span class="block w-2.5 h-2.5 rounded-full bg-[#4A8BDF]"></span>
                   <span class="absolute inset-0 rounded-full bg-[#4A8BDF] animate-ping opacity-40"></span>
                 </div>
-                <span class="text-xs font-black text-slate-700 tracking-wider">{{ gbbTrucks.length }} PENDING TRUCKS</span>
+                <span class="text-xs font-black text-slate-700 tracking-wider">{{ filteredGbbTrucks.length }} PENDING TRUCKS</span>
               </div>
             </div>
           </div>
@@ -194,8 +200,8 @@
               </div>
             </transition-group>
           </div>
-          <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="gbbTrucks.length > 0">
-            <Pagination :current-page="currentPage" :total-items="gbbTrucks.length" @update:current-page="currentPage = $event" />
+          <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="filteredGbbTrucks.length > 0">
+            <Pagination :current-page="currentPage" :total-items="filteredGbbTrucks.length" @update:current-page="currentPage = $event" />
           </div>
         </div>
       </div>
@@ -213,32 +219,32 @@
                 <span class="material-icons text-red-500 text-xl">report_problem</span>
               </div>
               <div>
-                <h3 class="text-base font-black text-red-800">Alasan Penolakan</h3>
-                <p class="text-[10px] font-bold text-red-400 uppercase tracking-widest">Wajib diisi sebelum menolak</p>
+                <h3 class="text-base font-black text-red-800">Rejection Reason</h3>
+                <p class="text-[10px] font-bold text-red-400 uppercase tracking-widest">Required before rejecting</p>
               </div>
             </div>
             <!-- Body -->
             <div class="p-5 space-y-4">
               <div class="p-3 rounded-xl flex items-center space-x-2" style="background:#FEF2F2;border:1px solid #FECACA;">
                 <span class="material-icons text-red-400 text-sm">info</span>
-                <span class="text-[11px] font-bold text-red-600">{{ selectedTruck?.plateNumber }} — Sampling TIDAK SESUAI</span>
+                <span class="text-[11px] font-bold text-red-600">{{ selectedTruck?.plateNumber }} — Sampling NON-COMPLIANT</span>
               </div>
               <div class="space-y-1.5">
-                <label class="text-[10px] font-black text-slate-600 uppercase tracking-wider">Komentar / Alasan Penolakan *</label>
-                <textarea v-model="rejectComment" rows="4" class="w-full p-3 bg-slate-50 rounded-xl text-sm font-medium text-slate-800 outline-none resize-none placeholder:text-slate-600 placeholder:font-normal transition-all focus:ring-2 focus:ring-red-300" style="border:1px solid #E2E8F0;" placeholder="Tuliskan alasan penolakan secara detail..."></textarea>
-                <p v-if="rejectCommentError" class="text-[10px] text-red-500 font-bold">⚠ Komentar wajib diisi minimal 10 karakter</p>
+                <label class="text-[10px] font-black text-slate-600 uppercase tracking-wider">Comment / Rejection Reason *</label>
+                <textarea v-model="rejectComment" rows="4" class="w-full p-3 bg-slate-50 rounded-xl text-sm font-medium text-slate-800 outline-none resize-none placeholder:text-slate-600 placeholder:font-normal transition-all focus:ring-2 focus:ring-red-300" style="border:1px solid #E2E8F0;" placeholder="Write the rejection reason in detail..."></textarea>
+                <p v-if="rejectCommentError" class="text-[10px] text-red-500 font-bold">⚠ Comment is required, minimum 10 characters</p>
               </div>
             </div>
             <!-- Footer -->
             <div class="px-5 pb-5 flex space-x-3">
               <button @click="showRejectModal = false; rejectComment = ''; rejectCommentError = false"
                 class="flex-1 py-3 rounded-xl text-sm font-black transition-all hover:bg-slate-100" style="border:1px solid #E2E8F0;color:#64748B;">
-                Batal
+                Cancel
               </button>
               <button @click="submitReject"
                 class="flex-1 py-3 rounded-xl text-sm font-black text-white transition-all hover:shadow-lg active:scale-[0.98]"
                 style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
-                <span class="flex items-center justify-center space-x-2"><span class="material-icons text-base">block</span><span>Tolak</span></span>
+                <span class="flex items-center justify-center space-x-2"><span class="material-icons text-base">block</span><span>Reject</span></span>
               </button>
             </div>
           </div>
@@ -250,7 +256,7 @@
     <teleport to="body">
       <transition name="modal">
         <div v-if="showChecklistModal" class="fixed inset-0 z-[9998] flex items-center justify-center p-4" @click.self="showChecklistModal = false">
-          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-md"></div>
+          <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-md pointer-events-none"></div>
           <div class="relative w-full max-w-3xl max-h-[90vh] flex flex-col rounded-3xl shadow-2xl overflow-hidden" style="background:white;">
             <!-- Header -->
             <div class="px-8 py-5 flex justify-between items-center bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
@@ -260,17 +266,17 @@
                 </div>
                 <div>
                   <h3 class="text-base font-black text-slate-800 tracking-tight">
-                    {{ inspectionStep === 1 ? 'Checklist Kendaraan' : 'Sampling Awal — Inspeksi Mutu' }}
+                    {{ inspectionStep === 1 ? 'Vehicle Checklist' : 'Initial Sampling — Quality Inspection' }}
                   </h3>
                   <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-                    Tahap {{ inspectionStep }} dari 2
+                    Step {{ inspectionStep }} of 2
                   </p>
                 </div>
               </div>
               <div class="flex items-center space-x-4">
                 <div class="flex flex-col items-end" v-if="inspectionStep === 1">
                   <span class="text-[10px] font-black" :class="isChecklistComplete ? 'text-[#3A6ABF]' : 'text-slate-500'">
-                    {{ checklistDoneCount }}/{{ vehicleChecklist.length }} Selesai
+                    {{ checklistDoneCount }}/{{ vehicleChecklist.length }} Done
                   </span>
                   <div class="w-24 h-1.5 rounded-full bg-slate-200 overflow-hidden mt-1">
                     <div class="h-full rounded-full transition-all duration-500 ease-out bg-[#4A8BDF]"
@@ -304,7 +310,7 @@
                       <div v-if="checklistStates[index]?.status === 'not_ok'" class="mt-4 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-red-50 border border-red-100">
                         <div class="flex items-center space-x-2 text-red-600">
                           <span class="material-icons text-sm">photo_camera</span>
-                          <span class="text-[10px] font-black uppercase tracking-wider">Wajib Lampirkan Foto</span>
+                          <span class="text-[10px] font-black uppercase tracking-wider">Photo Attachment Required</span>
                         </div>
                         <div class="flex items-center bg-white p-2 rounded-lg border border-red-200 shadow-sm w-full sm:w-auto">
                           <input type="file" @change="handlePhotoUpload($event, index)" class="text-[10px] file:mr-3 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:bg-red-50 file:text-red-700 hover:file:bg-red-100" accept="image/*" />
@@ -330,10 +336,10 @@
                         <div class="flex space-x-2">
                           <button type="button" @click="samplingStates[idx] = 'ok'"
                             class="px-4 py-2 rounded-lg text-[11px] font-black transition-all"
-                            :style="samplingStates[idx] === 'ok' ? 'background:#4A8BDF;color:white;border:1px solid #2A4A9F;box-shadow:0 2px 8px rgba(58,106,191,0.3)' : 'background:white;color:#64748B;border:1px solid #E2E8F0'">SESUAI</button>
+                            :style="samplingStates[idx] === 'ok' ? 'background:#4A8BDF;color:white;border:1px solid #2A4A9F;box-shadow:0 2px 8px rgba(58,106,191,0.3)' : 'background:white;color:#64748B;border:1px solid #E2E8F0'">COMPLIANT</button>
                           <button type="button" @click="samplingStates[idx] = 'not_ok'"
                             class="px-4 py-2 rounded-lg text-[11px] font-black transition-all"
-                            :style="samplingStates[idx] === 'not_ok' ? 'background:#DC2626;color:white;border:1px solid #B91C1C;box-shadow:0 2px 8px rgba(220,38,38,0.3)' : 'background:white;color:#64748B;border:1px solid #E2E8F0'">TIDAK SESUAI</button>
+                            :style="samplingStates[idx] === 'not_ok' ? 'background:#DC2626;color:white;border:1px solid #B91C1C;box-shadow:0 2px 8px rgba(220,38,38,0.3)' : 'background:white;color:#64748B;border:1px solid #E2E8F0'">NON-COMPLIANT</button>
                         </div>
                       </div>
                     </div>
@@ -349,11 +355,11 @@
                 <div v-if="inspectionStep === 1" key="footer1">
                   <div v-if="!isChecklistComplete" class="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-400">
                     <span class="material-icons text-xl mb-1 animate-pulse">lock</span>
-                    <span class="text-[11px] font-black uppercase tracking-widest">Selesaikan {{ checklistRemaining }} Item Checklist</span>
-                    <p class="text-[9px] font-bold mt-1 text-center">Semua item wajib dijawab OK atau NOT OK + lampiran foto untuk melanjutkan.</p>
+                    <span class="text-[11px] font-black uppercase tracking-widest">Complete {{ checklistRemaining }} Checklist Items</span>
+                    <p class="text-[9px] font-bold mt-1 text-center">All items must be answered OK or NOT OK + photo attachment to proceed.</p>
                   </div>
                   <button v-else @click="inspectionStep = 2" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;">
-                    <span class="text-sm font-black uppercase tracking-widest text-white">Lanjut ke Sampling Mutu</span>
+                    <span class="text-sm font-black uppercase tracking-widest text-white">Proceed to Quality Sampling</span>
                     <span class="material-icons text-lg animate-bounce-right">arrow_forward</span>
                   </button>
                 </div>
@@ -362,19 +368,19 @@
                 <div v-else-if="inspectionStep === 2" key="footer2">
                   <div v-if="!isSamplingFilled" class="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-400">
                     <span class="material-icons text-xl mb-1 animate-pulse">lock</span>
-                    <span class="text-[11px] font-black uppercase tracking-widest">Lengkapi Sampling Awal</span>
-                    <p class="text-[9px] font-bold mt-1 text-center">Semua parameter mutu wajib diinspeksi.</p>
+                    <span class="text-[11px] font-black uppercase tracking-widest">Complete Initial Sampling</span>
+                    <p class="text-[9px] font-bold mt-1 text-center">All quality parameters must be inspected.</p>
                   </div>
                   <div v-else class="flex flex-col sm:flex-row gap-3">
                     <button v-if="hasSamplingReject" type="button" @click="showRejectModal = true"
                       class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
                       style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
-                      <span class="material-icons text-lg">block</span><span>TOLAK SAMPLING</span>
+                      <span class="material-icons text-lg">block</span><span>REJECT SAMPLING</span>
                     </button>
                     <button v-if="!hasSamplingReject" type="button" @click="acceptSamplingAndFinish"
                       class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
                       style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);box-shadow:0 4px 12px rgba(74,139,223,0.3)">
-                      <span class="material-icons text-lg">check_circle</span><span>TERIMA & LANJUT BONGKAR</span>
+                      <span class="material-icons text-lg">check_circle</span><span>ACCEPT & PROCEED TO UNLOAD</span>
                     </button>
                   </div>
                 </div>
@@ -391,7 +397,7 @@
 
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
 import { useToast } from '../composables/useToast'
@@ -411,6 +417,7 @@ const showDetailsModal = ref(false)
 const showChecklistModal = ref(false)
 const inspectionStep = ref(1)
 const currentPage = ref(1)
+const searchQuery = ref('')
 
 const openInspection = () => {
   inspectionStep.value = 1
@@ -428,32 +435,37 @@ const rejectComment = ref('')
 const rejectCommentError = ref(false)
 
 const samplingParams = [
-  { label: 'Kadar Air', desc: 'Cek moisture content sample', icon: 'water_drop' },
-  { label: 'Visual', desc: 'Cek tampilan fisik barang', icon: 'visibility' },
-  { label: 'Bau', desc: 'Cek aroma / bau tidak normal', icon: 'air' }
+  { label: 'Moisture', desc: 'Check moisture content of sample', icon: 'water_drop' },
+  { label: 'Visual', desc: 'Check physical appearance of goods', icon: 'visibility' },
+  { label: 'Odor', desc: 'Check for abnormal odor/smell', icon: 'air' }
 ]
 
 const vehicleChecklist = [
-  "Kendaraan bersih",
-  "Seal pintu kendaraan baik",
-  "Kendaraan & barang tidak berbau",
-  "Barang tertata rapi",
-  "Tidak ditemukan hama / binatang dan atau jejak atau bekas binatang hidup atau mati",
-  "Tidak ada barang lain",
-  "Pembungkus barang baik dan lengkap",
-  "CoA tersedia dan sesuai batch",
-  "Jumlah barang sesuai SJ (untuk barang selain biji kopi)",
-  "Kondisi kendaraan tidak ada kebocoran / kondisi baik"
+  "Vehicle is clean",
+  "Vehicle door seal is intact",
+  "Vehicle & goods have no abnormal odor",
+  "Goods are neatly arranged",
+  "No pests/animals or traces of living or dead animals found",
+  "No foreign objects present",
+  "Packaging is intact and complete",
+  "CoA is available and matches batch",
+  "Goods quantity matches delivery note (for non-coffee bean items)",
+  "Vehicle has no leaks / in good condition"
 ]
 
 const isSamplingFilled = computed(() => samplingStates.value.every(s => s !== null))
 const hasSamplingReject = computed(() => samplingStates.value.some(s => s === 'not_ok'))
 const gbbTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'gbb'))
+const filteredGbbTrucks = computed(() => {
+  if (!searchQuery.value) return gbbTrucks.value
+  return gbbTrucks.value.filter(t => t.plateNumber.toLowerCase().includes(searchQuery.value.toLowerCase()))
+})
 const paginatedGbbTrucks = computed(() => {
   const start = (currentPage.value - 1) * 10
   const end = start + 10
-  return gbbTrucks.value.slice(start, end)
+  return filteredGbbTrucks.value.slice(start, end)
 })
+watch(searchQuery, () => { currentPage.value = 1 })
 
 const selectTruck = (truck) => {
   selectedTruck.value = truck
@@ -468,9 +480,9 @@ const selectTruck = (truck) => {
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
 
 const saveSecurityInfo = () => {
-  if (!suratJalanInput.value || !poNumberInput.value) { toast.warning('Mohon lengkapi data Surat Jalan dan PO Number'); return }
+  if (!suratJalanInput.value || !poNumberInput.value) { toast.warning('Please complete the Delivery Note and PO Number fields'); return }
   truckStore.updateTruckDetails(selectedTruck.value.id, { suratJalanNumber: suratJalanInput.value.toUpperCase(), poNumber: poNumberInput.value.toUpperCase() })
-  toast.success('Data Security berhasil disimpan!')
+  toast.success('Security data saved successfully!')
 }
 
 const handlePhotoUpload = (event, index) => { const file = event.target.files[0]; if (file) checklistStates.value[index].photo = file.name }
@@ -501,11 +513,11 @@ const submitReject = async () => {
   showRejectModal.value = false
   showChecklistModal.value = false
   samplingDecision.value = 'rejected'
-  const ok = await confirm({ title: 'Konfirmasi Penolakan', message: `TOLAK sampling untuk ${selectedTruck.value.plateNumber}? Truck diarahkan ke timbangan keluar tanpa bongkar.`, type: 'danger', confirmText: 'Ya, Tolak' })
+  const ok = await confirm({ title: 'Confirm Rejection', message: `REJECT sampling for ${selectedTruck.value.plateNumber}? Truck will be redirected to outbound weighbridge without unloading.`, type: 'danger', confirmText: 'Yes, Reject' })
   if (ok) {
     truckStore.updateTruckDetails(selectedTruck.value.id, { rejectReason: rejectComment.value.trim() })
     truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'weighbridge_out')
-    toast.error(`${selectedTruck.value.plateNumber} ditolak — ${rejectComment.value.trim()}`)
+    toast.error(`${selectedTruck.value.plateNumber} rejected — ${rejectComment.value.trim()}`)
     rejectComment.value = ''
     selectedTruck.value = null
   }
@@ -514,12 +526,12 @@ const acceptSamplingAndFinish = () => {
   samplingDecision.value = 'accepted'
   showChecklistModal.value = false
   truckStore.updateTruckStatus(selectedTruck.value.id, 'processing', 'gbb')
-  toast.success('Inspeksi Selesai — Memulai proses bongkar muat.')
+  toast.success('Inspection Complete — Starting unloading process.')
 }
 
 const handleWeightSave = async (weight) => {
   if (!selectedTruck.value) return
-  const ok = await confirm({ title: 'Selesai Bongkar?', message: `Simpan Roll Weight: ${weight}kg untuk ${selectedTruck.value.plateNumber}?`, type: 'success', confirmText: 'Ya, Simpan' })
+  const ok = await confirm({ title: 'Unloading Complete?', message: `Save Roll Weight: ${weight}kg for ${selectedTruck.value.plateNumber}?`, type: 'success', confirmText: 'Yes, Save' })
   if (ok) {
     truckStore.updateTruckWeight(selectedTruck.value.id, 'rollWeight', weight)
     truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'qc')

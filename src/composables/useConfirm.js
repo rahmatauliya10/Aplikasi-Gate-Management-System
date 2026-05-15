@@ -5,13 +5,13 @@ const confirmState = ref({
   title: '',
   message: '',
   type: 'warning',
-  confirmText: 'Konfirmasi',
-  cancelText: 'Batal',
+  confirmText: 'Confirm',
+  cancelText: 'Cancel',
   resolve: null,
 })
 
 export const useConfirm = () => {
-  const confirm = ({ title = 'Konfirmasi', message = '', type = 'warning', confirmText = 'Konfirmasi', cancelText = 'Batal' } = {}) => {
+  const confirm = ({ title = 'Confirm', message = '', type = 'warning', confirmText = 'Confirm', cancelText = 'Cancel' } = {}) => {
     return new Promise((resolve) => {
       confirmState.value = { show: true, title, message, type, confirmText, cancelText, resolve }
     })

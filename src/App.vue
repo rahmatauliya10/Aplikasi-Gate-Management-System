@@ -1,6 +1,11 @@
 <template>
   <PageTransition />
-  <MainLayout />
+  <template v-if="$route.path === '/login'">
+    <router-view />
+  </template>
+  <template v-else>
+    <MainLayout />
+  </template>
   <ToastNotification />
   <ConfirmDialog />
 </template>

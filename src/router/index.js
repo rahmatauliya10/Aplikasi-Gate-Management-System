@@ -10,10 +10,17 @@ import QCVerification from '../views/QCVerification.vue'
 import GateCheckOut from '../views/GateCheckOut.vue'
 import History from '../views/History.vue'
 import Settings from '../views/Settings.vue'
+import NotFound from '../views/NotFound.vue'
+import Login from '../views/Login.vue'
 
 const router = createRouter({
     history: createWebHistory(import.meta.env.BASE_URL),
     routes: [
+        {
+            path: '/login',
+            name: 'login',
+            component: Login
+        },
         {
             path: '/',
             name: 'dashboard',
@@ -63,17 +70,35 @@ const router = createRouter({
             path: '/settings',
             name: 'settings',
             component: Settings
+        },
+        {
+            path: '/:pathMatch(.*)*',
+            name: 'not-found',
+            component: NotFound
         }
     ]
 })
 
 export const isPageLoading = ref(false)
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   if (to.path !== from.path) {
     isPageLoading.value = true
   }
-  next()
+  
+  // Use auth store
+  const { useAuthStore } = await import('../stores/authStore')
+  const authStore = useAuthStore()
+  
+  // If not logged in and not heading to login page
+  if (to.path !== '/login' && !authStore.isAuthenticated) {
+    next('/login')
+  } else if (to.path === '/login' && authStore.isAuthenticated) {
+    // If logged in and heading to login page, redirect to dashboard
+    next('/')
+  } else {
+    next()
+  }
 })
 
 router.afterEach(() => {

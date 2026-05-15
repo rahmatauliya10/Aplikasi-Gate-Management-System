@@ -1,8 +1,8 @@
 <template>
   <teleport to="body">
     <transition name="confirm-overlay">
-      <div v-if="confirmState.show" class="fixed inset-0 z-[9998] flex items-center justify-center p-4"
-        style="background:rgba(2,8,23,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);"
+      <div v-if="confirmState.show" class="fixed inset-0 z-[10001] flex items-center justify-center p-4"
+        style="background:rgba(2,8,23,0.7);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);"
         @click.self="handleCancel">
         <transition name="confirm-panel" appear>
           <div v-if="confirmState.show" class="w-full max-w-md rounded-2xl overflow-hidden"
