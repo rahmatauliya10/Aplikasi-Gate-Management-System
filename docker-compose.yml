@@ -1,6 +1,6 @@
 services:
   frontend:
-    build: .
+    build: ./gms-frontend
     ports:
       - "80:80"
     container_name: gate-system-frontend
