@@ -224,10 +224,10 @@
             <div class="rounded-xl p-4 flex flex-col transition-all duration-300 hover:shadow-sm hover:bg-slate-50/80 hover:-translate-y-1 cursor-pointer group border border-transparent hover:border-slate-100 bg-transparent">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-teal-600 text-[16px] group-hover:text-teal-500 transition-colors duration-300">eco</span>
-                <span v-if="sidebarOpen" class="text-[11px] font-black text-slate-800 tracking-wide group-hover:text-teal-700 transition-colors duration-300">Rahmat Auliya</span>
+                <span v-if="sidebarOpen" class="text-[11px] font-black text-slate-800 tracking-wide group-hover:text-teal-700 transition-colors duration-300">{{ authStore.user?.name || authStore.user?.username || authStore.user?.email || 'User' }}</span>
               </div>
               <div v-if="sidebarOpen" class="mt-1 text-[7.5px] font-black text-teal-600 uppercase tracking-[0.2em] group-hover:text-teal-500 transition-colors duration-300">
-                OPERATIONAL EXCELLENCE
+                {{ authStore.user?.role || 'OPERATIONAL EXCELLENCE' }}
               </div>
             </div>
           </div>

@@ -419,6 +419,7 @@ import Pagination from '../components/Pagination.vue'
 const truckStore = useTruckStore()
 const toast = useToast()
 const { confirm } = useConfirm()
+const isSubmitting = ref(false)
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const currentPage = ref(1)
@@ -508,10 +509,13 @@ const checklistRemaining = computed(() => {
   return vehicleChecklist.length - checklistDoneCount.value
 })
 
-const acceptChecklistAndStart = () => {
+const acceptChecklistAndStart = async () => {
+  if (isSubmitting.value) return
+  isSubmitting.value = true
   showChecklistModal.value = false
-  truckStore.updateTruckStatus(selectedTruck.value.id, 'processing', 'gbj')
+  await truckStore.updateTruckStatus(selectedTruck.value.id, 'processing', 'gbj')
   toast.success('Inspection Complete — Starting loading process.')
+  isSubmitting.value = false
 }
 
 watch(searchQuery, () => { currentPage.value = 1 })
@@ -533,7 +537,7 @@ const handleWeightCapture = (weight) => {
 }
 
 const handleFinalSave = async () => {
-  if (!selectedTruck.value) return
+  if (!selectedTruck.value || isSubmitting.value) return
   if (!canSaveGBJ.value) {
     toast.warning('Please complete all required fields before saving.')
     return
@@ -545,9 +549,10 @@ const handleFinalSave = async () => {
     confirmText: 'Yes, Save' 
   })
   if (ok) {
+    isSubmitting.value = true
     const truckId = selectedTruck.value.id
-    truckStore.updateTruckWeight(truckId, 'rollWeight', capturedWeight.value)
-    truckStore.updateTruckDetails(truckId, { 
+    await truckStore.updateTruckWeight(truckId, 'rollWeight', capturedWeight.value)
+    await truckStore.updateTruckDetails(truckId, { 
       suratJalanNumber: sjInput.value,
       deliveryChecklist: {
         date: currentDateStr.value,
@@ -557,7 +562,7 @@ const handleFinalSave = async () => {
         documentAvailability: [...deliveryForm.documentAvailability]
       }
     })
-    truckStore.updateTruckStatus(truckId, 'waiting', 'qc')
+    await truckStore.updateTruckStatus(truckId, 'waiting', 'qc')
     toast.success(`Saved! ${selectedTruck.value.plateNumber} → QC Queue.`)
     // Reset all state
     showDeliveryModal.value = false
@@ -568,6 +573,7 @@ const handleFinalSave = async () => {
     deliveryForm.customer = ''
     deliveryForm.productCondition = [false, false, false, false]
     deliveryForm.documentAvailability = [false, false, false, false]
+    isSubmitting.value = false
   }
 }
 </script>

@@ -412,6 +412,7 @@ const router = useRouter()
 const truckStore = useTruckStore()
 const toast = useToast()
 const { confirm } = useConfirm()
+const isSubmitting = ref(false)
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const showChecklistModal = ref(false)
@@ -505,39 +506,48 @@ const checklistRemaining = computed(() => {
 })
 
 const submitReject = async () => {
+  if (isSubmitting.value) return
   if (!rejectComment.value || rejectComment.value.trim().length < 10) {
     rejectCommentError.value = true
     return
   }
   rejectCommentError.value = false
-  showRejectModal.value = false
-  showChecklistModal.value = false
-  samplingDecision.value = 'rejected'
+  
   const ok = await confirm({ title: 'Confirm Rejection', message: `REJECT sampling for ${selectedTruck.value.plateNumber}? Truck will be redirected to outbound weighbridge without unloading.`, type: 'danger', confirmText: 'Yes, Reject' })
   if (ok) {
-    truckStore.updateTruckDetails(selectedTruck.value.id, { rejectReason: rejectComment.value.trim() })
-    truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'weighbridge_out')
+    isSubmitting.value = true
+    showRejectModal.value = false
+    showChecklistModal.value = false
+    samplingDecision.value = 'rejected'
+    await truckStore.updateTruckDetails(selectedTruck.value.id, { rejectReason: rejectComment.value.trim() })
+    await truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'weighbridge_out')
     toast.error(`${selectedTruck.value.plateNumber} rejected — ${rejectComment.value.trim()}`)
     rejectComment.value = ''
     selectedTruck.value = null
+    isSubmitting.value = false
   }
 }
-const acceptSamplingAndFinish = () => {
+const acceptSamplingAndFinish = async () => {
+  if (isSubmitting.value) return
+  isSubmitting.value = true
   samplingDecision.value = 'accepted'
   showChecklistModal.value = false
-  truckStore.updateTruckStatus(selectedTruck.value.id, 'processing', 'gbb')
+  await truckStore.updateTruckStatus(selectedTruck.value.id, 'processing', 'gbb')
   toast.success('Inspection Complete — Starting unloading process.')
+  isSubmitting.value = false
 }
 
 const handleWeightSave = async (weight) => {
-  if (!selectedTruck.value) return
+  if (!selectedTruck.value || isSubmitting.value) return
   const ok = await confirm({ title: 'Unloading Complete?', message: `Save Roll Weight: ${weight}kg for ${selectedTruck.value.plateNumber}?`, type: 'success', confirmText: 'Yes, Save' })
   if (ok) {
-    truckStore.updateTruckWeight(selectedTruck.value.id, 'rollWeight', weight)
-    truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'qc')
+    isSubmitting.value = true
+    await truckStore.updateTruckWeight(selectedTruck.value.id, 'rollWeight', weight)
+    await truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'qc')
     toast.success(`Roll Weight ${weight}kg saved — proceed to QC.`)
     selectedTruck.value = null
     rollWeightInput.value = null
+    isSubmitting.value = false
   }
 }
 </script>

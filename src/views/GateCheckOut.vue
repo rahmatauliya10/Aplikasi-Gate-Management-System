@@ -134,6 +134,7 @@ const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const currentPage = ref(1)
 const searchQuery = ref('')
+const isSubmitting = ref(false)
 const completedTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'gate_out'))
 const filteredTrucks = computed(() => {
   if (!searchQuery.value) return completedTrucks.value
@@ -146,10 +147,13 @@ const paginatedCompletedTrucks = computed(() => {
 })
 watch(searchQuery, () => { currentPage.value = 1 })
 const processExit = async (truck) => {
+  if (isSubmitting.value) return
   const ok = await confirm({ title: 'Confirm Gate Out', message: `Confirm exit for ${truck.plateNumber}?`, type: 'success', confirmText: 'Check Out' })
   if (ok) {
-    truckStore.updateTruckStatus(truck.id, 'completed', 'completed')
+    isSubmitting.value = true
+    await truckStore.updateTruckStatus(truck.id, 'completed', 'completed')
     toast.success(`${truck.plateNumber} checked out successfully!`)
+    isSubmitting.value = false
   }
 }
 </script>

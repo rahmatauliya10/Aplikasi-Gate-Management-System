@@ -86,19 +86,52 @@ router.beforeEach(async (to, from, next) => {
     isPageLoading.value = true
   }
   
-  // Use auth store
   const { useAuthStore } = await import('../stores/authStore')
+  const { useNotificationStore } = await import('../stores/notificationStore')
   const authStore = useAuthStore()
+  const notificationStore = useNotificationStore()
   
-  // If not logged in and not heading to login page
-  if (to.path !== '/login' && !authStore.isAuthenticated) {
-    next('/login')
-  } else if (to.path === '/login' && authStore.isAuthenticated) {
-    // If logged in and heading to login page, redirect to dashboard
-    next('/')
-  } else {
-    next()
+  if (authStore.token && !authStore.user) {
+    await authStore.initAuth()
   }
+
+  const isAuthenticated = authStore.isAuthenticated
+  const role = authStore.user?.role
+
+  if (to.path !== '/login' && !isAuthenticated) {
+    next('/login')
+    return
+  } 
+  
+  if (to.path === '/login' && isAuthenticated) {
+    next('/')
+    return
+  }
+
+  // Role-based Access Control
+  if (to.path !== '/login' && to.path !== '/' && role !== 'ADMIN') {
+    let allowed = true
+    
+    if (['/gate-in', '/gate-out'].includes(to.path) && role !== 'GATE_SECURITY') {
+      allowed = false
+    } else if (to.path === '/weighbridge' && role !== 'WEIGHBRIDGE_OPERATOR') {
+      allowed = false
+    } else if (['/gbb', '/gbj', '/gsp'].includes(to.path) && role !== 'WAREHOUSE_STAFF') {
+      allowed = false
+    } else if (to.path === '/qc' && role !== 'QC_INSPECTOR') {
+      allowed = false
+    } else if (to.path === '/settings' && role !== 'ADMIN') {
+      allowed = false // Only ADMIN can access settings
+    }
+    
+    if (!allowed) {
+      notificationStore.addNotification('Access Denied', 'You do not have permission to access this page.', 'error')
+      next(from.path !== '/' ? '/' : false)
+      return
+    }
+  }
+
+  next()
 })
 
 router.afterEach(() => {

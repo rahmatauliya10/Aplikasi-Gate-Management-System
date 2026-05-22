@@ -188,6 +188,7 @@ const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const currentPage = ref(1)
 const searchQuery = ref('')
+const isSubmitting = ref(false)
 const gspTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'gsp'))
 const filteredGspTrucks = computed(() => {
   if (!searchQuery.value) return gspTrucks.value
@@ -201,15 +202,23 @@ const paginatedGspTrucks = computed(() => {
 watch(searchQuery, () => { currentPage.value = 1 })
 const selectTruck = (truck) => { selectedTruck.value = truck }
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-const processTruck = (truck) => { if (truck.status === 'waiting') truckStore.updateTruckStatus(truck.id, 'processing', 'gsp') }
+const processTruck = async (truck) => { 
+  if (truck.status === 'waiting' && !isSubmitting.value) {
+    isSubmitting.value = true
+    await truckStore.updateTruckStatus(truck.id, 'processing', 'gsp') 
+    isSubmitting.value = false
+  }
+}
 const handleWeightSave = async (weight) => {
-  if (!selectedTruck.value) return
+  if (!selectedTruck.value || isSubmitting.value) return
   const ok = await confirm({ title: 'Processing Complete?', message: `Save Processed Weight: ${weight}kg for ${selectedTruck.value.plateNumber}?`, type: 'success', confirmText: 'Yes, Save' })
   if (ok) {
-    truckStore.updateTruckWeight(selectedTruck.value.id, 'rollWeight', weight)
-    truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'qc')
+    isSubmitting.value = true
+    await truckStore.updateTruckWeight(selectedTruck.value.id, 'rollWeight', weight)
+    await truckStore.updateTruckStatus(selectedTruck.value.id, 'waiting', 'qc')
     toast.success(`Processed Weight ${weight}kg saved — proceed to QC.`)
     selectedTruck.value = null
+    isSubmitting.value = false
   }
 }
 </script>

@@ -169,6 +169,7 @@ const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const currentPage = ref(1)
 const searchQuery = ref('')
+const isSubmitting = ref(false)
 
 const queueTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'weighbridge_in' || t.step === 'weighbridge_out'))
 const filteredQueueTrucks = computed(() => {
@@ -209,17 +210,41 @@ const previousWeight = computed(() => {
 })
 
 const selectTruck = (truck) => { selectedTruck.value = truck }
-const handleWeightSubmit = (weight) => {
-  if (!selectedTruck.value) return
+const handleWeightSubmit = async (weight) => {
+  if (!selectedTruck.value || isSubmitting.value) return
+  isSubmitting.value = true
   const truck = selectedTruck.value
   const isFirst = truck.step === 'weighbridge_in'
   if (truck.processType === 'GBB' || truck.processType === 'GSP') {
-    if (isFirst) { truckStore.updateTruckWeight(truck.id, 'gross', weight); truckStore.updateTruckStatus(truck.id, 'waiting', truck.processType.toLowerCase()); toast.success(`Gross Weight Saved: ${weight} kg. Proceed to ${truck.processType}.`) }
-    else { truckStore.updateTruckWeight(truck.id, 'tare', weight); truckStore.updateTruckStatus(truck.id, 'waiting', 'gate_out'); toast.success(`Tare Weight Saved: ${weight} kg. Proceed to Gate Out.`); selectedTruck.value = null; return }
+    if (isFirst) { 
+      await truckStore.updateTruckWeight(truck.id, 'gross', weight); 
+      await truckStore.updateTruckStatus(truck.id, 'waiting', truck.processType.toLowerCase()); 
+      toast.success(`Gross Weight Saved: ${weight} kg. Proceed to ${truck.processType}.`) 
+    }
+    else { 
+      await truckStore.updateTruckWeight(truck.id, 'tare', weight); 
+      await truckStore.updateTruckStatus(truck.id, 'waiting', 'gate_out'); 
+      toast.success(`Tare Weight Saved: ${weight} kg. Proceed to Gate Out.`); 
+      selectedTruck.value = null; 
+      isSubmitting.value = false;
+      return 
+    }
   } else {
-    if (isFirst) { truckStore.updateTruckWeight(truck.id, 'tare', weight); truckStore.updateTruckStatus(truck.id, 'waiting', 'gbj'); toast.success(`Tare Weight Saved: ${weight} kg. Proceed to GBJ.`) }
-    else { truckStore.updateTruckWeight(truck.id, 'gross', weight); truckStore.updateTruckStatus(truck.id, 'waiting', 'gate_out'); toast.success(`Gross Weight Saved: ${weight} kg. Proceed to Gate Out.`); selectedTruck.value = null; return }
+    if (isFirst) { 
+      await truckStore.updateTruckWeight(truck.id, 'tare', weight); 
+      await truckStore.updateTruckStatus(truck.id, 'waiting', 'gbj'); 
+      toast.success(`Tare Weight Saved: ${weight} kg. Proceed to GBJ.`) 
+    }
+    else { 
+      await truckStore.updateTruckWeight(truck.id, 'gross', weight); 
+      await truckStore.updateTruckStatus(truck.id, 'waiting', 'gate_out'); 
+      toast.success(`Gross Weight Saved: ${weight} kg. Proceed to Gate Out.`); 
+      selectedTruck.value = null; 
+      isSubmitting.value = false;
+      return 
+    }
   }
   selectedTruck.value = null
+  isSubmitting.value = false
 }
 </script>

@@ -208,7 +208,21 @@ watch(searchQuery, () => { currentPage.value = 1 })
 
 const openModal = () => { isModalOpen.value = true }
 const closeModal = () => { isModalOpen.value = false }
-const handleTruckSubmit = (truckData) => { truckStore.addTruck(truckData); closeModal(); toast.success(`Truck ${truckData.plateNumber} registered successfully!`) }
+const isSubmitting = ref(false)
+const handleTruckSubmit = async (truckData) => { 
+  if (isSubmitting.value) return;
+  isSubmitting.value = true;
+  try {
+    await truckStore.addTruck(truckData); 
+    closeModal(); 
+    toast.success(`Truck ${truckData.plateNumber} registered successfully!`) 
+  } finally {
+    isSubmitting.value = false;
+  }
+}
+// BUG-001 NOTE: The QA report mentioned a cancelRegistration function that cancels an active truck registration.
+// This function and the corresponding UI do not exist in the current frontend codebase. 
+// Thus, BUG-001 is not reproducible here. No fake cancel feature is added.
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
 const calculateDuration = (isoString) => {
   if (!isoString) return '-';

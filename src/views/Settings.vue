@@ -44,11 +44,44 @@
         <p class="text-[11px] text-slate-600 mt-2 font-medium">Tonnage discrepancies above this percentage will trigger alerts.</p>
       </div>
     </div>
+
+    <!-- Save Button -->
+    <div class="mt-8 flex justify-end max-w-3xl">
+      <button @click="handleSave" class="px-8 py-3 rounded-xl font-black text-white flex items-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]" style="background: linear-gradient(135deg, #4A8BDF, #3A6ABF); box-shadow: 0 4px 15px rgba(74,139,223,0.3);">
+        <span class="material-icons text-[18px]">save</span>
+        <span>Save Configuration</span>
+      </button>
+    </div>
   </div>
 </template>
 
 <script setup>
+import { onMounted } from 'vue'
 import { useSettingsStore } from '../stores/settingsStore'
-  import PageHeader from '../components/PageHeader.vue'
+import PageHeader from '../components/PageHeader.vue'
+import { useToast } from '../composables/useToast'
+
 const settingsStore = useSettingsStore()
+const toast = useToast()
+
+onMounted(() => {
+  settingsStore.loadSettings()
+})
+
+const handleSave = () => {
+  const tat = settingsStore.targetTat
+  const dev = settingsStore.targetDeviation
+  
+  if (tat === null || tat === undefined || tat <= 0 || isNaN(tat)) {
+    toast.error('Target TAT must be a positive number.')
+    return
+  }
+  if (dev === null || dev === undefined || dev < 0 || isNaN(dev)) {
+    toast.error('Risk Threshold must be a positive number.')
+    return
+  }
+  
+  settingsStore.saveSettings()
+  toast.success('Configuration saved successfully!')
+}
 </script>

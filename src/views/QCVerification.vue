@@ -319,7 +319,10 @@ const currentPage = ref(1)
 const searchQuery = ref('')
 const selectedWarehouse = ref('ALL')
 const qcForm = ref({ bau: '', warna: '', kadarAir: null, totalFM: null, bijiOK: null, status: '', note: '', pic: authStore.user?.name || 'QC Admin' })
-const qcTrucks = computed(() => truckStore.trucks.filter(t => t.step === 'qc'))
+const qcTrucks = computed(() => truckStore.trucks.filter(t => {
+  if (!t) return false;
+  return t.step === 'qc' && t.status !== 'completed' && t.status !== 'rejected';
+}))
 const filteredQcTrucks = computed(() => {
   return qcTrucks.value.filter(t => {
     if (searchQuery.value && !t.plateNumber.toLowerCase().includes(searchQuery.value.toLowerCase())) return false
@@ -348,31 +351,52 @@ const selectTruck = (truck) => {
   }
 }
 
+const isSubmitting = ref(false)
+
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
-const startQC = (truck) => { truckStore.updateTruckStatus(truck.id, 'processing', 'qc') }
+const startQC = async (truck) => { 
+  if (isSubmitting.value) return;
+  isSubmitting.value = true;
+  try {
+    await truckStore.updateTruckStatus(truck.id, 'processing', 'qc') 
+  } finally {
+    isSubmitting.value = false;
+  }
+}
 
 const verifyTruck = async (truck, passed) => {
-  if (truck.processType === 'GBB') {
-    const { bau, warna, kadarAir, totalFM, bijiOK, status, note, pic } = qcForm.value
-    if (!bau || !warna || kadarAir === null || totalFM === null || bijiOK === null || !status) { toast.warning('Please fill in all main QC Verification parameters completely before proceeding!'); return }
-    truckStore.updateTruckDetails(truck.id, { qcDetails: { bau: bau.toUpperCase(), warna: warna.toUpperCase(), kadarAir, totalFM, bijiOK, status: status.toUpperCase(), note, pic } })
-  }
-  if (passed) {
-    const ok = await confirm({ title: 'Approve Verification?', message: `Approve verification for ${truck.plateNumber}?`, type: 'success', confirmText: 'Approve' })
-    if (ok) { 
-      truckStore.updateTruckStatus(truck.id, 'waiting', 'weighbridge_out'); 
-      toast.success(`${truck.plateNumber} verification passed!`); 
-      selectedTruck.value = null; 
-      showVerificationModal.value = false;
+  if (isSubmitting.value) return;
+  isSubmitting.value = true;
+
+  try {
+    if (truck.status !== 'processing') {
+      await truckStore.updateTruckStatus(truck.id, 'processing', 'qc')
     }
-  } else {
-    const ok = await confirm({ title: 'Reject Verification?', message: `Reject verification for ${truck.plateNumber}?`, type: 'danger', confirmText: 'Yes, Reject' })
-    if (ok) { 
-      truckStore.updateTruckStatus(truck.id, 'completed', 'qc'); 
-      toast.error(`${truck.plateNumber} verification rejected.`); 
-      selectedTruck.value = null; 
-      showVerificationModal.value = false;
+
+    if (truck.processType === 'GBB') {
+      const { bau, warna, kadarAir, totalFM, bijiOK, status, note, pic } = qcForm.value
+      if (!bau || !warna || kadarAir === null || totalFM === null || bijiOK === null || !status) { toast.warning('Please fill in all main QC Verification parameters completely before proceeding!'); return }
+      await truckStore.updateTruckDetails(truck.id, { qcDetails: { bau: bau.toUpperCase(), warna: warna.toUpperCase(), kadarAir, totalFM, bijiOK, status: status.toUpperCase(), note, pic } })
     }
+    if (passed) {
+      const ok = await confirm({ title: 'Approve Verification?', message: `Approve verification for ${truck.plateNumber}?`, type: 'success', confirmText: 'Approve' })
+      if (ok) { 
+        await truckStore.updateTruckStatus(truck.id, 'waiting', 'weighbridge_out'); 
+        toast.success(`${truck.plateNumber} verification passed!`); 
+        selectedTruck.value = null; 
+        showVerificationModal.value = false;
+      }
+    } else {
+      const ok = await confirm({ title: 'Reject Verification?', message: `Reject verification for ${truck.plateNumber}?`, type: 'danger', confirmText: 'Yes, Reject' })
+      if (ok) { 
+        await truckStore.updateTruckStatus(truck.id, 'completed', 'qc'); 
+        toast.error(`${truck.plateNumber} verification rejected.`); 
+        selectedTruck.value = null; 
+        showVerificationModal.value = false;
+      }
+    }
+  } finally {
+    isSubmitting.value = false;
   }
 }
 </script>
