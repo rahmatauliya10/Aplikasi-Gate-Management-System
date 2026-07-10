@@ -1,0 +1,218 @@
+<template>
+  <div class="space-y-7">
+    <!-- Header -->
+    <PageHeader title="Gate Out" subtitle="Vehicles Ready for Exit" />
+
+    <div class="flex flex-col h-[600px] ind-container overflow-hidden bg-slate-50 bg-opacity-40 backdrop-blur-xl border-slate-200 border-opacity-50 shadow-[0_20px_50px_rgba(0,0,0,0.05)] relative">
+      <!-- Glossy Overlay -->
+      <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-white/20 pointer-events-none"></div>
+      
+      <div class="px-8 py-6 bg-white/60 backdrop-blur-md border-b border-slate-100 flex flex-wrap justify-between items-center gap-4 z-10 relative">
+        <div class="flex items-center space-x-4">
+          <div class="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center border border-indigo-100 shadow-inner group cursor-help">
+            <span class="material-icons text-[#4A8BDF] group-hover:scale-125 transition-transform duration-500">exit_to_app</span>
+          </div>
+          <div>
+            <h2 class="text-xl font-black text-slate-800 tracking-tight">Ready for Exit</h2>
+            <div class="flex items-center mt-0.5 space-x-2">
+              <span class="text-[10px] font-black text-slate-500 uppercase tracking-widest">Real-time Activity Tracker</span>
+              <span class="w-1 h-1 rounded-full bg-slate-300"></span>
+              <span class="text-[10px] font-bold text-[#A0006D] uppercase">{{ new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' }) }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="relative">
+            <input v-model="searchQuery" type="text" placeholder="Search Plate Number..." class="w-56 h-10 pl-10 pr-10 bg-white/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-2 focus:ring-[#4A8BDF]/20 transition-all shadow-sm">
+            <span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+            <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+              <span class="material-icons text-[16px]">close</span>
+            </button>
+          </div>
+          <div class="flex items-center space-x-2 px-4 py-2 rounded-2xl bg-white shadow-sm border border-slate-100">
+            <div class="relative">
+              <span class="block w-2.5 h-2.5 rounded-full bg-[#4A8BDF]"></span>
+              <span class="absolute inset-0 rounded-full bg-[#4A8BDF] animate-ping opacity-40"></span>
+            </div>
+            <span class="text-xs font-black text-slate-700 tracking-wider">{{ filteredTrucks.length }} ACTIVE LOGS</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-6 space-y-5 hide-scrollbar relative">
+        <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
+        
+        <transition-group name="list" tag="div" class="relative z-10 space-y-4">
+          <div v-for="(truck, i) in paginatedCompletedTrucks" :key="truck.id"
+            class="group relative bg-white/70 backdrop-blur-md p-5 rounded-[2rem] transition-all duration-500 border border-white hover:border-emerald-400 hover:border-opacity-40 shadow-[0_4px_20px_rgba(0,0,0,0.02)] hover:shadow-[0_15px_40px_rgba(16,185,129,0.12)] hover:-translate-y-1.5 overflow-hidden"
+          >
+            <div class="absolute left-0 top-4 bottom-4 w-1.5 rounded-r-full transition-all duration-300 bg-[#4A8BDF] opacity-70 group-hover:opacity-100"></div>
+            
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pl-4">
+              <!-- Info Section -->
+              <div class="flex-1 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1.5">Plate Number</div>
+                  <div class="text-lg font-black text-slate-900 font-mono tracking-tight">{{ getPlateNumber(truck) }}</div>
+                </div>
+                
+                <div>
+                  <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1.5">Vendor</div>
+                  <div class="text-sm font-bold text-slate-700 truncate">{{ getVendor(truck) }}</div>
+                </div>
+                
+                <div>
+                  <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1.5">Gross / Tare</div>
+                  <div class="flex items-center space-x-2 text-xs font-bold text-slate-700 font-mono">
+                    <span class="px-1.5 py-0.5 rounded bg-slate-100 text-[10px]">G {{ truck.grossWeight ?? truck.weights?.gross ?? 0 }}</span>
+                    <span class="px-1.5 py-0.5 rounded bg-slate-100 text-[10px]">T {{ truck.tareWeight ?? truck.weights?.tare ?? 0 }}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1.5">Net Weight</div>
+                  <div class="flex items-baseline">
+                    <span class="text-xl font-black text-[#3A6ABF] font-mono tracking-tighter">{{ truck.netWeight ?? truck.weights?.net ?? 0 }}</span>
+                    <span class="text-xs font-bold text-[#4A8BDF]/70 ml-1">kg</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Actions Section -->
+              <div class="flex items-center space-x-3 shrink-0 border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0 md:pl-4">
+                <button @click="selectedTruck = truck; showDetailsModal = true"
+                  class="flex items-center justify-center w-10 h-10 rounded-xl text-[#4A8BDF] bg-[#E6F0FA] border border-[#CCE0F5] hover:bg-indigo-100 hover:border-indigo-300 transition-all group-hover:shadow-[0_4px_12px_rgba(74,139,223,0.15)]"
+                  title="View Details">
+                  <span class="material-icons text-xl">visibility</span>
+                </button>
+                <button @click="processExit(truck)" 
+                  :disabled="isProcessing"
+                  class="relative overflow-hidden flex items-center justify-center space-x-2 px-6 h-10 rounded-xl font-black uppercase tracking-widest text-xs text-white transition-all"
+                  :class="isProcessing ? 'bg-slate-400 cursor-not-allowed' : 'bg-[#4A8BDF] hover:bg-[#66A2E1] shadow-[0_4px_12px_rgba(74,139,223,0.3)] hover:shadow-[0_4px_15px_rgba(74,139,223,0.4)]'">
+                  <div v-if="!isProcessing" class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-shimmer pointer-events-none"></div>
+                  <span v-if="isProcessing" class="material-icons text-sm animate-spin">autorenew</span>
+                  <span v-else class="material-icons text-sm">local_shipping</span>
+                  <span>{{ isProcessing ? 'PROCESSING...' : 'CHECK OUT' }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div v-if="filteredTrucks.length === 0" key="empty" class="flex flex-col items-center justify-center py-28 relative z-10">
+            <div class="relative mb-6">
+              <div class="w-24 h-24 rounded-3xl bg-slate-50 flex items-center justify-center animate-gentle-float border border-slate-100">
+                <span class="material-icons text-slate-300 text-5xl">cloud_queue</span>
+              </div>
+              <div class="absolute -right-2 -bottom-2 w-10 h-10 rounded-2xl bg-[#E6F0FA] flex items-center justify-center animate-pulse">
+                <span class="material-icons text-[#4A8BDF] text-xl">radar</span>
+              </div>
+            </div>
+            <p class="text-base font-black text-slate-400 tracking-[0.3em] uppercase">No active operations</p>
+            <p class="text-xs font-bold text-slate-400 mt-2 italic">Scanning for outgoing trucks...</p>
+          </div>
+        </transition-group>
+      </div>
+      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="filteredTrucks.length > 0">
+        <Pagination :current-page="currentPage" :total-items="filteredTrucks.length" @update:current-page="currentPage = $event" />
+      </div>
+    </div>
+
+    <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" />
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, watch, onMounted } from 'vue'
+import { useTruckStore } from '../stores/truckStore'
+import { useGateStore } from '../stores/gateStore'
+import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import PageHeader from '../components/PageHeader.vue'
+import Pagination from '../components/Pagination.vue'
+
+const truckStore = useTruckStore()
+const gateStore = useGateStore()
+const toast = useToast()
+const { confirm } = useConfirm()
+
+onMounted(async () => {
+  try {
+    await truckStore.fetchTrucks()
+  } catch (err) {
+    console.warn('[GateCheckOut] Mount-time fetch failed, using store cache:', err.message)
+  }
+})
+
+const selectedTruck = ref(null)
+const showDetailsModal = ref(false)
+const currentPage = ref(1)
+const searchQuery = ref('')
+const isProcessing = ref(false)
+
+const getPlateNumber = (truck) => {
+  if (!truck) return '-'
+  return truck.plateNumber || truck.vehicle?.plateNumber || truck.licensePlate || '-'
+}
+
+const getVendor = (truck) => {
+  if (!truck) return '-'
+  return truck.vendorName || truck.vendor || truck.vehicle?.companyName || truck.companyName || truck.cargo?.supplierOrCustomer || '-'
+}
+
+const getProcessType = (truck) => {
+  if (!truck) return '-'
+  return truck.processType || truck.destination?.warehouseCode || truck.warehouseCode || truck.destination || '-'
+}
+
+const getStepLabel = (truck) => {
+  if (!truck) return '-'
+  const step = truck.step || truck.status || '-'
+  return String(step).replace(/_/g, ' ').toUpperCase()
+}
+
+const getEntryTimestamp = (truck) => {
+  if (!truck) return null
+  return truck.timestamps?.entry || truck.timestamps?.gateInAt || truck.gateInAt || truck.createdAt || null
+}
+
+const completedTrucks = computed(() => truckStore.trucks.filter(t => t.status === 'WEIGH_OUT_DONE'))
+const filteredTrucks = computed(() => {
+  const keyword = searchQuery.value.toLowerCase().trim()
+  if (!keyword) return completedTrucks.value
+  return completedTrucks.value.filter(t => getPlateNumber(t).toLowerCase().includes(keyword))
+})
+const totalPages = computed(() => Math.ceil(filteredTrucks.value.length / 10) || 1)
+const paginatedCompletedTrucks = computed(() => {
+  const start = (currentPage.value - 1) * 10
+  const end = start + 10
+  return filteredTrucks.value.slice(start, end)
+})
+
+watch(filteredTrucks, () => {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = 1
+  }
+})
+watch(searchQuery, () => { currentPage.value = 1 })
+
+const processExit = async (truck) => {
+  if (isProcessing.value) return;
+  const plate = getPlateNumber(truck)
+  const ok = await confirm({ title: 'Confirm Gate Out', message: `Confirm exit for ${plate}?`, type: 'success', confirmText: 'Check Out' })
+  if (ok) {
+    isProcessing.value = true;
+    try {
+      const response = await gateStore.checkOut(truck.id, { plateNumber: plate, exitTime: new Date() })
+      const updatedTruck = response?.data || response;
+      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
+      toast.success(`${plate} checked out successfully!`)
+    } catch (error) {
+      // Error is handled by store and notificationStore
+    } finally {
+      isProcessing.value = false;
+    }
+  }
+}
+</script>
+

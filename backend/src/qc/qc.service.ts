@@ -1,0 +1,242 @@
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { TransactionStatus, ProcessType, CheckResult } from '@prisma/client';
+import { StartQcDto } from './dto/start-qc.dto';
+import { VehicleCheckResultDto } from './dto/vehicle-check-result.dto';
+import { IncomingCheckResultDto } from './dto/incoming-check-result.dto';
+import { QcAttachmentDto } from './dto/qc-attachment.dto';
+
+@Injectable()
+export class QcService {
+  private readonly logger = new Logger(QcService.name);
+
+  constructor(private prisma: PrismaService, private activityLogsService: ActivityLogsService) {}
+
+  private mapToCheckResult(val?: string): CheckResult | null {
+    if (!val) return null;
+    const upper = val.toUpperCase();
+    if (upper === 'PASS' || upper === 'NORMAL' || upper === 'OK' || upper === 'GOOD') return CheckResult.PASS;
+    if (upper === 'REJECT' || upper === 'ABNORMAL' || upper === 'NOT_OK' || upper === 'BAD' || upper === 'REJECTED') return CheckResult.REJECT;
+    if (upper === 'NA') return CheckResult.NA;
+    return null;
+  }
+
+  private booleanToCheckResult(val?: boolean): CheckResult | null {
+    if (val === undefined || val === null) return null;
+    return val ? CheckResult.PASS : CheckResult.REJECT;
+  }
+
+  async getQueue() {
+    const queue = await this.prisma.transaction.findMany({
+      where: {
+        OR: [
+          { status: 'QC_VEHICLE_PENDING', processType: 'GBJ' },
+          { status: 'QC_VEHICLE_IN_PROGRESS', processType: 'GBJ' },
+          { status: 'INCOMING_CHECK_PENDING', processType: 'GBB' },
+          { status: 'INCOMING_CHECK_IN_PROGRESS', processType: 'GBB' },
+        ],
+      },
+      orderBy: { createdAt: 'asc' } });
+
+    return {
+      success: true,
+      message: 'QC queue retrieved successfully',
+      data: queue,
+    };
+  }
+
+  async startQc(transactionId: string, dto: StartQcDto, userId: string) {
+    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
+    if (!tx) throw new NotFoundException('Transaction not found');
+
+    let nextStatus: TransactionStatus;
+    if (tx.processType === 'GBJ' && tx.status === 'QC_VEHICLE_PENDING') {
+      nextStatus = 'QC_VEHICLE_IN_PROGRESS';
+    } else if (tx.processType === 'GBB' && tx.status === 'INCOMING_CHECK_PENDING') {
+      nextStatus = 'INCOMING_CHECK_IN_PROGRESS';
+    } else {
+      throw new BadRequestException('Transaction is not in a valid pending state to start QC');
+    }
+
+    const updated = await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: {
+        status: nextStatus,
+        qcStartAt: new Date(),
+        statusHistory: { create: { newStatus: nextStatus, changedById: userId, notes: 'QC started' } },
+      } });
+
+    await this.activityLogsService.logAction({ userId, action: 'QC_START', module: 'QC',  referenceId: transactionId,
+        status: 'SUCCESS'
+      });
+
+    return {
+      success: true,
+      message: 'QC started successfully',
+      data: updated,
+    };
+  }
+
+  async submitVehicleCheck(transactionId: string, dto: VehicleCheckResultDto, userId: string) {
+    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId }, include: { qcVehicleChecks: true } });
+    if (!tx) throw new NotFoundException('Transaction not found');
+    if (tx.processType !== 'GBJ') throw new BadRequestException('Vehicle check is only for GBJ process type');
+    if (tx.status !== 'QC_VEHICLE_IN_PROGRESS') throw new BadRequestException('Transaction must be in QC_VEHICLE_IN_PROGRESS state. Did you start QC?');
+    if (tx.qcVehicleChecks.length > 0) throw new BadRequestException('Result has already been submitted for this transaction');
+
+    const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
+    
+    await this.prisma.qcVehicleCheck.create({
+      data: {
+        transactionId,
+        result: result,
+        vehicleCleanliness: this.booleanToCheckResult(dto.vehicleCleanliness),
+        vehicleOdor: this.booleanToCheckResult(dto.vehicleOdor),
+        pestEvidence: this.booleanToCheckResult(dto.pestEvidence),
+        vehicleCondition: this.booleanToCheckResult(dto.vehicleCondition),
+        documentCompleteness: this.booleanToCheckResult(dto.documentCompleteness),
+        sealCondition: this.booleanToCheckResult(dto.sealCondition),
+        notes: dto.notes,
+        checkedById: userId,
+        startedAt: tx.qcStartAt,
+        completedAt: new Date(),
+      } });
+
+    const nextStatus = result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
+
+    const updated = await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: {
+        status: nextStatus,
+        qcEndAt: new Date(),
+        statusHistory: { create: { newStatus: nextStatus, changedById: userId, notes: `Vehicle Check: ${result}` } },
+      },
+      include: { qcVehicleChecks: true } });
+
+    await this.activityLogsService.logAction({ userId, action: 'QC_VEHICLE_RESULT', module: 'QC',  referenceId: transactionId, description: { result }, status: 'SUCCESS'
+      });
+
+    return {
+      success: true,
+      message: `Vehicle QC result submitted (${result})`,
+      data: updated,
+    };
+  }
+
+  async submitIncomingCheck(transactionId: string, dto: IncomingCheckResultDto, userId: string) {
+    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId }, include: { incomingMaterialChecks: true } });
+    if (!tx) throw new NotFoundException('Transaction not found');
+    if (tx.processType !== 'GBB') throw new BadRequestException('Incoming check is only for GBB process type');
+    if (tx.status !== 'INCOMING_CHECK_IN_PROGRESS') throw new BadRequestException('Transaction must be in INCOMING_CHECK_IN_PROGRESS state. Did you start QC?');
+    if (tx.incomingMaterialChecks.length > 0) throw new BadRequestException('Result has already been submitted for this transaction');
+
+    const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
+
+    await this.prisma.incomingMaterialCheck.create({
+      data: {
+        transactionId,
+        result: result,
+        odor: this.mapToCheckResult(dto.odor),
+        color: this.mapToCheckResult(dto.color),
+        moisture: dto.moisture,
+        foreignMatter: dto.foreignMatter,
+        beanCondition: this.booleanToCheckResult(dto.beanCondition),
+        sampleWeight: dto.sampleWeight,
+        itemCondition: this.booleanToCheckResult(dto.itemCondition),
+        packagingCondition: this.booleanToCheckResult(dto.packagingCondition),
+        quantityCheck: this.booleanToCheckResult(dto.quantityCheck),
+        documentCheck: this.booleanToCheckResult(dto.documentCheck),
+        visualInspection: this.booleanToCheckResult(dto.visualInspection),
+        defectNotes: dto.defectNotes,
+        notes: dto.notes,
+        checkedById: userId,
+        startedAt: tx.qcStartAt,
+        completedAt: new Date(),
+      } });
+
+    const nextStatus = result === 'PASS' ? 'INCOMING_CHECK_PASSED' : 'INCOMING_CHECK_REJECTED';
+
+    const updated = await this.prisma.transaction.update({
+      where: { id: transactionId },
+      data: {
+        status: nextStatus,
+        qcEndAt: new Date(),
+        statusHistory: { create: { newStatus: nextStatus, changedById: userId, notes: `Incoming Check: ${result}` } },
+      },
+      include: { incomingMaterialChecks: true } });
+
+    await this.activityLogsService.logAction({ userId, action: 'QC_INCOMING_RESULT', module: 'QC',  referenceId: transactionId, description: { result }, status: 'SUCCESS'
+      });
+
+    return {
+      success: true,
+      message: `Incoming QC result submitted (${result})`,
+      data: updated,
+    };
+  }
+
+  async getDetail(transactionId: string) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: {
+        qcVehicleChecks: true,
+        incomingMaterialChecks: true,
+        attachments: { where: { module: 'QC' } },
+      } });
+    
+    if (!tx) throw new NotFoundException('Transaction not found');
+    
+    return {
+      success: true,
+      message: 'QC detail retrieved',
+      data: tx,
+    };
+  }
+
+  async getHistory() {
+    const history = await this.prisma.transaction.findMany({
+      where: {
+        status: { in: ['QC_VEHICLE_PASSED', 'QC_VEHICLE_REJECTED', 'INCOMING_CHECK_PASSED', 'INCOMING_CHECK_REJECTED', 'WEIGH_OUT_DONE', 'COMPLETED'] },
+      },
+      include: {
+        qcVehicleChecks: true,
+        incomingMaterialChecks: true,
+      },
+      orderBy: { qcEndAt: 'desc' },
+      take: 100,
+    });
+    
+    return {
+      success: true,
+      message: 'QC history retrieved',
+      data: history,
+    };
+  }
+
+  async uploadAttachment(transactionId: string, dto: QcAttachmentDto, userId: string) {
+    // Basic mock implementation of saving attachment data since actual file uploading depends on setup
+    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
+    if (!tx) throw new NotFoundException('Transaction not found');
+
+    const attachment = await this.prisma.attachment.create({
+      data: {
+        transactionId,
+        module: 'QC',
+        attachmentType: dto.attachmentType as any,
+        originalName: dto.originalName || 'unknown.jpg',
+        fileName: dto.fileName || `qc_${Date.now()}.jpg`,
+        filePath: dto.filePath || '/uploads/placeholder.jpg',
+        mimeType: dto.mimeType || 'image/jpeg',
+        size: dto.size || 0,
+        description: dto.description,
+        uploadedById: userId,
+      } });
+
+    return {
+      success: true,
+      message: 'Attachment uploaded',
+      data: attachment,
+    };
+  }
+}

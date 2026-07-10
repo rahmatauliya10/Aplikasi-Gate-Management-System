@@ -1,0 +1,757 @@
+<template>
+  <teleport to="body">
+  <transition name="modal">
+    <div v-if="isOpen && truck" class="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-6"
+      style="background:rgba(2,8,23,0.7);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);"
+      @click.self="close">
+      <div class="modal-panel rounded-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[92vh] transition-all duration-500 w-[97vw] sm:w-[90vw] lg:w-[80vw] max-w-5xl mx-auto"
+        style="background: white; box-shadow: 0 25px 80px rgba(0,0,0,0.4), 0 0 0 1px rgba(74,139,223,0.1);">
+
+        <!-- Header (Compact) -->
+        <div class="px-4 sm:px-5 py-2.5 sm:py-3 flex justify-between items-center shrink-0"
+          style="background: linear-gradient(135deg, #FFFFFF, #E6F0FA); border-bottom: 1px solid rgba(74,139,223,0.15);">
+          <div class="flex items-center space-x-3">
+            <div class="w-9 h-9 rounded-lg flex items-center justify-center"
+              style="background: linear-gradient(135deg, rgba(74,139,223,0.2), rgba(160,0,109,0.1)); border: 1px solid rgba(74,139,223,0.3);">
+              <span class="material-icons text-[#4A8BDF] text-lg">local_shipping</span>
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <h2 class="text-lg sm:text-xl font-black text-[#4A8BDF] tracking-tight font-mono">{{ truck.plateNumber }}</h2>
+                <span class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                  :class="truck.processType === 'GBB' ? 'bg-pink-50 text-[#A0006D] border border-pink-200' : truck.processType === 'GBJ' ? 'bg-indigo-50 text-indigo-600 border border-indigo-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'">
+                  {{ truck.processType }}
+                </span>
+              </div>
+              <div class="flex items-center space-x-1.5 mt-0.5">
+                <span class="text-[10px] font-bold text-slate-500">{{ truck.driverName }}</span>
+                <span class="w-1 h-1 rounded-full bg-slate-300"></span>
+                <span class="text-[10px] font-bold text-slate-400">{{ truck.vehicleType || 'N/A' }}</span>
+              </div>
+            </div>
+          </div>
+          <button @click="close"
+            class="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:bg-red-50 hover:text-red-500 text-slate-400">
+            <span class="material-icons text-lg">close</span>
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-3 sm:p-4 overflow-y-auto flex-1 custom-scrollbar" style="background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+
+            <!-- LEFT COLUMN -->
+            <div class="space-y-3">
+
+              <!-- Identity & Security -->
+              <div class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center space-x-2 border-b border-slate-50 bg-slate-50/50">
+                  <span class="material-icons text-[#4A8BDF] text-[14px]">badge</span>
+                  <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Identity & Security</h3>
+                </div>
+                <div class="p-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
+                  <div v-for="field in identityFields" :key="field.label" class="flex flex-col">
+                    <span class="text-[8px] font-black text-slate-400 uppercase tracking-[0.15em] mb-0.5">{{ field.label }}</span>
+                    <span class="text-[12px] font-bold truncate" :class="field.highlight ? 'text-[#4A8BDF]' : 'text-slate-800'">{{ field.value || '-' }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Cargo Items -->
+              <div v-if="truck.cargoItems && truck.cargoItems.length > 0" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center space-x-2 border-b border-slate-50 bg-slate-50/50">
+                  <span class="material-icons text-amber-500 text-[14px]">inventory_2</span>
+                  <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Cargo Manifest</h3>
+                  <span class="ml-auto text-[9px] font-black text-slate-400">{{ truck.cargoItems.length }} item(s)</span>
+                </div>
+                <div class="p-3">
+                  <div class="flex flex-wrap gap-1.5">
+                    <span v-for="(item, idx) in truck.cargoItems" :key="idx"
+                      class="inline-flex items-center px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-100 text-[11px] font-bold text-amber-800">
+                      <span class="material-icons text-[12px] mr-1 text-amber-500">package_2</span>
+                      {{ item.name || item }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- QC Results (only show if qcDetails exist) -->
+              <div v-if="qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-blue-500 text-[14px]">biotech</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Quality Analysis</h3>
+                  </div>
+                  <span v-if="qcDetails.pic" class="text-[9px] font-bold text-slate-400">PIC: {{ qcDetails.pic }}</span>
+                </div>
+                <div class="p-3">
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
+                    <div v-for="item in qcMetrics" :key="item.label" 
+                         class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                      <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
+                      <div class="text-sm font-black text-slate-800 font-mono">{{ item.value }}</div>
+                    </div>
+                  </div>
+                  <!-- QC Status Banner -->
+                  <div class="rounded-xl p-3 text-white relative overflow-hidden"
+                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-white/80 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
+                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status || 'PENDING' }}</span>
+                    </div>
+                    <p v-if="qcDetails.note" class="text-[10px] font-bold text-white/80 mt-1 italic">"{{ qcDetails.note }}"</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Fraud Recon (only show if data exists) -->
+              <div v-if="fraudMetrics.status !== 'NOT_RECORDED'"
+                class="rounded-xl overflow-hidden relative bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center space-x-2 border-b border-slate-50"
+                  :style="{ background: fraudMetrics.status === 'CRITICAL' ? 'rgba(254, 242, 242, 0.6)' : fraudMetrics.status === 'WARNING' ? 'rgba(255, 251, 235, 0.6)' : 'rgba(240, 253, 244, 0.6)' }">
+                  <span class="material-icons text-[14px]"
+                    :style="fraudMetrics.status === 'CRITICAL' ? 'color:#EF4444' : fraudMetrics.status === 'WARNING' ? 'color:#800057' : 'color:#3A6ABF'">policy</span>
+                  <h3 class="text-[10px] font-black uppercase tracking-[0.15em]"
+                    :style="fraudMetrics.status === 'CRITICAL' ? 'color:#7F1D1D' : fraudMetrics.status === 'WARNING' ? 'color:#78350F' : 'color:#064E3B'">
+                    Integrity Check
+                  </h3>
+                </div>
+                <div class="p-3 space-y-2">
+                  <div class="grid grid-cols-3 gap-2">
+                    <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                      <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Ratio</span>
+                      <span class="text-sm font-black font-mono"
+                        :style="fraudMetrics.status === 'CRITICAL' ? 'color:#EF4444' : fraudMetrics.status === 'WARNING' ? 'color:#800057' : 'color:#3A6ABF'">
+                        {{ formatPercentageCustom1(fraudMetrics.ratioPercent) }}
+                      </span>
+                    </div>
+                    <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                      <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Deviation</span>
+                      <span class="text-sm font-black font-mono"
+                        :style="fraudMetrics.status === 'CRITICAL' ? 'color:#EF4444' : fraudMetrics.status === 'WARNING' ? 'color:#800057' : 'color:#3A6ABF'">
+                        {{ fraudMetrics.direction === '=' ? '0,0%' : fraudMetrics.direction + formatPercentageCustom1(fraudMetrics.deviationPercent) }}
+                      </span>
+                    </div>
+                    <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                      <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Diff</span>
+                      <span class="text-sm font-black font-mono"
+                        :style="fraudMetrics.status === 'CRITICAL' ? 'color:#EF4444' : fraudMetrics.status === 'WARNING' ? 'color:#800057' : 'color:#3A6ABF'">
+                        {{ fraudMetrics.direction === '=' ? '0' : fraudMetrics.direction + formatWeight(fraudMetrics.diff) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div class="p-2.5 rounded-xl text-white text-center"
+                    :style="{ background: fraudMetrics.status === 'CRITICAL' ? 'linear-gradient(135deg, #DC2626, #EF4444)' : fraudMetrics.status === 'WARNING' ? 'linear-gradient(135deg, #A0006D, #800057)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
+                    <span class="text-[10px] font-black tracking-widest uppercase">{{ fraudMetrics.status }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- RIGHT COLUMN -->
+            <div class="space-y-3">
+
+              <!-- Tonnage (only show if any weight > 0) -->
+              <div v-if="hasWeightData" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center space-x-2 border-b border-slate-50 bg-slate-50/50">
+                  <span class="material-icons text-emerald-500 text-[14px]">scale</span>
+                  <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Tonnage Analytics</h3>
+                </div>
+                <div class="p-3.5 space-y-3">
+                  <!-- 1. Weighing Inputs Grid -->
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <template v-if="truck.processType === 'GBB' || truck.processType === 'GSP'">
+                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
+                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400/20"></div>
+                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Gross (IN)</span>
+                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossInVal) }}</div>
+                      </div>
+                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
+                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-red-400/20"></div>
+                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Tare (OUT)</span>
+                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareOutVal) }}</div>
+                      </div>
+                    </template>
+                    <template v-else-if="truck.processType === 'GBJ'">
+                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
+                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400/20"></div>
+                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Tare (IN)</span>
+                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareInVal) }}</div>
+                      </div>
+                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
+                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-red-400/20"></div>
+                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Gross (OUT)</span>
+                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossOutVal) }}</div>
+                      </div>
+                    </template>
+                  </div>
+
+                  <!-- 2. Reconciled Weights Grid -->
+                  <div class="grid grid-cols-2 gap-2.5">
+                    <div class="p-2.5 rounded-xl bg-emerald-50/50 border border-emerald-100/50 relative">
+                      <span class="text-[8px] font-black text-emerald-600/80 uppercase tracking-widest block mb-1">Bridge Net</span>
+                      <div class="text-base font-black text-emerald-700 font-mono tracking-tight">{{ formatWeightCustom(nettoTimbanganJembatan) }}</div>
+                    </div>
+                    <div class="p-2.5 rounded-xl bg-orange-50/50 border border-orange-100/50 relative">
+                      <span class="text-[8px] font-black text-orange-600/80 uppercase tracking-widest block mb-1">Warehouse Realization</span>
+                      <div class="text-base font-black text-orange-700 font-mono tracking-tight">{{ formatWeightCustom(warehouseRealization) }}</div>
+                    </div>
+                  </div>
+
+                  <!-- 3. Status and Alert Bar -->
+                  <div class="p-3 rounded-xl border flex justify-between items-center gap-2"
+                       :class="statusTonnage === 'OK' ? 'bg-emerald-50 border-emerald-200' : (statusTonnage === 'PENDING' ? 'bg-slate-50 border-slate-200' : 'bg-red-50 border-red-200')">
+                    <div class="flex flex-col">
+                      <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Deviation</span>
+                      <div class="flex items-center space-x-1.5">
+                        <span class="text-base font-black font-mono" :class="statusTonnage === 'OK' ? 'text-emerald-700' : (statusTonnage === 'PENDING' ? 'text-slate-600' : 'text-red-700')">
+                          {{ formatPercentageCustom(deviationPercentage) }}
+                        </span>
+                        <span v-if="statusTonnage === 'PENDING' && (!nettoTimbanganJembatan || !warehouseRealization)" class="text-[9px] font-bold text-slate-400 italic">
+                          Waiting for weighbridge out
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <!-- Badge -->
+                    <div class="flex items-center">
+                      <span class="px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black text-white"
+                            :style="badgeStyle">
+                        {{ statusTonnage }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Alert Warning if triggerAlert is true and deviation > variance -->
+                  <div v-if="shouldShowAlert" class="p-3 rounded-xl bg-red-50 border border-red-200 flex items-start space-x-2.5">
+                    <span class="material-icons text-red-600 text-base mt-0.5">warning</span>
+                    <div class="flex-1">
+                      <h4 class="text-[9px] font-black text-red-800 uppercase tracking-wider">Tonnage Deviation Alert!</h4>
+                      <p class="text-[9px] font-bold text-red-600 leading-snug mt-0.5">
+                        Weight deviation ({{ formatPercentageCustom(deviationPercentage) }}) exceeds the Net Weight Variance tolerance of {{ toleranceLimit }}%.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- No Weight Yet Placeholder -->
+              <div v-else class="rounded-xl bg-white border border-dashed border-slate-200 p-6 flex flex-col items-center justify-center text-center">
+                <span class="material-icons text-slate-200 text-3xl mb-2">scale</span>
+                <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Weighing Pending</p>
+                <p class="text-[9px] text-slate-400 mt-1">Truck has not been weighed yet</p>
+              </div>
+
+              <!-- Operational Timeline -->
+              <div class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center space-x-2 border-b border-slate-50 bg-slate-50/50">
+                  <span class="material-icons text-[#4A8BDF] text-[14px]">route</span>
+                  <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Operational Roadmap</h3>
+                </div>
+                <div class="p-3">
+                  <div class="relative space-y-3">
+                    <!-- Vertical Timeline Line (centered on the dots) -->
+                    <div class="absolute left-[7px] top-[12px] bottom-[12px] w-[2px] bg-slate-100 z-0 rounded-full">
+                      <!-- Active Progress Line -->
+                      <div class="absolute top-0 left-0 w-full bg-gradient-to-b from-[#4A8BDF] to-[#3A6ABF] transition-all duration-500 ease-out rounded-full"
+                        :style="{ height: activeLineHeight }">
+                      </div>
+                    </div>
+                    
+                    <div v-for="(ts, idx) in timestampRows" :key="ts.label" class="relative pl-8 flex items-center justify-between group z-10">
+                      <!-- Dot indicator -->
+                      <div class="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white border-2 flex items-center justify-center transition-all duration-300 group-hover:scale-110"
+                        :class="ts.value ? 'border-[#4A8BDF] shadow-[0_0_6px_rgba(74,139,223,0.35)]' : 'border-slate-200'">
+                        <!-- Glowing active pulse ring -->
+                        <span v-if="idx === lastCompletedIdx" class="absolute -inset-[3px] rounded-full border border-[#4A8BDF]/50 bg-[#4A8BDF]/10 animate-ping"></span>
+                        <div class="w-1.5 h-1.5 rounded-full z-10" :style="{ backgroundColor: ts.value ? '#4A8BDF' : '#CBD5E1' }"></div>
+                      </div>
+                      
+                      <!-- Label and value -->
+                      <span class="text-[9px] font-black text-slate-500 uppercase tracking-widest">{{ ts.label }}</span>
+                      <div class="flex items-center space-x-1.5">
+                        <span class="text-[11px] font-bold text-slate-700 font-mono">{{ formatTimeFull(ts.value) }}</span>
+                        <span v-if="ts.value" class="material-icons text-[12px] text-emerald-500">check_circle</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer (Compact) -->
+        <div class="px-4 py-2.5 flex justify-between shrink-0" style="background: #FAFBFF; border-top: 1px solid #E8EEF7;">
+          <button v-if="authStore.isAdmin" @click="handleDelete" class="group relative overflow-hidden flex items-center space-x-1.5 px-5 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
+            style="background: linear-gradient(135deg, #EF4444, #B91C1C); box-shadow: 0 2px 8px rgba(239,68,68,0.25);">
+            <span class="material-icons text-white/80 text-[14px]">delete_forever</span>
+            <span class="text-[10px] font-black text-white uppercase tracking-[0.12em]">Delete</span>
+          </button>
+          <div v-else></div>
+          <button @click="close" class="group relative overflow-hidden flex items-center space-x-1.5 px-5 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
+            style="background: linear-gradient(135deg, #4A8BDF, #3A6ABF); box-shadow: 0 2px 8px rgba(74,139,223,0.25);">
+            <span class="material-icons text-white/80 text-[14px]">logout</span>
+            <span class="text-[10px] font-black text-white uppercase tracking-[0.12em]">Close</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </transition>
+  </teleport>
+</template>
+
+<script setup>
+import { defineProps, defineEmits, computed } from 'vue'
+import { useAuthStore } from '../stores/authStore'
+import { useTruckStore } from '../stores/truckStore'
+import { useSettingsStore } from '../stores/settingsStore'
+import { useConfirm } from '../composables/useConfirm'
+
+const props = defineProps({
+  isOpen: { type: Boolean, required: true },
+  truck: { type: Object, default: () => ({}) },
+  size: { type: String, default: 'normal' }
+})
+const emit = defineEmits(['close'])
+const close = () => emit('close')
+
+const authStore = useAuthStore()
+const truckStore = useTruckStore()
+const settingsStore = useSettingsStore()
+const { confirm } = useConfirm()
+
+const handleDelete = async () => {
+  const ok = await confirm({
+    title: 'Delete Data?',
+    message: 'Are you sure you want to completely delete this truck data? This action cannot be undone!',
+    type: 'danger',
+    confirmText: 'Yes, Delete'
+  })
+  if (ok) {
+    await truckStore.deleteTruck(props.truck.id)
+    close()
+  }
+}
+
+const identityFields = computed(() => {
+  const fields = [
+    { label: 'Driver Name', value: props.truck?.driverName },
+    { label: 'Carrier Vendor', value: props.truck?.vendorName || props.truck?.vendor },
+    { label: 'Vehicle Type', value: props.truck?.vehicleType },
+    { label: 'Process Type', value: props.truck?.processType === 'GBB' ? 'Raw Material (Unloading)' : props.truck?.processType === 'GBJ' ? 'Finished Goods (Loading)' : props.truck?.processType === 'GSP' ? 'Sparepart Warehouse' : props.truck?.processType },
+  ]
+  // Only add these if they have values
+  if (props.truck?.driverPhone) fields.push({ label: 'Driver Phone', value: props.truck.driverPhone, highlight: true })
+  if (props.truck?.suratJalanNumber) fields.push({ label: 'Delivery Note (SJ)', value: props.truck.suratJalanNumber, highlight: true })
+  if (props.truck?.poNumber) fields.push({ label: 'Logistics PO', value: props.truck.poNumber, highlight: true })
+  const permitCardVal = props.truck?.permitCard || props.truck?.permitCardNumber
+  const guestIdVal = props.truck?.guestId || props.truck?.guestIdNumber
+  if (permitCardVal) fields.push({ label: 'Permit Card / VMS', value: permitCardVal })
+  if (guestIdVal) fields.push({ label: `${props.truck?.idType || 'ID'} Number`, value: guestIdVal })
+  if (props.truck?.guestCount && props.truck.guestCount > 1) fields.push({ label: 'Guest Count', value: `${props.truck.guestCount} persons` })
+  if (props.truck?.securityName) fields.push({ label: 'Security Officer', value: props.truck.securityName })
+  if (props.truck?.remarks) fields.push({ label: 'Remarks', value: props.truck.remarks })
+  return fields
+})
+
+const qcDetails = computed(() => {
+  if (props.truck?.qcDetails) return props.truck.qcDetails;
+
+  // GBB / GSP from backend relations
+  if (props.truck?.incomingMaterialChecks && props.truck.incomingMaterialChecks.length > 0) {
+    const check = props.truck.incomingMaterialChecks[0];
+    return {
+      pic: check.checkedBy?.name || 'QC Inspector',
+      status: check.result,
+      note: check.notes || check.defectNotes || '',
+      bau: check.odor === 'PASS' ? 'Normal' : check.odor === 'REJECT' ? 'Abnormal' : check.odor || '',
+      warna: check.color === 'PASS' ? 'Normal' : check.color === 'REJECT' ? 'Abnormal' : check.color || '',
+      kadarAir: check.moisture,
+      totalFM: check.foreignMatter,
+      bijiOK: check.sampleWeight
+    };
+  }
+
+  // GBJ from backend relations
+  if (props.truck?.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
+    const check = props.truck.qcVehicleChecks[0];
+    return {
+      pic: check.checkedBy?.name || 'QC Inspector',
+      status: check.result,
+      note: check.notes || '',
+    };
+  }
+
+  return null;
+});
+
+const qcMetrics = computed(() => {
+  const metrics = []
+  const details = qcDetails.value
+  if (!details) return metrics
+  if (details.bau) metrics.push({ label: 'Odor', value: details.bau })
+  if (details.warna) metrics.push({ label: 'Color', value: details.warna })
+  if (details.kadarAir !== null && details.kadarAir !== undefined) metrics.push({ label: 'Moisture', value: details.kadarAir + '%' })
+  if (details.totalFM !== null && details.totalFM !== undefined) metrics.push({ label: 'Total FM', value: details.totalFM + '%' })
+  if (details.bijiOK !== null && details.bijiOK !== undefined) metrics.push({ label: 'Good Beans', value: details.bijiOK + '%' })
+  
+  // If it's a vehicle check (GBJ)
+  if (props.truck?.processType === 'GBJ' && props.truck.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
+    const check = props.truck.qcVehicleChecks[0];
+    if (check.vehicleCleanliness) metrics.push({ label: 'Cleanliness', value: check.vehicleCleanliness })
+    if (check.vehicleOdor) metrics.push({ label: 'Odor', value: check.vehicleOdor })
+    if (check.pestEvidence) metrics.push({ label: 'Pest Evidence', value: check.pestEvidence })
+    if (check.vehicleCondition) metrics.push({ label: 'Condition', value: check.vehicleCondition })
+    if (check.documentCompleteness) metrics.push({ label: 'Documents', value: check.documentCompleteness })
+    if (check.sealCondition) metrics.push({ label: 'Seal', value: check.sealCondition })
+  }
+  return metrics
+})
+
+const getWeightVal = (val) => {
+  if (val === undefined || val === null || val === '') return null
+  const num = Number(val)
+  if (isNaN(num)) return null
+  return num
+}
+
+const grossInVal = computed(() => {
+  if (!props.truck) return null
+  const t = props.truck
+  let val = getWeightVal(t.weights?.gross)
+  if (val === null) val = getWeightVal(t.grossWeight)
+  if (val === null && t.processType !== 'GBJ') val = getWeightVal(t.weighInWeight)
+  return val
+})
+
+const tareOutVal = computed(() => {
+  if (!props.truck) return null
+  const t = props.truck
+  let val = getWeightVal(t.weights?.tare)
+  if (val === null) val = getWeightVal(t.tareWeight)
+  if (val === null && t.processType !== 'GBJ') val = getWeightVal(t.weighOutWeight)
+  return val
+})
+
+const tareInVal = computed(() => {
+  if (!props.truck) return null
+  const t = props.truck
+  let val = getWeightVal(t.weights?.tare)
+  if (val === null) val = getWeightVal(t.tareWeight)
+  if (val === null && t.processType === 'GBJ') val = getWeightVal(t.weighInWeight)
+  return val
+})
+
+const grossOutVal = computed(() => {
+  if (!props.truck) return null
+  const t = props.truck
+  let val = getWeightVal(t.weights?.gross)
+  if (val === null) val = getWeightVal(t.grossWeight)
+  if (val === null && t.processType === 'GBJ') val = getWeightVal(t.weighOutWeight)
+  return val
+})
+
+const isRejected = computed(() => {
+  if (!props.truck) return false
+  const t = props.truck
+  return t.status === 'INCOMING_CHECK_REJECTED' || 
+         t.status === 'QC_VEHICLE_REJECTED' || 
+         t.incomingMaterialChecks?.some(c => c.result === 'REJECT') || 
+         t.qcVehicleChecks?.some(c => c.result === 'REJECT')
+})
+
+const warehouseRealization = computed(() => {
+  if (!props.truck) return null
+  if (isRejected.value) return 0
+  const t = props.truck
+  if (t.processType === 'GBB') {
+    return t.nettoTimbanganRoll !== undefined && t.nettoTimbanganRoll !== null ? t.nettoTimbanganRoll : (t.weights?.nettoTimbanganRoll !== undefined && t.weights?.nettoTimbanganRoll !== null ? t.weights.nettoTimbanganRoll : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
+  }
+  if (t.processType === 'GSP') {
+    return t.jumlahNettoGSP !== undefined && t.jumlahNettoGSP !== null ? t.jumlahNettoGSP : (t.weights?.jumlahNettoGSP !== undefined && t.weights?.jumlahNettoGSP !== null ? t.weights.jumlahNettoGSP : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
+  }
+  if (t.processType === 'GBJ') {
+    return t.nettoInstantCoffee !== undefined && t.nettoInstantCoffee !== null ? t.nettoInstantCoffee : (t.weights?.nettoInstantCoffee !== undefined && t.weights?.nettoInstantCoffee !== null ? t.weights.nettoInstantCoffee : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
+  }
+  return null
+})
+
+const isDataCompleteForCalc = computed(() => {
+  if (!props.truck) return false
+  if (isRejected.value) return true
+  const t = props.truck
+  const area = t.processType
+  const whReal = warehouseRealization.value
+
+  if (whReal === null || whReal === undefined || whReal === '') return false
+
+  if (area === 'GBB' || area === 'GSP') {
+    const gIn = grossInVal.value
+    const tOut = tareOutVal.value
+    if (gIn === null || gIn === 0 || tOut === null || tOut === 0) return false
+    if (tOut > gIn) return false
+    const bridgeNet = gIn - tOut
+    if (bridgeNet <= 0) return false
+    return true
+  } else if (area === 'GBJ') {
+    const tIn = tareInVal.value
+    const gOut = grossOutVal.value
+    if (tIn === null || tIn === 0 || gOut === null || gOut === 0) return false
+    if (tIn > gOut) return false
+    const bridgeNet = gOut - tIn
+    if (bridgeNet <= 0) return false
+    return true
+  }
+  return false
+})
+
+const nettoTimbanganJembatan = computed(() => {
+  if (!props.truck) return null
+  if (isRejected.value) return 0
+  const t = props.truck
+  const area = t.processType
+  if (area === 'GBB' || area === 'GSP') {
+    const gIn = grossInVal.value
+    const tOut = tareOutVal.value
+    if (gIn === null || tOut === null) return null
+    return gIn - tOut
+  } else if (area === 'GBJ') {
+    const tIn = tareInVal.value
+    const gOut = grossOutVal.value
+    if (tIn === null || gOut === null) return null
+    return gOut - tIn
+  }
+  return null
+})
+
+const persentaseAnalisa = computed(() => {
+  if (isRejected.value) return 100
+  if (!isDataCompleteForCalc.value) return null
+  const bridgeNet = nettoTimbanganJembatan.value
+  const whReal = warehouseRealization.value
+  if (!bridgeNet || !whReal) return null
+  return (whReal / bridgeNet) * 100
+})
+
+const deviationPercentage = computed(() => {
+  if (isRejected.value) return 0
+  if (!isDataCompleteForCalc.value) return null
+  const pct = persentaseAnalisa.value
+  if (pct === null) return null
+  return Math.abs(pct - 100)
+})
+
+const netWeightVarianceObj = computed(() => {
+  return settingsStore.weightTolerances?.find(t => t.parameterName === 'Net Weight Variance')
+})
+
+const toleranceLimit = computed(() => {
+  return netWeightVarianceObj.value ? netWeightVarianceObj.value.toleranceValue : 2.0
+})
+
+const statusTonnage = computed(() => {
+  if (!props.truck) return 'PENDING'
+  const t = props.truck
+  const area = t.processType
+  const whReal = warehouseRealization.value
+
+  if (area === 'GBB' || area === 'GSP') {
+    const gIn = grossInVal.value
+    const tOut = tareOutVal.value
+
+    if (tOut === null || tOut === undefined || tOut === 0) {
+      return 'PENDING'
+    }
+    if (gIn === null || gIn === undefined || gIn === 0) {
+      return 'PENDING'
+    }
+    if (tOut > gIn) {
+      return 'ERROR DATA'
+    }
+    const bridgeNet = gIn - tOut
+    if (bridgeNet <= 0) {
+      return 'ERROR DATA'
+    }
+    if (whReal === null || whReal === undefined || whReal === '') {
+      return 'PENDING'
+    }
+  } else if (area === 'GBJ') {
+    const tIn = tareInVal.value
+    const gOut = grossOutVal.value
+
+    if (gOut === null || gOut === undefined || gOut === 0) {
+      return 'PENDING'
+    }
+    if (tIn === null || tIn === undefined || tIn === 0) {
+      return 'PENDING'
+    }
+    if (tIn > gOut) {
+      return 'ERROR DATA'
+    }
+    const bridgeNet = gOut - tIn
+    if (bridgeNet <= 0) {
+      return 'ERROR DATA'
+    }
+    if (whReal === null || whReal === undefined || whReal === '') {
+      return 'PENDING'
+    }
+  } else {
+    return 'PENDING'
+  }
+
+  const devPct = deviationPercentage.value
+  if (devPct === null) return 'PENDING'
+
+  if (devPct <= toleranceLimit.value) {
+    return 'OK'
+  } else {
+    return 'CHECK / INVESTIGASI'
+  }
+})
+
+const shouldShowAlert = computed(() => {
+  if (statusTonnage.value !== 'CHECK / INVESTIGASI') return false
+  return netWeightVarianceObj.value ? netWeightVarianceObj.value.triggerAlert : true
+})
+
+const badgeStyle = computed(() => {
+  const status = statusTonnage.value
+  if (status === 'OK') {
+    return 'background: linear-gradient(135deg, #10B981, #059669); box-shadow: 0 2px 8px rgba(16,185,129,0.25);'
+  }
+  if (status === 'PENDING') {
+    return 'background: linear-gradient(135deg, #64748B, #475569); box-shadow: 0 2px 8px rgba(100,116,139,0.25);'
+  }
+  if (status === 'ERROR DATA') {
+    return 'background: linear-gradient(135deg, #EF4444, #B91C1C); box-shadow: 0 2px 8px rgba(239,68,68,0.25);'
+  }
+  return 'background: linear-gradient(135deg, #F59E0B, #D97706); box-shadow: 0 2px 8px rgba(245,158,11,0.25);'
+})
+
+const hasWeightData = computed(() => {
+  const gIn = grossInVal.value
+  const tIn = tareInVal.value
+  const gOut = grossOutVal.value
+  const tOut = tareOutVal.value
+  const whReal = warehouseRealization.value
+  return (gIn !== null && gIn > 0) || (tIn !== null && tIn > 0) || (gOut !== null && gOut > 0) || (tOut !== null && tOut > 0) || (whReal !== null && whReal > 0)
+})
+
+const getTimestampVal = (key) => {
+  return props.truck?.timestamps?.[key] || props.truck?.[key] || null;
+}
+
+const timestampRows = computed(() => {
+  if (props.truck?.processType === 'GBJ') {
+    return [
+      { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
+      { label: 'Weigh In', value: getTimestampVal('weighInAt') },
+      { label: 'QC Check', value: getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt') || getTimestampVal('qcVehicleEndAt') || getTimestampVal('qcVehicleStartAt') },
+      { label: 'Warehouse', value: getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt') },
+      { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
+      { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
+    ]
+  }
+  
+  return [
+    { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
+    { label: 'Weigh In', value: getTimestampVal('weighInAt') },
+    { label: 'Warehouse', value: getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt') },
+    { label: 'QC Check', value: getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt') || getTimestampVal('incomingCheckEndAt') || getTimestampVal('incomingCheckStartAt') },
+    { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
+    { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
+  ]
+})
+
+const lastCompletedIdx = computed(() => {
+  const rows = timestampRows.value;
+  let lastIdx = -1;
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].value) {
+      lastIdx = i;
+    }
+  }
+  return lastIdx;
+})
+
+const activeLineHeight = computed(() => {
+  const total = timestampRows.value.length;
+  if (total <= 1 || lastCompletedIdx.value <= 0) return '0%';
+  const pct = (lastCompletedIdx.value / (total - 1)) * 100;
+  return `${pct}%`;
+})
+
+const fraudMetrics = computed(() => {
+  if (!props.truck) return { status: 'NOT_RECORDED' }
+  const net = nettoTimbanganJembatan.value || 0
+  const roll = warehouseRealization.value || 0
+  if (net === 0 || roll === 0) return { net, roll, diff: 0, ratioPercent: 0, deviationPercent: 0, direction: '=', status: 'NOT_RECORDED' }
+  const ratioPercent = (roll / net) * 100
+  const rawDiff = roll - net
+  const diff = Math.abs(rawDiff)
+  const deviationPercent = Math.abs(100 - ratioPercent)
+  const direction = rawDiff > 0 ? '+' : rawDiff < 0 ? '-' : '='
+  
+  let status = 'SAFE'
+  const tol = toleranceLimit.value
+  if (deviationPercent > tol) status = 'CRITICAL'
+  else if (deviationPercent > tol / 2) status = 'WARNING'
+  
+  return { net, roll, diff, ratioPercent, deviationPercent, direction, status }
+})
+
+const formatWeight = (val) => {
+  if (val === undefined || val === null || val === '' || Number(val) === 0 || isNaN(Number(val))) return '-'
+  const num = Number(val)
+  return new Intl.NumberFormat('id-ID').format(num)
+}
+
+const formatWeightCustom = (val) => {
+  if (val === undefined || val === null || val === '' || Number(val) === 0 || isNaN(Number(val))) return '-'
+  const num = Number(val)
+  return new Intl.NumberFormat('id-ID').format(num) + ' kg'
+}
+
+const formatPercentageCustom = (val) => {
+  if (val === undefined || val === null || val === '') return '-'
+  const num = Number(val)
+  if (isNaN(num)) return '-'
+  return new Intl.NumberFormat('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num) + '%'
+}
+
+const formatPercentageCustom1 = (val) => {
+  if (val === undefined || val === null || val === '') return '-'
+  const num = Number(val)
+  if (isNaN(num)) return '-'
+  return new Intl.NumberFormat('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(num) + '%'
+}
+
+const formatTimeFull = (isoString) => {
+  if (!isoString) return '-'
+  const d = new Date(isoString)
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ', ' + d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+</script>
+
+<style scoped>
+.modal-enter-active { transition: opacity 0.35s ease-out; }
+.modal-leave-active { transition: opacity 0.2s ease-in; }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
+
+.modal-enter-active .modal-panel {
+  animation: modalSpringUp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.modal-leave-active .modal-panel {
+  animation: modalDown 0.2s ease-in forwards;
+}
+@keyframes modalSpringUp {
+  0%   { opacity: 0; transform: translateY(40px) scale(0.92); }
+  60%  { opacity: 1; transform: translateY(-4px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes modalDown {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(14px) scale(0.97); }
+}
+</style>
