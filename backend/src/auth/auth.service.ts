@@ -83,6 +83,13 @@ export class AuthService {
         lastLoginAt: new Date()
       } });
 
+    const isDefaultPassword = [
+      process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
+      process.env.DEFAULT_QC_PASSWORD || 'qc123',
+      process.env.DEFAULT_WAREHOUSE_PASSWORD || 'warehouse123',
+      process.env.DEFAULT_SECURITY_PASSWORD || 'security123',
+    ].includes(dto.password);
+
     this.logger.log(`Login success for ${dto.identifier}`);
     await this.auditLog(user.id, 'LOGIN_SUCCESS', { identifier: dto.identifier });
 
@@ -92,6 +99,7 @@ export class AuthService {
       data: {
         accessToken,
         refreshToken,
+        mustChangePassword: isDefaultPassword,
         user: {
           id: user.id,
           name: user.name,

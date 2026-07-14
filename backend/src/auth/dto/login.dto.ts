@@ -7,9 +7,9 @@ export class LoginDto {
   @IsNotEmpty({ message: 'Email or username is required' })
   identifier: string;
 
-  @ApiProperty({ example: 'admin123', description: 'User password (min 4 chars)' })
+  @ApiProperty({ example: 'admin123', description: 'User password (min 8 chars)' })
   @IsString()
   @IsNotEmpty({ message: 'Password is required' })
-  @MinLength(4, { message: 'Password must be at least 4 characters' })
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
   password: string;
 }

@@ -8,10 +8,10 @@ async function main() {
 
   // Hash passwords using argon2 (Argon2id is default or specifically configured)
   const hashOptions = { type: argon2.argon2id };
-  const passwordHashAdmin = await argon2.hash('admin123', hashOptions);
-  const passwordHashQC = await argon2.hash('qc123', hashOptions);
-  const passwordHashWarehouse = await argon2.hash('warehouse123', hashOptions);
-  const passwordHashSecurity = await argon2.hash('security123', hashOptions);
+  const passwordHashAdmin = await argon2.hash(process.env.DEFAULT_ADMIN_PASSWORD || 'admin123', hashOptions);
+  const passwordHashQC = await argon2.hash(process.env.DEFAULT_QC_PASSWORD || 'qc123', hashOptions);
+  const passwordHashWarehouse = await argon2.hash(process.env.DEFAULT_WAREHOUSE_PASSWORD || 'warehouse123', hashOptions);
+  const passwordHashSecurity = await argon2.hash(process.env.DEFAULT_SECURITY_PASSWORD || 'security123', hashOptions);
 
   // 1. Admin
   console.log('Upserting admin user...');

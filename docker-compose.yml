@@ -21,9 +21,13 @@ services:
     restart: always
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gms?schema=public
-      # WARNING: Change these secrets before deploying to production!
-      - JWT_ACCESS_SECRET=super_secret_access_key_gms
-      - JWT_REFRESH_SECRET=super_secret_refresh_key_gms
+      # WARNING: Provide these via .env file or secret manager, not here.
+      # - JWT_ACCESS_SECRET
+      # - JWT_REFRESH_SECRET
+      # - DEFAULT_ADMIN_PASSWORD
+      # - DEFAULT_QC_PASSWORD
+      # - DEFAULT_WAREHOUSE_PASSWORD
+      # - DEFAULT_SECURITY_PASSWORD
       - JWT_ACCESS_EXPIRES_IN=1h
       - JWT_REFRESH_EXPIRES_IN=7d
       - PORT=3001
@@ -32,13 +36,11 @@ services:
       - UPLOAD_DIR=./uploads
       - MAX_FILE_SIZE_MB=10
       - DEFAULT_ADMIN_EMAIL=admin@gms.local
-      - DEFAULT_ADMIN_PASSWORD=admin123
-      - DEFAULT_QC_PASSWORD=qc123
-      - DEFAULT_WAREHOUSE_PASSWORD=warehouse123
-      - DEFAULT_SECURITY_PASSWORD=security123
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
 
   postgres:
     image: postgres:15-alpine
@@ -60,3 +62,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:
