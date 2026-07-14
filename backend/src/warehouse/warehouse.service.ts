@@ -429,7 +429,7 @@ export class WarehouseService {
     };
   }
 
-  async completeQcAnalysis(transactionId: string, user: JwtPayloadUser) {
+  async completeQcAnalysis(transactionId: string, user: JwtPayloadUser, remarks?: string) {
     this.logger.log(`Marking QC analysis as completed for transaction ${transactionId} by ${user.email}`);
 
     const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
@@ -442,12 +442,31 @@ export class WarehouseService {
       throw new BadRequestException({ success: false, message: 'Transaction is not in GBB WAREHOUSE_IN_PROGRESS status', errors: [] });
     }
 
-    const updated = await this.prisma.transaction.update({
-      where: { id: transactionId },
-      data: {
-        qcAnalysisCompleted: true,
-        qcAnalysisCompletedAt: new Date()
-        } });
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      // Save remarks (checklist results) to warehouseProcess if provided
+      if (remarks) {
+        const activeProcess = await prismaTx.warehouseProcess.findFirst({
+          where: { transactionId, endAt: null } });
+        if (activeProcess) {
+          await prismaTx.warehouseProcess.update({
+            where: { id: activeProcess.id },
+            data: { remarks }
+          });
+        }
+      }
+
+      return prismaTx.transaction.update({
+        where: { id: transactionId },
+        data: {
+          qcAnalysisCompleted: true,
+          qcAnalysisCompletedAt: new Date(),
+          ...(remarks && { remarks })
+        },
+        include: {
+          warehouseProcesses: { orderBy: { createdAt: 'desc' }, take: 1 }
+        }
+      });
+    });
 
     await this.activityLogsService.logAction({
         userId: user.id,
@@ -455,14 +474,17 @@ export class WarehouseService {
         module: 'WAREHOUSE',
         
         referenceId: transactionId,
-        description: `QC analysis marked as completed for ${tx.plateNumber} by ${user.email}`,
+        description: `QC analysis marked as completed for ${tx.plateNumber} by ${user.email}${remarks ? ` | ${remarks}` : ''}`,
         status: 'SUCCESS'
       }).catch(() => {});
 
     return {
       success: true,
       message: 'QC analysis marked as completed',
-      data: updated
+      data: {
+        ...updated,
+        remarks: remarks || updated.warehouseProcesses?.[0]?.remarks || updated.remarks || null
+      }
     };
   }
 
@@ -587,6 +609,32 @@ export class WarehouseService {
         total,
         totalPages: Math.ceil(total / limit)
       }
+    };
+  }
+
+  async uploadAttachment(transactionId: string, file: Express.Multer.File, dto: any, userId: string) {
+    if (!file) throw new BadRequestException('File is required');
+    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
+    if (!tx) throw new NotFoundException('Transaction not found');
+
+    const attachment = await this.prisma.attachment.create({
+      data: {
+        transactionId,
+        module: 'WAREHOUSE',
+        attachmentType: dto?.attachmentType as any || 'DOCUMENT',
+        originalName: file.originalname,
+        fileName: file.filename,
+        filePath: file.path,
+        mimeType: file.mimetype,
+        size: file.size,
+        description: dto?.description,
+        uploadedById: userId,
+      } });
+
+    return {
+      success: true,
+      message: 'Warehouse attachment uploaded successfully',
+      data: attachment,
     };
   }
 }

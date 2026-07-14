@@ -75,9 +75,10 @@ export class WarehouseController {
   @ApiResponse({ status: 404, description: 'Transaction not found' })
   completeQcAnalysis(
     @Param('transactionId') transactionId: string,
+    @Body() body: { remarks?: string },
     @CurrentUser() user: JwtPayloadUser
   ) {
-    return this.warehouseService.completeQcAnalysis(transactionId, user);
+    return this.warehouseService.completeQcAnalysis(transactionId, user, body?.remarks);
   }
 
   @Get('process/:transactionId')
@@ -87,6 +88,34 @@ export class WarehouseController {
   @ApiResponse({ status: 404, description: 'Transaction not found' })
   getProcessDetail(@Param('transactionId') transactionId: string, @CurrentUser() user: JwtPayloadUser) {
     return this.warehouseService.getProcessDetail(transactionId, user);
+  }
+
+  @Post('attachments/:transactionId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Upload warehouse attachment' })
+  @UseInterceptors(
+    require('@nestjs/platform-express').FileInterceptor('file', {
+      storage: require('multer').diskStorage({
+        destination: process.env.UPLOAD_DIR || './uploads',
+        filename: (req: any, file: any, cb: any) => cb(null, `${Date.now()}-${file.originalname}`),
+      }),
+    }),
+  )
+  uploadAttachment(
+    @Param('transactionId') id: string,
+    @UploadedFile(
+      new (require('@nestjs/common').ParseFilePipe)({
+        validators: [
+          new (require('@nestjs/common').MaxFileSizeValidator)({ maxSize: parseInt(process.env.MAX_FILE_SIZE_MB || '10') * 1024 * 1024 }),
+          new (require('@nestjs/common').FileTypeValidator)({ fileType: /(jpg|jpeg|png|pdf)$/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+    @Body() dto: any,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.warehouseService.uploadAttachment(id, file, dto, user.id);
   }
 
   @Get('history')

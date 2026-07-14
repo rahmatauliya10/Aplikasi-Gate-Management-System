@@ -63,8 +63,28 @@ export class QcController {
   @Post('attachments/:transactionId')
   @Roles('QC')
   @ApiOperation({ summary: 'Upload QC attachment' })
-  // Should add FileInterceptor for real implementation, but for now we accept DTO
-  uploadAttachment(@Param('transactionId') id: string, @Body() dto: QcAttachmentDto, @CurrentUser() user: JwtPayloadUser) {
-    return this.qcService.uploadAttachment(id, dto, user.id);
+  @UseInterceptors(
+    require('@nestjs/platform-express').FileInterceptor('file', {
+      storage: require('multer').diskStorage({
+        destination: process.env.UPLOAD_DIR || './uploads',
+        filename: (req: any, file: any, cb: any) => cb(null, `${Date.now()}-${file.originalname}`),
+      }),
+    }),
+  )
+  uploadAttachment(
+    @Param('transactionId') id: string,
+    @UploadedFile(
+      new (require('@nestjs/common').ParseFilePipe)({
+        validators: [
+          new (require('@nestjs/common').MaxFileSizeValidator)({ maxSize: parseInt(process.env.MAX_FILE_SIZE_MB || '10') * 1024 * 1024 }),
+          new (require('@nestjs/common').FileTypeValidator)({ fileType: /(jpg|jpeg|png|pdf)$/ }),
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+    @Body() dto: QcAttachmentDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.qcService.uploadAttachment(id, file, dto, user.id);
   }
 }

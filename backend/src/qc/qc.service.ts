@@ -214,8 +214,8 @@ export class QcService {
     };
   }
 
-  async uploadAttachment(transactionId: string, dto: QcAttachmentDto, userId: string) {
-    // Basic mock implementation of saving attachment data since actual file uploading depends on setup
+  async uploadAttachment(transactionId: string, file: Express.Multer.File, dto: QcAttachmentDto, userId: string) {
+    if (!file) throw new BadRequestException('File is required');
     const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
     if (!tx) throw new NotFoundException('Transaction not found');
 
@@ -223,19 +223,19 @@ export class QcService {
       data: {
         transactionId,
         module: 'QC',
-        attachmentType: dto.attachmentType as any,
-        originalName: dto.originalName || 'unknown.jpg',
-        fileName: dto.fileName || `qc_${Date.now()}.jpg`,
-        filePath: dto.filePath || '/uploads/placeholder.jpg',
-        mimeType: dto.mimeType || 'image/jpeg',
-        size: dto.size || 0,
+        attachmentType: dto.attachmentType as any || 'PHOTO',
+        originalName: file.originalname,
+        fileName: file.filename,
+        filePath: file.path,
+        mimeType: file.mimetype,
+        size: file.size,
         description: dto.description,
         uploadedById: userId,
       } });
 
     return {
       success: true,
-      message: 'Attachment uploaded',
+      message: 'Attachment uploaded successfully',
       data: attachment,
     };
   }
