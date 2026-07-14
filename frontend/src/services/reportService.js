@@ -27,22 +27,6 @@ const reportService = {
       params,
       responseType: 'blob'
     })
-  },
-
-  /**
-   * Get TAT (Turn Around Time) analytics
-   * @param {Object} params - { period: 'daily'|'weekly'|'monthly' }
-   */
-  getTATAnalytics(params) {
-    return api.get('/reports/tat', { params })
-  },
-
-  /**
-   * Get deviation summary report
-   * @param {Object} params - { startDate, endDate }
-   */
-  getDeviationReport(params) {
-    return api.get('/reports/deviation', { params })
   }
 }
 

@@ -18,8 +18,7 @@ export class ActivityLogsController {
   findAll(@Query() query: ActivityLogQueryDto, @Req() req: any) {
     const user = req.user;
     
-    // Only ADMIN can see all logs. Others can only see their own logs if needed.
-    // Wait, the prompt says: "Only authorized roles can view Activity Log. ADMIN can view all activity logs. Other roles can only view their own activity logs if required by business rules."
+    // Only ADMIN can see all logs. Others can only see their own logs.
     if (user.role !== 'ADMIN') {
       query.userId = user.id;
     }

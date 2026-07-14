@@ -36,9 +36,10 @@ async function bootstrap() {
   if (!corsOrigin) {
     throw new Error('CORS_ORIGIN environment variable is not defined.');
   }
+  const origins = corsOrigin.split(',').map(o => o.trim());
   
   app.enableCors({
-    origin: corsOrigin,
+    origin: origins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });

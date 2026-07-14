@@ -13,7 +13,7 @@ export class AnnouncementsController {
   constructor(private readonly announcementsService: AnnouncementsService) {}
 
   @Get('active')
-  @ApiOperation({ summary: 'Get all active announcements' })
+  @ApiOperation({ summary: 'Get all active announcements', description: 'Intentionally public endpoint for pre-login banners.' })
   findActive() {
     return this.announcementsService.findActive();
   }

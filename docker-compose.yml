@@ -9,7 +9,7 @@ services:
     restart: always
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
 
   backend:
     build:
@@ -41,6 +41,11 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:15-alpine
