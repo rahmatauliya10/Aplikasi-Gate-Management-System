@@ -195,6 +195,11 @@ model Transaction {
   incomingMaterialChecks IncomingMaterialCheck[]
   fraudChecks            FraudCheck[]
   attachments            Attachment[]
+
+  @@index([status])
+  @@index([plateNumber])
+  @@index([processType, status])
+  @@index([createdAt])
 }
 
 model TransactionStatusHistory {
@@ -207,6 +212,8 @@ model TransactionStatusHistory {
   changedAt     DateTime          @default(now())
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
 }
 
 model WeighbridgeRecord {
@@ -221,6 +228,8 @@ model WeighbridgeRecord {
   updatedAt     DateTime        @updatedAt
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
 }
 
 model WarehouseProcess {
@@ -245,6 +254,8 @@ model WarehouseProcess {
   transaction   Transaction        @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   startBy       User?              @relation("WarehouseStartBy", fields: [startById], references: [id], onDelete: SetNull)
   endBy         User?              @relation("WarehouseEndBy", fields: [endById], references: [id], onDelete: SetNull)
+
+  @@index([transactionId])
 }
 
 model QcVehicleCheck {
@@ -267,6 +278,8 @@ model QcVehicleCheck {
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   checkedBy   User?       @relation("QCVehicleCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+
+  @@index([transactionId])
 }
 
 model IncomingMaterialCheck {
@@ -295,6 +308,8 @@ model IncomingMaterialCheck {
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   checkedBy   User?       @relation("IncomingCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+
+  @@index([transactionId])
 }
 
 model Attachment {
@@ -313,6 +328,8 @@ model Attachment {
 
   transaction      Transaction     @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   uploadedBy       User?           @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([transactionId])
 }
 
 model FraudCheck {
@@ -334,6 +351,8 @@ model FraudCheck {
 
   transaction      Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   acknowledgedBy   User?       @relation("AcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+
+  @@index([transactionId])
 }
 
 model ActivityLog {
@@ -351,6 +370,10 @@ model ActivityLog {
   createdAt   DateTime @default(now())
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([module, action])
 }
 
 model AppSetting {
