@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, UseGuards, HttpCode, HttpStatus, Res, Req, UnauthorizedException } from '@nestjs/common';
+import { Response, Request } from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -17,8 +18,18 @@ export class AuthController {
   @ApiOperation({ summary: 'Login user', description: 'Authenticate with email and password. Returns JWT tokens.' })
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
-  async login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.login(dto);
+    if (result.success && result.data?.refreshToken) {
+      res.cookie('refreshToken', result.data.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+      delete (result.data as any).refreshToken;
+    }
+    return result;
   }
 
   @Post('logout')
@@ -28,7 +39,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Logout user', description: 'Invalidate refresh token for current user.' })
   @ApiResponse({ status: 200, description: 'Logout successful' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async logout(@CurrentUser() user: JwtPayloadUser) {
+  async logout(@CurrentUser() user: JwtPayloadUser, @Res({ passthrough: true }) res: Response) {
+    res.clearCookie('refreshToken');
     return this.authService.logout(user.id);
   }
 
@@ -37,8 +49,23 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh tokens', description: 'Exchange refresh token for new access and refresh tokens (rotation).' })
   @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
   @ApiResponse({ status: 401, description: 'Invalid refresh token' })
-  async refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshTokens(dto.refreshToken);
+  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const cookieHeader = req.headers.cookie || '';
+    const match = cookieHeader.match(/refreshToken=([^;]+)/);
+    const refreshToken = match ? match[1] : req.body?.refreshToken;
+    if (!refreshToken) throw new UnauthorizedException('Refresh token missing');
+    
+    const result = await this.authService.refreshTokens(refreshToken);
+    if (result.success && result.data?.refreshToken) {
+      res.cookie('refreshToken', result.data.refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+      delete (result.data as any).refreshToken;
+    }
+    return result;
   }
 
   @Get('me')

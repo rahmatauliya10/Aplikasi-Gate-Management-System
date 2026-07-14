@@ -6,7 +6,6 @@ export const useAuthStore = defineStore('auth', {
   state: () => {
     let user = null
     const token = localStorage.getItem('access_token') || null
-    const refreshToken = localStorage.getItem('refresh_token') || null
     const userStr = localStorage.getItem('user')
     
     if (userStr && token) {
@@ -15,13 +14,11 @@ export const useAuthStore = defineStore('auth', {
       } catch (e) {
         console.error('Invalid user JSON in state initialization', e)
         localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
         localStorage.removeItem('user')
         sessionStorage.clear()
       }
     } else {
       localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
       sessionStorage.clear()
     }
@@ -29,7 +26,6 @@ export const useAuthStore = defineStore('auth', {
     return {
       user,
       token,
-      refreshToken,
       loading: false,
       error: null
     }
@@ -64,11 +60,9 @@ export const useAuthStore = defineStore('auth', {
         }
 
         this.token = accessToken
-        this.refreshToken = refreshToken || null
         this.user = user
 
         localStorage.setItem('access_token', accessToken)
-        localStorage.setItem('refresh_token', refreshToken || '')
         localStorage.setItem('user', JSON.stringify(user))
 
         this.loading = false
@@ -146,11 +140,6 @@ export const useAuthStore = defineStore('auth', {
         this.token = accessToken
         localStorage.setItem('access_token', accessToken)
         
-        if (refreshToken) {
-          this.refreshToken = refreshToken
-          localStorage.setItem('refresh_token', refreshToken)
-        }
-
         this.loading = false
         return { success: true, accessToken }
       } catch (err) {
@@ -164,11 +153,9 @@ export const useAuthStore = defineStore('auth', {
 
     initializeAuth() {
       const token = localStorage.getItem('access_token') || null
-      const refreshToken = localStorage.getItem('refresh_token') || null
       const userStr = localStorage.getItem('user')
 
       this.token = token
-      this.refreshToken = refreshToken
 
       if (userStr && token) {
         try {
@@ -185,15 +172,12 @@ export const useAuthStore = defineStore('auth', {
     clearAuth() {
       this.user = null
       this.token = null
-      this.refreshToken = null
       this.error = null
       this.loading = false
 
       localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
       sessionStorage.removeItem('access_token')
-      sessionStorage.removeItem('refresh_token')
       sessionStorage.removeItem('user')
       
       // Also clear axios authorization header just in case
