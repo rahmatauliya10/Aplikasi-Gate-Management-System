@@ -461,9 +461,9 @@ export class WeighbridgeService {
         const deviationPercent = maxWeight > 0 ? (deviation / maxWeight) * 100 : 0;
         
         let riskLevel: 'SAFE' | 'WARNING' | 'CRITICAL' = 'SAFE';
-        if (deviationPercent > 3) {
+        if (deviationPercent > 5) {
           riskLevel = 'CRITICAL';
-        } else if (deviationPercent > 1) {
+        } else if (deviationPercent > 2) {
           riskLevel = 'WARNING';
         }
 
