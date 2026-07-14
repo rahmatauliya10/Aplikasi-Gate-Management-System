@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Header } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -27,6 +27,8 @@ export class ReportsController {
   @Roles('ADMIN', 'SECURITY')
   @ApiOperation({ summary: 'Export transaction history as CSV' })
   @ApiResponse({ status: 200, description: 'CSV file generated' })
+  @Header('Content-Type', 'text/csv')
+  @Header('Content-Disposition', 'attachment; filename="transaction-history.csv"')
   async exportHistory(@Query() query: ReportQueryDto, @CurrentUser() user: JwtPayloadUser) {
     const csvData = await this.reportsService.exportCsv(query, user);
     return csvData;

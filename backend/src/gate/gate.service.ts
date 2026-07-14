@@ -54,39 +54,53 @@ export class GateService {
       throw new BadRequestException('Kendaraan dengan pelat ini masih memiliki transaksi yang sedang aktif (Belum Gate Out). Harap selesaikan atau batalkan transaksi sebelumnya terlebih dahulu.');
     }
 
-    const transactionNumber = await this.generateTransactionNumber();
-
-    const transaction = await this.prisma.transaction.create({
-      data: {
-        transactionNumber,
-        plateNumber: dto.plateNumber,
-        driverName: dto.driverName,
-        driverPhone: dto.driverPhone,
-        vendorName: dto.vendorName,
-        vehicleType: dto.vehicleType,
-        processType: dto.processType,
-        cargoType: dto.cargoType,
-        cargoSubType: dto.cargoSubType,
-        cargoProcessType: dto.cargoProcessType,
-        suratJalanNumber: dto.suratJalanNumber,
-        poNumber: dto.poNumber,
-        permitCardNumber: dto.permitCardNumber,
-        guestIdNumber: dto.guestIdNumber,
-        remarks: dto.remarks,
-        status: 'REGISTERED',
-        gateInAt: new Date(),
-        createdById: user.id,
-        statusHistory: {
-          create: {
-            newStatus: 'REGISTERED',
-            changedById: user.id,
-            notes: 'Gate check-in created',
+    let transaction;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        const transactionNumber = await this.generateTransactionNumber();
+        transaction = await this.prisma.transaction.create({
+          data: {
+            transactionNumber,
+            plateNumber: dto.plateNumber,
+            driverName: dto.driverName,
+            driverPhone: dto.driverPhone,
+            vendorName: dto.vendorName,
+            vehicleType: dto.vehicleType,
+            processType: dto.processType,
+            cargoType: dto.cargoType,
+            cargoSubType: dto.cargoSubType,
+            cargoProcessType: dto.cargoProcessType,
+            suratJalanNumber: dto.suratJalanNumber,
+            poNumber: dto.poNumber,
+            permitCardNumber: dto.permitCardNumber,
+            guestIdNumber: dto.guestIdNumber,
+            remarks: dto.remarks,
+            status: 'REGISTERED',
+            gateInAt: new Date(),
+            createdById: user.id,
+            statusHistory: {
+              create: {
+                newStatus: 'REGISTERED',
+                changedById: user.id,
+                notes: 'Gate check-in created',
+              },
+            },
           },
-        },
-      },
-      include: {
-        statusHistory: true,
-      } });
+          include: {
+            statusHistory: true,
+          }
+        });
+        break;
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          retries--;
+          if (retries === 0) throw new BadRequestException('Sistem sedang sibuk memproses antrean. Silakan coba lagi.');
+          continue;
+        }
+        throw error;
+      }
+    }
 
     // Write audit log
     await this.activityLogsService.logAction({

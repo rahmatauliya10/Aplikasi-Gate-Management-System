@@ -19,7 +19,8 @@ export class AnnouncementsController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get all announcements (Admin only)' })
   findAll() {

@@ -7,9 +7,19 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { json, urlencoded } from 'express';
 
 async function bootstrap() {
+  const isProduction = process.env.NODE_ENV === 'production';
   const app = await NestFactory.create(AppModule, {
-    logger: ['log', 'error', 'warn', 'debug', 'verbose'],
+    logger: isProduction ? ['log', 'error', 'warn'] : ['log', 'error', 'warn', 'debug', 'verbose'],
   });
+
+  const requiredEnvs = ['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'CORS_ORIGIN'];
+  for (const env of requiredEnvs) {
+    if (!process.env[env]) {
+      throw new Error(`CRITICAL: Environment variable ${env} is missing.`);
+    }
+  }
+
+  app.enableShutdownHooks();
 
   // Global prefix
   app.setGlobalPrefix('api');

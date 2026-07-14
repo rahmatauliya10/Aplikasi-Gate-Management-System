@@ -128,6 +128,15 @@ export class ReportsService {
 
     // Generate CSV
     const headers = ['TRX ID', 'Plate Number', 'Vendor', 'Type', 'Status', 'Gate In', 'Gate Out', 'Net WB', 'WH Scale', 'Deviation Status'];
+    
+    const escapeCsv = (val: any) => {
+      let str = String(val).replace(/"/g, '""');
+      if (str.match(/^[=\-+@]/)) {
+        str = "'" + str;
+      }
+      return `"${str}"`;
+    };
+
     const rows = data.map(t => {
       const fraud = t.fraudChecks && t.fraudChecks.length > 0 ? t.fraudChecks[0].riskLevel : 'SAFE';
       return [
@@ -141,7 +150,7 @@ export class ReportsService {
         t.netWeight || 0,
         t.actualWeight || 0,
         fraud
-      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+      ].map(escapeCsv).join(',');
     });
 
     return [headers.join(','), ...rows].join('\n');
