@@ -71,7 +71,10 @@ export class AnnouncementsService {
     let desc = `Updated announcement: ${announcement.title}`;
 
     if (oldAnnouncement.status !== announcement.status) {
-      action = announcement.status === 'ACTIVE' ? 'ACTIVATE_ANNOUNCEMENT' : 'DEACTIVATE_ANNOUNCEMENT';
+      action =
+        announcement.status === 'ACTIVE'
+          ? 'ACTIVATE_ANNOUNCEMENT'
+          : 'DEACTIVATE_ANNOUNCEMENT';
       desc = `${announcement.status === 'ACTIVE' ? 'Activated' : 'Deactivated'} announcement: ${announcement.title}`;
     }
 
@@ -91,8 +94,9 @@ export class AnnouncementsService {
 
   async remove(id: string, user: any) {
     const announcement = await this.findOne(id);
-    await this.prisma.announcement.delete({
+    await this.prisma.announcement.update({
       where: { id },
+      data: { status: 'INACTIVE' },
     });
 
     await this.activityLogsService.logAction({

@@ -53,8 +53,8 @@ const usersService = {
    * @param {string} id
    * @param {string} password - new password
    */
-  resetPassword(id, password) {
-    return api.patch(`/users/${id}/reset-password`, { password })
+  resetPassword(id) {
+    return api.post(`/users/${id}/reset-password`)
   },
 
   /**

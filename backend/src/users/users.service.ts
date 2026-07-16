@@ -1,159 +1,59 @@
-import { Injectable, ConflictException, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 
 @Injectable()
-export class UsersService implements OnModuleInit {
+export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private activityLogsService: ActivityLogsService,
   ) {}
-
-  async onModuleInit() {
-    await this.seedDefaultAdmin();
-  }
-
-  async seedDefaultAdmin() {
-    try {
-      this.logger.log('[Seed] Ensuring core users are seeded...');
-      const hashOptions = { type: argon2.argon2id };
-
-      const passwordHashAdmin = await argon2.hash(this.config.get('DEFAULT_ADMIN_PASSWORD', 'admin123'), hashOptions);
-      const passwordHashQC = await argon2.hash(this.config.get('DEFAULT_QC_PASSWORD', 'qc123'), hashOptions);
-      const passwordHashWarehouse = await argon2.hash(this.config.get('DEFAULT_WAREHOUSE_PASSWORD', 'warehouse123'), hashOptions);
-      const passwordHashSecurity = await argon2.hash(this.config.get('DEFAULT_SECURITY_PASSWORD', 'security123'), hashOptions);
-
-      // 1. Admin
-      const admin = await this.prisma.user.upsert({
-        where: { email: 'admin@gms.local' },
-        update: {
-          username: 'admin',
-          name: 'Admin',
-          role: 'ADMIN',
-          isActive: true,
-        },
-        create: {
-          email: 'admin@gms.local',
-          username: 'admin',
-          name: 'Admin',
-          role: 'ADMIN',
-          isActive: true,
-          passwordHash: passwordHashAdmin,
-        } });
-      await this.prisma.user.update({
-        where: { id: admin.id },
-        data: { passwordHash: passwordHashAdmin } });
-      await this.prisma.userWarehouseAccess.deleteMany({ where: { userId: admin.id } });
-      await this.prisma.userWarehouseAccess.createMany({
-        data: [
-          { userId: admin.id, processType: 'GBB' },
-          { userId: admin.id, processType: 'GBJ' },
-          { userId: admin.id, processType: 'GSP' },
-        ],
-      });
-
-      // 2. QC
-      const qc = await this.prisma.user.upsert({
-        where: { email: 'frengky.qc@gms.local' },
-        update: {
-          username: 'frengky',
-          name: 'Frengky Wahudi',
-          role: 'QC',
-          isActive: true,
-        },
-        create: {
-          email: 'frengky.qc@gms.local',
-          username: 'frengky',
-          name: 'Frengky Wahudi',
-          role: 'QC',
-          isActive: true,
-          passwordHash: passwordHashQC,
-        } });
-      await this.prisma.user.update({
-        where: { id: qc.id },
-        data: { passwordHash: passwordHashQC } });
-      await this.prisma.userWarehouseAccess.deleteMany({ where: { userId: qc.id } });
-
-      // 3. Warehouse
-      const warehouse = await this.prisma.user.upsert({
-        where: { email: 'arga.warehouse@gms.local' },
-        update: {
-          username: 'arga',
-          name: 'Arga Vebrianto',
-          role: 'WAREHOUSE',
-          isActive: true,
-        },
-        create: {
-          email: 'arga.warehouse@gms.local',
-          username: 'arga',
-          name: 'Arga Vebrianto',
-          role: 'WAREHOUSE',
-          isActive: true,
-          passwordHash: passwordHashWarehouse,
-        } });
-      await this.prisma.user.update({
-        where: { id: warehouse.id },
-        data: { passwordHash: passwordHashWarehouse } });
-      await this.prisma.userWarehouseAccess.deleteMany({ where: { userId: warehouse.id } });
-      await this.prisma.userWarehouseAccess.createMany({
-        data: [
-          { userId: warehouse.id, processType: 'GBB' },
-          { userId: warehouse.id, processType: 'GBJ' },
-          { userId: warehouse.id, processType: 'GSP' },
-        ],
-      });
-
-      // 4. Security
-      const security = await this.prisma.user.upsert({
-        where: { email: 'enggar.security@gms.local' },
-        update: {
-          username: 'enggar',
-          name: 'Enggar',
-          role: 'SECURITY',
-          isActive: true,
-        },
-        create: {
-          email: 'enggar.security@gms.local',
-          username: 'enggar',
-          name: 'Enggar',
-          role: 'SECURITY',
-          isActive: true,
-          passwordHash: passwordHashSecurity,
-        } });
-      await this.prisma.user.update({
-        where: { id: security.id },
-        data: { passwordHash: passwordHashSecurity } });
-      await this.prisma.userWarehouseAccess.deleteMany({ where: { userId: security.id } });
-
-      this.logger.log('[Seed] Core users verification completed successfully.');
-    } catch (error) {
-      this.logger.warn(`[Seed] Error ensuring core users are seeded: ${error.message}`);
-    }
-  }
 
   async create(dto: CreateUserDto) {
     const emailLower = dto.email.trim().toLowerCase();
     const usernameLower = dto.username.trim().toLowerCase();
 
-    const existingEmail = await this.prisma.user.findUnique({ where: { email: emailLower } });
-    if (existingEmail) throw new ConflictException({ success: false, message: 'Email already exists', errors: [] });
+    const existingEmail = await this.prisma.user.findUnique({
+      where: { email: emailLower },
+    });
+    if (existingEmail)
+      throw new ConflictException({
+        success: false,
+        message: 'Email already exists',
+        errors: [],
+      });
 
-    const existingUsername = await this.prisma.user.findUnique({ where: { username: usernameLower } });
-    if (existingUsername) throw new ConflictException({ success: false, message: 'Username already exists', errors: [] });
+    const existingUsername = await this.prisma.user.findUnique({
+      where: { username: usernameLower },
+    });
+    if (existingUsername)
+      throw new ConflictException({
+        success: false,
+        message: 'Username already exists',
+        errors: [],
+      });
 
     // Validate warehouse role constraints
     if (dto.role === 'WAREHOUSE') {
       if (!dto.warehouseAccess || dto.warehouseAccess.length === 0) {
         throw new BadRequestException({
           success: false,
-          message: 'Warehouse role requires at least 1 warehouse access selection',
+          message:
+            'Warehouse role requires at least 1 warehouse access selection',
           errors: [],
         });
       }
@@ -161,7 +61,12 @@ export class UsersService implements OnModuleInit {
       dto.warehouseAccess = [];
     }
 
-    const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    const temporaryPassword = require('crypto')
+      .randomBytes(16)
+      .toString('base64url');
+    const passwordHash = await argon2.hash(temporaryPassword, {
+      type: argon2.argon2id,
+    });
     const user = await this.prisma.user.create({
       data: {
         email: emailLower,
@@ -169,11 +74,23 @@ export class UsersService implements OnModuleInit {
         passwordHash,
         name: dto.name.trim(),
         role: dto.role as any,
+        phone: dto.phone,
+        department: dto.department,
+        site: dto.site,
+        area: dto.area,
+        avatarUrl: dto.avatarUrl,
         warehouseAccess: dto.warehouseAccess?.length
-          ? { create: dto.warehouseAccess.map((wh) => ({ processType: wh as any })) }
+          ? {
+              create: dto.warehouseAccess.map((wh) => ({
+                processType: wh as any,
+              })),
+            }
           : undefined,
+        mustChangePassword: true,
+        temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       },
-      include: { warehouseAccess: true } });
+      include: { warehouseAccess: true },
+    });
 
     return {
       success: true,
@@ -188,12 +105,19 @@ export class UsersService implements OnModuleInit {
         lastLoginAt: user.lastLoginAt,
         warehouseAccess: user.warehouseAccess.map((wa) => wa.processType),
         createdAt: user.createdAt,
+        phone: user.phone,
+        department: user.department,
+        site: user.site,
+        area: user.area,
+        avatarUrl: user.avatarUrl,
       },
+      temporaryPassword,
     };
   }
 
   async findAll() {
     const users = await this.prisma.user.findMany({
+      where: { isDeleted: false },
       select: {
         id: true,
         email: true,
@@ -204,8 +128,14 @@ export class UsersService implements OnModuleInit {
         lastLoginAt: true,
         createdAt: true,
         warehouseAccess: true,
+        phone: true,
+        department: true,
+        site: true,
+        area: true,
+        avatarUrl: true,
       },
-      orderBy: { createdAt: 'desc' } });
+      orderBy: { createdAt: 'desc' },
+    });
     return {
       success: true,
       message: 'Users retrieved',
@@ -217,10 +147,16 @@ export class UsersService implements OnModuleInit {
   }
 
   async findOne(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      include: { warehouseAccess: true } });
-    if (!user) throw new NotFoundException({ success: false, message: 'User not found', errors: [] });
+    const user = await this.prisma.user.findFirst({
+      where: { id, isDeleted: false },
+      include: { warehouseAccess: true },
+    });
+    if (!user)
+      throw new NotFoundException({
+        success: false,
+        message: 'User not found',
+        errors: [],
+      });
 
     return {
       success: true,
@@ -235,22 +171,40 @@ export class UsersService implements OnModuleInit {
         lastLoginAt: user.lastLoginAt,
         warehouseAccess: user.warehouseAccess.map((wa) => wa.processType),
         createdAt: user.createdAt,
+        phone: user.phone,
+        department: user.department,
+        site: user.site,
+        area: user.area,
+        avatarUrl: user.avatarUrl,
       },
     };
   }
 
   async update(id: string, dto: UpdateUserDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      include: { warehouseAccess: true } });
-    if (!user) throw new NotFoundException({ success: false, message: 'User not found', errors: [] });
+    const user = await this.prisma.user.findFirst({
+      where: { id, isDeleted: false },
+      include: { warehouseAccess: true },
+    });
+    if (!user)
+      throw new NotFoundException({
+        success: false,
+        message: 'User not found',
+        errors: [],
+      });
 
     const data: any = {};
     if (dto.email) {
       const emailLower = dto.email.trim().toLowerCase();
       if (emailLower !== user.email) {
-        const existingEmail = await this.prisma.user.findUnique({ where: { email: emailLower } });
-        if (existingEmail) throw new ConflictException({ success: false, message: 'Email already exists', errors: [] });
+        const existingEmail = await this.prisma.user.findUnique({
+          where: { email: emailLower },
+        });
+        if (existingEmail)
+          throw new ConflictException({
+            success: false,
+            message: 'Email already exists',
+            errors: [],
+          });
         data.email = emailLower;
       }
     }
@@ -258,22 +212,30 @@ export class UsersService implements OnModuleInit {
     if (dto.username) {
       const usernameLower = dto.username.trim().toLowerCase();
       if (usernameLower !== user.username) {
-        const existingUsername = await this.prisma.user.findUnique({ where: { username: usernameLower } });
-        if (existingUsername) throw new ConflictException({ success: false, message: 'Username already exists', errors: [] });
+        const existingUsername = await this.prisma.user.findUnique({
+          where: { username: usernameLower },
+        });
+        if (existingUsername)
+          throw new ConflictException({
+            success: false,
+            message: 'Username already exists',
+            errors: [],
+          });
         data.username = usernameLower;
       }
     }
 
     if (dto.name) data.name = dto.name.trim();
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
-    
+    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.department !== undefined) data.department = dto.department;
+    if (dto.site !== undefined) data.site = dto.site;
+    if (dto.area !== undefined) data.area = dto.area;
+    if (dto.avatarUrl !== undefined) data.avatarUrl = dto.avatarUrl;
+
     const targetRole = dto.role || user.role;
     if (dto.role) {
       data.role = dto.role;
-    }
-
-    if (dto.password) {
-      data.passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
     }
 
     // Determine warehouseAccess logic based on final role
@@ -283,14 +245,16 @@ export class UsersService implements OnModuleInit {
         if (dto.warehouseAccess.length === 0) {
           throw new BadRequestException({
             success: false,
-            message: 'Warehouse role requires at least 1 warehouse access selection',
+            message:
+              'Warehouse role requires at least 1 warehouse access selection',
             errors: [],
           });
         }
       } else if (user.warehouseAccess.length === 0) {
         throw new BadRequestException({
           success: false,
-          message: 'Warehouse role requires at least 1 warehouse access selection',
+          message:
+              'Warehouse role requires at least 1 warehouse access selection',
           errors: [],
         });
       }
@@ -301,20 +265,27 @@ export class UsersService implements OnModuleInit {
     const updated = await this.prisma.user.update({
       where: { id },
       data,
-      include: { warehouseAccess: true } });
+      include: { warehouseAccess: true },
+    });
 
     if (updatedAccess !== undefined) {
-      await this.prisma.userWarehouseAccess.deleteMany({ where: { userId: id } });
+      await this.prisma.userWarehouseAccess.deleteMany({
+        where: { userId: id },
+      });
       if (updatedAccess.length > 0) {
         await this.prisma.userWarehouseAccess.createMany({
-          data: updatedAccess.map((wh) => ({ userId: id, processType: wh as any })),
+          data: updatedAccess.map((wh) => ({
+            userId: id,
+            processType: wh as any,
+          })),
         });
       }
     }
 
-    const finalAccess = updatedAccess !== undefined 
-      ? updatedAccess 
-      : updated.warehouseAccess.map((wa) => wa.processType);
+    const finalAccess =
+      updatedAccess !== undefined
+        ? updatedAccess
+        : updated.warehouseAccess.map((wa) => wa.processType);
 
     return {
       success: true,
@@ -329,13 +300,25 @@ export class UsersService implements OnModuleInit {
         lastLoginAt: updated.lastLoginAt,
         warehouseAccess: finalAccess,
         createdAt: updated.createdAt,
+        phone: updated.phone,
+        department: updated.department,
+        site: updated.site,
+        area: updated.area,
+        avatarUrl: updated.avatarUrl,
       },
     };
   }
 
   async remove(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException({ success: false, message: 'User not found', errors: [] });
+    const user = await this.prisma.user.findFirst({
+      where: { id, isDeleted: false },
+    });
+    if (!user)
+      throw new NotFoundException({
+        success: false,
+        message: 'User not found',
+        errors: [],
+      });
 
     // Prevent deleting the main admin user (to avoid locking out)
     if (user.email === 'admin@gms.local' || user.username === 'admin') {
@@ -346,32 +329,95 @@ export class UsersService implements OnModuleInit {
       });
     }
 
-    await this.prisma.user.delete({ where: { id } });
-    return { success: true, message: 'User deleted successfully', data: null };
-  }
-
-  async resetPassword(id: string, dto: ResetPasswordDto) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException({ success: false, message: 'User not found', errors: [] });
-
-    const passwordHash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    const timestamp = Date.now();
     await this.prisma.user.update({
       where: { id },
-      data: { passwordHash } });
-
+      data: {
+        isDeleted: true,
+        isActive: false,
+        email: `${user.email}_deleted_${timestamp}`,
+        username: `${user.username}_deleted_${timestamp}`,
+        refreshTokenHash: null,
+      },
+    });
     return {
       success: true,
-      message: 'Password reset successfully',
+      message: 'User deleted successfully',
       data: null,
     };
   }
 
+  async resetPassword(id: string, adminId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, isDeleted: false },
+    });
+    if (!user)
+      throw new NotFoundException({
+        success: false,
+        message: 'User not found',
+        errors: [],
+      });
+
+    // Prevent resetting the main admin user's password to avoid accidental lockout
+    if (user.email === 'admin@gms.local' || user.username === 'admin') {
+      throw new BadRequestException({
+        success: false,
+        message: 'Cannot reset the primary administrator account password',
+        errors: [],
+      });
+    }
+
+    const temporaryPassword = require('crypto')
+      .randomBytes(16)
+      .toString('base64url');
+    const passwordHash = await argon2.hash(temporaryPassword, {
+      type: argon2.argon2id,
+    });
+    await this.prisma.user.update({
+      where: { id },
+      data: {
+        passwordHash,
+        mustChangePassword: true,
+        passwordChangedAt: new Date(),
+        temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        tokenVersion: { increment: 1 },
+        refreshTokenHash: null,
+      },
+    });
+
+    await this.activityLogsService.logAction({
+      userId: adminId,
+      action: 'ADMIN_RESET_PASSWORD',
+      module: 'USERS',
+      description: `Admin reset password for user ${user.username}`,
+      status: 'SUCCESS',
+      referenceId: user.id,
+    });
+
+    return {
+      success: true,
+      message:
+        'Password reset successfully. Please share this temporary password securely.',
+      data: { temporaryPassword },
+    };
+  }
+
   async updateStatus(id: string, dto: UpdateStatusDto) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException({ success: false, message: 'User not found', errors: [] });
+    const user = await this.prisma.user.findFirst({
+      where: { id, isDeleted: false },
+    });
+    if (!user)
+      throw new NotFoundException({
+        success: false,
+        message: 'User not found',
+        errors: [],
+      });
 
     // Prevent deactivating the main admin user (to avoid locking out)
-    if ((user.email === 'admin@gms.local' || user.username === 'admin') && !dto.isActive) {
+    if (
+      (user.email === 'admin@gms.local' || user.username === 'admin') &&
+      !dto.isActive
+    ) {
       throw new BadRequestException({
         success: false,
         message: 'Cannot deactivate the primary administrator account',
@@ -381,7 +427,8 @@ export class UsersService implements OnModuleInit {
 
     const updated = await this.prisma.user.update({
       where: { id },
-      data: { isActive: dto.isActive } });
+      data: { isActive: dto.isActive },
+    });
 
     return {
       success: true,

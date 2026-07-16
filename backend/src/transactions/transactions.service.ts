@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { TransactionQueryDto } from './dto/transaction-query.dto';
@@ -9,12 +14,17 @@ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator
 export class TransactionsService {
   private readonly logger = new Logger(TransactionsService.name);
 
-  constructor(private prisma: PrismaService, private activityLogsService: ActivityLogsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private activityLogsService: ActivityLogsService,
+  ) {}
 
   async findAll(query: TransactionQueryDto, user: JwtPayloadUser) {
     const { page = 1, limit = 10, status, processType, search } = query;
 
-    this.logger.log(`Find all transactions by user ${user.email} | page=${page} limit=${limit}`);
+    this.logger.log(
+      `Find all transactions by user ${user.email} | page=${page} limit=${limit}`,
+    );
 
     const where: Prisma.TransactionWhereInput = {};
 
@@ -47,21 +57,25 @@ export class TransactionsService {
           statusHistory: { orderBy: { changedAt: 'desc' } },
           weighbridgeRecords: true,
           warehouseProcesses: true,
-          qcVehicleChecks: { include: { checkedBy: { select: { id: true, name: true } } } },
-          incomingMaterialChecks: { include: { checkedBy: { select: { id: true, name: true } } } },
+          qcVehicleChecks: {
+            include: { checkedBy: { select: { id: true, name: true } } },
+          },
+          incomingMaterialChecks: {
+            include: { checkedBy: { select: { id: true, name: true } } },
+          },
         },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
 
     await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'TRANSACTIONS_LIST_VIEW',
-        module: 'TRANSACTIONS',
-        
-        description: 'User viewed transaction list',
-        status: 'SUCCESS'
-      });
+      userId: user.id,
+      action: 'TRANSACTIONS_LIST_VIEW',
+      module: 'TRANSACTIONS',
+
+      description: 'User viewed transaction list',
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
@@ -85,19 +99,24 @@ export class TransactionsService {
         statusHistory: { orderBy: { changedAt: 'desc' } },
         weighbridgeRecords: true,
         warehouseProcesses: true,
-        qcVehicleChecks: { include: { checkedBy: { select: { id: true, name: true } } } },
-        incomingMaterialChecks: { include: { checkedBy: { select: { id: true, name: true } } } },
+        qcVehicleChecks: {
+          include: { checkedBy: { select: { id: true, name: true } } },
+        },
+        incomingMaterialChecks: {
+          include: { checkedBy: { select: { id: true, name: true } } },
+        },
       },
-      orderBy: { createdAt: 'desc' } });
+      orderBy: { createdAt: 'desc' },
+    });
 
     await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'TRANSACTIONS_ACTIVE_VIEW',
-        module: 'TRANSACTIONS',
-        
-        description: 'User viewed active transactions list',
-        status: 'SUCCESS'
-      });
+      userId: user.id,
+      action: 'TRANSACTIONS_ACTIVE_VIEW',
+      module: 'TRANSACTIONS',
+
+      description: 'User viewed active transactions list',
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
@@ -107,7 +126,9 @@ export class TransactionsService {
   }
 
   async findOne(id: string, user: JwtPayloadUser) {
-    this.logger.log(`Find transaction details for ID: ${id} by user ${user.email}`);
+    this.logger.log(
+      `Find transaction details for ID: ${id} by user ${user.email}`,
+    );
 
     const tx = await this.prisma.transaction.findUnique({
       where: { id },
@@ -115,10 +136,15 @@ export class TransactionsService {
         statusHistory: { orderBy: { changedAt: 'desc' } },
         weighbridgeRecords: true,
         warehouseProcesses: true,
-        qcVehicleChecks: { include: { checkedBy: { select: { id: true, name: true } } } },
-        incomingMaterialChecks: { include: { checkedBy: { select: { id: true, name: true } } } },
+        qcVehicleChecks: {
+          include: { checkedBy: { select: { id: true, name: true } } },
+        },
+        incomingMaterialChecks: {
+          include: { checkedBy: { select: { id: true, name: true } } },
+        },
         fraudChecks: true,
-      } });
+      },
+    });
 
     if (!tx) {
       throw new NotFoundException({
@@ -129,14 +155,14 @@ export class TransactionsService {
     }
 
     await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'TRANSACTION_DETAIL_VIEW',
-        module: 'TRANSACTIONS',
-        
-        referenceId: id,
-        description: `User viewed transaction details for ${tx.transactionNumber}`,
-        status: 'SUCCESS'
-      });
+      userId: user.id,
+      action: 'TRANSACTION_DETAIL_VIEW',
+      module: 'TRANSACTIONS',
+
+      referenceId: id,
+      description: `User viewed transaction details for ${tx.transactionNumber}`,
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
@@ -146,7 +172,9 @@ export class TransactionsService {
   }
 
   async cancel(id: string, reason: string, user: JwtPayloadUser) {
-    this.logger.warn(`Transaction cancellation request for ID: ${id} by user ${user.email}`);
+    this.logger.warn(
+      `Transaction cancellation request for ID: ${id} by user ${user.email}`,
+    );
 
     const tx = await this.prisma.transaction.findUnique({ where: { id } });
 
@@ -190,17 +218,18 @@ export class TransactionsService {
           },
         },
       },
-      include: { statusHistory: true } });
+      include: { statusHistory: true },
+    });
 
     await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'TRANSACTION_CANCELLED',
-        module: 'TRANSACTIONS',
-        
-        referenceId: id,
-        description: `Transaction ${tx.transactionNumber} was cancelled by ${user.email}. Reason: ${reason}`,
-        status: 'SUCCESS'
-      });
+      userId: user.id,
+      action: 'TRANSACTION_CANCELLED',
+      module: 'TRANSACTIONS',
+
+      referenceId: id,
+      description: `Transaction ${tx.transactionNumber} was cancelled by ${user.email}. Reason: ${reason}`,
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
@@ -210,7 +239,9 @@ export class TransactionsService {
   }
 
   async remove(id: string, user: JwtPayloadUser) {
-    this.logger.warn(`Transaction deletion request for ID: ${id} by user ${user.email}`);
+    this.logger.warn(
+      `Transaction deletion request for ID: ${id} by user ${user.email}`,
+    );
 
     const tx = await this.prisma.transaction.findUnique({ where: { id } });
 
@@ -222,23 +253,47 @@ export class TransactionsService {
       });
     }
 
-    await this.prisma.transaction.delete({
-      where: { id } });
+    if (tx.status === 'COMPLETED' || tx.status === 'CANCELLED') {
+      throw new BadRequestException({
+        success: false,
+        message: `Cannot delete/cancel transaction in status ${tx.status}`,
+        errors: [],
+      });
+    }
+
+    const updated = await this.prisma.transaction.update({
+      where: { id },
+      data: {
+        status: 'CANCELLED',
+        cancelledAt: new Date(),
+        cancelledById: user.id,
+        cancellationReason: 'Transaction deleted via API (soft-delete)',
+      },
+    });
+
+    await this.prisma.transactionStatusHistory.create({
+      data: {
+        transactionId: id,
+        oldStatus: tx.status,
+        newStatus: 'CANCELLED',
+        changedById: user.id,
+        notes: 'Deleted via API (soft-delete)',
+      },
+    });
 
     await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'TRANSACTION_DELETED',
-        module: 'TRANSACTIONS',
-        
-        referenceId: id,
-        description: `Transaction ${tx.transactionNumber} was deleted by ${user.email}.`,
-        status: 'SUCCESS'
-      });
+      userId: user.id,
+      action: 'TRANSACTION_CANCELLED',
+      module: 'TRANSACTIONS',
+      referenceId: id,
+      description: `Transaction ${tx.transactionNumber} was cancelled (soft-deleted) by ${user.email}.`,
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
-      message: 'Transaction deleted successfully',
-      data: tx,
+      message: 'Transaction cancelled (soft-deleted) successfully',
+      data: updated,
     };
   }
 }

@@ -28,19 +28,51 @@ export class ActivityLogsService {
       if (typeof desc === 'object') {
         desc = JSON.stringify(desc);
       }
-      
-      const logData = { ...data, description: desc };
+
+      let userName = data.userName;
+      let role = data.role;
+
+      if (data.userId && (!userName || !role)) {
+        const user = await this.prisma.user.findFirst({
+          where: { id: data.userId },
+        });
+        if (user) {
+          userName = userName || user.name;
+          role = role || user.role;
+        }
+      }
+
+      const logData = {
+        ...data,
+        description: desc,
+        userName,
+        role,
+      };
+
       await this.prisma.activityLog.create({
         data: logData,
       });
     } catch (error) {
       // Catch errors so it doesn't break the main business flow
-      this.logger.error(`Failed to save activity log: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to save activity log: ${error.message}`,
+        error.stack,
+      );
     }
   }
 
   async findAll(query: ActivityLogQueryDto) {
-    const { page = 1, limit = 50, module, action, status, userId, startDate, endDate, search } = query;
+    const {
+      page = 1,
+      limit = 50,
+      module,
+      action,
+      status,
+      userId,
+      startDate,
+      endDate,
+      search,
+    } = query;
 
     this.logger.log(`Activity logs requested | page=${page} limit=${limit}`);
 

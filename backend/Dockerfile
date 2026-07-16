@@ -27,6 +27,8 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3001
 
+RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
+
 USER node
 
 CMD ["npm", "run", "start:prod"]

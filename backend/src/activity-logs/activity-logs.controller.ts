@@ -1,5 +1,10 @@
 import { Controller, Get, Query, UseGuards, Req } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { ActivityLogsService } from './activity-logs.service';
@@ -13,11 +18,14 @@ export class ActivityLogsController {
   constructor(private activityLogsService: ActivityLogsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Get activity logs', description: 'Returns paginated activity logs with filters' })
+  @ApiOperation({
+    summary: 'Get activity logs',
+    description: 'Returns paginated activity logs with filters',
+  })
   @ApiResponse({ status: 200, description: 'Activity logs retrieved' })
   findAll(@Query() query: ActivityLogQueryDto, @Req() req: any) {
     const user = req.user;
-    
+
     // Only ADMIN can see all logs. Others can only see their own logs.
     if (user.role !== 'ADMIN') {
       query.userId = user.id;

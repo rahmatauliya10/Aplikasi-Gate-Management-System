@@ -15,20 +15,39 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.getOrThrow('JWT_ACCESS_SECRET'),
+      secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     });
   }
 
-  async validate(payload: { sub: string; email: string; role: string }) {
+  async validate(payload: {
+    sub: string;
+    email: string;
+    role: string;
+    tv?: number;
+  }) {
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      include: { warehouseAccess: true } });
+      include: { warehouseAccess: true },
+    });
 
     if (!user || !user.isActive) {
-      this.logger.warn(`JWT validation failed for user ${payload.email}: not found or inactive`);
+      this.logger.warn(
+        `JWT validation failed for user ${payload.email}: not found or inactive`,
+      );
       throw new UnauthorizedException({
         success: false,
         message: 'User not found or inactive',
+        errors: [],
+      });
+    }
+
+    if (payload.tv !== undefined && user.tokenVersion !== payload.tv) {
+      this.logger.warn(
+        `JWT validation failed for user ${payload.email}: token version mismatch (revoked)`,
+      );
+      throw new UnauthorizedException({
+        success: false,
+        message: 'Token has been revoked. Please login again.',
         errors: [],
       });
     }
@@ -39,6 +58,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       username: user.username,
       name: user.name,
       role: user.role,
+      mustChangePassword: user.mustChangePassword,
       warehouseAccess: user.warehouseAccess.map((wa) => wa.processType),
     };
   }

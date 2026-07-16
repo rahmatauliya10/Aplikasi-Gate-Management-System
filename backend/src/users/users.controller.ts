@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -51,11 +62,11 @@ export class UsersController {
     return this.usersService.remove(id);
   }
 
-  @Patch(':id/reset-password')
+  @Post(':id/reset-password')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Reset user password (ADMIN only)' })
-  resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto) {
-    return this.usersService.resetPassword(id, dto);
+  resetPassword(@Param('id') id: string, @CurrentUser() admin: JwtPayloadUser) {
+    return this.usersService.resetPassword(id, admin.id);
   }
 
   @Patch(':id/status')

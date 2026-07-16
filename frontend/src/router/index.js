@@ -12,6 +12,7 @@ import History from '../views/History.vue'
 import Settings from '../views/Settings.vue'
 import NotFound from '../views/NotFound.vue'
 import Login from '../views/Login.vue'
+import ChangePassword from '../views/ChangePassword.vue'
 import Unauthorized from '../views/Unauthorized.vue'
 
 const router = createRouter({
@@ -21,6 +22,12 @@ const router = createRouter({
             path: '/login',
             name: 'login',
             component: Login
+        },
+        {
+            path: '/change-password',
+            name: 'change-password',
+            component: ChangePassword,
+            meta: { requiresAuth: true }
         },
         {
             path: '/',
@@ -38,7 +45,7 @@ const router = createRouter({
             path: '/weighbridge',
             name: 'weighbridge',
             component: Weighbridge,
-            meta: { requiresAuth: true, roles: ["ADMIN", "SECURITY", "WAREHOUSE"] }
+            meta: { requiresAuth: true, roles: ["ADMIN", "SECURITY"] }
         },
         {
             path: '/gbb',
@@ -136,6 +143,12 @@ router.beforeEach(async (to, from, next) => {
     next('/')
   } else if (to.meta.requiresAuth && authStore.isAuthenticated) {
     const user = authStore.user;
+
+    // Force redirect to change-password if mustChangePassword is set
+    if (authStore.mustChangePassword && to.path !== '/change-password') {
+      next('/change-password');
+      return;
+    }
     
     // Check role access
     if (to.meta.roles && !hasRoleAccess(user?.role, to.meta.roles)) {

@@ -1,5 +1,21 @@
-import { Controller, Get, Param, Post, Query, UseGuards, Body, HttpCode, HttpStatus, Delete } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+  Body,
+  HttpCode,
+  HttpStatus,
+  Delete,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -19,13 +35,21 @@ export class TransactionsController {
   @Get()
   @ApiOperation({ summary: 'Get all transactions with pagination and filters' })
   @ApiResponse({ status: 200, description: 'Transactions list retrieved' })
-  findAll(@Query() query: TransactionQueryDto, @CurrentUser() user: JwtPayloadUser) {
+  findAll(
+    @Query() query: TransactionQueryDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
     return this.transactionsService.findAll(query, user);
   }
 
   @Get('active')
-  @ApiOperation({ summary: 'Get all active (non-completed/cancelled) transactions' })
-  @ApiResponse({ status: 200, description: 'Active transactions list retrieved' })
+  @ApiOperation({
+    summary: 'Get all active (non-completed/cancelled) transactions',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Active transactions list retrieved',
+  })
   findActive(@CurrentUser() user: JwtPayloadUser) {
     return this.transactionsService.findActive(user);
   }
@@ -42,8 +66,14 @@ export class TransactionsController {
   @Roles('ADMIN', 'SECURITY')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Cancel a transaction' })
-  @ApiResponse({ status: 200, description: 'Transaction cancelled successfully' })
-  @ApiResponse({ status: 400, description: 'Transaction already completed or cancelled' })
+  @ApiResponse({
+    status: 200,
+    description: 'Transaction cancelled successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Transaction already completed or cancelled',
+  })
   @ApiResponse({ status: 404, description: 'Transaction not found' })
   cancel(
     @Param('id') id: string,

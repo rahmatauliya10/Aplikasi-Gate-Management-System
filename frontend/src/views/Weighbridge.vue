@@ -69,20 +69,31 @@
                 </div>
               </div>
             </div>
-            <div class="flex flex-wrap items-center gap-3">
-              <div class="relative">
-                <input v-model="searchQuery" type="text" placeholder="Search Plate Number..." class="w-56 h-10 pl-10 pr-10 bg-white/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-2 focus:ring-[#4A8BDF]/20 transition-all shadow-sm">
-                <span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
+            <div class="flex flex-nowrap items-center gap-2 sm:gap-3 shrink min-w-0 overflow-x-auto hide-scrollbar pb-1 -mb-1">
+              <div class="relative shrink-0 w-[140px] sm:w-[160px]">
+                <input v-model="searchQuery" type="text" placeholder="Search Truck" class="w-full h-10 pl-9 sm:pl-10 pr-4 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-2 focus:ring-[#4A8BDF]/20 transition-all shadow-sm">
+                <span class="material-icons absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px]">search</span>
                 <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
                   <span class="material-icons text-[16px]">close</span>
                 </button>
               </div>
-              <div class="flex items-center space-x-2 px-4 py-2 rounded-2xl bg-white shadow-sm border border-slate-100">
+              <div class="relative shrink-0 w-[140px] sm:w-[160px]">
+                <select v-model="filterStatus" class="w-full h-10 pl-3 sm:pl-4 pr-8 sm:pr-10 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-2 focus:ring-[#4A8BDF]/20 transition-all shadow-sm appearance-none cursor-pointer">
+                  <option value="ALL">All Status</option>
+                  <option value="REGISTERED">Registered</option>
+                  <option value="INCOMING_CHECK_PASSED">Incoming Check Passed</option>
+                  <option value="INCOMING_CHECK_REJECTED">Incoming Check Rejected</option>
+                  <option value="WAREHOUSE_DONE">Warehouse Done</option>
+                  <option value="QC_VEHICLE_REJECTED">QC Vehicle Rejected</option>
+                </select>
+                <span class="material-icons absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 text-slate-400 text-[18px] pointer-events-none">filter_list</span>
+              </div>
+              <div class="flex items-center space-x-1.5 sm:space-x-2 px-3 sm:px-4 h-10 rounded-xl bg-white shadow-sm border border-slate-100 shrink-0 whitespace-nowrap">
                 <div class="relative">
-                  <span class="block w-2.5 h-2.5 rounded-full bg-[#4A8BDF]"></span>
+                  <span class="block w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full bg-[#4A8BDF]"></span>
                   <span class="absolute inset-0 rounded-full bg-[#4A8BDF] animate-ping opacity-40"></span>
                 </div>
-                <span class="text-xs font-black text-slate-700 tracking-wider">{{ filteredQueueTrucks.length }} PENDING TRUCKS</span>
+                <span class="text-xs sm:text-sm font-bold text-slate-700 tracking-wide">{{ filteredQueueTrucks.length }} PENDING</span>
               </div>
             </div>
           </div>
@@ -171,6 +182,7 @@ const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const currentPage = ref(1)
 const searchQuery = ref('')
+const filterStatus = ref('ALL')
 const isProcessing = ref(false)
 
 onMounted(async () => {
@@ -232,9 +244,18 @@ const queueTrucks = computed(() => {
   });
 });
 const filteredQueueTrucks = computed(() => {
+  let list = queueTrucks.value
+  
+  if (filterStatus.value !== 'ALL') {
+    list = list.filter(t => t.status === filterStatus.value)
+  }
+  
   const keyword = searchQuery.value.toLowerCase().trim()
-  if (!keyword) return queueTrucks.value
-  return queueTrucks.value.filter(t => getPlateNumber(t).toLowerCase().includes(keyword))
+  if (keyword) {
+    list = list.filter(t => getPlateNumber(t).toLowerCase().includes(keyword))
+  }
+  
+  return list
 })
 
 const totalPages = computed(() => Math.ceil(filteredQueueTrucks.value.length / 10) || 1)

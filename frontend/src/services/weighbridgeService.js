@@ -37,14 +37,6 @@ const weighbridgeService = {
   },
 
   /**
-   * Get all weighbridge records with filters
-   * @param {Object} params - { date, page, limit }
-   */
-  getAll(params) {
-    return api.get('/weighbridge/records', { params })
-  },
-
-  /**
    * Get trucks waiting at weighbridge
    */
   getQueue() {

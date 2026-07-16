@@ -19,7 +19,10 @@ export class GateQueryDto {
   @Max(100)
   limit?: number = 10;
 
-  @ApiProperty({ required: false, description: 'Search by transaction number or plate number' })
+  @ApiProperty({
+    required: false,
+    description: 'Search by transaction number or plate number',
+  })
   @IsOptional()
   @IsString()
   search?: string;

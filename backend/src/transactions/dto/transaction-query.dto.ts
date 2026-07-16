@@ -16,7 +16,7 @@ export class TransactionQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(1000)
   limit?: number = 10;
 
   @ApiProperty({ required: false, enum: TransactionStatus })
@@ -29,7 +29,10 @@ export class TransactionQueryDto {
   @IsEnum(ProcessType)
   processType?: ProcessType;
 
-  @ApiProperty({ required: false, description: 'Search by plate number, transaction number, or vendor' })
+  @ApiProperty({
+    required: false,
+    description: 'Search by plate number, transaction number, or vendor',
+  })
   @IsOptional()
   @IsString()
   search?: string;

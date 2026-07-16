@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { AnnouncementsService } from './announcements.service';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
@@ -13,7 +23,10 @@ export class AnnouncementsController {
   constructor(private readonly announcementsService: AnnouncementsService) {}
 
   @Get('active')
-  @ApiOperation({ summary: 'Get all active announcements', description: 'Intentionally public endpoint for pre-login banners.' })
+  @ApiOperation({
+    summary: 'Get all active announcements',
+    description: 'Intentionally public endpoint for pre-login banners.',
+  })
   findActive() {
     return this.announcementsService.findActive();
   }
@@ -41,7 +54,11 @@ export class AnnouncementsController {
   @Roles('ADMIN')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Update an announcement' })
-  update(@Param('id') id: string, @Body() updateDto: UpdateAnnouncementDto, @Request() req: any) {
+  update(
+    @Param('id') id: string,
+    @Body() updateDto: UpdateAnnouncementDto,
+    @Request() req: any,
+  ) {
     return this.announcementsService.update(id, updateDto, req.user);
   }
 

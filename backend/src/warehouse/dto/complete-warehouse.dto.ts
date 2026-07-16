@@ -1,21 +1,38 @@
-import { IsEnum, IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WarehouseUnit, WarehouseCondition } from '@prisma/client';
 
 export class CompleteWarehouseDto {
-  @ApiPropertyOptional({ description: 'Actual weight recorded in warehouse', example: 8000 })
+  @ApiPropertyOptional({
+    description: 'Actual weight recorded in warehouse',
+    example: 8000,
+  })
   @IsOptional()
   @IsNumber()
   @Min(0.01)
   actualWeight?: number;
 
-  @ApiPropertyOptional({ description: 'Actual quantity/pieces recorded in warehouse', example: 100 })
+  @ApiPropertyOptional({
+    description: 'Actual quantity/pieces recorded in warehouse',
+    example: 100,
+  })
   @IsOptional()
   @IsInt()
   @Min(1)
   actualQuantity?: number;
 
-  @ApiPropertyOptional({ description: 'Unit of measurement', enum: WarehouseUnit, example: WarehouseUnit.KG })
+  @ApiPropertyOptional({
+    description: 'Unit of measurement',
+    enum: WarehouseUnit,
+    example: WarehouseUnit.KG,
+  })
   @IsOptional()
   @IsEnum(WarehouseUnit)
   unit?: WarehouseUnit;
@@ -38,22 +55,34 @@ export class CompleteWarehouseDto {
   @Min(0)
   rollCount?: number;
 
-  @ApiPropertyOptional({ description: 'Condition of goods', enum: WarehouseCondition, example: WarehouseCondition.GOOD })
+  @ApiPropertyOptional({
+    description: 'Condition of goods',
+    enum: WarehouseCondition,
+    example: WarehouseCondition.GOOD,
+  })
   @IsOptional()
   @IsEnum(WarehouseCondition)
   condition?: WarehouseCondition;
 
-  @ApiPropertyOptional({ description: 'Remarks or notes', example: 'Proses warehouse selesai normal' })
+  @ApiPropertyOptional({
+    description: 'Remarks or notes',
+    example: 'Proses warehouse selesai normal',
+  })
   @IsOptional()
   @IsString()
   remarks?: string;
 
-  @ApiPropertyOptional({ description: 'Optional Surat Jalan Number for GBJ process completion', example: 'SJ-12345' })
+  @ApiPropertyOptional({
+    description: 'Optional Surat Jalan Number for GBJ process completion',
+    example: 'SJ-12345',
+  })
   @IsOptional()
   @IsString()
   suratJalanNumber?: string;
 
-  @ApiPropertyOptional({ description: 'Optional Delivery Checklist JSON payload' })
+  @ApiPropertyOptional({
+    description: 'Optional Delivery Checklist JSON payload',
+  })
   @IsOptional()
   deliveryChecklist?: any;
 }

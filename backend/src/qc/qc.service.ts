@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { TransactionStatus, ProcessType, CheckResult } from '@prisma/client';
@@ -11,13 +16,29 @@ import { QcAttachmentDto } from './dto/qc-attachment.dto';
 export class QcService {
   private readonly logger = new Logger(QcService.name);
 
-  constructor(private prisma: PrismaService, private activityLogsService: ActivityLogsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private activityLogsService: ActivityLogsService,
+  ) {}
 
   private mapToCheckResult(val?: string): CheckResult | null {
     if (!val) return null;
     const upper = val.toUpperCase();
-    if (upper === 'PASS' || upper === 'NORMAL' || upper === 'OK' || upper === 'GOOD') return CheckResult.PASS;
-    if (upper === 'REJECT' || upper === 'ABNORMAL' || upper === 'NOT_OK' || upper === 'BAD' || upper === 'REJECTED') return CheckResult.REJECT;
+    if (
+      upper === 'PASS' ||
+      upper === 'NORMAL' ||
+      upper === 'OK' ||
+      upper === 'GOOD'
+    )
+      return CheckResult.PASS;
+    if (
+      upper === 'REJECT' ||
+      upper === 'ABNORMAL' ||
+      upper === 'NOT_OK' ||
+      upper === 'BAD' ||
+      upper === 'REJECTED'
+    )
+      return CheckResult.REJECT;
     if (upper === 'NA') return CheckResult.NA;
     return null;
   }
@@ -37,7 +58,8 @@ export class QcService {
           { status: 'INCOMING_CHECK_IN_PROGRESS', processType: 'GBB' },
         ],
       },
-      orderBy: { createdAt: 'asc' } });
+      orderBy: { createdAt: 'asc' },
+    });
 
     return {
       success: true,
@@ -47,16 +69,23 @@ export class QcService {
   }
 
   async startQc(transactionId: string, dto: StartQcDto, userId: string) {
-    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    });
     if (!tx) throw new NotFoundException('Transaction not found');
 
     let nextStatus: TransactionStatus;
     if (tx.processType === 'GBJ' && tx.status === 'QC_VEHICLE_PENDING') {
       nextStatus = 'QC_VEHICLE_IN_PROGRESS';
-    } else if (tx.processType === 'GBB' && tx.status === 'INCOMING_CHECK_PENDING') {
+    } else if (
+      tx.processType === 'GBB' &&
+      tx.status === 'INCOMING_CHECK_PENDING'
+    ) {
       nextStatus = 'INCOMING_CHECK_IN_PROGRESS';
     } else {
-      throw new BadRequestException('Transaction is not in a valid pending state to start QC');
+      throw new BadRequestException(
+        'Transaction is not in a valid pending state to start QC',
+      );
     }
 
     const updated = await this.prisma.transaction.update({
@@ -64,12 +93,23 @@ export class QcService {
       data: {
         status: nextStatus,
         qcStartAt: new Date(),
-        statusHistory: { create: { newStatus: nextStatus, changedById: userId, notes: 'QC started' } },
-      } });
+        statusHistory: {
+          create: {
+            newStatus: nextStatus,
+            changedById: userId,
+            notes: 'QC started',
+          },
+        },
+      },
+    });
 
-    await this.activityLogsService.logAction({ userId, action: 'QC_START', module: 'QC',  referenceId: transactionId,
-        status: 'SUCCESS'
-      });
+    await this.activityLogsService.logAction({
+      userId,
+      action: 'QC_START',
+      module: 'QC',
+      referenceId: transactionId,
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
@@ -78,15 +118,31 @@ export class QcService {
     };
   }
 
-  async submitVehicleCheck(transactionId: string, dto: VehicleCheckResultDto, userId: string) {
-    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId }, include: { qcVehicleChecks: true } });
+  async submitVehicleCheck(
+    transactionId: string,
+    dto: VehicleCheckResultDto,
+    userId: string,
+  ) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: { qcVehicleChecks: true },
+    });
     if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.processType !== 'GBJ') throw new BadRequestException('Vehicle check is only for GBJ process type');
-    if (tx.status !== 'QC_VEHICLE_IN_PROGRESS') throw new BadRequestException('Transaction must be in QC_VEHICLE_IN_PROGRESS state. Did you start QC?');
-    if (tx.qcVehicleChecks.length > 0) throw new BadRequestException('Result has already been submitted for this transaction');
+    if (tx.processType !== 'GBJ')
+      throw new BadRequestException(
+        'Vehicle check is only for GBJ process type',
+      );
+    if (tx.status !== 'QC_VEHICLE_IN_PROGRESS')
+      throw new BadRequestException(
+        'Transaction must be in QC_VEHICLE_IN_PROGRESS state. Did you start QC?',
+      );
+    if (tx.qcVehicleChecks.length > 0)
+      throw new BadRequestException(
+        'Result has already been submitted for this transaction',
+      );
 
     const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
-    
+
     await this.prisma.qcVehicleCheck.create({
       data: {
         transactionId,
@@ -95,27 +151,44 @@ export class QcService {
         vehicleOdor: this.booleanToCheckResult(dto.vehicleOdor),
         pestEvidence: this.booleanToCheckResult(dto.pestEvidence),
         vehicleCondition: this.booleanToCheckResult(dto.vehicleCondition),
-        documentCompleteness: this.booleanToCheckResult(dto.documentCompleteness),
+        documentCompleteness: this.booleanToCheckResult(
+          dto.documentCompleteness,
+        ),
         sealCondition: this.booleanToCheckResult(dto.sealCondition),
         notes: dto.notes,
         checkedById: userId,
         startedAt: tx.qcStartAt,
         completedAt: new Date(),
-      } });
+      },
+    });
 
-    const nextStatus = result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
+    const nextStatus =
+      result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
     const updated = await this.prisma.transaction.update({
       where: { id: transactionId },
       data: {
         status: nextStatus,
         qcEndAt: new Date(),
-        statusHistory: { create: { newStatus: nextStatus, changedById: userId, notes: `Vehicle Check: ${result}` } },
+        statusHistory: {
+          create: {
+            newStatus: nextStatus,
+            changedById: userId,
+            notes: `Vehicle Check: ${result}`,
+          },
+        },
       },
-      include: { qcVehicleChecks: true } });
+      include: { qcVehicleChecks: true },
+    });
 
-    await this.activityLogsService.logAction({ userId, action: 'QC_VEHICLE_RESULT', module: 'QC',  referenceId: transactionId, description: { result }, status: 'SUCCESS'
-      });
+    await this.activityLogsService.logAction({
+      userId,
+      action: 'QC_VEHICLE_RESULT',
+      module: 'QC',
+      referenceId: transactionId,
+      description: { result },
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
@@ -124,12 +197,28 @@ export class QcService {
     };
   }
 
-  async submitIncomingCheck(transactionId: string, dto: IncomingCheckResultDto, userId: string) {
-    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId }, include: { incomingMaterialChecks: true } });
+  async submitIncomingCheck(
+    transactionId: string,
+    dto: IncomingCheckResultDto,
+    userId: string,
+  ) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: { incomingMaterialChecks: true },
+    });
     if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.processType !== 'GBB') throw new BadRequestException('Incoming check is only for GBB process type');
-    if (tx.status !== 'INCOMING_CHECK_IN_PROGRESS') throw new BadRequestException('Transaction must be in INCOMING_CHECK_IN_PROGRESS state. Did you start QC?');
-    if (tx.incomingMaterialChecks.length > 0) throw new BadRequestException('Result has already been submitted for this transaction');
+    if (tx.processType !== 'GBB')
+      throw new BadRequestException(
+        'Incoming check is only for GBB process type',
+      );
+    if (tx.status !== 'INCOMING_CHECK_IN_PROGRESS')
+      throw new BadRequestException(
+        'Transaction must be in INCOMING_CHECK_IN_PROGRESS state. Did you start QC?',
+      );
+    if (tx.incomingMaterialChecks.length > 0)
+      throw new BadRequestException(
+        'Result has already been submitted for this transaction',
+      );
 
     const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
 
@@ -153,21 +242,36 @@ export class QcService {
         checkedById: userId,
         startedAt: tx.qcStartAt,
         completedAt: new Date(),
-      } });
+      },
+    });
 
-    const nextStatus = result === 'PASS' ? 'INCOMING_CHECK_PASSED' : 'INCOMING_CHECK_REJECTED';
+    const nextStatus =
+      result === 'PASS' ? 'INCOMING_CHECK_PASSED' : 'INCOMING_CHECK_REJECTED';
 
     const updated = await this.prisma.transaction.update({
       where: { id: transactionId },
       data: {
         status: nextStatus,
         qcEndAt: new Date(),
-        statusHistory: { create: { newStatus: nextStatus, changedById: userId, notes: `Incoming Check: ${result}` } },
+        statusHistory: {
+          create: {
+            newStatus: nextStatus,
+            changedById: userId,
+            notes: `Incoming Check: ${result}`,
+          },
+        },
       },
-      include: { incomingMaterialChecks: true } });
+      include: { incomingMaterialChecks: true },
+    });
 
-    await this.activityLogsService.logAction({ userId, action: 'QC_INCOMING_RESULT', module: 'QC',  referenceId: transactionId, description: { result }, status: 'SUCCESS'
-      });
+    await this.activityLogsService.logAction({
+      userId,
+      action: 'QC_INCOMING_RESULT',
+      module: 'QC',
+      referenceId: transactionId,
+      description: { result },
+      status: 'SUCCESS',
+    });
 
     return {
       success: true,
@@ -183,10 +287,11 @@ export class QcService {
         qcVehicleChecks: true,
         incomingMaterialChecks: true,
         attachments: { where: { module: 'QC' } },
-      } });
-    
+      },
+    });
+
     if (!tx) throw new NotFoundException('Transaction not found');
-    
+
     return {
       success: true,
       message: 'QC detail retrieved',
@@ -197,7 +302,16 @@ export class QcService {
   async getHistory() {
     const history = await this.prisma.transaction.findMany({
       where: {
-        status: { in: ['QC_VEHICLE_PASSED', 'QC_VEHICLE_REJECTED', 'INCOMING_CHECK_PASSED', 'INCOMING_CHECK_REJECTED', 'WEIGH_OUT_DONE', 'COMPLETED'] },
+        status: {
+          in: [
+            'QC_VEHICLE_PASSED',
+            'QC_VEHICLE_REJECTED',
+            'INCOMING_CHECK_PASSED',
+            'INCOMING_CHECK_REJECTED',
+            'WEIGH_OUT_DONE',
+            'COMPLETED',
+          ],
+        },
       },
       include: {
         qcVehicleChecks: true,
@@ -206,7 +320,7 @@ export class QcService {
       orderBy: { qcEndAt: 'desc' },
       take: 100,
     });
-    
+
     return {
       success: true,
       message: 'QC history retrieved',
@@ -214,16 +328,23 @@ export class QcService {
     };
   }
 
-  async uploadAttachment(transactionId: string, file: Express.Multer.File, dto: QcAttachmentDto, userId: string) {
+  async uploadAttachment(
+    transactionId: string,
+    file: any,
+    dto: QcAttachmentDto,
+    userId: string,
+  ) {
     if (!file) throw new BadRequestException('File is required');
-    const tx = await this.prisma.transaction.findUnique({ where: { id: transactionId } });
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    });
     if (!tx) throw new NotFoundException('Transaction not found');
 
     const attachment = await this.prisma.attachment.create({
       data: {
         transactionId,
         module: 'QC',
-        attachmentType: dto.attachmentType as any || 'PHOTO',
+        attachmentType: (dto.attachmentType as any) || 'PHOTO',
         originalName: file.originalname,
         fileName: file.filename,
         filePath: file.path,
@@ -231,7 +352,8 @@ export class QcService {
         size: file.size,
         description: dto.description,
         uploadedById: userId,
-      } });
+      },
+    });
 
     return {
       success: true,

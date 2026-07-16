@@ -26,6 +26,7 @@ export const useAuthStore = defineStore('auth', {
     return {
       user,
       token,
+      mustChangePassword: false,
       loading: false,
       error: null
     }
@@ -54,19 +55,25 @@ export const useAuthStore = defineStore('auth', {
           authData = responseData
         }
 
-        const { accessToken, refreshToken, user } = authData || {}
+        const { accessToken, refreshToken, user, mustChangePassword } = authData || {}
         if (!accessToken || !user) {
           throw new Error('Invalid response data from server')
         }
 
         this.token = accessToken
         this.user = user
+        this.mustChangePassword = !!mustChangePassword
 
         localStorage.setItem('access_token', accessToken)
         localStorage.setItem('user', JSON.stringify(user))
+        if (mustChangePassword) {
+          localStorage.setItem('mustChangePassword', '1')
+        } else {
+          localStorage.removeItem('mustChangePassword')
+        }
 
         this.loading = false
-        return { success: true, user }
+        return { success: true, user, mustChangePassword }
       } catch (err) {
         this.clearAuth()
         const message = err.gmsMessage || getErrorMessage(err);
@@ -156,6 +163,7 @@ export const useAuthStore = defineStore('auth', {
       const userStr = localStorage.getItem('user')
 
       this.token = token
+      this.mustChangePassword = localStorage.getItem('mustChangePassword') === '1'
 
       if (userStr && token) {
         try {
@@ -172,11 +180,13 @@ export const useAuthStore = defineStore('auth', {
     clearAuth() {
       this.user = null
       this.token = null
+      this.mustChangePassword = false
       this.error = null
       this.loading = false
 
       localStorage.removeItem('access_token')
       localStorage.removeItem('user')
+      localStorage.removeItem('mustChangePassword')
       sessionStorage.removeItem('access_token')
       sessionStorage.removeItem('user')
       

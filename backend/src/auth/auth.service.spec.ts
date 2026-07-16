@@ -30,7 +30,10 @@ describe('AuthService Refresh Token Rotation', () => {
         },
         {
           provide: ConfigService,
-          useValue: { getOrThrow: jest.fn().mockReturnValue('secret'), get: jest.fn() },
+          useValue: {
+            getOrThrow: jest.fn().mockReturnValue('secret'),
+            get: jest.fn(),
+          },
         },
         {
           provide: ActivityLogsService,
@@ -45,18 +48,24 @@ describe('AuthService Refresh Token Rotation', () => {
   });
 
   it('should invalidate all tokens on refresh token reuse attack', async () => {
-    jest.spyOn(jwtService, 'verify').mockReturnValue({ sub: 'user-1', email: 'test@local' });
+    jest
+      .spyOn(jwtService, 'verify')
+      .mockReturnValue({ sub: 'user-1', email: 'test@local' });
     jest.spyOn(prismaService.user, 'findUnique').mockResolvedValue({
       id: 'user-1',
       isActive: true,
       refreshTokenHash: 'stored-hash',
     } as any);
-    
+
     // Simulate argon2 failing -> meaning the token was already used (reuse attack)
     (argon2.verify as jest.Mock).mockResolvedValue(false);
-    const updateSpy = jest.spyOn(prismaService.user, 'update').mockResolvedValue(null as any);
+    const updateSpy = jest
+      .spyOn(prismaService.user, 'update')
+      .mockResolvedValue(null as any);
 
-    await expect(service.refreshTokens('stolen-token')).rejects.toThrow(UnauthorizedException);
+    await expect(service.refreshTokens('stolen-token')).rejects.toThrow(
+      UnauthorizedException,
+    );
 
     // Verify rotation security: it must nullify the stored hash
     expect(updateSpy).toHaveBeenCalledWith({

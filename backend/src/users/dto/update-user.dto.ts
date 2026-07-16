@@ -1,4 +1,13 @@
-import { IsEmail, IsEnum, IsOptional, IsString, MinLength, IsBoolean, IsArray, Matches } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MinLength,
+  IsBoolean,
+  IsArray,
+  Matches,
+} from 'class-validator';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -7,14 +16,11 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^[a-z0-9_]+$/, { message: 'Username must be lowercase, alphanumeric, or underscores, and contain no spaces' })
+  @Matches(/^[a-z0-9_]+$/, {
+    message:
+      'Username must be lowercase, alphanumeric, or underscores, and contain no spaces',
+  })
   username?: string;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(8)
-  @Matches(/^(?=.*[A-Za-z])(?=.*\\d).*$/, { message: 'Password must contain at least one letter and one number' })
-  password?: string;
 
   @IsOptional()
   @IsString()
@@ -32,4 +38,24 @@ export class UpdateUserDto {
   @IsArray()
   @IsString({ each: true })
   warehouseAccess?: string[];
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  department?: string;
+
+  @IsOptional()
+  @IsString()
+  site?: string;
+
+  @IsOptional()
+  @IsString()
+  area?: string;
+
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
 }

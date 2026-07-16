@@ -383,12 +383,12 @@
                       style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
                       <span class="material-icons text-lg">block</span><span>REJECT SAMPLING</span>
                     </button>
-                    <button v-if="!hasSamplingReject" type="button" @click="acceptSamplingAndFinish" :disabled="isProcessing"
+                    <button type="button" @click="acceptSamplingAndFinish" :disabled="isProcessing"
                       class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
-                      style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);box-shadow:0 4px 12px rgba(74,139,223,0.3)">
+                      :style="hasSamplingReject ? 'background:linear-gradient(135deg,#F59E0B,#D97706);box-shadow:0 4px 12px rgba(245,158,11,0.3)' : 'background:linear-gradient(135deg,#4A8BDF,#3A6ABF);box-shadow:0 4px 12px rgba(74,139,223,0.3)'">
                       <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
                       <span v-else class="material-icons text-lg">check_circle</span>
-                      <span>ACCEPT & UNLOCK ROLL WEIGHT</span>
+                      <span>{{ hasSamplingReject ? 'TETAP DITERIMA' : 'ACCEPT & UNLOCK ROLL WEIGHT' }}</span>
                     </button>
                   </div>
                 </div>
@@ -494,6 +494,7 @@ const checklistStates = ref([])
 const samplingStates = ref([null, null, null])
 const samplingDecision = ref(null)
 const showRejectModal = ref(false)
+const compiledChecklistString = ref('')
 const rejectComment = ref('')
 const rejectCommentError = ref(false)
 
@@ -579,7 +580,40 @@ const saveSecurityInfo = async () => {
   } finally { isProcessing.value = false; }
 }
 
-const handlePhotoUpload = (event, index) => { const file = event.target.files[0]; if (file) checklistStates.value[index].photo = file.name }
+const handlePhotoUpload = (event, index) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      
+      const MAX_SIZE = 800;
+      if (width > height && width > MAX_SIZE) {
+        height *= MAX_SIZE / width;
+        width = MAX_SIZE;
+      } else if (height > MAX_SIZE) {
+        width *= MAX_SIZE / height;
+        height = MAX_SIZE;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Compress to JPEG with 0.6 quality to keep it lightweight for DB storage
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      checklistStates.value[index].photo = dataUrl;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
 
 const isChecklistComplete = computed(() => {
   if (checklistStates.value.length === 0) return false
@@ -626,9 +660,31 @@ const acceptSamplingAndFinish = async () => {
   if (isProcessing.value) return;
   isProcessing.value = true;
   try {
-    const response = await warehouseStore.completeQcAnalysis(selectedTruck.value.id);
+    // Compile checklist and sampling into a string BEFORE the API call
+    let resultStrs = []
+    if (hasSamplingReject.value) {
+      resultStrs.push('DITERIMA DENGAN CATATAN')
+    }
+    const samplings = samplingStates.value.map((s, idx) => `${samplingParams[idx].label}: ${s === 'ok' ? 'COMPLIANT' : 'NON-COMPLIANT'}`)
+    resultStrs.push(`Sampling: [${samplings.join(', ')}]`)
+    
+    const checks = checklistStates.value.map((s, idx) => {
+      let statusStr = s.status === 'ok' ? 'OK' : 'NOT OK';
+      if (s.photo) statusStr += `||IMG:${s.photo}`;
+      return `Item ${idx+1}: ${statusStr}`;
+    })
+    resultStrs.push(`Checklist: [${checks.join(' | ')}]`)
+    
+    compiledChecklistString.value = resultStrs.join(' | ')
+
+    // Send remarks to backend so it's persisted immediately
+    const response = await warehouseStore.completeQcAnalysis(selectedTruck.value.id, { remarks: compiledChecklistString.value });
     const updatedTruck = response?.data || response;
-    if (updatedTruck) truckStore.upsertTruck(updatedTruck);
+
+    if (updatedTruck) {
+      updatedTruck.compiledChecklist = compiledChecklistString.value
+      truckStore.upsertTruck(updatedTruck);
+    }
     
     samplingDecision.value = 'accepted'
     isChecklistPassed.value = true
@@ -652,7 +708,13 @@ const handleWeightSave = async (weight) => {
   if (ok) {
     isProcessing.value = true;
     try {
-      const response = await warehouseStore.completeProcess(selectedTruck.value.id, { actualWeight: weight })
+      const payload = { actualWeight: weight }
+      if (compiledChecklistString.value) {
+        payload.remarks = compiledChecklistString.value
+      } else if (selectedTruck.value.compiledChecklist) {
+        payload.remarks = selectedTruck.value.compiledChecklist
+      }
+      const response = await warehouseStore.completeProcess(selectedTruck.value.id, payload)
       const updatedTruck = response?.data || response;
       if (updatedTruck) truckStore.upsertTruck(updatedTruck);
       const nextStep = 'QC Verification (Lab)';
@@ -660,6 +722,7 @@ const handleWeightSave = async (weight) => {
       selectedTruck.value = null
       rollWeightInput.value = null
       isChecklistPassed.value = false
+      compiledChecklistString.value = ''
     } catch(error) {
       //
     } finally { isProcessing.value = false; }

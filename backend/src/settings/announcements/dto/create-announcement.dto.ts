@@ -1,5 +1,17 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsDateString } from 'class-validator';
-import { AnnouncementType, AnnouncementStatus, AnnouncementLocation, AnnouncementSpeed, AnnouncementPriority } from '@prisma/client';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsDateString,
+} from 'class-validator';
+import {
+  AnnouncementType,
+  AnnouncementStatus,
+  AnnouncementLocation,
+  AnnouncementSpeed,
+  AnnouncementPriority,
+} from '@prisma/client';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateAnnouncementDto {
@@ -23,7 +35,10 @@ export class CreateAnnouncementDto {
   @IsOptional()
   status?: AnnouncementStatus;
 
-  @ApiProperty({ enum: AnnouncementLocation, default: AnnouncementLocation.ALL_PAGES })
+  @ApiProperty({
+    enum: AnnouncementLocation,
+    default: AnnouncementLocation.ALL_PAGES,
+  })
   @IsEnum(AnnouncementLocation)
   @IsOptional()
   location?: AnnouncementLocation;
@@ -53,7 +68,10 @@ export class CreateAnnouncementDto {
   @IsOptional()
   backgroundColor?: string;
 
-  @ApiProperty({ enum: AnnouncementPriority, default: AnnouncementPriority.MEDIUM })
+  @ApiProperty({
+    enum: AnnouncementPriority,
+    default: AnnouncementPriority.MEDIUM,
+  })
   @IsEnum(AnnouncementPriority)
   @IsOptional()
   priority?: AnnouncementPriority;

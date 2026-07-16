@@ -13,6 +13,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { SettingsModule } from './settings/settings.module';
 import { ActivityLogsModule } from './activity-logs/activity-logs.module';
+import { SystemIssuesModule } from './system-issues/system-issues.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -21,10 +22,12 @@ import { APP_GUARD } from '@nestjs/core';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    ThrottlerModule.forRoot([{
-      ttl: 60000,
-      limit: 100, // 100 requests per minute
-    }]),
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000,
+        limit: 100, // 100 requests per minute
+      },
+    ]),
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -37,6 +40,7 @@ import { APP_GUARD } from '@nestjs/core';
     ReportsModule,
     SettingsModule,
     ActivityLogsModule,
+    SystemIssuesModule,
   ],
   controllers: [AppController],
   providers: [

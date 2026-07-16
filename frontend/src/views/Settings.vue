@@ -18,17 +18,6 @@
           </button>
         </div>
 
-        <!-- Site / Plant Setting -->
-        <div class="p-5 rounded-2xl animate-fadeInUp stagger-4 group hover:-translate-y-1 transition-all duration-300" style="background:white;border:1px solid #E8EEF7;box-shadow:0 2px 12px rgba(15,23,42,0.05)">
-          <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-colors" style="background:rgba(160,0,109,0.1);color:#A0006D">
-            <span class="material-icons text-xl group-hover:scale-110 transition-transform">business</span>
-          </div>
-          <h3 class="text-sm font-black text-slate-900 mb-1">Site / Plant Setting</h3>
-          <p class="text-xs text-slate-500 font-medium mb-5 line-clamp-2">Configure factory sites, warehouses, and gate locations within the system.</p>
-          <button class="w-full py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-slate-50 hover:bg-[#A0006D] hover:text-white transition-colors border border-slate-100 hover:border-transparent">
-            Manage Sites
-          </button>
-        </div>
 
         <!-- Master Data Setting -->
         <div class="p-5 rounded-2xl animate-fadeInUp stagger-5 group hover:-translate-y-1 transition-all duration-300" style="background:white;border:1px solid #E8EEF7;box-shadow:0 2px 12px rgba(15,23,42,0.05)">

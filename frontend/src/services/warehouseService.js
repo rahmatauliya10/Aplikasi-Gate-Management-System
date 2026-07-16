@@ -65,8 +65,8 @@ const warehouseService = {
    * Complete QC Analysis for GBB
    * @param {Number|String} truckId
    */
-  completeQcAnalysis(truckId) {
-    return api.post(`/warehouse/complete-qc-analysis/${truckId}`)
+  completeQcAnalysis(truckId, data = {}) {
+    return api.post(`/warehouse/complete-qc-analysis/${truckId}`, data)
   }
 }
 

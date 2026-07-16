@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Param, Body, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -28,21 +37,33 @@ export class QcController {
   @Post('start/:transactionId')
   @Roles('QC')
   @ApiOperation({ summary: 'Start QC process' })
-  startQc(@Param('transactionId') id: string, @Body() dto: StartQcDto, @CurrentUser() user: JwtPayloadUser) {
+  startQc(
+    @Param('transactionId') id: string,
+    @Body() dto: StartQcDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
     return this.qcService.startQc(id, dto, user.id);
   }
 
   @Post('vehicle-result/:transactionId')
   @Roles('QC')
   @ApiOperation({ summary: 'Submit vehicle check result' })
-  submitVehicleCheck(@Param('transactionId') id: string, @Body() dto: VehicleCheckResultDto, @CurrentUser() user: JwtPayloadUser) {
+  submitVehicleCheck(
+    @Param('transactionId') id: string,
+    @Body() dto: VehicleCheckResultDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
     return this.qcService.submitVehicleCheck(id, dto, user.id);
   }
 
   @Post('incoming-result/:transactionId')
   @Roles('QC')
   @ApiOperation({ summary: 'Submit incoming material check result' })
-  submitIncomingCheck(@Param('transactionId') id: string, @Body() dto: IncomingCheckResultDto, @CurrentUser() user: JwtPayloadUser) {
+  submitIncomingCheck(
+    @Param('transactionId') id: string,
+    @Body() dto: IncomingCheckResultDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
     return this.qcService.submitIncomingCheck(id, dto, user.id);
   }
 
@@ -67,7 +88,13 @@ export class QcController {
     require('@nestjs/platform-express').FileInterceptor('file', {
       storage: require('multer').diskStorage({
         destination: process.env.UPLOAD_DIR || './uploads',
-        filename: (req: any, file: any, cb: any) => cb(null, `${Date.now()}-${file.originalname}`),
+        filename: (req: any, file: any, cb: any) => {
+          const crypto = require('crypto');
+          const path = require('path');
+          const randomName = crypto.randomUUID();
+          const ext = path.extname(file.originalname);
+          cb(null, `${randomName}${ext}`);
+        },
       }),
     }),
   )
@@ -76,12 +103,17 @@ export class QcController {
     @UploadedFile(
       new (require('@nestjs/common').ParseFilePipe)({
         validators: [
-          new (require('@nestjs/common').MaxFileSizeValidator)({ maxSize: parseInt(process.env.MAX_FILE_SIZE_MB || '10') * 1024 * 1024 }),
-          new (require('@nestjs/common').FileTypeValidator)({ fileType: /(jpg|jpeg|png|pdf)$/ }),
+          new (require('@nestjs/common').MaxFileSizeValidator)({
+            maxSize:
+              parseInt(process.env.MAX_FILE_SIZE_MB || '10') * 1024 * 1024,
+          }),
+          new (require('@nestjs/common').FileTypeValidator)({
+            fileType: /(jpg|jpeg|png|pdf)$/,
+          }),
         ],
       }),
     )
-    file: Express.Multer.File,
+    file: any,
     @Body() dto: QcAttachmentDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {

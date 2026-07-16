@@ -9,12 +9,24 @@ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
 
-  constructor(private prisma: PrismaService, private activityLogsService: ActivityLogsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private activityLogsService: ActivityLogsService,
+  ) {}
 
   async getTransactionHistory(query: ReportQueryDto, user: JwtPayloadUser) {
-    const { page = 1, limit = 20, processType, startDate, endDate, search } = query;
+    const {
+      page = 1,
+      limit = 20,
+      processType,
+      startDate,
+      endDate,
+      search,
+    } = query;
 
-    this.logger.log(`Report history requested by ${user.email} | page=${page} limit=${limit}`);
+    this.logger.log(
+      `Report history requested by ${user.email} | page=${page} limit=${limit}`,
+    );
 
     const where: Prisma.TransactionWhereInput = {
       status: { in: ['COMPLETED', 'CANCELLED'] },
@@ -62,14 +74,16 @@ export class ReportsService {
       }),
     ]);
 
-    await this.activityLogsService.logAction({
+    await this.activityLogsService
+      .logAction({
         userId: user.id,
         action: 'REPORT_HISTORY_VIEW',
         module: 'REPORTS',
-        
+
         description: `User viewed transaction history report`,
-        status: 'SUCCESS'
-      }).catch(() => {});
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
 
     return {
       success: true,
@@ -116,19 +130,33 @@ export class ReportsService {
       include: {
         fraudChecks: true,
       },
-      orderBy: { createdAt: 'desc' } });
+      orderBy: { createdAt: 'desc' },
+    });
 
-    await this.activityLogsService.logAction({
+    await this.activityLogsService
+      .logAction({
         userId: user.id,
         action: 'REPORT_EXPORT',
         module: 'REPORTS',
         description: `User exported transaction history to CSV`,
-        status: 'SUCCESS'
-      }).catch(() => {});
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
 
     // Generate CSV
-    const headers = ['TRX ID', 'Plate Number', 'Vendor', 'Type', 'Status', 'Gate In', 'Gate Out', 'Net WB', 'WH Scale', 'Deviation Status'];
-    
+    const headers = [
+      'TRX ID',
+      'Plate Number',
+      'Vendor',
+      'Type',
+      'Status',
+      'Gate In',
+      'Gate Out',
+      'Net WB',
+      'WH Scale',
+      'Deviation Status',
+    ];
+
     const escapeCsv = (val: any) => {
       let str = String(val).replace(/"/g, '""');
       if (str.match(/^[=\-+@]/)) {
@@ -137,8 +165,11 @@ export class ReportsService {
       return `"${str}"`;
     };
 
-    const rows = data.map(t => {
-      const fraud = t.fraudChecks && t.fraudChecks.length > 0 ? t.fraudChecks[0].riskLevel : 'SAFE';
+    const rows = data.map((t) => {
+      const fraud =
+        t.fraudChecks && t.fraudChecks.length > 0
+          ? t.fraudChecks[0].riskLevel
+          : 'SAFE';
       return [
         t.transactionNumber,
         t.plateNumber,
@@ -149,8 +180,10 @@ export class ReportsService {
         t.gateOutAt ? t.gateOutAt.toISOString() : '',
         t.netWeight || 0,
         t.actualWeight || 0,
-        fraud
-      ].map(escapeCsv).join(',');
+        fraud,
+      ]
+        .map(escapeCsv)
+        .join(',');
     });
 
     return [headers.join(','), ...rows].join('\n');

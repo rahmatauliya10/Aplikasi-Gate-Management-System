@@ -16,7 +16,12 @@ describe('TransactionsService State Machine', () => {
           provide: PrismaService,
           useValue: {
             transaction: { findUnique: jest.fn(), update: jest.fn() },
-            $transaction: jest.fn((cb) => cb({ transaction: { update: jest.fn() }, transactionStatusHistory: { create: jest.fn() } })),
+            $transaction: jest.fn((cb) =>
+              cb({
+                transaction: { update: jest.fn() },
+                transactionStatusHistory: { create: jest.fn() },
+              }),
+            ),
           },
         },
         {
@@ -30,15 +35,18 @@ describe('TransactionsService State Machine', () => {
     prismaService = module.get<PrismaService>(PrismaService);
   });
 
-  it('should deny status transition from REGISTERED to COMPLETED (bypass prevention)', async () => {
+  it('should deny cancel if status is COMPLETED', async () => {
     const mockTx = {
       id: 'tx-1',
-      status: 'REGISTERED',
+      status: 'COMPLETED',
     };
-    
-    jest.spyOn(prismaService.transaction, 'findUnique').mockResolvedValue(mockTx as any);
 
-    await expect(service.updateStatus('tx-1', { status: 'COMPLETED' }, 'admin'))
-      .rejects.toThrow(BadRequestException);
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    await expect(
+      service.cancel('tx-1', 'Test', { id: 'admin' } as any),
+    ).rejects.toThrow(BadRequestException);
   });
 });

@@ -1,10 +1,17 @@
-import { Injectable, UnauthorizedException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class AuthService {
@@ -23,16 +30,21 @@ export class AuthService {
     const identifier = dto.identifier.trim();
     const user = await this.prisma.user.findFirst({
       where: {
+        isDeleted: false,
         OR: [
           { email: { equals: identifier, mode: 'insensitive' } },
           { username: { equals: identifier, mode: 'insensitive' } },
         ],
       },
-      include: { warehouseAccess: true } });
+      include: { warehouseAccess: true },
+    });
 
     if (!user) {
       this.logger.warn(`Login failed: user not found - ${dto.identifier}`);
-      await this.auditLog(null, 'LOGIN_FAILED', { identifier: dto.identifier, reason: 'User not found' });
+      await this.auditLog(null, 'LOGIN_FAILED', {
+        identifier: dto.identifier,
+        reason: 'User not found',
+      });
       throw new UnauthorizedException({
         success: false,
         message: 'Username atau email tidak ditemukan.',
@@ -43,7 +55,10 @@ export class AuthService {
     const passwordValid = await argon2.verify(user.passwordHash, dto.password);
     if (!passwordValid) {
       this.logger.warn(`Login failed: invalid password for ${dto.identifier}`);
-      await this.auditLog(user.id, 'LOGIN_FAILED', { identifier: dto.identifier, reason: 'Invalid password' });
+      await this.auditLog(user.id, 'LOGIN_FAILED', {
+        identifier: dto.identifier,
+        reason: 'Invalid password',
+      });
       throw new UnauthorizedException({
         success: false,
         message: 'Password salah.',
@@ -53,7 +68,10 @@ export class AuthService {
 
     if (!user.isActive) {
       this.logger.warn(`Login failed: account disabled for ${dto.identifier}`);
-      await this.auditLog(user.id, 'LOGIN_FAILED', { identifier: dto.identifier, reason: 'Account disabled' });
+      await this.auditLog(user.id, 'LOGIN_FAILED', {
+        identifier: dto.identifier,
+        reason: 'Account disabled',
+      });
       throw new UnauthorizedException({
         success: false,
         message: 'Account is disabled. Contact administrator.',
@@ -61,16 +79,41 @@ export class AuthService {
       });
     }
 
+    if (
+      user.mustChangePassword &&
+      user.temporaryPasswordExpiresAt &&
+      new Date() > user.temporaryPasswordExpiresAt
+    ) {
+      this.logger.warn(
+        `Login failed: temporary password expired for ${dto.identifier}`,
+      );
+      await this.auditLog(user.id, 'LOGIN_FAILED', {
+        identifier: dto.identifier,
+        reason: 'Temporary password expired',
+      });
+      throw new UnauthorizedException({
+        success: false,
+        message: 'Temporary password expired. Hubungi administrator.',
+        code: 'TEMPORARY_PASSWORD_EXPIRED',
+        errors: [],
+      });
+    }
+
+    // Generate tokens, fallback to JWT_SECRET for backward compatibility during transition
     const payload = {
       sub: user.id,
       name: user.name,
       username: user.username,
       email: user.email,
       role: user.role,
+      tv: user.tokenVersion,
     };
-    const accessToken = this.jwtService.sign(payload);
+    const accessSecret = this.config.get('JWT_ACCESS_SECRET');
+    if (!accessSecret) throw new Error('JWT_ACCESS_SECRET is not configured');
+
+    const accessToken = this.jwtService.sign(payload, { secret: accessSecret });
     const refreshToken = this.jwtService.sign(payload, {
-      secret: this.config.getOrThrow('JWT_REFRESH_SECRET'),
+      secret: this.config.get('JWT_REFRESH_SECRET'),
       expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d'),
     });
 
@@ -78,20 +121,16 @@ export class AuthService {
     const refreshTokenHash = await argon2.hash(refreshToken);
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { 
+      data: {
         refreshTokenHash,
-        lastLoginAt: new Date()
-      } });
-
-    const isDefaultPassword = [
-      process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
-      process.env.DEFAULT_QC_PASSWORD || 'qc123',
-      process.env.DEFAULT_WAREHOUSE_PASSWORD || 'warehouse123',
-      process.env.DEFAULT_SECURITY_PASSWORD || 'security123',
-    ].includes(dto.password);
+        lastLoginAt: new Date(),
+      },
+    });
 
     this.logger.log(`Login success for ${dto.identifier}`);
-    await this.auditLog(user.id, 'LOGIN_SUCCESS', { identifier: dto.identifier });
+    await this.auditLog(user.id, 'LOGIN_SUCCESS', {
+      identifier: dto.identifier,
+    });
 
     return {
       success: true,
@@ -99,7 +138,7 @@ export class AuthService {
       data: {
         accessToken,
         refreshToken,
-        mustChangePassword: isDefaultPassword,
+        mustChangePassword: user.mustChangePassword,
         user: {
           id: user.id,
           name: user.name,
@@ -107,6 +146,12 @@ export class AuthService {
           email: user.email,
           role: user.role,
           warehouseAccess: user.warehouseAccess.map((wa) => wa.processType),
+          phone: user.phone,
+          department: user.department,
+          site: user.site,
+          area: user.area,
+          avatarUrl: user.avatarUrl,
+          lastLoginAt: user.lastLoginAt,
         },
       },
     };
@@ -117,7 +162,8 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshTokenHash: null } });
+      data: { refreshTokenHash: null },
+    });
 
     await this.auditLog(userId, 'LOGOUT', {});
 
@@ -133,8 +179,9 @@ export class AuthService {
 
     let payload: any;
     try {
+      const refreshSecret = this.config.get('JWT_REFRESH_SECRET');
       payload = this.jwtService.verify(refreshToken, {
-        secret: this.config.getOrThrow('JWT_REFRESH_SECRET'),
+        secret: refreshSecret,
       });
     } catch {
       this.logger.warn('Refresh token: invalid or expired token');
@@ -147,10 +194,13 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      include: { warehouseAccess: true } });
+      include: { warehouseAccess: true },
+    });
 
     if (!user || !user.isActive || !user.refreshTokenHash) {
-      this.logger.warn(`Refresh token: user not found, inactive, or no stored token for ${payload.email}`);
+      this.logger.warn(
+        `Refresh token: user not found, inactive, or no stored token for ${payload.email}`,
+      );
       throw new UnauthorizedException({
         success: false,
         message: 'Invalid refresh token',
@@ -159,13 +209,19 @@ export class AuthService {
     }
 
     // Verify refresh token matches stored hash
-    const tokenMatches = await argon2.verify(user.refreshTokenHash, refreshToken);
+    const tokenMatches = await argon2.verify(
+      user.refreshTokenHash,
+      refreshToken,
+    );
     if (!tokenMatches) {
-      this.logger.warn(`Refresh token: token mismatch for ${payload.email} — possible token reuse attack`);
+      this.logger.warn(
+        `Refresh token: token mismatch for ${payload.email} — possible token reuse attack`,
+      );
       // Invalidate all tokens (security measure)
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { refreshTokenHash: null } });
+        data: { refreshTokenHash: null },
+      });
       throw new UnauthorizedException({
         success: false,
         message: 'Invalid refresh token',
@@ -180,10 +236,17 @@ export class AuthService {
       username: user.username,
       email: user.email,
       role: user.role,
+      tv: user.tokenVersion,
     };
-    const newAccessToken = this.jwtService.sign(newPayload);
+
+    const accessSecret = this.config.get('JWT_ACCESS_SECRET');
+    const refreshSecret = this.config.get('JWT_REFRESH_SECRET');
+
+    const newAccessToken = this.jwtService.sign(newPayload, {
+      secret: accessSecret,
+    });
     const newRefreshToken = this.jwtService.sign(newPayload, {
-      secret: this.config.getOrThrow('JWT_REFRESH_SECRET'),
+      secret: refreshSecret,
       expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d'),
     });
 
@@ -191,7 +254,8 @@ export class AuthService {
     const newRefreshTokenHash = await argon2.hash(newRefreshToken);
     await this.prisma.user.update({
       where: { id: user.id },
-      data: { refreshTokenHash: newRefreshTokenHash } });
+      data: { refreshTokenHash: newRefreshTokenHash },
+    });
 
     this.logger.log(`Refresh token success for ${user.email}`);
     await this.auditLog(user.id, 'REFRESH_TOKEN', {});
@@ -209,6 +273,12 @@ export class AuthService {
           email: user.email,
           role: user.role,
           warehouseAccess: user.warehouseAccess.map((wa) => wa.processType),
+          phone: user.phone,
+          department: user.department,
+          site: user.site,
+          area: user.area,
+          avatarUrl: user.avatarUrl,
+          lastLoginAt: user.lastLoginAt,
         },
       },
     };
@@ -217,7 +287,8 @@ export class AuthService {
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { warehouseAccess: true } });
+      include: { warehouseAccess: true },
+    });
 
     if (!user) {
       throw new UnauthorizedException({
@@ -239,7 +310,109 @@ export class AuthService {
         isActive: user.isActive,
         warehouseAccess: user.warehouseAccess.map((wa) => wa.processType),
         createdAt: user.createdAt,
+        phone: user.phone,
+        department: user.department,
+        site: user.site,
+        area: user.area,
+        avatarUrl: user.avatarUrl,
+        lastLoginAt: user.lastLoginAt,
       },
+    };
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const data: any = {};
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.department !== undefined) data.department = dto.department;
+    if (dto.site !== undefined) data.site = dto.site;
+    if (dto.area !== undefined) data.area = dto.area;
+    if (dto.avatarUrl !== undefined) data.avatarUrl = dto.avatarUrl;
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+      include: { warehouseAccess: true },
+    });
+
+    await this.auditLog(userId, 'UPDATE_PROFILE', {
+      details: 'User updated profile details',
+    });
+
+    return {
+      success: true,
+      message: 'Profile updated successfully',
+      data: {
+        id: updated.id,
+        name: updated.name,
+        username: updated.username,
+        email: updated.email,
+        role: updated.role,
+        isActive: updated.isActive,
+        warehouseAccess: updated.warehouseAccess.map((wa) => wa.processType),
+        createdAt: updated.createdAt,
+        phone: updated.phone,
+        department: updated.department,
+        site: updated.site,
+        area: updated.area,
+        avatarUrl: updated.avatarUrl,
+        lastLoginAt: updated.lastLoginAt,
+      },
+    };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('User not found');
+
+    const passwordValid = await argon2.verify(
+      user.passwordHash,
+      dto.currentPassword,
+    );
+    if (!passwordValid) {
+      await this.auditLog(userId, 'CHANGE_PASSWORD_FAILED', {
+        reason: 'Invalid current password',
+      });
+      throw new BadRequestException({
+        success: false,
+        message: 'Password saat ini salah',
+        errors: [],
+      });
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Password baru tidak boleh sama dengan password lama',
+        errors: [],
+      });
+    }
+
+    const newPasswordHash = await argon2.hash(dto.newPassword, {
+      type: argon2.argon2id,
+    });
+
+    // Use transaction to update user and clear sessions
+    await this.prisma.$transaction(async (prisma) => {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash: newPasswordHash,
+          mustChangePassword: false,
+          passwordChangedAt: new Date(),
+          temporaryPasswordExpiresAt: null,
+          tokenVersion: { increment: 1 },
+          refreshTokenHash: null,
+        },
+      });
+    });
+
+    await this.auditLog(userId, 'PASSWORD_CHANGED', {});
+
+    return {
+      success: true,
+      message: 'Password berhasil diubah. Silakan login kembali.',
+      data: null,
     };
   }
 
@@ -253,7 +426,7 @@ export class AuthService {
         role = u.role;
       }
     }
-    
+
     await this.activityLogsService.logAction({
       userId: userId || undefined,
       userName: userName || undefined,

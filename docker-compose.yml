@@ -16,11 +16,13 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     container_name: gate-system-backend
     restart: always
+    env_file:
+      - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gms?schema=public
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
       # WARNING: Provide these via .env file or secret manager, not here.
       # - JWT_ACCESS_SECRET
       # - JWT_REFRESH_SECRET
@@ -32,7 +34,8 @@ services:
       - JWT_REFRESH_EXPIRES_IN=7d
       - PORT=3001
       - NODE_ENV=production
-      - CORS_ORIGIN=http://localhost:8081
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8081}
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
       - UPLOAD_DIR=./uploads
       - MAX_FILE_SIZE_MB=10
       - DEFAULT_ADMIN_EMAIL=admin@gms.local
@@ -42,25 +45,26 @@ services:
     volumes:
       - uploads:/app/uploads
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   postgres:
     image: postgres:15-alpine
     container_name: gate-system-postgres
     restart: always
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=gms
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD wajib diisi}
+      - POSTGRES_DB=${POSTGRES_DB:-gms}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d gms"]
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 5s
       retries: 10

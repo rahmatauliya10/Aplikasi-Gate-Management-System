@@ -2,7 +2,7 @@
 FROM node:20-alpine as build-stage
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 COPY . .
 
 # Set production API URL (nginx proxies /api to backend)

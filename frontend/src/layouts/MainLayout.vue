@@ -114,7 +114,7 @@
               <div v-if="sidebarOpen && $route.path === '/gate-in'" class="ml-auto w-1.5 h-1.5 rounded-full bg-[#A0006D]"></div>
             </router-link>
 
-            <router-link v-if="hasAccess(['ADMIN', 'SECURITY', 'WAREHOUSE'])" to="/weighbridge" class="nav-link" :class="$route.path === '/weighbridge' ? 'nav-active' : 'nav-inactive'" :title="!sidebarOpen ? 'Weighbridge' : ''">
+            <router-link v-if="hasAccess(['ADMIN', 'SECURITY'])" to="/weighbridge" class="nav-link" :class="$route.path === '/weighbridge' ? 'nav-active' : 'nav-inactive'" :title="!sidebarOpen ? 'Weighbridge' : ''">
               <span class="nav-icon material-icons-outlined">speed</span>
               <transition name="fade-slide"><span v-if="sidebarOpen" class="nav-text">Weighing Bridge</span></transition>
               <div v-if="sidebarOpen && $route.path === '/weighbridge'" class="ml-auto w-1.5 h-1.5 rounded-full bg-[#A0006D]"></div>

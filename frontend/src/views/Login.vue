@@ -226,6 +226,17 @@ const handleLogin = async () => {
     
     if (result.success) {
       loginSuccess.value = true
+      if (result.mustChangePassword) {
+        statusMsg.value = 'Wajib ganti password! Mengalihkan...'
+        statusClass.value = 'status-success'
+        statusIcon.value = '⚠️'
+        notificationStore.addNotification('Login Success', 'Anda wajib mengganti password sementara Anda.', 'warning')
+        setTimeout(() => {
+          router.replace('/change-password')
+        }, 1200)
+        return
+      }
+
       statusMsg.value = 'Login Berhasil! Mengalihkan...'
       statusClass.value = 'status-success'
       statusIcon.value = '✅'
@@ -599,6 +610,11 @@ const handleLogin = async () => {
   font-family: 'Inter', sans-serif;
   font-weight: 500;
   outline: none;
+}
+/* Hide Edge/IE default password reveal icon to prevent double eye icon */
+.field-input-wrap input::-ms-reveal,
+.field-input-wrap input::-ms-clear {
+  display: none !important;
 }
 .field-input-wrap input::placeholder {
   color: transparent;

@@ -1,60 +1,34 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import helmet from 'helmet';
-import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
-import { json, urlencoded } from 'express';
+import { configureApp } from './app.config';
 
 async function bootstrap() {
   const isProduction = process.env.NODE_ENV === 'production';
   const app = await NestFactory.create(AppModule, {
-    logger: isProduction ? ['log', 'error', 'warn'] : ['log', 'error', 'warn', 'debug', 'verbose'],
+    logger: isProduction
+      ? ['log', 'error', 'warn']
+      : ['log', 'error', 'warn', 'debug', 'verbose'],
   });
 
-  const requiredEnvs = ['DATABASE_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'CORS_ORIGIN'];
+  const requiredEnvs = ['DATABASE_URL', 'JWT_REFRESH_SECRET', 'CORS_ORIGIN'];
   for (const env of requiredEnvs) {
     if (!process.env[env]) {
       throw new Error(`CRITICAL: Environment variable ${env} is missing.`);
     }
   }
 
+  if (!process.env.JWT_ACCESS_SECRET) {
+    throw new Error(
+      `CRITICAL: Environment variable JWT_ACCESS_SECRET is missing.`,
+    );
+  }
+
   app.enableShutdownHooks();
 
-  // Global prefix
-  app.setGlobalPrefix('api');
-
-  // Security headers
-  app.use(helmet());
-
-  // Increase payload limit for base64 photo uploads
-  app.use(json({ limit: '10mb' }));
-  app.use(urlencoded({ extended: true, limit: '10mb' }));
-
-  // CORS
-  const corsOrigin = process.env.CORS_ORIGIN;
-  if (!corsOrigin) {
-    throw new Error('CORS_ORIGIN environment variable is not defined.');
-  }
-  const origins = corsOrigin.split(',').map(o => o.trim());
-  
-  app.enableCors({
-    origin: origins,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    credentials: true,
-  });
-
-  // Global validation pipes
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  // Global Exception Filter
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  // Load shared application middlewares & configurations
+  configureApp(app);
 
   if (process.env.NODE_ENV !== 'production') {
     const swaggerConfig = new DocumentBuilder()
@@ -74,9 +48,10 @@ async function bootstrap() {
       .addTag('ActivityLogs', 'Activity log viewer')
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup('docs', app, document, { 
+    SwaggerModule.setup('docs', app, document, {
       useGlobalPrefix: true,
-      swaggerOptions: { persistAuthorization: true } });
+      swaggerOptions: { persistAuthorization: true },
+    });
   }
 
   const port = process.env.PORT || 3001;
@@ -85,7 +60,10 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   logger.log(`🚀 Application is running on: http://localhost:${port}/api`);
   if (process.env.NODE_ENV !== 'production') {
-    logger.log(`📖 Swagger docs available at: http://localhost:${port}/api/docs`);
+    logger.log(
+      `📖 Swagger docs available at: http://localhost:${port}/api/docs`,
+    );
   }
 }
-bootstrap();
+
+void bootstrap();

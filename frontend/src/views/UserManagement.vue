@@ -123,6 +123,9 @@
                   <div class="min-w-0">
                     <p class="font-bold text-slate-800 truncate">{{ user.name }}</p>
                     <p class="text-xs text-slate-400 truncate">{{ user.email }}</p>
+                    <p v-if="user.phone" class="text-[10px] text-slate-400 truncate flex items-center gap-1 mt-0.5">
+                      <span class="material-icons text-[11px]">phone</span>{{ user.phone }}
+                    </p>
                   </div>
                 </div>
               </td>
@@ -132,10 +135,16 @@
               </td>
               <!-- Role -->
               <td class="px-5 py-4">
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black" :class="roleBadgeClass(user.role)">
-                  <span class="material-icons text-[13px]">{{ roleIcon(user.role) }}</span>
-                  {{ roleLabel(user.role) }}
-                </span>
+                <div class="space-y-1">
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-black" :class="roleBadgeClass(user.role)">
+                    <span class="material-icons text-[13px]">{{ roleIcon(user.role) }}</span>
+                    {{ roleLabel(user.role) }}
+                  </span>
+                  <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1 space-y-0.5">
+                    <div v-if="user.department">Dept: {{ user.department }}</div>
+                    <div v-if="user.site || user.area">Loc: {{ [user.site, user.area].filter(Boolean).join(' - ') }}</div>
+                  </div>
+                </div>
               </td>
               <!-- Status -->
               <td class="px-5 py-4">
@@ -157,7 +166,8 @@
                   <button @click="openEditModal(user)" class="action-btn" title="Edit">
                     <span class="material-icons text-[16px]">edit</span>
                   </button>
-                  <button @click="openResetPasswordModal(user)" class="action-btn" title="Reset Password">
+                  <button @click="openResetPasswordModal(user)" class="action-btn"
+                    :disabled="user.username === 'admin'" title="Reset Password">
                     <span class="material-icons text-[16px]">lock_reset</span>
                   </button>
                   <button @click="confirmDelete(user)" class="action-btn text-rose-400 hover:text-rose-600 hover:bg-rose-50"
@@ -179,137 +189,160 @@
     </div>
 
     <!-- ═══ Create/Edit Modal ═══ -->
-    <transition name="fade">
-      <div v-if="showFormModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" @click.self="closeFormModal">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border border-slate-100">
-          <!-- Header -->
-          <div class="flex items-center justify-between p-5 border-b border-slate-100">
-            <h2 class="text-lg font-black text-slate-900">{{ isEditing ? 'Edit User' : 'Tambah User Baru' }}</h2>
-            <button @click="closeFormModal" class="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
-              <span class="material-icons text-lg">close</span>
-            </button>
-          </div>
-          <!-- Body -->
-          <div class="p-5 space-y-4">
-            <!-- Name -->
-            <div>
-              <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Nama Lengkap</label>
-              <input v-model="form.name" type="text" placeholder="Nama lengkap"
-                class="input-field" />
+    <Teleport to="body">
+      <transition name="fade">
+        <div v-if="showFormModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" @click.self="closeFormModal">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto border border-slate-100 animate-modal">
+            <!-- Header -->
+            <div class="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 class="text-lg font-black text-slate-900">{{ isEditing ? 'Edit User' : 'Tambah User Baru' }}</h2>
+              <button @click="closeFormModal" class="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+                <span class="material-icons text-lg">close</span>
+              </button>
             </div>
-            <!-- Username -->
-            <div>
-              <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Username</label>
-              <input v-model="form.username" type="text" placeholder="username (lowercase, no spaces)"
-                class="input-field font-mono" :disabled="isEditing && editingUser?.username === 'admin'" />
-            </div>
-            <!-- Email -->
-            <div>
-              <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
-              <input v-model="form.email" type="email" placeholder="email@domain.com"
-                class="input-field" />
-            </div>
-            <!-- Password (only for create) -->
-            <div v-if="!isEditing">
-              <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Password</label>
-              <input v-model="form.password" type="password" placeholder="Min. 4 karakter"
-                class="input-field" />
-            </div>
-            <!-- Role -->
-            <div>
-              <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
-              <select v-model="form.role" class="input-field cursor-pointer">
-                <option value="" disabled>Pilih role</option>
-                <option value="ADMIN">Admin</option>
-                <option value="SECURITY">Security</option>
-                <option value="WAREHOUSE">Warehouse</option>
-                <option value="QC">QC</option>
-              </select>
-            </div>
-            <!-- Warehouse Access (conditional) -->
-            <div v-if="form.role === 'WAREHOUSE' || form.role === 'ADMIN'">
-              <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Akses Gudang</label>
-              <div class="flex flex-wrap gap-3">
-                <label v-for="wh in warehouseOptions" :key="wh" class="flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-all"
-                  :class="form.warehouseAccess.includes(wh) ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-blue-200'">
-                  <input type="checkbox" :value="wh" v-model="form.warehouseAccess" class="accent-blue-500" />
-                  <span class="text-xs font-bold">{{ wh }}</span>
-                </label>
+            <!-- Body -->
+            <div class="p-5 space-y-4">
+              <!-- Name -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Nama Lengkap</label>
+                <input v-model="form.name" type="text" placeholder="Nama lengkap"
+                  class="input-field" />
+              </div>
+              <!-- Username -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Username</label>
+                <input v-model="form.username" type="text" placeholder="username (lowercase, no spaces)"
+                  class="input-field font-mono" :disabled="isEditing && editingUser?.username === 'admin'" />
+              </div>
+              <!-- Email -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
+                <input v-model="form.email" type="email" placeholder="email@domain.com"
+                  class="input-field" />
+              </div>
+              <!-- Phone Number -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Nomor Telepon (Opsional)</label>
+                <input v-model="form.phone" type="text" placeholder="Contoh: 081234567890"
+                  class="input-field" />
+              </div>
+              <!-- Department -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Departemen (Opsional)</label>
+                <input v-model="form.department" type="text" placeholder="Contoh: Operational Excellence"
+                  class="input-field" />
+              </div>
+              <!-- Site -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Site / Plant (Opsional)</label>
+                <input v-model="form.site" type="text" placeholder="Contoh: SJA 3"
+                  class="input-field" />
+              </div>
+              <!-- Area -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Area Kerja (Opsional)</label>
+                <input v-model="form.area" type="text" placeholder="Contoh: Gate Security"
+                  class="input-field" />
+              </div>
+              <!-- Role -->
+              <div>
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
+                <select v-model="form.role" class="input-field cursor-pointer">
+                  <option value="" disabled>Pilih role</option>
+                  <option value="ADMIN">Admin</option>
+                  <option value="SECURITY">Security</option>
+                  <option value="WAREHOUSE">Warehouse</option>
+                  <option value="QC">QC</option>
+                </select>
+              </div>
+              <!-- Warehouse Access (conditional) -->
+              <div v-if="form.role === 'WAREHOUSE' || form.role === 'ADMIN'">
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Akses Gudang</label>
+                <div class="flex flex-wrap gap-3">
+                  <label v-for="wh in warehouseOptions" :key="wh" class="flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-all"
+                    :class="form.warehouseAccess.includes(wh) ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-blue-200'">
+                    <input type="checkbox" :value="wh" v-model="form.warehouseAccess" class="accent-blue-500" />
+                    <span class="text-xs font-bold">{{ wh }}</span>
+                  </label>
+                </div>
+              </div>
+              <!-- Error -->
+              <div v-if="formError" class="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100">
+                <span class="material-icons text-rose-500 text-lg">error</span>
+                <p class="text-xs font-bold text-rose-600">{{ formError }}</p>
               </div>
             </div>
-            <!-- Error -->
-            <div v-if="formError" class="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100">
-              <span class="material-icons text-rose-500 text-lg">error</span>
-              <p class="text-xs font-bold text-rose-600">{{ formError }}</p>
+            <!-- Footer -->
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
+              <button @click="closeFormModal" class="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all">
+                Batal
+              </button>
+              <button @click="submitForm" :disabled="submitting" class="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-60">
+                <span v-if="submitting" class="animate-spin material-icons text-sm mr-1">sync</span>
+                {{ isEditing ? 'Simpan' : 'Buat User' }}
+              </button>
             </div>
           </div>
-          <!-- Footer -->
-          <div class="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
-            <button @click="closeFormModal" class="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all">
-              Batal
-            </button>
-            <button @click="submitForm" :disabled="submitting" class="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-60">
-              <span v-if="submitting" class="animate-spin material-icons text-sm mr-1">sync</span>
-              {{ isEditing ? 'Simpan' : 'Buat User' }}
-            </button>
-          </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+    </Teleport>
 
     <!-- ═══ Reset Password Modal ═══ -->
-    <transition name="fade">
-      <div v-if="showResetModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" @click.self="closeResetModal">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100">
-          <div class="flex items-center justify-between p-5 border-b border-slate-100">
-            <h2 class="text-lg font-black text-slate-900">Reset Password</h2>
-            <button @click="closeResetModal" class="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
-              <span class="material-icons text-lg">close</span>
-            </button>
-          </div>
-          <div class="p-5 space-y-4">
-            <p class="text-sm text-slate-600">Reset password untuk <strong class="text-slate-800">{{ resetTarget?.name }}</strong> (<span class="font-mono text-xs">{{ resetTarget?.username }}</span>)</p>
-            <div>
-              <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Password Baru</label>
-              <input v-model="resetPassword" type="password" placeholder="Min. 6 karakter" class="input-field" />
+    <Teleport to="body">
+      <transition name="fade">
+        <div v-if="showResetModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" @click.self="closeResetModal">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100 animate-modal">
+            <div class="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 class="text-lg font-black text-slate-900">Reset Password</h2>
+              <button @click="closeResetModal" class="w-8 h-8 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+                <span class="material-icons text-lg">close</span>
+              </button>
             </div>
-            <div v-if="resetError" class="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100">
-              <span class="material-icons text-rose-500 text-lg">error</span>
-              <p class="text-xs font-bold text-rose-600">{{ resetError }}</p>
+            <div class="p-5 space-y-4">
+              <p class="text-sm text-slate-600">Reset password untuk <strong class="text-slate-800">{{ resetTarget?.name }}</strong> (<span class="font-mono text-xs">{{ resetTarget?.username }}</span>)?</p>
+              <p class="text-xs text-slate-400 font-semibold leading-relaxed">
+                Password baru sementara akan di-generate otomatis oleh sistem dan harus diserahkan secara aman ke pengguna tersebut.
+              </p>
+              <div v-if="resetError" class="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-100">
+                <span class="material-icons text-rose-500 text-lg">error</span>
+                <p class="text-xs font-bold text-rose-600">{{ resetError }}</p>
+              </div>
             </div>
-          </div>
-          <div class="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
-            <button @click="closeResetModal" class="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all">Batal</button>
-            <button @click="submitResetPassword" :disabled="submitting" class="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-60">
-              <span v-if="submitting" class="animate-spin material-icons text-sm mr-1">sync</span>
-              Reset Password
-            </button>
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-slate-100">
+              <button @click="closeResetModal" class="px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all">Batal</button>
+              <button @click="submitResetPassword" :disabled="submitting" class="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all disabled:opacity-60">
+                <span v-if="submitting" class="animate-spin material-icons text-sm mr-1">sync</span>
+                Reset Password
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+    </Teleport>
 
     <!-- ═══ Delete Confirmation Modal ═══ -->
-    <transition name="fade">
-      <div v-if="showDeleteModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" @click.self="closeDeleteModal">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100">
-          <div class="p-6 text-center">
-            <div class="w-14 h-14 rounded-full bg-rose-50 flex items-center justify-center mx-auto mb-4">
-              <span class="material-icons text-rose-500 text-3xl">warning</span>
+    <Teleport to="body">
+      <transition name="fade">
+        <div v-if="showDeleteModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" @click.self="closeDeleteModal">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100 animate-modal">
+            <div class="p-6 text-center">
+              <div class="w-14 h-14 rounded-full bg-rose-50 flex items-center justify-center mx-auto mb-4">
+                <span class="material-icons text-rose-500 text-3xl">warning</span>
+              </div>
+              <h2 class="text-lg font-black text-slate-900 mb-2">Hapus User?</h2>
+              <p class="text-sm text-slate-500">User <strong class="text-slate-700">{{ deleteTarget?.name }}</strong> akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.</p>
             </div>
-            <h2 class="text-lg font-black text-slate-900 mb-2">Hapus User?</h2>
-            <p class="text-sm text-slate-500">User <strong class="text-slate-700">{{ deleteTarget?.name }}</strong> akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.</p>
-          </div>
-          <div class="flex items-center justify-center gap-3 p-5 border-t border-slate-100">
-            <button @click="closeDeleteModal" class="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all">Batal</button>
-            <button @click="submitDelete" :disabled="submitting" class="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 shadow-md hover:shadow-lg transition-all disabled:opacity-60">
-              <span v-if="submitting" class="animate-spin material-icons text-sm mr-1">sync</span>
-              Ya, Hapus
-            </button>
+            <div class="flex items-center justify-center gap-3 p-5 border-t border-slate-100">
+              <button @click="closeDeleteModal" class="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-all">Batal</button>
+              <button @click="submitDelete" :disabled="submitting" class="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-rose-500 hover:bg-rose-600 shadow-md hover:shadow-lg transition-all disabled:opacity-60">
+                <span v-if="submitting" class="animate-spin material-icons text-sm mr-1">sync</span>
+                Ya, Hapus
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+    </Teleport>
 
     <!-- ═══ Toast Notification ═══ -->
     <transition name="slide-up">
@@ -319,6 +352,48 @@
         {{ toast.message }}
       </div>
     </transition>
+
+    <!-- ═══ Success Password Modal ═══ -->
+    <Teleport to="body">
+      <transition name="fade">
+        <div v-if="showSuccessPasswordModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm" @click.self="closeSuccessPasswordModal">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-slate-100 overflow-hidden animate-modal">
+            <div class="flex items-center justify-between p-5 border-b border-slate-100 bg-emerald-50">
+              <h2 class="text-lg font-black text-emerald-800 flex items-center gap-2">
+                <span class="material-icons text-emerald-600">check_circle</span>
+                {{ successModalTitle }}
+              </h2>
+              <button @click="closeSuccessPasswordModal" class="w-8 h-8 rounded-xl flex items-center justify-center text-emerald-600 hover:bg-emerald-100 transition-all">
+                <span class="material-icons text-lg">close</span>
+              </button>
+            </div>
+            <div class="p-5 space-y-4">
+              <p class="text-sm text-slate-600">Password sementara berhasil dibuat untuk user berikut:</p>
+              <div class="bg-slate-50 p-4 rounded-xl space-y-2.5 border border-slate-100 text-xs">
+                <div class="flex justify-between"><span class="text-slate-400 font-bold">Nama:</span><span class="font-bold text-slate-800">{{ successModalUser.name }}</span></div>
+                <div class="flex justify-between"><span class="text-slate-400 font-bold">Username:</span><span class="font-mono text-slate-800">{{ successModalUser.username }}</span></div>
+                <div class="flex justify-between items-center"><span class="text-slate-400 font-bold">Password Sementara:</span><span class="font-mono bg-blue-50 text-blue-700 px-2.5 py-1.5 rounded-lg font-bold border border-blue-100 select-all">{{ successModalUser.tempPass }}</span></div>
+              </div>
+              <div class="bg-amber-50 border border-amber-100 p-3 rounded-xl flex gap-2.5">
+                <span class="material-icons text-amber-600 text-lg">warning</span>
+                <p class="text-xs text-amber-700 leading-relaxed font-semibold">
+                  Gunakan password di atas untuk login pertama kali. Password sementara ini berlaku selama <strong>24 jam</strong> dan wajib diganti segera setelah masuk.
+                </p>
+              </div>
+            </div>
+            <div class="flex items-center justify-end gap-3 p-5 border-t border-slate-100 bg-slate-50">
+              <button @click="copyTempPassword" class="btn-primary px-5 py-2.5 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center gap-1.5">
+                <span class="material-icons text-sm">content_copy</span>
+                Salin Password
+              </button>
+              <button @click="closeSuccessPasswordModal" class="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-600 bg-white border border-slate-100 hover:bg-slate-50 transition-all">
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </Teleport>
   </div>
 </template>
 
@@ -356,6 +431,22 @@ const toast = ref({ show: false, message: '', type: 'success' })
 
 const warehouseOptions = ['GBB', 'GBJ', 'GSP']
 
+// Success password modal
+const showSuccessPasswordModal = ref(false)
+const successModalTitle = ref('')
+const successModalUser = ref({ name: '', username: '', tempPass: '' })
+
+function closeSuccessPasswordModal() {
+  showSuccessPasswordModal.value = false
+}
+
+function copyTempPassword() {
+  if (successModalUser.value.tempPass) {
+    navigator.clipboard.writeText(successModalUser.value.tempPass)
+    showToast('Password sementara disalin ke clipboard')
+  }
+}
+
 // ── Computed ──
 const filteredUsers = computed(() => {
   let list = users.value
@@ -375,7 +466,7 @@ const filteredUsers = computed(() => {
 
 // ── Helpers ──
 function getEmptyForm() {
-  return { name: '', username: '', email: '', password: '', role: '', warehouseAccess: [] }
+  return { name: '', username: '', email: '', role: '', warehouseAccess: [], phone: '', department: '', site: '', area: '' }
 }
 
 function roleColor(role) {
@@ -448,9 +539,12 @@ function openEditModal(user) {
     name: user.name || '',
     username: user.username || '',
     email: user.email || '',
-    password: '',
     role: user.role || '',
-    warehouseAccess: Array.isArray(user.warehouseAccess) ? [...user.warehouseAccess] : []
+    warehouseAccess: Array.isArray(user.warehouseAccess) ? [...user.warehouseAccess] : [],
+    phone: user.phone || '',
+    department: user.department || '',
+    site: user.site || '',
+    area: user.area || ''
   }
   formError.value = ''
   showFormModal.value = true
@@ -468,7 +562,6 @@ async function submitForm() {
   if (!form.value.username.trim()) { formError.value = 'Username wajib diisi'; return }
   if (!form.value.email.trim()) { formError.value = 'Email wajib diisi'; return }
   if (!form.value.role) { formError.value = 'Role wajib dipilih'; return }
-  if (!isEditing.value && !form.value.password) { formError.value = 'Password wajib diisi'; return }
   if (form.value.role === 'WAREHOUSE' && form.value.warehouseAccess.length === 0) {
     formError.value = 'Warehouse role membutuhkan minimal 1 akses gudang'
     return
@@ -483,24 +576,43 @@ async function submitForm() {
       if (form.value.username !== editingUser.value.username) payload.username = form.value.username.trim()
       if (form.value.email !== editingUser.value.email) payload.email = form.value.email.trim()
       if (form.value.role !== editingUser.value.role) payload.role = form.value.role
+      if (form.value.phone !== editingUser.value.phone) payload.phone = form.value.phone.trim()
+      if (form.value.department !== editingUser.value.department) payload.department = form.value.department.trim()
+      if (form.value.site !== editingUser.value.site) payload.site = form.value.site.trim()
+      if (form.value.area !== editingUser.value.area) payload.area = form.value.area.trim()
       // Always send warehouseAccess if role requires it
       payload.warehouseAccess = form.value.warehouseAccess
 
       await usersService.update(editingUser.value.id, payload)
+      closeFormModal()
       showToast('User berhasil diperbarui')
     } else {
       const payload = {
         name: form.value.name.trim(),
         username: form.value.username.trim().toLowerCase(),
         email: form.value.email.trim().toLowerCase(),
-        password: form.value.password,
         role: form.value.role,
-        warehouseAccess: form.value.warehouseAccess
+        warehouseAccess: form.value.warehouseAccess,
+        phone: form.value.phone.trim(),
+        department: form.value.department.trim(),
+        site: form.value.site.trim(),
+        area: form.value.area.trim()
       }
-      await usersService.create(payload)
+      const res = await usersService.create(payload)
+      const resData = res.data?.data || res.data
+      const tempPass = res.data?.temporaryPassword || resData?.temporaryPassword
+
+      closeFormModal()
       showToast('User berhasil dibuat')
+
+      successModalTitle.value = 'User Berhasil Dibuat'
+      successModalUser.value = {
+        name: resData.name || form.value.name,
+        username: resData.username || form.value.username,
+        tempPass: tempPass
+      }
+      showSuccessPasswordModal.value = true
     }
-    closeFormModal()
     await fetchUsers()
   } catch (err) {
     formError.value = extractError(err)
@@ -526,6 +638,7 @@ async function toggleStatus(user) {
 
 // ── Reset Password ──
 function openResetPasswordModal(user) {
+  if (user.username === 'admin') return
   resetTarget.value = user
   resetPassword.value = ''
   resetError.value = ''
@@ -537,16 +650,23 @@ function closeResetModal() {
 }
 
 async function submitResetPassword() {
-  if (!resetPassword.value || resetPassword.value.length < 6) {
-    resetError.value = 'Password minimal 6 karakter'
-    return
-  }
   resetError.value = ''
   submitting.value = true
   try {
-    await usersService.resetPassword(resetTarget.value.id, resetPassword.value)
-    showToast(`Password ${resetTarget.value.name} berhasil direset`)
+    const res = await usersService.resetPassword(resetTarget.value.id)
+    const resData = res.data?.data || res.data
+    const tempPass = resData?.temporaryPassword
+
     closeResetModal()
+    showToast(`Password ${resetTarget.value.name} berhasil direset`)
+
+    successModalTitle.value = 'Password Berhasil Direset'
+    successModalUser.value = {
+      name: resetTarget.value.name,
+      username: resetTarget.value.username,
+      tempPass: tempPass
+    }
+    showSuccessPasswordModal.value = true
   } catch (err) {
     resetError.value = extractError(err)
   } finally {

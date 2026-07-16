@@ -60,12 +60,12 @@ export const useWarehouseStore = defineStore('warehouse', {
       }
     },
 
-    async completeQcAnalysis(id) {
+    async completeQcAnalysis(id, data = {}) {
       this.loading = true;
       this.error = null;
       const notificationStore = useNotificationStore();
       try {
-        const response = await warehouseService.completeQcAnalysis(id);
+        const response = await warehouseService.completeQcAnalysis(id, data);
         return response.data;
       } catch (error) {
         const parsedError = handleApiError(error);

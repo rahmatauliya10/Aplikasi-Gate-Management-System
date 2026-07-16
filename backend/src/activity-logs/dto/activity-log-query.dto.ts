@@ -38,7 +38,9 @@ export class ActivityLogQueryDto {
   @IsString()
   userId?: string;
 
-  @ApiPropertyOptional({ description: 'Search across description, action, module, userName' })
+  @ApiPropertyOptional({
+    description: 'Search across description, action, module, userName',
+  })
   @IsOptional()
   @IsString()
   search?: string;

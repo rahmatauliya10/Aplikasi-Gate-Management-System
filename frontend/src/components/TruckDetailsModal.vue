@@ -50,9 +50,9 @@
                   <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Identity & Security</h3>
                 </div>
                 <div class="p-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
-                  <div v-for="field in identityFields" :key="field.label" class="flex flex-col">
+                  <div v-for="field in identityFields" :key="field.label" class="flex flex-col" :class="field.label === 'Remarks' ? 'col-span-2' : ''">
                     <span class="text-[8px] font-black text-slate-400 uppercase tracking-[0.15em] mb-0.5">{{ field.label }}</span>
-                    <span class="text-[12px] font-bold truncate" :class="field.highlight ? 'text-[#4A8BDF]' : 'text-slate-800'">{{ field.value || '-' }}</span>
+                    <span class="text-[12px] font-bold" :class="[field.highlight ? 'text-[#4A8BDF]' : 'text-slate-800', field.label === 'Remarks' ? 'whitespace-pre-wrap leading-snug' : 'truncate']">{{ field.value || '-' }}</span>
                   </div>
                 </div>
               </div>
@@ -100,6 +100,71 @@
                       <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status || 'PENDING' }}</span>
                     </div>
                     <p v-if="qcDetails.note" class="text-[10px] font-bold text-white/80 mt-1 italic">"{{ qcDetails.note }}"</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Incoming Checklist Results (GBB only, when remarks contain checklist data) -->
+              <div v-if="parsedChecklist" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50" 
+                     :style="{ background: parsedChecklist.hasIssue ? 'rgba(251, 191, 36, 0.05)' : 'rgba(16, 185, 129, 0.04)' }">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-[14px]" :style="parsedChecklist.hasIssue ? 'color:#D97706' : 'color:#059669'">assignment_turned_in</span>
+                    <h3 class="text-[10px] font-black uppercase tracking-[0.15em]" :style="parsedChecklist.hasIssue ? 'color:#92400E' : 'color:#064E3B'">Incoming QC Checklist</h3>
+                  </div>
+                  <!-- Status Pill -->
+                  <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
+                       :class="parsedChecklist.hasIssue ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
+                    <span class="material-icons text-[10px]">{{ parsedChecklist.hasIssue ? 'warning' : 'check_circle' }}</span>
+                    <span>{{ parsedChecklist.hasIssue ? 'DITERIMA DENGAN CATATAN' : 'ALL COMPLIANT' }}</span>
+                  </div>
+                </div>
+
+                <div class="p-3 space-y-4">
+                  <!-- 1. Sampling Parameters Grid (3 columns) -->
+                  <div v-if="parsedChecklist.samplings.length" class="space-y-1.5">
+                    <h4 class="text-[8px] font-black text-slate-400 uppercase tracking-widest">Sampling Parameters</h4>
+                    <div class="grid grid-cols-3 gap-2">
+                      <div v-for="s in parsedChecklist.samplings" :key="s.label" 
+                           class="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-300"
+                           :class="s.compliant ? 'bg-emerald-50/20 border-emerald-100/60 text-emerald-800' : 'bg-rose-50/30 border-rose-100 text-rose-800'">
+                        <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1.5">{{ s.label }}</span>
+                        <div class="flex items-center space-x-1">
+                          <span class="material-icons text-[12px]" :class="s.compliant ? 'text-emerald-500' : 'text-rose-500'">
+                            {{ s.compliant ? 'check_circle' : 'cancel' }}
+                          </span>
+                          <span class="text-[11px] font-black tracking-tight" :class="s.compliant ? 'text-emerald-700' : 'text-rose-700'">
+                            {{ s.compliant ? 'OK' : 'FAIL' }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 2. Inspection Items Grid (2 columns) -->
+                  <div v-if="parsedChecklist.items.length" class="space-y-1.5">
+                    <h4 class="text-[8px] font-black text-slate-400 uppercase tracking-widest">Vehicle & Goods Inspection</h4>
+                    <div class="grid grid-cols-2 gap-2">
+                      <div v-for="c in parsedChecklist.items" :key="c.label" 
+                           class="flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300 hover:translate-y-[-1px] bg-slate-50/30"
+                           :class="c.ok ? 'border-slate-100 text-slate-700 hover:bg-white hover:shadow-[0_2px_8px_rgba(0,0,0,0.02)]' : 'border-rose-100 text-rose-800 bg-rose-50/20'">
+                        <div class="flex items-center space-x-2 truncate">
+                          <span class="material-icons text-[13px]" :class="c.ok ? 'text-emerald-500' : 'text-rose-500'">
+                            {{ c.ok ? 'check_circle' : 'cancel' }}
+                          </span>
+                          <span class="text-[11px] font-bold text-slate-700 truncate" :title="c.label">{{ c.label }}</span>
+                        </div>
+                        <div class="flex items-center space-x-2 shrink-0">
+                          <span class="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wide"
+                                :class="c.ok ? 'bg-emerald-100/50 text-emerald-700' : 'bg-rose-100 text-rose-700'">
+                            {{ c.ok ? 'OK' : 'NOT OK' }}
+                          </span>
+                          <button v-if="c.photo" @click="selectedPhoto = c.photo" title="View Attachment" class="flex items-center justify-center w-6 h-6 rounded bg-rose-100 hover:bg-rose-200 text-rose-600 transition-colors">
+                            <span class="material-icons text-[14px]">image</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -298,11 +363,35 @@
       </div>
     </div>
   </transition>
+  
+  <!-- Photo Viewer Lightbox -->
+  <transition name="fade">
+    <div v-if="selectedPhoto" class="fixed inset-0 z-[10000] flex flex-col items-center justify-center p-4" style="background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(8px);" @click.self="selectedPhoto = null">
+      <!-- Top Toolbar -->
+      <div class="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-10 pointer-events-none">
+        <div class="text-white font-black tracking-widest uppercase text-[10px] bg-black/30 px-3 py-1.5 rounded-full pointer-events-auto backdrop-blur-md">
+          QC Attachment
+        </div>
+        <div class="flex items-center space-x-3 pointer-events-auto">
+          <a :href="selectedPhoto" download="QC_Attachment.jpg" class="w-10 h-10 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 text-white transition-all shadow-lg backdrop-blur-md">
+            <span class="material-icons text-lg">download</span>
+          </a>
+          <button @click="selectedPhoto = null" class="w-10 h-10 rounded-full flex items-center justify-center bg-white/10 hover:bg-white/20 text-white transition-all shadow-lg backdrop-blur-md">
+            <span class="material-icons text-lg">close</span>
+          </button>
+        </div>
+      </div>
+      
+      <!-- Image Container -->
+      <img :src="selectedPhoto" class="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain ring-1 ring-white/10" />
+    </div>
+  </transition>
+  
   </teleport>
 </template>
 
 <script setup>
-import { defineProps, defineEmits, computed } from 'vue'
+import { defineProps, defineEmits, computed, ref } from 'vue'
 import { useAuthStore } from '../stores/authStore'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -320,6 +409,8 @@ const authStore = useAuthStore()
 const truckStore = useTruckStore()
 const settingsStore = useSettingsStore()
 const { confirm } = useConfirm()
+
+const selectedPhoto = ref(null)
 
 const handleDelete = async () => {
   const ok = await confirm({
@@ -351,7 +442,12 @@ const identityFields = computed(() => {
   if (guestIdVal) fields.push({ label: `${props.truck?.idType || 'ID'} Number`, value: guestIdVal })
   if (props.truck?.guestCount && props.truck.guestCount > 1) fields.push({ label: 'Guest Count', value: `${props.truck.guestCount} persons` })
   if (props.truck?.securityName) fields.push({ label: 'Security Officer', value: props.truck.securityName })
-  if (props.truck?.remarks) fields.push({ label: 'Remarks', value: props.truck.remarks })
+  if (props.truck?.remarks) {
+    const isChecklist = props.truck.remarks.includes('Sampling:') || props.truck.remarks.includes('Checklist:')
+    if (!isChecklist) {
+      fields.push({ label: 'Remarks', value: props.truck.remarks })
+    }
+  }
   return fields
 })
 
@@ -407,6 +503,70 @@ const qcMetrics = computed(() => {
     if (check.sealCondition) metrics.push({ label: 'Seal', value: check.sealCondition })
   }
   return metrics
+})
+
+// Parse remarks string into structured checklist/sampling data
+const parsedChecklist = computed(() => {
+  if (!props.truck) return null
+  const remarksStr = props.truck.remarks || props.truck.compiledChecklist || props.truck.warehouseProcesses?.[0]?.remarks || ''
+  if (!remarksStr || (!remarksStr.includes('Sampling:') && !remarksStr.includes('Checklist:'))) return null
+
+  const hasIssue = remarksStr.includes('DITERIMA DENGAN CATATAN') || remarksStr.includes('NON-COMPLIANT') || remarksStr.includes('NOT OK')
+  
+  // Parse Sampling: [Odor: COMPLIANT, Color: NON-COMPLIANT, ...]
+  const samplings = []
+  const samplingMatch = remarksStr.match(/Sampling:\s*\[([^\]]+)\]/)
+  if (samplingMatch) {
+    samplingMatch[1].split(',').forEach(s => {
+      const [label, status] = s.trim().split(':').map(x => x.trim())
+      if (label && status) {
+        samplings.push({ label, compliant: status === 'COMPLIANT' || status === 'OK' })
+      }
+    })
+  }
+
+  const vehicleChecklistLabels = [
+    "Vehicle Cleanliness",
+    "Door Seal Intact",
+    "Odor/Smell Check",
+    "Arrangement",
+    "Pest/Animal Control",
+    "Foreign Objects",
+    "Packaging Integrity",
+    "CoA Validation",
+    "Quantity Verification",
+    "Leakage & Condition"
+  ]
+
+  // Parse Checklist: [Item 1: OK, Item 2: NOT OK||IMG:data:image..., ...]
+  const items = []
+  const checklistMatch = remarksStr.match(/Checklist:\s*\[([^\]]+)\]/)
+  if (checklistMatch) {
+    // Detect separator: new format uses ' | ' to prevent base64 comma conflicts, old format uses ','
+    const sep = checklistMatch[1].includes(' | Item') ? ' | ' : ','
+    checklistMatch[1].split(sep).forEach(c => {
+      // Split by '||IMG:' safely since the label won't contain it
+      const hasImg = c.includes('||IMG:')
+      const textPart = hasImg ? c.split('||IMG:')[0] : c
+      const photo = hasImg ? c.split('||IMG:')[1].trim() : null
+      
+      const parts = textPart.trim().match(/^(.+?):\s*(OK|NOT OK)$/)
+      if (parts) {
+        let label = parts[1].trim()
+        const matchItemNum = label.match(/Item (\d+)/)
+        if (matchItemNum) {
+          const index = parseInt(matchItemNum[1], 10) - 1
+          if (vehicleChecklistLabels[index]) {
+            label = vehicleChecklistLabels[index]
+          }
+        }
+        items.push({ label, ok: parts[2] === 'OK', photo })
+      }
+    })
+  }
+
+  if (samplings.length === 0 && items.length === 0) return null
+  return { hasIssue, samplings, items }
 })
 
 const getWeightVal = (val) => {

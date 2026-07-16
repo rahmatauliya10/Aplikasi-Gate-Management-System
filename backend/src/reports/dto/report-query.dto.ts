@@ -24,17 +24,30 @@ export class ReportQueryDto {
   @IsEnum(ProcessType)
   processType?: ProcessType;
 
-  @ApiProperty({ required: false, type: String, format: 'date', example: '2026-01-01' })
+  @ApiProperty({
+    required: false,
+    type: String,
+    format: 'date',
+    example: '2026-01-01',
+  })
   @IsOptional()
   @IsString()
   startDate?: string;
 
-  @ApiProperty({ required: false, type: String, format: 'date', example: '2026-12-31' })
+  @ApiProperty({
+    required: false,
+    type: String,
+    format: 'date',
+    example: '2026-12-31',
+  })
   @IsOptional()
   @IsString()
   endDate?: string;
 
-  @ApiProperty({ required: false, description: 'Search by transaction number or plate number' })
+  @ApiProperty({
+    required: false,
+    description: 'Search by transaction number or plate number',
+  })
   @IsOptional()
   @IsString()
   search?: string;

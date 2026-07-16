@@ -94,14 +94,14 @@
               
               <div class="pl-2">
                 <p class="text-[13px] font-black text-slate-800 mb-1">{{ log.action }}</p>
-                <p class="text-[12px] font-medium text-slate-600 mb-3">{{ log.description || 'No additional details.' }}</p>
+                <p class="text-[12px] font-medium text-slate-600 mb-3">{{ formatDescription(log.description) }}</p>
                 
                 <div v-if="isAdmin" class="flex items-center gap-2 mt-2 pt-2 border-t border-slate-50">
                   <div class="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
                     <span class="material-icons text-[12px]">person</span>
                   </div>
-                  <span class="text-[11px] font-bold text-slate-700">{{ log.userName || 'System' }}</span>
-                  <span v-if="log.role" class="text-[9px] font-black text-slate-400 bg-slate-100 px-1.5 rounded uppercase">{{ log.role }}</span>
+                  <span class="text-[11px] font-bold text-slate-700">{{ log.userName || log.user?.name || 'System' }}</span>
+                  <span v-if="log.role || log.user?.role" class="text-[9px] font-black text-slate-400 bg-slate-100 px-1.5 rounded uppercase">{{ log.role || log.user?.role }}</span>
                 </div>
               </div>
             </div>
@@ -238,6 +238,31 @@ const getStatusColor = (status, type) => {
     WARNING: { bg: 'bg-amber-500', 'text-bg': 'bg-amber-50 text-amber-600' }
   };
   return map[status] ? map[status][type] : map.SUCCESS[type];
+};
+
+const formatDescription = (desc) => {
+  if (!desc) return 'No additional details.';
+  const trimmed = desc.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.identifier) {
+        return `Identifier: ${parsed.identifier}${parsed.reason ? ` (${parsed.reason})` : ''}`;
+      }
+      if (parsed.reason) {
+        return `Reason: ${parsed.reason}`;
+      }
+      const keys = Object.keys(parsed);
+      if (keys.length === 0) return 'No additional details.';
+      return keys.map(k => {
+        const val = typeof parsed[k] === 'object' ? JSON.stringify(parsed[k]) : parsed[k];
+        return `${k}: ${val}`;
+      }).join(' | ');
+    } catch (e) {
+      return desc;
+    }
+  }
+  return desc;
 };
 
 const formatDate = (dateStr) => {

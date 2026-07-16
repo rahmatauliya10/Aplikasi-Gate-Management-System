@@ -1,4 +1,10 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -29,10 +35,10 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(
+      ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
 
     // If no roles specified, allow access for logged-in users
     if (!requiredRoles || requiredRoles.length === 0) {
@@ -42,10 +48,13 @@ export class RolesGuard implements CanActivate {
     const hasRole = requiredRoles.some((role) => user.role === role);
 
     if (!hasRole) {
-      this.logger.warn(`ACCESS_DENIED: User ${user.email} (role: ${user.role}) tried to access endpoint requiring roles: [${requiredRoles.join(', ')}]`);
+      this.logger.warn(
+        `ACCESS_DENIED: User ${user.email} (role: ${user.role}) tried to access endpoint requiring roles: [${requiredRoles.join(', ')}]`,
+      );
 
       // Log access denied to audit
-      await this.activityLogsService.logAction({
+      await this.activityLogsService
+        .logAction({
           userId: user.id,
           action: 'ACCESS_DENIED',
           module: 'AUTH',
@@ -56,10 +65,11 @@ export class RolesGuard implements CanActivate {
             method: context.switchToHttp().getRequest().method,
           },
           status: 'FAILED',
-        }).catch((err) => {
-        // Don't fail the request if audit logging fails
-        console.error('Failed to log unauthorized access', err);
-      });
+        })
+        .catch((err) => {
+          // Don't fail the request if audit logging fails
+          console.error('Failed to log unauthorized access', err);
+        });
 
       throw new ForbiddenException({
         success: false,

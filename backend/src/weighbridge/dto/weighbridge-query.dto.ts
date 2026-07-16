@@ -19,7 +19,10 @@ export class WeighbridgeQueryDto {
   @Max(100)
   limit?: number = 10;
 
-  @ApiProperty({ required: false, description: 'Search by transaction number or plate number' })
+  @ApiProperty({
+    required: false,
+    description: 'Search by transaction number or plate number',
+  })
   @IsOptional()
   @IsString()
   search?: string;
@@ -29,7 +32,11 @@ export class WeighbridgeQueryDto {
   @IsEnum(ProcessType)
   processType?: ProcessType;
 
-  @ApiProperty({ required: false, enum: WeighbridgeType, description: 'Filter queue by weighbridge type (IN/OUT)' })
+  @ApiProperty({
+    required: false,
+    enum: WeighbridgeType,
+    description: 'Filter queue by weighbridge type (IN/OUT)',
+  })
   @IsOptional()
   @IsEnum(WeighbridgeType)
   type?: WeighbridgeType;

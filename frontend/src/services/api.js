@@ -70,7 +70,16 @@ api.interceptors.response.use(
         error.gmsMessage = 'Sesi login sudah habis. Silakan login ulang.';
       }
     } else if (error.response && error.response.status === 403) {
-      error.gmsMessage = 'Anda tidak memiliki akses ke halaman ini.';
+      if (error.response.data && error.response.data.code === 'PASSWORD_CHANGE_REQUIRED') {
+        error.gmsMessage = 'Anda wajib mengganti temporary password sebelum menggunakan aplikasi.';
+        import('../router').then(({ default: router }) => {
+          if (router.currentRoute.value.path !== '/change-password') {
+             router.push('/change-password')
+          }
+        })
+      } else {
+        error.gmsMessage = 'Anda tidak memiliki akses ke halaman ini.';
+      }
     } else {
       // Attach our human-readable message directly to the error object 
       // so stores can just use error.gmsMessage

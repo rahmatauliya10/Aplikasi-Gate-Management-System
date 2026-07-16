@@ -1,6 +1,6 @@
 <template>
   <PageTransition />
-  <template v-if="$route.path === '/login'">
+  <template v-if="$route.path === '/login' || $route.path === '/change-password'">
     <router-view />
   </template>
   <template v-else>

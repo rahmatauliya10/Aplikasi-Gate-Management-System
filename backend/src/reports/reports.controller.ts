@@ -1,5 +1,10 @@
 import { Controller, Get, Query, UseGuards, Header } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -17,9 +22,16 @@ export class ReportsController {
 
   @Get('history')
   @Roles('ADMIN', 'SECURITY')
-  @ApiOperation({ summary: 'Get transaction history', description: 'Returns completed/cancelled transactions with pagination and filters' })
+  @ApiOperation({
+    summary: 'Get transaction history',
+    description:
+      'Returns completed/cancelled transactions with pagination and filters',
+  })
   @ApiResponse({ status: 200, description: 'Transaction history retrieved' })
-  getHistory(@Query() query: ReportQueryDto, @CurrentUser() user: JwtPayloadUser) {
+  getHistory(
+    @Query() query: ReportQueryDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
     return this.reportsService.getTransactionHistory(query, user);
   }
 
@@ -28,8 +40,14 @@ export class ReportsController {
   @ApiOperation({ summary: 'Export transaction history as CSV' })
   @ApiResponse({ status: 200, description: 'CSV file generated' })
   @Header('Content-Type', 'text/csv')
-  @Header('Content-Disposition', 'attachment; filename="transaction-history.csv"')
-  async exportHistory(@Query() query: ReportQueryDto, @CurrentUser() user: JwtPayloadUser) {
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="transaction-history.csv"',
+  )
+  async exportHistory(
+    @Query() query: ReportQueryDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
     const csvData = await this.reportsService.exportCsv(query, user);
     return csvData;
   }

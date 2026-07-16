@@ -2,9 +2,23 @@
   <div class="space-y-6">
     <PageHeader title="Rekap Transaksi &amp; Analisa Operasional" subtitle="Gate-to-Gate Operations Intelligence &amp; Scale Audit" :showBadge="false">
       <div class="flex items-center space-x-3">
+        <!-- Bulk PDF Download Button -->
+        <button @click="downloadBulkPDF" :disabled="selectedTruckIds.length === 0" class="px-5 py-2.5 text-xs rounded-xl font-black flex items-center space-x-1.5 transition-all shadow-sm duration-300"
+          :class="selectedTruckIds.length > 0 ? 'bg-rose-600 text-white hover:bg-rose-700 hover:scale-[1.02] cursor-pointer' : 'bg-slate-100 text-slate-400 cursor-not-allowed'">
+          <span class="material-icons text-base">picture_as_pdf</span>
+          <span>PDF SELECTED ({{ selectedTruckIds.length }})</span>
+        </button>
+
+        <!-- Excel Export Button -->
+        <button @click="exportExcel" class="px-5 py-2.5 text-xs rounded-xl border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-all font-black flex items-center space-x-1.5 shadow-sm duration-300">
+          <span class="material-icons text-base text-emerald-600">table_view</span>
+          <span>EXPORT EXCEL</span>
+        </button>
+
+        <!-- CSV Export Button -->
         <button @click="exportData" class="btn-primary px-6 py-2.5 text-xs flex items-center space-x-1.5 shadow-[0_4px_12px_rgba(74,139,223,0.25)] hover:shadow-lg transition-all duration-300">
           <span class="material-icons text-base">download</span>
-          <span class="font-black">EXPORT CSV REPORT</span>
+          <span class="font-black">EXPORT CSV</span>
         </button>
       </div>
     </PageHeader>
@@ -177,6 +191,9 @@
         <table class="w-full border-separate relative z-10 min-w-[950px]" style="border-spacing: 0 10px;">
           <thead>
             <tr>
+              <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[40px]">
+                <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" class="accent-[#4A8BDF] rounded cursor-pointer w-4 h-4" />
+              </th>
               <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Vehicle ID</th>
               <template v-if="currentMode === 'time'">
                 <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Registration</th>
@@ -207,8 +224,13 @@
                 ]"
                 @click="toggleRow(truck.id)">
                 
+                <!-- Checkbox -->
+                <td class="px-5 py-3 rounded-l-xl border-y border-l border-slate-100" @click.stop>
+                  <input type="checkbox" :value="truck.id" v-model="selectedTruckIds" class="accent-[#4A8BDF] rounded cursor-pointer w-4 h-4" />
+                </td>
+
                 <!-- Plate Number & Cargo Type -->
-                <td class="px-5 py-3 rounded-l-xl border-y border-l border-slate-100">
+                <td class="px-5 py-3 border-y border-slate-100">
                   <div class="flex items-center space-x-2.5">
                     <div class="flex flex-col items-center justify-center bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 shadow-inner shrink-0">
                       <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-widest leading-none">{{ getPlateNumber(truck) }}</span>
@@ -341,11 +363,14 @@
                 <!-- Actions -->
                 <td class="px-5 py-3 rounded-r-xl border-y border-r border-slate-100 text-right">
                   <div class="flex items-center justify-end space-x-1.5">
+                    <button @click.stop="downloadSinglePDF(truck)" class="w-8 h-8 rounded-lg flex items-center justify-center text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-600 hover:text-white transition-all duration-300" title="Download PDF Report">
+                      <span class="material-icons text-[15px]">picture_as_pdf</span>
+                    </button>
+                    <button @click.stop="viewDetails(truck)" class="w-8 h-8 rounded-lg flex items-center justify-center text-[#4A8BDF] bg-blue-50 border border-blue-100 hover:bg-[#4A8BDF] hover:text-white transition-all" title="View Details">
+                      <span class="material-icons text-[15px]">travel_explore</span>
+                    </button>
                     <button @click.stop="toggleRow(truck.id)" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
                       <span class="material-icons text-base transition-transform duration-300" :class="isRowExpanded(truck.id) ? 'rotate-180' : ''">expand_more</span>
-                    </button>
-                    <button @click.stop="viewDetails(truck)" class="w-8 h-8 rounded-lg flex items-center justify-center text-[#4A8BDF] bg-blue-50 border border-blue-100 hover:bg-[#4A8BDF] hover:text-white transition-all">
-                      <span class="material-icons text-[15px]">travel_explore</span>
                     </button>
                   </div>
                 </td>
@@ -353,7 +378,7 @@
 
               <!-- Expanded Details Row -->
               <tr v-if="isRowExpanded(truck.id)" :key="'expand-' + truck.id" class="bg-slate-50/50 hover:bg-slate-50/50">
-                <td :colspan="currentMode==='time' ? 9 : 7" class="px-5 pb-5 pt-1 rounded-b-xl border-x border-b border-[#4A8BDF]/20 shadow-[inset_0_5px_15px_rgba(0,0,0,0.02)]">
+                <td :colspan="currentMode==='time' ? 10 : 8" class="px-5 pb-5 pt-1 rounded-b-xl border-x border-b border-[#4A8BDF]/20 shadow-[inset_0_5px_15px_rgba(0,0,0,0.02)]">
                   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-4 border-t border-slate-100 animate-fadeInUp">
                     <!-- Column 1: Milestone Timeline -->
                     <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col">
@@ -466,7 +491,7 @@
             </template>
             <!-- Loading State -->
             <tr v-if="loading" key="loading-history">
-              <td :colspan="currentMode==='time' ? 9 : 7" class="px-5 py-24 text-center">
+              <td :colspan="currentMode==='time' ? 10 : 8" class="px-5 py-24 text-center">
                 <div class="flex flex-col items-center justify-center space-y-4">
                   <div class="relative w-12 h-12">
                     <div class="absolute inset-0 rounded-full border-4 border-slate-100"></div>
@@ -478,7 +503,7 @@
             </tr>
             <!-- Empty State -->
             <tr v-else-if="filteredAnalyzedTrucks.length === 0" key="empty-history">
-              <td :colspan="currentMode==='time' ? 9 : 7" class="px-5 py-24 text-center">
+              <td :colspan="currentMode==='time' ? 10 : 8" class="px-5 py-24 text-center">
                 <div class="flex flex-col items-center justify-center opacity-60">
                   <div class="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mb-4">
                     <span class="material-icons text-3xl text-slate-400">history_toggle_off</span>
@@ -524,11 +549,15 @@ const loading = ref(false)
 onMounted(async () => {
   loading.value = true
   try {
-    const res = await truckService.getCompleted({ limit: 1000 })
+    const res = await truckService.getCompleted({ limit: 100 })
     rawCompletedTrucks.value = res.data?.data || res.data || []
   } catch (err) {
-    console.warn('[History] Mount-time fetch failed:', err.message)
-    toast.error('Failed to load history data')
+    // Don't show toast for password-change-required redirect (handled by interceptor)
+    const is403Redirect = err.response?.status === 403 && err.response?.data?.code === 'PASSWORD_CHANGE_REQUIRED'
+    if (!is403Redirect) {
+      console.warn('[History] Mount-time fetch failed:', err.message)
+      toast.error(err.gmsMessage || 'Failed to load history data')
+    }
   } finally {
     loading.value = false
   }
@@ -548,6 +577,28 @@ const integrityFilter = ref('ALL')
 
 // Pagination State
 const currentPage = ref(1)
+
+// Selection State for Bulk Export/PDF
+const selectedTruckIds = ref([])
+
+const isAllSelected = computed(() => {
+  const visibleTrucks = paginatedFilteredTrucks.value
+  if (visibleTrucks.length === 0) return false
+  return visibleTrucks.every(t => selectedTruckIds.value.includes(t.id))
+})
+
+const toggleSelectAll = () => {
+  const visibleTrucks = paginatedFilteredTrucks.value
+  if (isAllSelected.value) {
+    selectedTruckIds.value = selectedTruckIds.value.filter(id => !visibleTrucks.some(t => t.id === id))
+  } else {
+    visibleTrucks.forEach(t => {
+      if (!selectedTruckIds.value.includes(t.id)) {
+        selectedTruckIds.value.push(t.id)
+      }
+    })
+  }
+}
 
 // Toggle row expansion
 const toggleRow = (id) => {
@@ -978,6 +1029,461 @@ const exportData = () => {
   document.body.removeChild(link)
   
   toast.success('CSV Report generated and downloaded!')
+}
+
+const exportExcel = () => {
+  toast.info('Exporting transaction data as Excel...')
+  
+  const headers = ['TRX ID', 'Plate Number', 'Driver', 'Vendor', 'Destination', 'Gate In', 'Weigh In', 'Warehouse In/Out', 'QC In/Out', 'Weigh Out', 'Gate Out', 'Total TAT (m)', 'Net Weighbridge (kg)', 'Warehouse Scale (kg)', 'Deviation (%)', 'Verdict']
+  
+  const rows = filteredAnalyzedTrucks.value.map(t => [
+    t.id,
+    getPlateNumber(t),
+    t.driverName || '',
+    getVendor(t),
+    getProcessType(t),
+    t.gateInAt || t.timestamps?.gateInAt || t.createdAt || '',
+    t.weighInAt || t.timestamps?.weighInAt || '',
+    `${t.warehouseStartAt || t.timestamps?.warehouseStartAt || ''} - ${t.warehouseEndAt || t.timestamps?.warehouseEndAt || ''}`,
+    `${t.qcStartAt || t.timestamps?.qcVehicleStartAt || t.timestamps?.incomingCheckStartAt || ''} - ${t.qcEndAt || t.timestamps?.qcVehicleEndAt || t.timestamps?.incomingCheckEndAt || ''}`,
+    t.weighOutAt || t.timestamps?.weighOutAt || '',
+    t.gateOutAt || t.timestamps?.gateOutAt || '',
+    t.durations.total,
+    t.fraud.net,
+    t.fraud.roll,
+    t.fraud.deviationPercent !== null && t.fraud.deviationPercent !== undefined ? t.fraud.deviationPercent.toFixed(2) : '0.00',
+    t.fraud.status
+  ])
+
+  // Build styled HTML representation that Excel opens natively as a worksheet
+  let html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <!--[if gte mso 9]>
+      <xml>
+        <x:ExcelWorkbook>
+          <x:ExcelWorksheets>
+            <x:ExcelWorksheet>
+              <x:Name>GMS Operations Report</x:Name>
+              <x:WorksheetOptions>
+                <x:DisplayGridlines/>
+              </x:WorksheetOptions>
+            </x:ExcelWorksheet>
+          </x:ExcelWorksheets>
+        </x:ExcelWorkbook>
+      </xml>
+      <![endif]-->
+      <style>
+        table { border-collapse: collapse; }
+        th { background-color: #4A8BDF; color: #ffffff; font-weight: bold; border: 1px solid #cbd5e1; padding: 8px; font-family: sans-serif; font-size: 11px; }
+        td { border: 1px solid #cbd5e1; padding: 6px; font-family: sans-serif; font-size: 11px; }
+      </style>
+    </head>
+    <body>
+      <table>
+        <thead>
+          <tr>
+  `
+  headers.forEach(h => {
+    html += `<th>${h}</th>`
+  })
+  html += `
+          </tr>
+        </thead>
+        <tbody>
+  `
+  rows.forEach(r => {
+    html += '<tr>'
+    r.forEach(cell => {
+      html += `<td>${String(cell)}</td>`
+    })
+    html += '</tr>'
+  })
+  html += `
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.setAttribute('href', url)
+  link.setAttribute('download', `GMS_Operations_Report_${new Date().toISOString().slice(0,10)}.xls`)
+  link.style.visibility = 'hidden'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  
+  toast.success('Excel Report generated and downloaded!')
+}
+
+const generatePrintHTML = (truckList) => {
+  let html = `
+    <html>
+    <head>
+      <title>PT Santos Jaya Abadi - GMS Truck Report</title>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+      <style>
+        body {
+          font-family: 'Inter', sans-serif;
+          margin: 0;
+          padding: 20px;
+          color: #1e293b;
+          background-color: #ffffff;
+        }
+        .report-page {
+          page-break-after: always;
+          border: 1px solid #e2e8f0;
+          padding: 30px;
+          margin-bottom: 30px;
+          border-radius: 12px;
+          position: relative;
+        }
+        .report-page:last-child {
+          page-break-after: avoid;
+        }
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 2px solid #1e293b;
+          padding-bottom: 20px;
+          margin-bottom: 20px;
+        }
+        .company-title {
+          font-weight: 900;
+          font-size: 18px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin: 0;
+        }
+        .company-subtitle {
+          font-size: 10px;
+          color: #64748b;
+          font-weight: bold;
+          letter-spacing: 1px;
+          margin-top: 4px;
+        }
+        .doc-title {
+          font-size: 14px;
+          font-weight: 900;
+          text-align: right;
+          color: #4A8BDF;
+          margin: 0;
+        }
+        .doc-subtitle {
+          font-size: 10px;
+          color: #64748b;
+          text-align: right;
+          margin-top: 4px;
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 20px;
+          margin-bottom: 25px;
+        }
+        .section-box {
+          border: 1px solid #f1f5f9;
+          background-color: #f8fafc;
+          border-radius: 8px;
+          padding: 15px;
+        }
+        .section-title {
+          font-size: 10px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          color: #64748b;
+          margin-top: 0;
+          margin-bottom: 10px;
+          border-bottom: 1px solid #e2e8f0;
+          padding-bottom: 5px;
+        }
+        .field {
+          display: flex;
+          justify-content: space-between;
+          font-size: 11px;
+          margin-bottom: 6px;
+        }
+        .field-label {
+          color: #64748b;
+          font-weight: bold;
+        }
+        .field-value {
+          font-weight: bold;
+          color: #0f172a;
+        }
+        .table-data {
+          width: 100%;
+          border-collapse: collapse;
+          margin-top: 15px;
+          margin-bottom: 20px;
+        }
+        .table-data th, .table-data td {
+          border: 1px solid #e2e8f0;
+          padding: 10px;
+          text-align: left;
+          font-size: 11px;
+        }
+        .table-data th {
+          background-color: #f1f5f9;
+          color: #475569;
+          font-weight: 900;
+          text-transform: uppercase;
+          font-size: 9px;
+          letter-spacing: 0.5px;
+        }
+        .badge {
+          display: inline-block;
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-size: 9px;
+          font-weight: 900;
+          text-transform: uppercase;
+        }
+        .badge-safe { background-color: #d1fae5; color: #065f46; }
+        .badge-warning { background-color: #fef3c7; color: #92400e; }
+        .badge-critical { background-color: #fee2e2; color: #991b1b; }
+        .badge-pending { background-color: #f1f5f9; color: #475569; }
+        .timeline-container {
+          margin-top: 20px;
+          border-top: 1px dashed #e2e8f0;
+          padding-top: 15px;
+        }
+        .timeline-grid {
+          display: grid;
+          grid-template-columns: repeat(6, 1fr);
+          gap: 10px;
+        }
+        .timeline-node {
+          text-align: center;
+          position: relative;
+        }
+        .timeline-node::after {
+          content: "";
+          position: absolute;
+          top: 10px;
+          left: 50%;
+          width: 100%;
+          height: 2px;
+          background-color: #cbd5e1;
+          z-index: 1;
+        }
+        .timeline-node:last-child::after {
+          display: none;
+        }
+        .node-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background-color: #4A8BDF;
+          margin: 0 auto 5px;
+          position: relative;
+          z-index: 2;
+        }
+        .node-dot.empty {
+          background-color: #cbd5e1;
+        }
+        .node-label {
+          font-size: 8px;
+          font-weight: 900;
+          color: #64748b;
+          text-transform: uppercase;
+          display: block;
+        }
+        .node-time {
+          font-size: 9px;
+          font-weight: bold;
+          color: #0f172a;
+          margin-top: 2px;
+        }
+        .footer {
+          margin-top: 30px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          font-size: 9px;
+          color: #94a3b8;
+          border-top: 1px solid #f1f5f9;
+          padding-top: 10px;
+        }
+        @media print {
+          body {
+            padding: 0;
+          }
+          .report-page {
+            border: none;
+            padding: 0;
+            margin: 0;
+            box-shadow: none;
+          }
+        }
+      </style>
+    </head>
+    <body>
+  `
+
+  truckList.forEach(t => {
+    const timelines = getTimelineRows(t)
+    const formattedTimelines = timelines.map(node => {
+      return `
+        <div class="timeline-node">
+          <div class="node-dot ${node.value ? '' : 'empty'}"></div>
+          <span class="node-label">${node.label}</span>
+          <span class="node-time">${formatTimeFull(node.value)}</span>
+        </div>
+      `
+    }).join('')
+
+    html += `
+      <div class="report-page">
+        <div class="header">
+          <div>
+            <h1 class="company-title">PT Santos Jaya Abadi</h1>
+            <div class="company-subtitle">GATE MANAGEMENT SYSTEM — OPERATIONS LOG</div>
+          </div>
+          <div>
+            <h2 class="doc-title">TRUCK AUDIT RECEIPT</h2>
+            <div class="doc-subtitle">ID: ${t.id}</div>
+          </div>
+        </div>
+
+        <div class="grid">
+          <!-- Section 1: Vehicle Info -->
+          <div class="section-box">
+            <h3 class="section-title">Vehicle & Driver Details</h3>
+            <div class="field">
+              <span class="field-label">Plate Number</span>
+              <span class="field-value">${getPlateNumber(t)}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Driver Name</span>
+              <span class="field-value">${t.driverName || '—'}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Vendor</span>
+              <span class="field-value">${getVendor(t)}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Destination</span>
+              <span class="field-value">${getProcessType(t)}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Status</span>
+              <span class="field-value">${t.status}</span>
+            </div>
+          </div>
+
+          <!-- Section 2: Weight Info -->
+          <div class="section-box">
+            <h3 class="section-title">Weighbridge & Scale Reconciliation</h3>
+            <div class="field">
+              <span class="field-label">Scale IN (Weighbridge)</span>
+              <span class="field-value">${formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.tare || t.tareWeight || t.weighInWeight) : (t.weights?.gross || t.grossWeight || t.weighInWeight))}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Scale OUT (Weighbridge)</span>
+              <span class="field-value">${formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.gross || t.grossWeight || t.weighOutWeight) : (t.weights?.tare || t.tareWeight || t.weighOutWeight))}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Net Weight</span>
+              <span class="field-value">${formatWeightCustom(t.fraud?.net)}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Warehouse Realization</span>
+              <span class="field-value">${formatWeightCustom(t.fraud?.roll)}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Deviation</span>
+              <span class="field-value">${formatPercentage(t.fraud?.deviationPercent)}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- QC Section -->
+        <div class="section-box" style="margin-bottom: 25px;">
+          <h3 class="section-title">Quality Assurance & Lab Verdict</h3>
+          <table class="table-data" style="margin-top: 5px; margin-bottom: 5px;">
+            <thead>
+              <tr>
+                <th>Moisture (Kadar Air)</th>
+                <th>Foreign Matter (FM)</th>
+                <th>Bean Condition (Biji Baik)</th>
+                <th>QC Officer / PIC</th>
+                <th>Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${t.qcDetails?.kadarAir !== null && t.qcDetails?.kadarAir !== undefined ? t.qcDetails.kadarAir + '%' : '—'}</td>
+                <td>${t.qcDetails?.totalFM !== null && t.qcDetails?.totalFM !== undefined ? t.qcDetails.totalFM + '%' : '—'}</td>
+                <td>${t.qcDetails?.bijiOK !== null && t.qcDetails?.bijiOK !== undefined ? t.qcDetails.bijiOK + '%' : '—'}</td>
+                <td>${t.qcDetails?.pic || '—'}</td>
+                <td>
+                  <span class="badge ${t.fraud.status === 'CRITICAL' ? 'badge-critical' : t.fraud.status === 'WARNING' ? 'badge-warning' : t.fraud.status === 'PENDING' ? 'badge-pending' : 'badge-safe'}">
+                    ${t.fraud.status}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Timeline Section -->
+        <div class="timeline-container">
+          <h3 class="section-title" style="border: none; margin-bottom: 15px;">Operations Timeline</h3>
+          <div class="timeline-grid">
+            ${formattedTimelines}
+          </div>
+        </div>
+
+        <div class="footer">
+          <span>Printed on: ${new Date().toLocaleString('id-ID')} — Generated dynamically by GMS Intelligence</span>
+          <span>PT Santos Jaya Abadi — Confidential</span>
+        </div>
+      </div>
+    `
+  })
+
+  html += `
+    </body>
+    </html>
+  `
+  return html
+}
+
+const downloadSinglePDF = (truck) => {
+  const printWindow = window.open('', '_blank')
+  printWindow.document.write(generatePrintHTML([truck]))
+  printWindow.document.close()
+  
+  printWindow.onload = () => {
+    printWindow.focus()
+    printWindow.print()
+    printWindow.close()
+  }
+}
+
+const downloadBulkPDF = () => {
+  if (selectedTruckIds.value.length === 0) return
+  
+  const trucksToPrint = filteredAnalyzedTrucks.value.filter(t => selectedTruckIds.value.includes(t.id))
+  
+  const printWindow = window.open('', '_blank')
+  printWindow.document.write(generatePrintHTML(trucksToPrint))
+  printWindow.document.close()
+  
+  printWindow.onload = () => {
+    printWindow.focus()
+    printWindow.print()
+    printWindow.close()
+  }
+  
+  // Clear selection after print
+  selectedTruckIds.value = []
 }
 </script>
 
