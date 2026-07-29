@@ -25,6 +25,27 @@ async function bootstrap() {
     );
   }
 
+  // Security Hardening: Enforce strong secrets in production mode
+  if (isProduction) {
+    const weakSecrets = [
+      'super_secret_access_key_gms',
+      'super_secret_refresh_key_gms',
+      'postgres',
+      'admin123',
+      'secret',
+    ];
+    
+    if (weakSecrets.includes(process.env.JWT_ACCESS_SECRET)) {
+      throw new Error('CRITICAL SECURITY BLOCKER: Default JWT_ACCESS_SECRET is forbidden in production.');
+    }
+    if (weakSecrets.includes(process.env.JWT_REFRESH_SECRET || '')) {
+      throw new Error('CRITICAL SECURITY BLOCKER: Default JWT_REFRESH_SECRET is forbidden in production.');
+    }
+    if ((process.env.JWT_ACCESS_SECRET || '').length < 32) {
+      throw new Error('CRITICAL SECURITY BLOCKER: JWT_ACCESS_SECRET must be at least 32 characters long in production.');
+    }
+  }
+
   app.enableShutdownHooks();
 
   // Load shared application middlewares & configurations

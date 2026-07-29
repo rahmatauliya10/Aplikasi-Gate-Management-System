@@ -142,43 +142,45 @@ export class QcService {
       );
 
     const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
-
-    await this.prisma.qcVehicleCheck.create({
-      data: {
-        transactionId,
-        result: result,
-        vehicleCleanliness: this.booleanToCheckResult(dto.vehicleCleanliness),
-        vehicleOdor: this.booleanToCheckResult(dto.vehicleOdor),
-        pestEvidence: this.booleanToCheckResult(dto.pestEvidence),
-        vehicleCondition: this.booleanToCheckResult(dto.vehicleCondition),
-        documentCompleteness: this.booleanToCheckResult(
-          dto.documentCompleteness,
-        ),
-        sealCondition: this.booleanToCheckResult(dto.sealCondition),
-        notes: dto.notes,
-        checkedById: userId,
-        startedAt: tx.qcStartAt,
-        completedAt: new Date(),
-      },
-    });
-
     const nextStatus =
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
-    const updated = await this.prisma.transaction.update({
-      where: { id: transactionId },
-      data: {
-        status: nextStatus,
-        qcEndAt: new Date(),
-        statusHistory: {
-          create: {
-            newStatus: nextStatus,
-            changedById: userId,
-            notes: `Vehicle Check: ${result}`,
+    const updated = await this.prisma.$transaction(async (prisma) => {
+      await prisma.qcVehicleCheck.create({
+        data: {
+          transactionId,
+          result: result,
+          vehicleCleanliness: this.booleanToCheckResult(dto.vehicleCleanliness),
+          vehicleOdor: this.booleanToCheckResult(dto.vehicleOdor),
+          pestEvidence: this.booleanToCheckResult(dto.pestEvidence),
+          vehicleCondition: this.booleanToCheckResult(dto.vehicleCondition),
+          documentCompleteness: this.booleanToCheckResult(
+            dto.documentCompleteness,
+          ),
+          sealCondition: this.booleanToCheckResult(dto.sealCondition),
+          notes: dto.notes,
+          checklistItems: dto.checklistItems || null,
+          checkedById: userId,
+          startedAt: tx.qcStartAt,
+          completedAt: new Date(),
+        },
+      });
+
+      return prisma.transaction.update({
+        where: { id: transactionId },
+        data: {
+          status: nextStatus,
+          qcEndAt: new Date(),
+          statusHistory: {
+            create: {
+              newStatus: nextStatus,
+              changedById: userId,
+              notes: `Vehicle Check: ${result}`,
+            },
           },
         },
-      },
-      include: { qcVehicleChecks: true },
+        include: { qcVehicleChecks: true },
+      });
     });
 
     await this.activityLogsService.logAction({
@@ -221,47 +223,48 @@ export class QcService {
       );
 
     const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
-
-    await this.prisma.incomingMaterialCheck.create({
-      data: {
-        transactionId,
-        result: result,
-        odor: this.mapToCheckResult(dto.odor),
-        color: this.mapToCheckResult(dto.color),
-        moisture: dto.moisture,
-        foreignMatter: dto.foreignMatter,
-        beanCondition: this.booleanToCheckResult(dto.beanCondition),
-        sampleWeight: dto.sampleWeight,
-        itemCondition: this.booleanToCheckResult(dto.itemCondition),
-        packagingCondition: this.booleanToCheckResult(dto.packagingCondition),
-        quantityCheck: this.booleanToCheckResult(dto.quantityCheck),
-        documentCheck: this.booleanToCheckResult(dto.documentCheck),
-        visualInspection: this.booleanToCheckResult(dto.visualInspection),
-        defectNotes: dto.defectNotes,
-        notes: dto.notes,
-        checkedById: userId,
-        startedAt: tx.qcStartAt,
-        completedAt: new Date(),
-      },
-    });
-
     const nextStatus =
       result === 'PASS' ? 'INCOMING_CHECK_PASSED' : 'INCOMING_CHECK_REJECTED';
 
-    const updated = await this.prisma.transaction.update({
-      where: { id: transactionId },
-      data: {
-        status: nextStatus,
-        qcEndAt: new Date(),
-        statusHistory: {
-          create: {
-            newStatus: nextStatus,
-            changedById: userId,
-            notes: `Incoming Check: ${result}`,
+    const updated = await this.prisma.$transaction(async (prisma) => {
+      await prisma.incomingMaterialCheck.create({
+        data: {
+          transactionId,
+          result: result,
+          odor: this.mapToCheckResult(dto.odor),
+          color: this.mapToCheckResult(dto.color),
+          moisture: dto.moisture,
+          foreignMatter: dto.foreignMatter,
+          beanCondition: this.booleanToCheckResult(dto.beanCondition),
+          sampleWeight: dto.sampleWeight,
+          itemCondition: this.booleanToCheckResult(dto.itemCondition),
+          packagingCondition: this.booleanToCheckResult(dto.packagingCondition),
+          quantityCheck: this.booleanToCheckResult(dto.quantityCheck),
+          documentCheck: this.booleanToCheckResult(dto.documentCheck),
+          visualInspection: this.booleanToCheckResult(dto.visualInspection),
+          defectNotes: dto.defectNotes,
+          notes: dto.notes,
+          checkedById: userId,
+          startedAt: tx.qcStartAt,
+          completedAt: new Date(),
+        },
+      });
+
+      return prisma.transaction.update({
+        where: { id: transactionId },
+        data: {
+          status: nextStatus,
+          qcEndAt: new Date(),
+          statusHistory: {
+            create: {
+              newStatus: nextStatus,
+              changedById: userId,
+              notes: `Incoming Check: ${result}`,
+            },
           },
         },
-      },
-      include: { incomingMaterialChecks: true },
+        include: { incomingMaterialChecks: true },
+      });
     });
 
     await this.activityLogsService.logAction({

@@ -57,12 +57,27 @@
             </button>
           </div>
         </div>
+
+        <!-- Database Backup & Recovery -->
+        <div class="p-5 rounded-2xl animate-fadeInUp stagger-8 group hover:-translate-y-1 transition-all duration-300 flex flex-col h-full" style="background:white;border:1px solid #E8EEF7;box-shadow:0 2px 12px rgba(15,23,42,0.05)">
+          <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-colors" style="background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(16,185,129,0.05));border:1px solid rgba(16,185,129,0.2)">
+            <span class="material-icons text-xl text-emerald-600 group-hover:scale-110 transition-transform">storage</span>
+          </div>
+          <h3 class="text-sm font-black text-slate-900 mb-1">Database Backup & Recovery</h3>
+          <p class="text-xs text-slate-500 font-medium mb-5 line-clamp-2">Export database snapshot JSON file and restore system data with safety verification.</p>
+          <div class="mt-auto">
+            <button @click="showBackupModal = true" class="w-full py-2.5 rounded-xl text-xs font-bold text-slate-600 bg-slate-50 hover:bg-emerald-600 hover:text-white transition-colors border border-slate-100 hover:border-transparent">
+              Manage Backup
+            </button>
+          </div>
+        </div>
       </div>
     </div>
     
     <TargetThresholdModal :isOpen="isTargetModalOpen" @close="isTargetModalOpen = false" />
     <MasterDataModal v-if="showMasterDataModal" @close="showMasterDataModal = false" />
     <AnnouncementModal :isOpen="showAnnouncementModal" @close="showAnnouncementModal = false" />
+    <DatabaseBackupModal :isOpen="showBackupModal" @close="showBackupModal = false" />
   </div>
 </template>
 
@@ -73,9 +88,11 @@ import PageHeader from '../components/PageHeader.vue'
 import TargetThresholdModal from '../components/TargetThresholdModal.vue'
 import MasterDataModal from '../components/MasterDataModal.vue'
 import AnnouncementModal from '../components/AnnouncementModal.vue'
+import DatabaseBackupModal from '../components/DatabaseBackupModal.vue'
 
 const settingsStore = useSettingsStore()
 const isTargetModalOpen = ref(false)
 const showMasterDataModal = ref(false)
 const showAnnouncementModal = ref(false)
+const showBackupModal = ref(false)
 </script>

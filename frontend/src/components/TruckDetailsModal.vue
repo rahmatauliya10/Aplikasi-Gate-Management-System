@@ -79,13 +79,13 @@
               <div v-if="qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                 <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
                   <div class="flex items-center space-x-2">
-                    <span class="material-icons text-blue-500 text-[14px]">biotech</span>
-                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Quality Analysis</h3>
+                    <span class="material-icons text-[14px]" :class="truck.processType === 'GBJ' ? 'text-indigo-500' : 'text-blue-500'">{{ truck.processType === 'GBJ' ? 'local_shipping' : 'biotech' }}</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">{{ truck.processType === 'GBJ' ? 'QC Vehicle' : 'Quality Analysis' }}</h3>
                   </div>
-                  <span v-if="qcDetails.pic" class="text-[9px] font-bold text-slate-400">PIC: {{ qcDetails.pic }}</span>
+                  <span v-if="!isWarehouseRejection && qcPicLabel" class="text-[9px] font-bold text-slate-400">PIC: {{ qcPicLabel }}</span>
                 </div>
                 <div class="p-3">
-                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
+                  <div v-if="!isWarehouseRejection && qcMetrics.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
                     <div v-for="item in qcMetrics" :key="item.label" 
                          class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
                       <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
@@ -93,7 +93,11 @@
                     </div>
                   </div>
                   <!-- QC Status Banner -->
-                  <div class="rounded-xl p-3 text-white relative overflow-hidden"
+                  <div v-if="isWarehouseRejection" class="rounded-xl p-3 text-slate-500 relative overflow-hidden bg-slate-50 border border-slate-150 shadow-sm flex items-center space-x-2">
+                    <span class="material-icons text-slate-400 text-sm">next_plan</span>
+                    <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED (REJECTED AT WAREHOUSE)</span>
+                  </div>
+                  <div v-else class="rounded-xl p-3 text-white relative overflow-hidden"
                        :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
                     <div class="flex items-center space-x-2">
                       <span class="material-icons text-white/80 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
@@ -104,30 +108,37 @@
                 </div>
               </div>
 
-              <!-- Incoming Checklist Results (GBB only, when remarks contain checklist data) -->
-              <div v-if="parsedChecklist" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+              <!-- Incoming Checklist Results (when remarks contain checklist data or it is a warehouse rejection or vehicle check) -->
+              <div v-if="parsedChecklist || isWarehouseRejection" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                 <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50" 
-                     :style="{ background: parsedChecklist.hasIssue ? 'rgba(251, 191, 36, 0.05)' : 'rgba(16, 185, 129, 0.04)' }">
+                     :style="{ background: isWarehouseRejection ? 'rgba(239, 68, 68, 0.05)' : (parsedChecklist?.hasIssue ? 'rgba(239, 68, 68, 0.05)' : 'rgba(16, 185, 129, 0.04)') }">
                   <div class="flex items-center space-x-2">
-                    <span class="material-icons text-[14px]" :style="parsedChecklist.hasIssue ? 'color:#D97706' : 'color:#059669'">assignment_turned_in</span>
-                    <h3 class="text-[10px] font-black uppercase tracking-[0.15em]" :style="parsedChecklist.hasIssue ? 'color:#92400E' : 'color:#064E3B'">Incoming QC Checklist</h3>
+                    <span class="material-icons text-[14px]" :style="isWarehouseRejection || parsedChecklist?.hasIssue ? 'color:#E11D48' : 'color:#059669'">{{ truck?.processType === 'GBJ' ? 'local_shipping' : 'assignment_turned_in' }}</span>
+                    <h3 class="text-[10px] font-black uppercase tracking-[0.15em]" :style="isWarehouseRejection || parsedChecklist?.hasIssue ? 'color:#9F1239' : 'color:#064E3B'">{{ truck?.processType === 'GBJ' ? 'Vehicle & Goods Inspection' : 'Incoming QC Checklist' }}</h3>
                   </div>
-                  <!-- Status Pill -->
-                  <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
-                       :class="parsedChecklist.hasIssue ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
-                    <span class="material-icons text-[10px]">{{ parsedChecklist.hasIssue ? 'warning' : 'check_circle' }}</span>
-                    <span>{{ parsedChecklist.hasIssue ? 'DITERIMA DENGAN CATATAN' : 'ALL COMPLIANT' }}</span>
+                  <!-- Status Pill & PIC -->
+                  <div class="flex items-center space-x-2.5">
+                    <span v-if="checklistPicLabel && truck?.processType !== 'GBJ'" class="text-[9px] font-bold text-slate-400">PIC: {{ checklistPicLabel }}</span>
+                    <div v-if="isWarehouseRejection" class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase bg-rose-50 text-rose-700 border border-rose-200">
+                      <span class="material-icons text-[10px]">cancel</span>
+                      <span>REJECTED</span>
+                    </div>
+                    <div v-else class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
+                          :class="parsedChecklist?.hasIssue ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
+                      <span class="material-icons text-[10px]">{{ parsedChecklist?.hasIssue ? 'cancel' : 'check_circle' }}</span>
+                      <span>{{ parsedChecklist?.hasIssue ? 'REJECTED' : 'ALL COMPLIANT' }}</span>
+                    </div>
                   </div>
                 </div>
 
                 <div class="p-3 space-y-4">
                   <!-- 1. Sampling Parameters Grid (3 columns) -->
-                  <div v-if="parsedChecklist.samplings.length" class="space-y-1.5">
+                  <div v-if="parsedChecklist && parsedChecklist.samplings.length" class="space-y-1.5">
                     <h4 class="text-[8px] font-black text-slate-400 uppercase tracking-widest">Sampling Parameters</h4>
                     <div class="grid grid-cols-3 gap-2">
                       <div v-for="s in parsedChecklist.samplings" :key="s.label" 
-                           class="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-300"
-                           :class="s.compliant ? 'bg-emerald-50/20 border-emerald-100/60 text-emerald-800' : 'bg-rose-50/30 border-rose-100 text-rose-800'">
+                            class="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-300"
+                            :class="s.compliant ? 'bg-emerald-50/20 border-emerald-100/60 text-emerald-800' : 'bg-rose-50/30 border-rose-100 text-rose-800'">
                         <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1.5">{{ s.label }}</span>
                         <div class="flex items-center space-x-1">
                           <span class="material-icons text-[12px]" :class="s.compliant ? 'text-emerald-500' : 'text-rose-500'">
@@ -142,12 +153,12 @@
                   </div>
 
                   <!-- 2. Inspection Items Grid (2 columns) -->
-                  <div v-if="parsedChecklist.items.length" class="space-y-1.5">
+                  <div v-if="parsedChecklist && parsedChecklist.items.length" class="space-y-1.5">
                     <h4 class="text-[8px] font-black text-slate-400 uppercase tracking-widest">Vehicle & Goods Inspection</h4>
                     <div class="grid grid-cols-2 gap-2">
                       <div v-for="c in parsedChecklist.items" :key="c.label" 
-                           class="flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300 hover:translate-y-[-1px] bg-slate-50/30"
-                           :class="c.ok ? 'border-slate-100 text-slate-700 hover:bg-white hover:shadow-[0_2px_8px_rgba(0,0,0,0.02)]' : 'border-rose-100 text-rose-800 bg-rose-50/20'">
+                            class="flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300 hover:translate-y-[-1px] bg-slate-50/30"
+                            :class="c.ok ? 'border-slate-100 text-slate-700 hover:bg-white hover:shadow-[0_2px_8px_rgba(0,0,0,0.02)]' : 'border-rose-100 text-rose-800 bg-rose-50/20'">
                         <div class="flex items-center space-x-2 truncate">
                           <span class="material-icons text-[13px]" :class="c.ok ? 'text-emerald-500' : 'text-rose-500'">
                             {{ c.ok ? 'check_circle' : 'cancel' }}
@@ -159,12 +170,22 @@
                                 :class="c.ok ? 'bg-emerald-100/50 text-emerald-700' : 'bg-rose-100 text-rose-700'">
                             {{ c.ok ? 'OK' : 'NOT OK' }}
                           </span>
-                          <button v-if="c.photo" @click="selectedPhoto = c.photo" title="View Attachment" class="flex items-center justify-center w-6 h-6 rounded bg-rose-100 hover:bg-rose-200 text-rose-600 transition-colors">
+                          <button v-if="c.photo" @click="selectedPhoto = c.photo" title="View Attachment" class="flex items-center justify-center w-6 h-6 rounded bg-rose-100 hover:bg-rose-200 text-rose-600 transition-colors ml-2">
                             <span class="material-icons text-[14px]">image</span>
                           </button>
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  <!-- 3. Rejection Banner (only show if isWarehouseRejection is true) -->
+                  <div v-if="isWarehouseRejection && qcDetails" class="rounded-xl p-3 text-white relative overflow-hidden bg-gradient-to-r from-red-500 to-red-600 shadow-sm">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-white/80 text-sm">cancel</span>
+                      <span class="text-xs font-black tracking-widest uppercase">REJECTED BY WAREHOUSE (INCOMING CHECKLIST FAIL)</span>
+                    </div>
+                    <p v-if="qcDetails.note" class="text-[10px] font-bold text-white/80 mt-1 italic">"{{ qcDetails.note }}"</p>
+                    <span v-if="checklistPicLabel" class="absolute right-3 bottom-1.5 text-[8px] font-bold text-white/60">PIC: {{ checklistPicLabel }}</span>
                   </div>
                 </div>
               </div>
@@ -230,11 +251,13 @@
                         <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400/20"></div>
                         <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Gross (IN)</span>
                         <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossInVal) }}</div>
+                        <span v-if="props.truck.weighInBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
                       </div>
                       <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
                         <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-red-400/20"></div>
                         <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Tare (OUT)</span>
                         <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareOutVal) }}</div>
+                        <span v-if="props.truck.weighOutBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
                       </div>
                     </template>
                     <template v-else-if="truck.processType === 'GBJ'">
@@ -242,11 +265,13 @@
                         <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400/20"></div>
                         <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Tare (IN)</span>
                         <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareInVal) }}</div>
+                        <span v-if="props.truck.weighInBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
                       </div>
                       <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
                         <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-red-400/20"></div>
                         <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Gross (OUT)</span>
                         <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossOutVal) }}</div>
+                        <span v-if="props.truck.weighOutBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
                       </div>
                     </template>
                   </div>
@@ -260,6 +285,7 @@
                     <div class="p-2.5 rounded-xl bg-orange-50/50 border border-orange-100/50 relative">
                       <span class="text-[8px] font-black text-orange-600/80 uppercase tracking-widest block mb-1">Warehouse Realization</span>
                       <div class="text-base font-black text-orange-700 font-mono tracking-tight">{{ formatWeightCustom(warehouseRealization) }}</div>
+                      <span v-if="props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name" class="text-[8px] font-bold text-orange-600/80 block mt-1.5 leading-none">PIC: [GUDANG] {{ props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name }}</span>
                     </div>
                   </div>
 
@@ -402,7 +428,7 @@ const props = defineProps({
   truck: { type: Object, default: () => ({}) },
   size: { type: String, default: 'normal' }
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'deleted'])
 const close = () => emit('close')
 
 const authStore = useAuthStore()
@@ -421,6 +447,7 @@ const handleDelete = async () => {
   })
   if (ok) {
     await truckStore.deleteTruck(props.truck.id)
+    emit('deleted', props.truck.id)
     close()
   }
 }
@@ -452,12 +479,13 @@ const identityFields = computed(() => {
 })
 
 const qcDetails = computed(() => {
-  if (props.truck?.qcDetails) return props.truck.qcDetails;
+  const sourceDetails = props.truck?.qcDetails;
+  let relationDetails = null;
 
   // GBB / GSP from backend relations
   if (props.truck?.incomingMaterialChecks && props.truck.incomingMaterialChecks.length > 0) {
     const check = props.truck.incomingMaterialChecks[0];
-    return {
+    relationDetails = {
       pic: check.checkedBy?.name || 'QC Inspector',
       status: check.result,
       note: check.notes || check.defectNotes || '',
@@ -468,24 +496,70 @@ const qcDetails = computed(() => {
       bijiOK: check.sampleWeight
     };
   }
-
   // GBJ from backend relations
-  if (props.truck?.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
+  else if (props.truck?.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
     const check = props.truck.qcVehicleChecks[0];
-    return {
+    relationDetails = {
       pic: check.checkedBy?.name || 'QC Inspector',
       status: check.result,
       note: check.notes || '',
+      kadarAir: null,
+      totalFM: null,
+      bijiOK: null
     };
   }
 
-  return null;
+  // Merge sourceDetails and relationDetails if both exist
+  if (sourceDetails && relationDetails) {
+    return {
+      ...relationDetails,
+      ...sourceDetails,
+      status: sourceDetails.status || relationDetails.status,
+      note: sourceDetails.note !== undefined ? sourceDetails.note : relationDetails.note,
+      bau: sourceDetails.bau !== undefined ? sourceDetails.bau : relationDetails.bau,
+      warna: sourceDetails.warna !== undefined ? sourceDetails.warna : relationDetails.warna,
+      pic: sourceDetails.pic && sourceDetails.pic !== 'N/A' ? sourceDetails.pic : relationDetails.pic
+    };
+  }
+
+  return sourceDetails || relationDetails;
 });
+
+const isWarehouseRejection = computed(() => {
+  if (!props.truck) return false
+  const t = props.truck
+  const isGbbOrGsp = t.processType === 'GBB' || t.processType === 'GSP'
+  const qcStart = t.timestamps?.qcStartAt || t.qcStartAt || null
+  const hasReject = t.incomingMaterialChecks?.some(c => c.result === 'REJECT') || 
+                    qcDetails.value?.status === 'REJECT' || 
+                    qcDetails.value?.status === 'REJECTED'
+  return isGbbOrGsp && hasReject && !qcStart
+})
+
+const qcPicLabel = computed(() => {
+  if (!qcDetails.value || !qcDetails.value.pic) return ''
+  const dept = props.truck?.processType === 'GBJ' ? 'QC VEHICLE' : 'LAB QC'
+  return `[${dept}] ${qcDetails.value.pic}`
+})
+
+const checklistPicLabel = computed(() => {
+  if (!props.truck) return ''
+  if (isWarehouseRejection.value) {
+    return `[GUDANG] ${qcDetails.value?.pic || 'Admin'}`
+  }
+  const opName = props.truck.warehouseEndBy?.name || 
+                 props.truck.warehouseStartBy?.name || 
+                 props.truck.warehouseProcesses?.[0]?.endBy?.name ||
+                 'Staff Gudang'
+  return `[GUDANG] ${opName}`
+})
 
 const qcMetrics = computed(() => {
   const metrics = []
+  if (isWarehouseRejection.value) return metrics
   const details = qcDetails.value
   if (!details) return metrics
+  if (props.truck?.processType === 'GBJ') return metrics // Empty for GBJ since it uses the detailed checklist below
   if (details.bau) metrics.push({ label: 'Odor', value: details.bau })
   if (details.warna) metrics.push({ label: 'Color', value: details.warna })
   if (details.kadarAir !== null && details.kadarAir !== undefined) metrics.push({ label: 'Moisture', value: details.kadarAir + '%' })
@@ -508,6 +582,39 @@ const qcMetrics = computed(() => {
 // Parse remarks string into structured checklist/sampling data
 const parsedChecklist = computed(() => {
   if (!props.truck) return null
+
+  // If GBJ, populate checklist from qcVehicleChecks
+  if (props.truck.processType === 'GBJ' && props.truck.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
+    const check = props.truck.qcVehicleChecks[0];
+    let items = []
+    
+    // Use new checklistItems format if available (includes photos)
+    if (check.checklistItems && Array.isArray(check.checklistItems)) {
+      items = check.checklistItems;
+    } else {
+      // Fallback for old data
+      if (check.vehicleCleanliness && check.vehicleCleanliness !== 'NA') {
+        items.push({ label: 'Vehicle Cleanliness', ok: check.vehicleCleanliness === 'PASS' })
+      }
+      if (check.sealCondition && check.sealCondition !== 'NA') {
+        items.push({ label: 'Door Seal Intact', ok: check.sealCondition === 'PASS' })
+      }
+      if (check.vehicleOdor && check.vehicleOdor !== 'NA') {
+        items.push({ label: 'Odor/Smell Check', ok: check.vehicleOdor === 'PASS' })
+      }
+      if (check.pestEvidence && check.pestEvidence !== 'NA') {
+        items.push({ label: 'Pest/Animal Control', ok: check.pestEvidence === 'PASS' })
+      }
+      if (check.documentCompleteness && check.documentCompleteness !== 'NA') {
+        items.push({ label: 'CoA Validation', ok: check.documentCompleteness === 'PASS' })
+      }
+      if (check.vehicleCondition && check.vehicleCondition !== 'NA') {
+        items.push({ label: 'Leakage & Condition', ok: check.vehicleCondition === 'PASS' })
+      }
+    }
+    return { hasIssue: check.result === 'REJECT', samplings: [], items }
+  }
+
   const remarksStr = props.truck.remarks || props.truck.compiledChecklist || props.truck.warehouseProcesses?.[0]?.remarks || ''
   if (!remarksStr || (!remarksStr.includes('Sampling:') && !remarksStr.includes('Checklist:'))) return null
 
@@ -668,19 +775,18 @@ const isDataCompleteForCalc = computed(() => {
 
 const nettoTimbanganJembatan = computed(() => {
   if (!props.truck) return null
-  if (isRejected.value) return 0
   const t = props.truck
   const area = t.processType
   if (area === 'GBB' || area === 'GSP') {
     const gIn = grossInVal.value
     const tOut = tareOutVal.value
     if (gIn === null || tOut === null) return null
-    return gIn - tOut
+    return Math.max(0, gIn - tOut)
   } else if (area === 'GBJ') {
     const tIn = tareInVal.value
     const gOut = grossOutVal.value
     if (tIn === null || gOut === null) return null
-    return gOut - tIn
+    return Math.max(0, gOut - tIn)
   }
   return null
 })

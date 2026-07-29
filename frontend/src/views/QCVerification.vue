@@ -194,7 +194,7 @@
               <span class="material-icons text-[#4A8BDF]">science</span>
             </div>
             <div>
-              <h3 class="text-lg font-black text-indigo-900 tracking-tight">GBB Verification Parameters</h3>
+              <h3 class="text-lg font-black text-indigo-900 tracking-tight">Quality Analysis</h3>
               <p class="text-xs font-bold text-indigo-600 tracking-wider uppercase">{{ selectedTruck?.plateNumber }}</p>
             </div>
           </div>
@@ -498,7 +498,39 @@ const selectTruck = (truck) => {
   }
 }
 
-const handlePhotoUpload = (event, index) => { const file = event.target.files[0]; if (file) checklistStates.value[index].photo = file.name }
+const handlePhotoUpload = (event, index) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      
+      const MAX_SIZE = 800;
+      if (width > height && width > MAX_SIZE) {
+        height *= MAX_SIZE / width;
+        width = MAX_SIZE;
+      } else if (height > MAX_SIZE) {
+        width *= MAX_SIZE / height;
+        height = MAX_SIZE;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+      checklistStates.value[index].photo = dataUrl;
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
 
 const isChecklistComplete = computed(() => {
   if (checklistStates.value.length === 0) return false
@@ -519,7 +551,8 @@ const checklistRemaining = computed(() => {
 
 const acceptChecklistAndStart = () => {
   showChecklistModal.value = false
-  verifyTruck(selectedTruck.value, true)
+  const passed = checklistStates.value.every(s => s.status === 'ok')
+  verifyTruck(selectedTruck.value, passed)
 }
 
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
@@ -590,10 +623,22 @@ const verifyTruck = async (truck, passed) => {
           notes: qcForm.value.note
         })
       } else {
-        response = await qcStore.submitVehicleResult(truck.id, { 
+        const payload = { 
           result,
+          pestEvidence: checklistStates.value[0]?.status === 'ok',
+          documentCompleteness: checklistStates.value[1]?.status === 'ok',
+          vehicleCleanliness: checklistStates.value[2]?.status === 'ok',
+          vehicleOdor: checklistStates.value[2]?.status === 'ok',
+          sealCondition: checklistStates.value[3]?.status === 'ok',
+          vehicleCondition: checklistStates.value[4]?.status === 'ok',
+          checklistItems: checklistStates.value.map((s, idx) => ({
+            label: vehicleChecklist[idx],
+            ok: s.status === 'ok',
+            photo: s.photo || null
+          })),
           notes: 'Completed vehicle checklist'
-        })
+        };
+        response = await qcStore.submitVehicleResult(truck.id, payload)
       }
       const updatedTruck = response?.data || response;
       if (updatedTruck) truckStore.upsertTruck(updatedTruck);

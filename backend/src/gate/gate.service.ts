@@ -49,64 +49,69 @@ export class GateService {
   async checkIn(dto: CreateGateCheckInDto, user: JwtPayloadUser) {
     this.logger.log(`Gate check-in attempt for plate: ${dto.plateNumber}`);
 
-    // Check for duplicate active transaction for the same plate number
-    const activeTransaction = await this.prisma.transaction.findFirst({
-      where: {
-        plateNumber: dto.plateNumber,
-        status: {
-          notIn: ['COMPLETED', 'CANCELLED'],
-        },
-      },
-    });
-
-    if (activeTransaction) {
-      this.logger.warn(
-        `Check-in rejected: Active transaction found for plate ${dto.plateNumber}`,
-      );
-      throw new BadRequestException(
-        'Kendaraan dengan pelat ini masih memiliki transaksi yang sedang aktif (Belum Gate Out). Harap selesaikan atau batalkan transaksi sebelumnya terlebih dahulu.',
-      );
-    }
-
     let transaction: any;
     let retries = 3;
     while (retries > 0) {
       try {
         const transactionNumber = await this.generateTransactionNumber();
-        transaction = await this.prisma.transaction.create({
-          data: {
-            transactionNumber,
-            plateNumber: dto.plateNumber,
-            driverName: dto.driverName,
-            driverPhone: dto.driverPhone,
-            vendorName: dto.vendorName,
-            vehicleType: dto.vehicleType,
-            processType: dto.processType,
-            cargoType: dto.cargoType,
-            cargoSubType: dto.cargoSubType,
-            cargoProcessType: dto.cargoProcessType,
-            suratJalanNumber: dto.suratJalanNumber,
-            poNumber: dto.poNumber,
-            permitCardNumber: dto.permitCardNumber,
-            guestIdNumber: dto.guestIdNumber,
-            remarks: dto.remarks,
-            status: 'REGISTERED',
-            gateInAt: new Date(),
-            createdById: user.id,
-            statusHistory: {
-              create: {
-                newStatus: 'REGISTERED',
-                changedById: user.id,
-                notes: 'Gate check-in created',
+
+        transaction = await this.prisma.$transaction(async (tx) => {
+          const activeTransaction = await tx.transaction.findFirst({
+            where: {
+              plateNumber: dto.plateNumber,
+              status: {
+                notIn: ['COMPLETED', 'CANCELLED'],
               },
             },
-          },
-          include: {
-            statusHistory: true,
-          },
+          });
+
+          if (activeTransaction) {
+            this.logger.warn(
+              `Check-in rejected: Active transaction found for plate ${dto.plateNumber}`,
+            );
+            throw new BadRequestException(
+              'Kendaraan dengan pelat ini masih memiliki transaksi yang sedang aktif (Belum Gate Out). Harap selesaikan atau batalkan transaksi sebelumnya terlebih dahulu.',
+            );
+          }
+
+          return tx.transaction.create({
+            data: {
+              transactionNumber,
+              plateNumber: dto.plateNumber,
+              driverName: dto.driverName,
+              driverPhone: dto.driverPhone,
+              vendorName: dto.vendorName,
+              vehicleType: dto.vehicleType,
+              processType: dto.processType,
+              cargoType: dto.cargoType,
+              cargoSubType: dto.cargoSubType,
+              cargoProcessType: dto.cargoProcessType,
+              suratJalanNumber: dto.suratJalanNumber,
+              poNumber: dto.poNumber,
+              permitCardNumber: dto.permitCardNumber,
+              guestIdNumber: dto.guestIdNumber,
+              remarks: dto.remarks,
+              status: 'REGISTERED',
+              gateInAt: new Date(),
+              createdById: user.id,
+              statusHistory: {
+                create: {
+                  newStatus: 'REGISTERED',
+                  changedById: user.id,
+                  notes: 'Gate check-in created',
+                },
+              },
+            },
+            include: {
+              statusHistory: true,
+            },
+          });
         });
         break;
       } catch (error: any) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
         if (error.code === 'P2002') {
           retries--;
           if (retries === 0)

@@ -149,6 +149,8 @@ router.beforeEach(async (to, from, next) => {
       next('/change-password');
       return;
     }
+
+
     
     // Check role access
     if (to.meta.roles && !hasRoleAccess(user?.role, to.meta.roles)) {

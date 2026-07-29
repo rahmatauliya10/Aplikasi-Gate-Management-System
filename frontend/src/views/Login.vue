@@ -245,7 +245,7 @@ const handleLogin = async () => {
         if (authStore.user.role === 'SECURITY') {
           router.push('/gate-in')
         } else if (authStore.user.role === 'WAREHOUSE') {
-          router.push('/weighbridge')
+          router.push('/')
         } else if (authStore.user.role === 'QC') {
           router.push('/qc')
         } else {

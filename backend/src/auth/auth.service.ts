@@ -24,6 +24,8 @@ export class AuthService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
+  private failedAttemptsMap = new Map<string, { count: number; lockedUntil?: Date }>();
+
   async login(dto: LoginDto) {
     this.logger.log(`Login attempt for identifier: ${dto.identifier}`);
 
@@ -52,19 +54,60 @@ export class AuthService {
       });
     }
 
-    const passwordValid = await argon2.verify(user.passwordHash, dto.password);
-    if (!passwordValid) {
-      this.logger.warn(`Login failed: invalid password for ${dto.identifier}`);
-      await this.auditLog(user.id, 'LOGIN_FAILED', {
+    // Check Account Lockout status (5 failed attempts -> 15 min lockout)
+    const lockInfo = this.failedAttemptsMap.get(user.id);
+    if (lockInfo && lockInfo.lockedUntil && new Date() < lockInfo.lockedUntil) {
+      const remainingMinutes = Math.ceil((lockInfo.lockedUntil.getTime() - Date.now()) / (1000 * 60));
+      this.logger.warn(`Login failed: account locked for ${dto.identifier} (Locked for ${remainingMinutes}m)`);
+      await this.auditLog(user.id, 'LOGIN_LOCKED', {
         identifier: dto.identifier,
-        reason: 'Invalid password',
+        reason: `Account locked due to 5 consecutive failed attempts. Try again in ${remainingMinutes} minutes.`,
       });
       throw new UnauthorizedException({
         success: false,
-        message: 'Password salah.',
+        message: `Akun terkunci sementara karena 5x kesalahan password. Silakan coba lagi dalam ${remainingMinutes} menit.`,
+        code: 'ACCOUNT_TEMPORARILY_LOCKED',
         errors: [],
       });
     }
+
+    const passwordValid = await argon2.verify(user.passwordHash, dto.password);
+    if (!passwordValid) {
+      const current = this.failedAttemptsMap.get(user.id) || { count: 0 };
+      const newCount = current.count + 1;
+      let lockedUntil: Date | undefined = undefined;
+
+      if (newCount >= 5) {
+        lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes lockout
+        this.logger.warn(`Account ${user.email} has been locked for 15 minutes after 5 failed attempts.`);
+      }
+
+      this.failedAttemptsMap.set(user.id, { count: newCount, lockedUntil });
+
+      this.logger.warn(`Login failed: invalid password for ${dto.identifier} (Attempt ${newCount}/5)`);
+      await this.auditLog(user.id, 'LOGIN_FAILED', {
+        identifier: dto.identifier,
+        reason: `Invalid password (Attempt ${newCount}/5)`,
+      });
+
+      if (newCount >= 5) {
+        throw new UnauthorizedException({
+          success: false,
+          message: 'Terlalu banyak percobaan password salah. Akun Anda telah terkunci selama 15 menit.',
+          code: 'ACCOUNT_TEMPORARILY_LOCKED',
+          errors: [],
+        });
+      }
+
+      throw new UnauthorizedException({
+        success: false,
+        message: `Password salah. sisa percobaan: ${5 - newCount}x`,
+        errors: [],
+      });
+    }
+
+    // Reset failed attempts counter upon successful password verification
+    this.failedAttemptsMap.delete(user.id);
 
     if (!user.isActive) {
       this.logger.warn(`Login failed: account disabled for ${dto.identifier}`);

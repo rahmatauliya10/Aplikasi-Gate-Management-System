@@ -451,14 +451,16 @@
                       </div>
                     </div>
 
-                    <!-- Column 3: QC Lab Certificate & Metadata -->
+                    <!-- Column 3: QC Lab Certificate / Vehicle Checklist & Metadata -->
                     <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col justify-between">
                       <div>
                         <div class="flex items-center space-x-2 pb-3 mb-3 border-b border-slate-50">
-                          <span class="material-icons text-blue-500 text-sm">science</span>
-                          <h4 class="text-[9px] font-black text-slate-700 uppercase tracking-wider">Quality Assurance Cert</h4>
+                          <span class="material-icons text-sm" :class="truck.processType === 'GBJ' ? 'text-indigo-500' : 'text-blue-500'">{{ truck.processType === 'GBJ' ? 'local_shipping' : 'science' }}</span>
+                          <h4 class="text-[9px] font-black text-slate-700 uppercase tracking-wider">{{ truck.processType === 'GBJ' ? 'QC Vehicle Checklist' : 'Quality Assurance Cert' }}</h4>
                         </div>
-                        <div v-if="truck.qcDetails" class="grid grid-cols-3 gap-1.5 mb-2.5">
+                        
+                        <!-- GBB / GSP Metrics -->
+                        <div v-if="truck.qcDetails && truck.processType !== 'GBJ'" class="grid grid-cols-3 gap-1.5 mb-2.5">
                           <div class="bg-slate-50 p-1.5 rounded text-center" v-if="truck.qcDetails.kadarAir !== null && truck.qcDetails.kadarAir !== undefined">
                             <span class="text-[7px] font-black text-slate-400 uppercase tracking-wider block">Moisture</span>
                             <span class="text-[10px] font-black text-slate-700 font-mono">{{ truck.qcDetails.kadarAir }}%</span>
@@ -470,6 +472,34 @@
                           <div class="bg-slate-50 p-1.5 rounded text-center" v-if="truck.qcDetails.bijiOK !== null && truck.qcDetails.bijiOK !== undefined">
                             <span class="text-[7px] font-black text-slate-400 uppercase tracking-wider block">Biji Baik</span>
                             <span class="text-[10px] font-black text-slate-700 font-mono">{{ truck.qcDetails.bijiOK }}%</span>
+                          </div>
+                        </div>
+
+                        <!-- GBJ Metrics -->
+                        <div v-if="truck.qcDetails && truck.processType === 'GBJ'" class="grid grid-cols-3 gap-1.5 mb-2.5">
+                          <div class="bg-slate-50 p-1 rounded text-center" v-if="truck.qcDetails.vehicleCleanliness">
+                            <span class="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block">Cleanliness</span>
+                            <span class="text-[9px] font-black" :class="truck.qcDetails.vehicleCleanliness === 'PASS' ? 'text-emerald-600' : 'text-rose-600'">{{ truck.qcDetails.vehicleCleanliness }}</span>
+                          </div>
+                          <div class="bg-slate-50 p-1 rounded text-center" v-if="truck.qcDetails.vehicleOdor">
+                            <span class="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block">Odor</span>
+                            <span class="text-[9px] font-black" :class="truck.qcDetails.vehicleOdor === 'PASS' ? 'text-emerald-600' : 'text-rose-600'">{{ truck.qcDetails.vehicleOdor }}</span>
+                          </div>
+                          <div class="bg-slate-50 p-1 rounded text-center" v-if="truck.qcDetails.pestEvidence">
+                            <span class="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block">Pest Free</span>
+                            <span class="text-[9px] font-black" :class="truck.qcDetails.pestEvidence === 'PASS' ? 'text-emerald-600' : 'text-rose-600'">{{ truck.qcDetails.pestEvidence }}</span>
+                          </div>
+                          <div class="bg-slate-50 p-1 rounded text-center" v-if="truck.qcDetails.vehicleCondition">
+                            <span class="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block">Condition</span>
+                            <span class="text-[9px] font-black" :class="truck.qcDetails.vehicleCondition === 'PASS' ? 'text-emerald-600' : 'text-rose-600'">{{ truck.qcDetails.vehicleCondition }}</span>
+                          </div>
+                          <div class="bg-slate-50 p-1 rounded text-center" v-if="truck.qcDetails.documentCompleteness">
+                            <span class="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block">Documents</span>
+                            <span class="text-[9px] font-black" :class="truck.qcDetails.documentCompleteness === 'PASS' ? 'text-emerald-600' : 'text-rose-600'">{{ truck.qcDetails.documentCompleteness }}</span>
+                          </div>
+                          <div class="bg-slate-50 p-1 rounded text-center" v-if="truck.qcDetails.sealCondition">
+                            <span class="text-[7.5px] font-black text-slate-400 uppercase tracking-wider block">Seal</span>
+                            <span class="text-[9px] font-black" :class="truck.qcDetails.sealCondition === 'PASS' ? 'text-emerald-600' : 'text-rose-600'">{{ truck.qcDetails.sealCondition }}</span>
                           </div>
                         </div>
                         <div class="text-[10px] space-y-1 text-slate-600">
@@ -524,7 +554,7 @@
     </div>
 
     <!-- Main Detail Modal Overlay -->
-    <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" />
+    <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" @deleted="handleTruckDeleted" />
   </div>
 </template>
 
@@ -544,6 +574,9 @@ const settingsStore = useSettingsStore()
 const toast = useToast()
 
 const rawCompletedTrucks = ref([])
+const handleTruckDeleted = (id) => {
+  rawCompletedTrucks.value = rawCompletedTrucks.value.filter(t => String(t.id) !== String(id))
+}
 const loading = ref(false)
 
 onMounted(async () => {
@@ -659,6 +692,8 @@ const analyzedTrucks = computed(() => {
     if (truck.incomingMaterialChecks && truck.incomingMaterialChecks.length > 0) {
       const im = truck.incomingMaterialChecks[0]
       qcDetails = {
+        status: im.result,
+        note: im.notes || im.defectNotes || '',
         kadarAir: im.moisture,
         totalFM: im.foreignMatter,
         bijiOK: im.beanCondition === 'PASS' || im.result === 'PASS' ? 100 : 0,
@@ -667,10 +702,18 @@ const analyzedTrucks = computed(() => {
     } else if (truck.qcVehicleChecks && truck.qcVehicleChecks.length > 0) {
       const qv = truck.qcVehicleChecks[0]
       qcDetails = {
+        status: qv.result,
+        note: qv.notes || '',
         kadarAir: null,
         totalFM: null,
-        bijiOK: qv.result === 'PASS' ? 100 : 0,
-        pic: qv.checkedBy?.name || 'N/A'
+        bijiOK: null,
+        pic: qv.checkedBy?.name || 'N/A',
+        vehicleCleanliness: qv.vehicleCleanliness,
+        vehicleOdor: qv.vehicleOdor,
+        pestEvidence: qv.pestEvidence,
+        vehicleCondition: qv.vehicleCondition,
+        documentCompleteness: qv.documentCompleteness,
+        sealCondition: qv.sealCondition
       }
     }
 
@@ -815,7 +858,17 @@ const calculateFraudMetrics = (truck) => {
                      truck.qcVehicleChecks?.some(c => c.result === 'REJECT')
 
   if (isRejected) {
-    return { net: 0, roll: 0, diff: 0, ratioPercent: 100, deviationPercent: 0, direction: '=', status: 'SAFE' }
+    let net = 0
+    if (area === 'GBB' || area === 'GSP') {
+      if (tareOut !== null && grossIn !== null) {
+        net = Math.max(0, grossIn - tareOut)
+      }
+    } else if (area === 'GBJ') {
+      if (grossOut !== null && tareIn !== null) {
+        net = Math.max(0, grossOut - tareIn)
+      }
+    }
+    return { net, roll: 0, diff: 0, ratioPercent: 100, deviationPercent: 0, direction: '=', status: 'SAFE' }
   }
 
   let net = 0
@@ -1326,14 +1379,24 @@ const generatePrintHTML = (truckList) => {
     <body>
   `
 
+  const escapeHtml = (str) => {
+    if (str === null || str === undefined) return '—'
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;')
+  }
+
   truckList.forEach(t => {
     const timelines = getTimelineRows(t)
     const formattedTimelines = timelines.map(node => {
       return `
         <div class="timeline-node">
           <div class="node-dot ${node.value ? '' : 'empty'}"></div>
-          <span class="node-label">${node.label}</span>
-          <span class="node-time">${formatTimeFull(node.value)}</span>
+          <span class="node-label">${escapeHtml(node.label)}</span>
+          <span class="node-time">${escapeHtml(formatTimeFull(node.value))}</span>
         </div>
       `
     }).join('')
@@ -1347,7 +1410,7 @@ const generatePrintHTML = (truckList) => {
           </div>
           <div>
             <h2 class="doc-title">TRUCK AUDIT RECEIPT</h2>
-            <div class="doc-subtitle">ID: ${t.id}</div>
+            <div class="doc-subtitle">ID: ${escapeHtml(t.id)}</div>
           </div>
         </div>
 
@@ -1357,23 +1420,23 @@ const generatePrintHTML = (truckList) => {
             <h3 class="section-title">Vehicle & Driver Details</h3>
             <div class="field">
               <span class="field-label">Plate Number</span>
-              <span class="field-value">${getPlateNumber(t)}</span>
+              <span class="field-value">${escapeHtml(getPlateNumber(t))}</span>
             </div>
             <div class="field">
               <span class="field-label">Driver Name</span>
-              <span class="field-value">${t.driverName || '—'}</span>
+              <span class="field-value">${escapeHtml(t.driverName)}</span>
             </div>
             <div class="field">
               <span class="field-label">Vendor</span>
-              <span class="field-value">${getVendor(t)}</span>
+              <span class="field-value">${escapeHtml(getVendor(t))}</span>
             </div>
             <div class="field">
               <span class="field-label">Destination</span>
-              <span class="field-value">${getProcessType(t)}</span>
+              <span class="field-value">${escapeHtml(getProcessType(t))}</span>
             </div>
             <div class="field">
               <span class="field-label">Status</span>
-              <span class="field-value">${t.status}</span>
+              <span class="field-value">${escapeHtml(t.status)}</span>
             </div>
           </div>
 
@@ -1382,23 +1445,23 @@ const generatePrintHTML = (truckList) => {
             <h3 class="section-title">Weighbridge & Scale Reconciliation</h3>
             <div class="field">
               <span class="field-label">Scale IN (Weighbridge)</span>
-              <span class="field-value">${formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.tare || t.tareWeight || t.weighInWeight) : (t.weights?.gross || t.grossWeight || t.weighInWeight))}</span>
+              <span class="field-value">${escapeHtml(formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.tare || t.tareWeight || t.weighInWeight) : (t.weights?.gross || t.grossWeight || t.weighInWeight)))}</span>
             </div>
             <div class="field">
               <span class="field-label">Scale OUT (Weighbridge)</span>
-              <span class="field-value">${formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.gross || t.grossWeight || t.weighOutWeight) : (t.weights?.tare || t.tareWeight || t.weighOutWeight))}</span>
+              <span class="field-value">${escapeHtml(formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.gross || t.grossWeight || t.weighOutWeight) : (t.weights?.tare || t.tareWeight || t.weighOutWeight)))}</span>
             </div>
             <div class="field">
               <span class="field-label">Net Weight</span>
-              <span class="field-value">${formatWeightCustom(t.fraud?.net)}</span>
+              <span class="field-value">${escapeHtml(formatWeightCustom(t.fraud?.net))}</span>
             </div>
             <div class="field">
               <span class="field-label">Warehouse Realization</span>
-              <span class="field-value">${formatWeightCustom(t.fraud?.roll)}</span>
+              <span class="field-value">${escapeHtml(formatWeightCustom(t.fraud?.roll))}</span>
             </div>
             <div class="field">
               <span class="field-label">Deviation</span>
-              <span class="field-value">${formatPercentage(t.fraud?.deviationPercent)}</span>
+              <span class="field-value">${escapeHtml(formatPercentage(t.fraud?.deviationPercent))}</span>
             </div>
           </div>
         </div>
@@ -1418,13 +1481,13 @@ const generatePrintHTML = (truckList) => {
             </thead>
             <tbody>
               <tr>
-                <td>${t.qcDetails?.kadarAir !== null && t.qcDetails?.kadarAir !== undefined ? t.qcDetails.kadarAir + '%' : '—'}</td>
-                <td>${t.qcDetails?.totalFM !== null && t.qcDetails?.totalFM !== undefined ? t.qcDetails.totalFM + '%' : '—'}</td>
-                <td>${t.qcDetails?.bijiOK !== null && t.qcDetails?.bijiOK !== undefined ? t.qcDetails.bijiOK + '%' : '—'}</td>
-                <td>${t.qcDetails?.pic || '—'}</td>
+                <td>${escapeHtml(t.qcDetails?.kadarAir !== null && t.qcDetails?.kadarAir !== undefined ? t.qcDetails.kadarAir + '%' : '—')}</td>
+                <td>${escapeHtml(t.qcDetails?.totalFM !== null && t.qcDetails?.totalFM !== undefined ? t.qcDetails.totalFM + '%' : '—')}</td>
+                <td>${escapeHtml(t.qcDetails?.bijiOK !== null && t.qcDetails?.bijiOK !== undefined ? t.qcDetails.bijiOK + '%' : '—')}</td>
+                <td>${escapeHtml(t.qcDetails?.pic || '—')}</td>
                 <td>
-                  <span class="badge ${t.fraud.status === 'CRITICAL' ? 'badge-critical' : t.fraud.status === 'WARNING' ? 'badge-warning' : t.fraud.status === 'PENDING' ? 'badge-pending' : 'badge-safe'}">
-                    ${t.fraud.status}
+                  <span class="badge ${t.fraud?.status === 'CRITICAL' ? 'badge-critical' : t.fraud?.status === 'WARNING' ? 'badge-warning' : t.fraud?.status === 'PENDING' ? 'badge-pending' : 'badge-safe'}">
+                    ${escapeHtml(t.fraud?.status)}
                   </span>
                 </td>
               </tr>

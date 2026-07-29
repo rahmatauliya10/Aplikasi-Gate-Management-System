@@ -39,11 +39,15 @@ services:
       - UPLOAD_DIR=./uploads
       - MAX_FILE_SIZE_MB=10
       - DEFAULT_ADMIN_EMAIL=admin@gms.local
+      - LOCAL_BACKUP_DIR=${LOCAL_BACKUP_DIR:-/app/backups/local}
+      - OFFSITE_BACKUP_DIR=${OFFSITE_BACKUP_DIR:-/app/backups/nas}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
+      - backups_local:/app/backups/local
+      - backups_nas:/app/backups/nas
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))\""]
       interval: 10s
@@ -72,3 +76,5 @@ services:
 volumes:
   pgdata:
   uploads:
+  backups_local:
+  backups_nas:

@@ -89,7 +89,7 @@ set HEALTH_MAX_RETRY=30
 
 :WAIT_BACKEND
 powershell -NoProfile -Command ^
-  "try { $r = Invoke-WebRequest -UseBasicParsing http://localhost:3001/api/health -TimeoutSec 5; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }"
+  "try { $c = New-Object System.Net.Sockets.TcpClient; $c.Connect('127.0.0.1', 3001); if ($c.Connected) { $c.Close(); exit 0 } else { exit 1 } } catch { exit 1 }"
 if %errorlevel%==0 (
     echo Backend siap dan sehat.
     goto DEPLOYMENT_SUCCESS

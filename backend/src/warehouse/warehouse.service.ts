@@ -581,10 +581,15 @@ export class WarehouseService {
       });
     }
 
-    if (tx.status !== 'INCOMING_CHECK_PENDING') {
+    const allowedStatuses = ['INCOMING_CHECK_PENDING'];
+    if (dto.decision === 'rejected') {
+      allowedStatuses.push('WAREHOUSE_IN_PROGRESS');
+    }
+
+    if (!allowedStatuses.includes(tx.status)) {
       throw new BadRequestException({
         success: false,
-        message: `Transaction must be in INCOMING_CHECK_PENDING status (current: ${tx.status})`,
+        message: `Transaction must be in [${allowedStatuses.join(', ')}] status (current: ${tx.status})`,
         errors: [],
       });
     }

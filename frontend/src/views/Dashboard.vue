@@ -130,7 +130,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="alert in alertList" :key="alert.id" class="transition-colors hover:bg-slate-50/60" style="border-top:1px solid rgba(241,245,249,0.5)">
+                      <tr v-for="alert in paginatedAlertList" :key="alert.id" class="transition-colors hover:bg-slate-50/60" style="border-top:1px solid rgba(241,245,249,0.5)">
                         <td class="px-4 sm:px-5 py-3 whitespace-nowrap">
                           <span class="text-[11px] sm:text-xs font-black text-[#4A8BDF] bg-[#E6F0FA] px-2 py-1 rounded-lg">{{ alert.plate }}</span>
                         </td>
@@ -148,6 +148,31 @@
                       </tr>
                     </tbody>
                   </table>
+                  <!-- Pagination Controls for Alerts -->
+                  <div v-if="totalAlertPages > 1" class="flex justify-between items-center px-4 sm:px-5 py-3 border-t border-slate-100 bg-[#FAFBFF] relative z-20">
+                    <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                      Showing {{ (alertPage - 1) * alertPerPage + 1 }}-{{ Math.min(alertPage * alertPerPage, alertList.length) }} of {{ alertList.length }}
+                    </span>
+                    <div class="flex items-center space-x-2">
+                      <button 
+                        @click="alertPage > 1 ? alertPage-- : null"
+                        :disabled="alertPage === 1"
+                        class="p-1 rounded bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white transition-colors"
+                      >
+                        <span class="material-icons text-sm block">chevron_left</span>
+                      </button>
+                      <span class="text-[10px] font-black font-mono text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+                        {{ alertPage }} / {{ totalAlertPages }}
+                      </span>
+                      <button 
+                        @click="alertPage < totalAlertPages ? alertPage++ : null"
+                        :disabled="alertPage === totalAlertPages"
+                        class="p-1 rounded bg-white border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white transition-colors"
+                      >
+                        <span class="material-icons text-sm block">chevron_right</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div v-else class="p-10 rounded-2xl text-center" style="background:#FAFBFF;border:1px dashed #D5DDE8">
                    <div class="w-14 h-14 mx-auto rounded-2xl flex items-center justify-center mb-3" style="background:rgba(74,139,223,0.06);border:1px solid rgba(74,139,223,0.1)">
@@ -292,7 +317,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import dashboardService from '../services/dashboardService'
@@ -364,6 +389,19 @@ const avgTotalTAT = computed(() => stats.value?.avgTotalTAT || 0)
 const avgStageTimes = computed(() => stats.value?.avgStageTimes || { waitingIn: 0, warehouse: 0, qc: 0, waitingOut: 0 })
 
 const alertList = computed(() => stats.value?.activeFraudAlerts || [])
+const alertPage = ref(1)
+const alertPerPage = ref(4)
+const paginatedAlertList = computed(() => {
+  const start = (alertPage.value - 1) * alertPerPage.value
+  const end = start + alertPerPage.value
+  return alertList.value.slice(start, end)
+})
+const totalAlertPages = computed(() => {
+  return Math.ceil(alertList.value.length / alertPerPage.value) || 1
+})
+watch(() => alertList.value.length, () => {
+  alertPage.value = 1
+})
 const defaultStat = { totalProcessed: 0, totalNet: 0, avgDiscrepancy: 0 }
 const getStatFor = (type) => stats.value?.fraudStats?.[type] || defaultStat
 const getDiscrepancyColor = (val) => { if (!val || val === 0) return 'text-slate-400'; if (val <= 2) return 'text-emerald-600'; if (val <= 5) return 'text-amber-500'; return 'text-red-500' }

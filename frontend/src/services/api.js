@@ -40,13 +40,23 @@ api.interceptors.request.use(
 )
 
 // ── Response Interceptor ─────────────────────────────
-// Handle 401 Unauthorized globally
+// Handle 401 Unauthorized globally & parse Blob error payloads
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     // Log technical details only for developers
     if (import.meta.env.DEV) {
       console.error('[API Error]', error);
+    }
+
+    // Convert Blob error response to JSON object if applicable
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        error.response.data = JSON.parse(text);
+      } catch (e) {
+        // Failed to parse blob text as JSON, retain original blob
+      }
     }
 
     if (error.response && error.response.status === 401) {
@@ -78,7 +88,7 @@ api.interceptors.response.use(
           }
         })
       } else {
-        error.gmsMessage = 'Anda tidak memiliki akses ke halaman ini.';
+        error.gmsMessage = error.response?.data?.message || 'Anda tidak memiliki akses ke halaman ini.';
       }
     } else {
       // Attach our human-readable message directly to the error object 

@@ -18,6 +18,9 @@ RUN npm prune --omit=dev
 
 FROM node:20-alpine
 
+# Install postgresql15-client for native pg_dump backup & restore capabilities
+RUN apk add --no-cache postgresql15-client
+
 WORKDIR /app
 
 COPY --from=builder /app/package*.json ./
@@ -27,7 +30,7 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3001
 
-RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
+RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas && chown -R node:node /app/uploads /app/backups
 
 USER node
 

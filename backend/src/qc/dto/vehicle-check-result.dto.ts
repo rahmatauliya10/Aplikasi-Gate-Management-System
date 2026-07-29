@@ -40,4 +40,8 @@ export class VehicleCheckResultDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  checklistItems?: any;
 }

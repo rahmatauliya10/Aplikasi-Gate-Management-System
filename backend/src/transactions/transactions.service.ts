@@ -63,6 +63,10 @@ export class TransactionsService {
           incomingMaterialChecks: {
             include: { checkedBy: { select: { id: true, name: true } } },
           },
+          weighInBy: { select: { id: true, name: true } },
+          weighOutBy: { select: { id: true, name: true } },
+          warehouseStartBy: { select: { id: true, name: true } },
+          warehouseEndBy: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -105,6 +109,10 @@ export class TransactionsService {
         incomingMaterialChecks: {
           include: { checkedBy: { select: { id: true, name: true } } },
         },
+        weighInBy: { select: { id: true, name: true } },
+        weighOutBy: { select: { id: true, name: true } },
+        warehouseStartBy: { select: { id: true, name: true } },
+        warehouseEndBy: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -143,6 +151,10 @@ export class TransactionsService {
           include: { checkedBy: { select: { id: true, name: true } } },
         },
         fraudChecks: true,
+        weighInBy: { select: { id: true, name: true } },
+        weighOutBy: { select: { id: true, name: true } },
+        warehouseStartBy: { select: { id: true, name: true } },
+        warehouseEndBy: { select: { id: true, name: true } },
       },
     });
 
@@ -253,14 +265,16 @@ export class TransactionsService {
       });
     }
 
-    if (tx.status === 'COMPLETED' || tx.status === 'CANCELLED') {
-      throw new BadRequestException({
-        success: false,
-        message: `Cannot delete/cancel transaction in status ${tx.status}`,
-        errors: [],
-      });
+    // If already cancelled (soft-deleted), just return success
+    if (tx.status === 'CANCELLED') {
+      return {
+        success: true,
+        message: 'Transaction is already deleted/cancelled (soft-delete)',
+        data: tx,
+      };
     }
 
+    // Perform soft delete by setting status to CANCELLED to preserve audit trail
     const updated = await this.prisma.transaction.update({
       where: { id },
       data: {
@@ -283,16 +297,16 @@ export class TransactionsService {
 
     await this.activityLogsService.logAction({
       userId: user.id,
-      action: 'TRANSACTION_CANCELLED',
+      action: 'TRANSACTION_DELETE',
       module: 'TRANSACTIONS',
       referenceId: id,
-      description: `Transaction ${tx.transactionNumber} was cancelled (soft-deleted) by ${user.email}.`,
+      description: `Transaction ${tx.transactionNumber} (${tx.plateNumber}) in status ${tx.status} was soft-deleted (status set to CANCELLED) by Admin ${user.email}`,
       status: 'SUCCESS',
-    });
+    }).catch(() => {});
 
     return {
       success: true,
-      message: 'Transaction cancelled (soft-deleted) successfully',
+      message: 'Transaction deleted successfully',
       data: updated,
     };
   }

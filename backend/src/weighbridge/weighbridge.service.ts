@@ -476,7 +476,9 @@ export class WeighbridgeService {
       });
     }
 
-    const netWeight = isRejected ? 0 : finalGrossWeight - finalTareWeight;
+    const netWeight = isRejected
+      ? Math.max(0, finalGrossWeight - finalTareWeight)
+      : finalGrossWeight - finalTareWeight;
 
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
