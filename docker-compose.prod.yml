@@ -2,7 +2,7 @@ services:
   nginx-proxy:
     image: nginx:stable-alpine
     container_name: gate-system-nginx
-    restart: always
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
@@ -12,9 +12,15 @@ services:
       - ./deploy/nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       frontend:
-        condition: service_started
+        condition: service_healthy
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     logging:
       driver: "json-file"
       options:
@@ -26,10 +32,16 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: gate-system-frontend
-    restart: always
+    restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     logging:
       driver: "json-file"
       options:
@@ -41,7 +53,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: gate-system-backend
-    restart: always
+    restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
@@ -88,7 +100,7 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: gate-system-postgres
-    restart: always
+    restart: unless-stopped
     # ISOLATION HIGH RISK SECURITY FIX: Port 5432/5433 NOT exposed to host network in production.
     # PostgreSQL is accessible ONLY internally by gate-system-backend over docker bridge network.
     environment:

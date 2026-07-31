@@ -56,6 +56,13 @@ export class GateService {
         const transactionNumber = await this.generateTransactionNumber();
 
         transaction = await this.prisma.$transaction(async (tx) => {
+          // Database-level concurrency lock on plate number hash
+          try {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.plateNumber}))`;
+          } catch (e) {
+            // Fallback for non-postgres database environments in testing
+          }
+
           const activeTransaction = await tx.transaction.findFirst({
             where: {
               plateNumber: dto.plateNumber,

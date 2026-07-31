@@ -146,6 +146,15 @@ export class QcService {
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
     const updated = await this.prisma.$transaction(async (prisma) => {
+      const existingCount = await prisma.qcVehicleCheck.count({
+        where: { transactionId },
+      });
+      if (existingCount > 0) {
+        throw new BadRequestException(
+          'Result has already been submitted for this transaction',
+        );
+      }
+
       await prisma.qcVehicleCheck.create({
         data: {
           transactionId,
@@ -227,6 +236,15 @@ export class QcService {
       result === 'PASS' ? 'INCOMING_CHECK_PASSED' : 'INCOMING_CHECK_REJECTED';
 
     const updated = await this.prisma.$transaction(async (prisma) => {
+      const existingCount = await prisma.incomingMaterialCheck.count({
+        where: { transactionId },
+      });
+      if (existingCount > 0) {
+        throw new BadRequestException(
+          'Result has already been submitted for this transaction',
+        );
+      }
+
       await prisma.incomingMaterialCheck.create({
         data: {
           transactionId,

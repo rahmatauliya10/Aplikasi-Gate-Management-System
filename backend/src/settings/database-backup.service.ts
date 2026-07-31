@@ -508,7 +508,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       this.logger.warn(`Could not write globals sql file: ${e.message}`);
     }
 
-    // P0-05 Fix: Physical Attachments Backup & Checksum Manifest
+    // P0-02 & P0-05 Fix: Physical Attachments Byte Archive & Checksum Manifest
     const attachmentsArchiveName = `gms_${timestamp}_attachments.json`;
     const localAttachmentsPath = path.join(activeLocalDir, attachmentsArchiveName);
     let attachmentsCount = 0;
@@ -525,6 +525,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
             fileName: f,
             size: fileBuffer.length,
             checksum: this.calculateChecksumForBuffer(fileBuffer),
+            base64Content: fileBuffer.toString('base64'),
           };
         });
         attachmentsCount = attachmentManifest.length;
@@ -587,10 +588,12 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         const offsiteGlobalsPath = path.join(this.offsiteBackupDir, globalsFileName);
         const offsiteManifestPath = path.join(this.offsiteBackupDir, manifestFileName);
         const offsiteSnapshotPath = path.join(this.offsiteBackupDir, snapshotFileName);
+        const offsiteAttachmentsPath = path.join(this.offsiteBackupDir, attachmentsArchiveName);
 
         if (fs.existsSync(localDumpPath)) fs.copyFileSync(localDumpPath, offsiteDumpPath);
         if (fs.existsSync(localGlobalsPath)) fs.copyFileSync(localGlobalsPath, offsiteGlobalsPath);
         if (fs.existsSync(localSnapshotPath)) fs.copyFileSync(localSnapshotPath, offsiteSnapshotPath);
+        if (fs.existsSync(localAttachmentsPath)) fs.copyFileSync(localAttachmentsPath, offsiteAttachmentsPath);
 
         const offsiteDumpChecksum = this.calculateChecksumForFile(offsiteDumpPath);
         if (offsiteDumpChecksum === dumpChecksum) {
@@ -793,7 +796,44 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         },
       );
 
-      this.logger.log(`Database restore completed successfully by ${user.email}`);
+      // P0-02 Fix: Restore physical upload attachment files to disk
+      let restoredAttachmentsCount = 0;
+      try {
+        const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+        // Search for attachment archive file in backup directory
+        const history = await this.getBackupHistory();
+        const latest = history[0];
+        if (latest && latest.artifacts?.attachmentsArchive) {
+          const archivePath = path.join(this.localBackupDir, latest.artifacts.attachmentsArchive);
+          if (fs.existsSync(archivePath)) {
+            const archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+            if (archiveContent.files && Array.isArray(archiveContent.files)) {
+              for (const file of archiveContent.files) {
+                if (file.fileName && file.base64Content) {
+                  const targetPath = path.join(uploadDir, file.fileName);
+                  const buffer = Buffer.from(file.base64Content, 'base64');
+                  fs.writeFileSync(targetPath, buffer);
+                  const restoredChecksum = this.calculateChecksumForBuffer(buffer);
+                  if (file.checksum && restoredChecksum !== file.checksum) {
+                    throw new Error(`Checksum mismatch during attachment file restore: ${file.fileName}`);
+                  }
+                  restoredAttachmentsCount++;
+                }
+              }
+            }
+          }
+        }
+      } catch (fileErr: any) {
+        this.logger.error(`Attachment file restoration error: ${fileErr.message}`);
+        throw new BadRequestException({
+          success: false,
+          message: `Gagal memulihkan berkas fisik attachment: ${fileErr.message}`,
+        });
+      }
+
+      this.logger.log(`Database restore completed successfully by ${user.email} (${restoredAttachmentsCount} attachment files restored)`);
 
       await this.activityLogsService.logAction({
         userId: user.id,
