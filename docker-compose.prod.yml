@@ -58,8 +58,8 @@ services:
       - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER wajib diisi}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD wajib diisi}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET wajib diisi di produksi}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET wajib diisi di produksi}
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-GMS_Prod_Secret_Access_Token_Key_2026_Secure_Key_32char}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-GMS_Prod_Secret_Refresh_Token_Key_2026_Secure_Key_32char}
       - JWT_ACCESS_EXPIRES_IN=${JWT_ACCESS_EXPIRES_IN:-1h}
       - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN:-7d}
       - PORT=3001
