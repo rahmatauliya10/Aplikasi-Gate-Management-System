@@ -30,7 +30,7 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3001
 
-RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas && chown -R node:node /app/uploads /app/backups
+RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /home/node/.cache /home/node/.npm && chown -R node:node /app /home/node
 
 USER node
 
