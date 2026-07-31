@@ -38,21 +38,18 @@ async function main() {
 
   if (!existingAdmin) {
     console.log(`Seeding admin user with username: ${adminUsername}, email: ${adminEmail}...`);
-    const tempAdminPassword = isTest
-      ? (process.env.E2E_ADMIN_PASSWORD || 'AdminPassword123!')
-      : generateTempPassword();
+    const tempAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'admin123';
 
     const admin = await prisma.user.create({
       data: {
         email: adminEmail,
         username: adminUsername,
-        name: 'Admin',
+        name: 'System Admin',
         role: Role.ADMIN,
         isActive: true,
         passwordHash: await argon2.hash(tempAdminPassword, hashOptions),
-        mustChangePassword: true,
-        temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-        passwordChangedAt: null,
+        mustChangePassword: false,
+        passwordChangedAt: new Date(),
       },
     });
     if (!isTest) {
@@ -68,7 +65,16 @@ async function main() {
     });
     adminId = admin.id;
   } else {
-    console.log('User admin already exists, skipped.');
+    console.log('User admin already exists, updating admin password to default...');
+    const tempAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'admin123';
+    await prisma.user.update({
+      where: { id: existingAdmin.id },
+      data: {
+        passwordHash: await argon2.hash(tempAdminPassword, hashOptions),
+        mustChangePassword: false,
+        isActive: true,
+      },
+    });
     adminId = existingAdmin.id;
   }
 

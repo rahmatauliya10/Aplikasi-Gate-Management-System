@@ -65,7 +65,7 @@ services:
       - PORT=3001
       - NODE_ENV=production
       - CORS_ORIGIN=${CORS_ORIGIN:?CORS_ORIGIN wajib diset di produksi}
-      - COOKIE_SECURE=true
+      - COOKIE_SECURE=false
       - UPLOAD_DIR=/app/uploads
       - MAX_FILE_SIZE_MB=10
       - LOCAL_BACKUP_DIR=/app/backups/local
