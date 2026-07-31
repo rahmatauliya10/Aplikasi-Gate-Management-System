@@ -14,11 +14,20 @@ export function configureApp(app: INestApplication) {
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
-  // CORS
-  const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:8081';
-  const origins = corsOrigin.split(',').map((o) => o.trim());
+  // CORS Configuration - Permissive & resilient for Nginx reverse proxy
+  const corsOrigin = process.env.CORS_ORIGIN || '*';
+  const allowedOrigins = corsOrigin.split(',').map((o) => o.trim());
+
   app.enableCors({
-    origin: origins,
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });

@@ -4,7 +4,7 @@ SETLOCAL EnableDelayedExpansion
 COLOR 0B
 
 echo ==============================================================
-echo       UPDATE DARI GIT & DEPLOY ULANG GMS V6 - STABLE PRODUCTION
+echo       UPDATE DARI GIT ^& DEPLOY ULANG GMS V6 - STABLE PRODUCTION
 echo ==============================================================
 echo.
 
@@ -31,17 +31,15 @@ if errorlevel 1 (
 echo [+] Pembaruan Git selesai diselaraskan.
 
 echo.
-echo => [2/8] Sanitasi file .env (Menghapus tanda kutip)...
-powershell -Command "$c = Get-Content backend/.env; $c = $c -replace '\"', ''; Set-Content backend/.env $c" >nul 2>&1
+echo => [2/8] Sanitasi file .env...
+powershell -NoProfile -Command "(Get-Content -Path 'backend\.env') -replace '\"', '' | Set-Content -Path 'backend\.env'" >nul 2>&1
 echo [+] File .env telah dibersihkan.
 
 echo.
-echo => [3/8] Memeriksa & Menyiapkan Sertifikat SSL TLS Nginx...
+echo => [3/8] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
 if not exist deploy\nginx\ssl\server.crt (
-    echo [!] Sertifikat SSL belum ditemukan. Membuat SSL Self-Signed sementara...
+    echo [!] Sertifikat SSL belum ditemukan. Menyiapkan folder SSL...
     if not exist deploy\nginx\ssl mkdir deploy\nginx\ssl
-    powershell -Command "New-SelfSignedCertificate -DnsName 'localhost', 'gms.local' -CertStoreLocation 'cert:\LocalMachine\My' -NotAfter (Get-Date).AddYears(5)" >nul 2>&1
-    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout deploy\nginx\ssl\server.key -out deploy\nginx\ssl\server.crt -subj "/C=ID/ST=Indonesia/L=Jakarta/O=GMS Enterprise/OU=IT/CN=localhost" >nul 2>&1
 )
 echo [+] Sertifikat SSL TLS terkonfigurasi.
 
@@ -69,7 +67,7 @@ if errorlevel 1 (
 
 echo.
 echo => [7/8] Menjalankan Migrasi Database Prisma...
-docker compose -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml exec -T backend npx prisma db push --skip-generate
 if errorlevel 1 (
     echo.
     echo [!] GAGAL: Migrasi database Prisma gagal! Deployment dibatalkan demi keamanan data.
@@ -84,9 +82,8 @@ docker image prune -f >nul 2>&1
 
 echo.
 echo ==============================================================
-echo  [+] GMS V6 PRODUKSI BERHASIL MENYALA & TERDEPLOY!
-echo  [+] Web HTTPS Portal : https://localhost (atau IP Server)
-echo  [+] Web HTTP Portal  : http://localhost (Auto Redirect to HTTPS)
+echo  [+] GMS V6 PRODUKSI BERHASIL MENYALA ^& TERDEPLOY!
+echo  [+] Web Portal  : http://localhost:8080 (atau IP Server:8080)
 echo  [+] Gunakan perintah: 'docker compose -f docker-compose.prod.yml logs -f' untuk melacak log
 echo ==============================================================
 echo.

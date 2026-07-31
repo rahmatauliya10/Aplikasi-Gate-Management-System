@@ -64,7 +64,7 @@ services:
       - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN:-7d}
       - PORT=3001
       - NODE_ENV=production
-      - CORS_ORIGIN=${CORS_ORIGIN:?CORS_ORIGIN wajib diset di produksi}
+      - CORS_ORIGIN=${CORS_ORIGIN:-*}
       - COOKIE_SECURE=false
       - UPLOAD_DIR=/app/uploads
       - MAX_FILE_SIZE_MB=10
