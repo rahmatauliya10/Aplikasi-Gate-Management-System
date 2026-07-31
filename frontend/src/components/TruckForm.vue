@@ -183,11 +183,11 @@
           
           <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
 
-
             <!-- VMS -->
             <div class="floating-group">
-              <input :value="form.permitCard" @input="form.permitCard = $event.target.value.toUpperCase()" type="text" class="floating-input uppercase" placeholder="VMS/Pass Number" />
-              <label class="floating-label">Permit Card / VMS</label>
+              <input :value="form.permitCard" @input="form.permitCard = $event.target.value.toUpperCase()" type="text" class="floating-input uppercase" placeholder="VMS/Pass Number" required />
+              <label class="floating-label">Permit Card / VMS <span class="text-red-500 font-black">*</span></label>
+              <p v-if="!form.permitCard" class="text-[9px] font-bold text-amber-600 mt-1 italic">* Wajib diisi</p>
             </div>
 
             <!-- ID Type & Number -->
@@ -197,18 +197,19 @@
                   <option>KTP</option><option>SIM</option><option>PASPOR</option>
                 </select>
                 <span class="material-icons absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none">expand_more</span>
-                <label class="absolute -top-2 left-3 px-1 text-[10px] font-black tracking-widest uppercase bg-white text-slate-700">ID Type</label>
+                <label class="absolute -top-2 left-3 px-1 text-[10px] font-black tracking-widest uppercase bg-white text-slate-700">ID Type <span class="text-red-500 font-black">*</span></label>
               </div>
               <div class="flex-1 floating-group !pt-0 relative">
-                <input :value="form.guestId" @input="form.guestId = $event.target.value.toUpperCase()" type="text" class="floating-input font-mono uppercase" placeholder="ID Number" />
-                <label class="floating-label">ID Number</label>
+                <input :value="form.guestId" @input="form.guestId = $event.target.value.toUpperCase()" type="text" class="floating-input font-mono uppercase" placeholder="ID Number" required />
+                <label class="floating-label">ID Number <span class="text-red-500 font-black">*</span></label>
+                <p v-if="!form.guestId" class="text-[9px] font-bold text-amber-600 mt-1 italic">* Wajib diisi</p>
               </div>
             </div>
 
             <!-- Guest Count -->
             <div class="floating-group">
               <input v-model.number="form.guestCount" type="number" min="1" class="floating-input" placeholder="Guest Count" />
-              <label class="floating-label">Guest Count</label>
+              <label class="floating-label">Guest Count <span class="text-red-500 font-black">*</span></label>
             </div>
             
             <!-- Security Info -->
@@ -219,6 +220,12 @@
               </div>
               <label class="absolute -top-0 left-3 px-1 text-[10px] font-black tracking-widest uppercase bg-white text-[#3A6ABF]">On Duty Officer</label>
             </div>
+          </div>
+
+          <!-- Validation Warning Banner when required fields are missing -->
+          <div v-if="!canSubmit" class="mt-4 p-3 rounded-xl bg-amber-50 border border-amber-200 flex items-center space-x-2 text-amber-800 text-[11px] font-bold">
+            <span class="material-icons text-amber-600 text-sm">warning</span>
+            <span>Harap isi bidang wajib (<strong>Permit Card / VMS</strong> &amp; <strong>ID Number</strong>) untuk menyelesaikan registrasi.</span>
           </div>
         </div>
 

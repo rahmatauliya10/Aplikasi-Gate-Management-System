@@ -261,19 +261,26 @@
           </div>
         </div>
 
-        <div class="p-6 border-t border-slate-100 bg-white grid grid-cols-2 gap-4">
+        <div v-if="!hasChecklistReject" class="p-6 border-t border-slate-100 bg-white grid grid-cols-2 gap-4">
           <button @click="showChecklistModal = false" class="py-4 rounded-xl font-black text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">
             Cancel
           </button>
-          <button v-if="hasChecklistReject" @click="rejectChecklist" :disabled="!rejectComment.trim() || isProcessing" class="py-4 rounded-xl font-black text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2">
-            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-            <span v-else class="material-icons text-lg">cancel</span>
-            <span>Confirm Reject</span>
-          </button>
-          <button v-else @click="acceptChecklist" :disabled="!isChecklistComplete || isProcessing" class="py-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);">
+          <button @click="acceptChecklist(false)" :disabled="!isChecklistComplete || isProcessing" class="py-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);">
             <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
             <span v-else class="material-icons text-lg">verified</span>
             <span>Pass Inspection</span>
+          </button>
+        </div>
+        <div v-else class="p-6 border-t border-slate-100 bg-white flex flex-col sm:flex-row gap-3">
+          <button @click="rejectChecklist" :disabled="!rejectComment.trim() || isProcessing" class="flex-1 py-4 rounded-xl font-black text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 shadow-md">
+            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
+            <span v-else class="material-icons text-lg">cancel</span>
+            <span>Reject Inspection</span>
+          </button>
+          <button @click="acceptChecklist(true)" :disabled="isProcessing" class="flex-1 py-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg" style="background:linear-gradient(135deg,#F59E0B,#D97706);">
+            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
+            <span v-else class="material-icons text-lg">warning</span>
+            <span>Terima With Note</span>
           </button>
         </div>
       </div>
@@ -451,15 +458,26 @@ const openChecklist = () => {
   showChecklistModal.value = true
 }
 
-const acceptChecklist = async () => {
+const acceptChecklist = async (isNote = false) => {
   if (isProcessing.value) return;
   isProcessing.value = true;
   try {
-    const response = await warehouseStore.submitIncomingCheck(selectedTruck.value.id, { decision: 'passed' })
+    const checks = currentChecklist.value.map((item, idx) => `Item ${idx+1}: ${checklistStates.value[idx] ? 'OK' : 'NOT OK'}`);
+    let resultStrs = [];
+    if (isNote || hasChecklistReject.value) {
+      resultStrs.push('DITERIMA DENGAN CATATAN');
+    }
+    resultStrs.push(`Checklist: [${checks.join(' | ')}]`);
+    const remarks = resultStrs.join(' | ');
+
+    const response = await warehouseStore.submitIncomingCheck(selectedTruck.value.id, { decision: 'passed', remarks })
     const updatedTruck = response?.data || response;
-    if (updatedTruck) truckStore.upsertTruck(updatedTruck);
+    if (updatedTruck) {
+      updatedTruck.compiledChecklist = remarks;
+      truckStore.upsertTruck(updatedTruck);
+    }
     showChecklistModal.value = false
-    toast.success('Incoming Check Complete — Proceed to outbound weighbridge.')
+    toast.success(isNote || hasChecklistReject.value ? 'Incoming Check Passed (With Note) — Proceed to outbound weighbridge.' : 'Incoming Check Complete — Proceed to outbound weighbridge.')
     selectedTruck.value = null
   } catch(e) {} finally { isProcessing.value = false; }
 }

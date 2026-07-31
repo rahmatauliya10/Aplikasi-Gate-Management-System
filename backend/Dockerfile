@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 # Install build dependencies for native modules (argon2, bcrypt)
 RUN apk add --no-cache python3 make g++
@@ -16,10 +16,10 @@ RUN npx prisma generate
 RUN npm run build
 RUN npm prune --omit=dev
 
-FROM node:20-alpine
+FROM node:22-alpine
 
-# Install postgresql15-client for native pg_dump backup & restore capabilities
-RUN apk add --no-cache postgresql15-client
+# Install postgresql-client for native pg_dump backup & restore capabilities
+RUN apk add --no-cache postgresql-client
 
 WORKDIR /app
 

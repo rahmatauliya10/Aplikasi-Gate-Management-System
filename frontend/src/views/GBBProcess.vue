@@ -364,10 +364,17 @@
                     <span class="text-[11px] font-black uppercase tracking-widest">Complete {{ checklistRemaining }} Checklist Items</span>
                     <p class="text-[9px] font-bold mt-1 text-center">All items must be answered OK or NOT OK + photo attachment to proceed.</p>
                   </div>
-                  <button v-else @click="inspectionStep = 2" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;">
-                    <span class="text-sm font-black uppercase tracking-widest text-white">Proceed to Quality Sampling</span>
-                    <span class="material-icons text-lg animate-bounce-right">arrow_forward</span>
-                  </button>
+                  <div v-else class="flex flex-col sm:flex-row gap-3">
+                    <button v-if="hasChecklistNotOk" type="button" @click="showRejectModal = true"
+                      class="py-3.5 px-4 rounded-xl text-xs font-black text-white flex items-center justify-center space-x-1.5 transition-all hover:shadow-lg active:scale-[0.98]"
+                      style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
+                      <span class="material-icons text-base">block</span><span>REJECT VEHICLE</span>
+                    </button>
+                    <button @click="inspectionStep = 2" class="flex-1 flex justify-center items-center py-3.5 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;">
+                      <span class="text-xs font-black uppercase tracking-widest text-white">Proceed to Quality Sampling</span>
+                      <span class="material-icons text-base animate-bounce-right">arrow_forward</span>
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Footer Step 2 -->
@@ -378,17 +385,17 @@
                     <p class="text-[9px] font-bold mt-1 text-center">All quality parameters must be inspected.</p>
                   </div>
                   <div v-else class="flex flex-col sm:flex-row gap-3">
-                    <button v-if="hasSamplingReject" type="button" @click="showRejectModal = true"
+                    <button v-if="hasAnyIssue" type="button" @click="showRejectModal = true"
                       class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
                       style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
-                      <span class="material-icons text-lg">block</span><span>REJECT SAMPLING</span>
+                      <span class="material-icons text-lg">block</span><span>REJECT INSPECTION</span>
                     </button>
                     <button type="button" @click="acceptSamplingAndFinish" :disabled="isProcessing"
                       class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
-                      :style="hasSamplingReject ? 'background:linear-gradient(135deg,#F59E0B,#D97706);box-shadow:0 4px 12px rgba(245,158,11,0.3)' : 'background:linear-gradient(135deg,#4A8BDF,#3A6ABF);box-shadow:0 4px 12px rgba(74,139,223,0.3)'">
+                      :style="hasAnyIssue ? 'background:linear-gradient(135deg,#F59E0B,#D97706);box-shadow:0 4px 12px rgba(245,158,11,0.3)' : 'background:linear-gradient(135deg,#4A8BDF,#3A6ABF);box-shadow:0 4px 12px rgba(74,139,223,0.3)'">
                       <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-                      <span v-else class="material-icons text-lg">check_circle</span>
-                      <span>{{ hasSamplingReject ? 'TETAP DITERIMA' : 'ACCEPT & UNLOCK ROLL WEIGHT' }}</span>
+                      <span v-else class="material-icons text-lg">{{ hasAnyIssue ? 'warning' : 'check_circle' }}</span>
+                      <span>{{ hasAnyIssue ? 'TERIMA WITH NOTE' : 'ACCEPT & UNLOCK ROLL WEIGHT' }}</span>
                     </button>
                   </div>
                 </div>
@@ -519,6 +526,8 @@ const vehicleChecklist = [
 
 const isSamplingFilled = computed(() => samplingStates.value.every(s => s !== null))
 const hasSamplingReject = computed(() => samplingStates.value.some(s => s === 'not_ok'))
+const hasChecklistNotOk = computed(() => checklistStates.value.some(s => s.status === 'not_ok'))
+const hasAnyIssue = computed(() => hasSamplingReject.value || hasChecklistNotOk.value)
 const gbbTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'WEIGH_IN_DONE' || t.status === 'WAREHOUSE_IN_PROGRESS') && getProcessType(t) === 'GBB'))
 const filteredGbbTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
@@ -662,7 +671,7 @@ const acceptSamplingAndFinish = async () => {
   try {
     // Compile checklist and sampling into a string BEFORE the API call
     let resultStrs = []
-    if (hasSamplingReject.value) {
+    if (hasAnyIssue.value) {
       resultStrs.push('DITERIMA DENGAN CATATAN')
     }
     const samplings = samplingStates.value.map((s, idx) => `${samplingParams[idx].label}: ${s === 'ok' ? 'COMPLIANT' : 'NON-COMPLIANT'}`)

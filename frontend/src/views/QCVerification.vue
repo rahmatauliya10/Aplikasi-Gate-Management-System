@@ -551,8 +551,8 @@ const checklistRemaining = computed(() => {
 
 const acceptChecklistAndStart = () => {
   showChecklistModal.value = false
-  const passed = checklistStates.value.every(s => s.status === 'ok')
-  verifyTruck(selectedTruck.value, passed)
+  // When explicit accept button is clicked, pass the verification (items and photos are stored for audit)
+  verifyTruck(selectedTruck.value, true)
 }
 
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }

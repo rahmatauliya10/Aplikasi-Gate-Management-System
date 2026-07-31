@@ -98,10 +98,10 @@
                     <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED (REJECTED AT WAREHOUSE)</span>
                   </div>
                   <div v-else class="rounded-xl p-3 text-white relative overflow-hidden"
-                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
+                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'linear-gradient(135deg, #F59E0B, #D97706)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)') }">
                     <div class="flex items-center space-x-2">
-                      <span class="material-icons text-white/80 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
-                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status || 'PENDING' }}</span>
+                      <span class="material-icons text-white/80 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'warning' : 'verified') }}</span>
+                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'REJECTED' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'ACCEPTED (WITH NOTE)' : (qcDetails.status || 'ACCEPTED')) }}</span>
                     </div>
                     <p v-if="qcDetails.note" class="text-[10px] font-bold text-white/80 mt-1 italic">"{{ qcDetails.note }}"</p>
                   </div>
@@ -111,22 +111,18 @@
               <!-- Incoming Checklist Results (when remarks contain checklist data or it is a warehouse rejection or vehicle check) -->
               <div v-if="parsedChecklist || isWarehouseRejection" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                 <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50" 
-                     :style="{ background: isWarehouseRejection ? 'rgba(239, 68, 68, 0.05)' : (parsedChecklist?.hasIssue ? 'rgba(239, 68, 68, 0.05)' : 'rgba(16, 185, 129, 0.04)') }">
+                     :style="checklistStatusInfo.headerStyle">
                   <div class="flex items-center space-x-2">
-                    <span class="material-icons text-[14px]" :style="isWarehouseRejection || parsedChecklist?.hasIssue ? 'color:#E11D48' : 'color:#059669'">{{ truck?.processType === 'GBJ' ? 'local_shipping' : 'assignment_turned_in' }}</span>
-                    <h3 class="text-[10px] font-black uppercase tracking-[0.15em]" :style="isWarehouseRejection || parsedChecklist?.hasIssue ? 'color:#9F1239' : 'color:#064E3B'">{{ truck?.processType === 'GBJ' ? 'Vehicle & Goods Inspection' : 'Incoming QC Checklist' }}</h3>
+                    <span class="material-icons text-[14px]" :style="checklistStatusInfo.iconStyle">{{ truck?.processType === 'GBJ' ? 'local_shipping' : 'assignment_turned_in' }}</span>
+                    <h3 class="text-[10px] font-black uppercase tracking-[0.15em]" :style="checklistStatusInfo.titleStyle">{{ truck?.processType === 'GBJ' ? 'Vehicle & Goods Inspection' : 'Incoming QC Checklist' }}</h3>
                   </div>
                   <!-- Status Pill & PIC -->
                   <div class="flex items-center space-x-2.5">
                     <span v-if="checklistPicLabel && truck?.processType !== 'GBJ'" class="text-[9px] font-bold text-slate-400">PIC: {{ checklistPicLabel }}</span>
-                    <div v-if="isWarehouseRejection" class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase bg-rose-50 text-rose-700 border border-rose-200">
-                      <span class="material-icons text-[10px]">cancel</span>
-                      <span>REJECTED</span>
-                    </div>
-                    <div v-else class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
-                          :class="parsedChecklist?.hasIssue ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'">
-                      <span class="material-icons text-[10px]">{{ parsedChecklist?.hasIssue ? 'cancel' : 'check_circle' }}</span>
-                      <span>{{ parsedChecklist?.hasIssue ? 'REJECTED' : 'ALL COMPLIANT' }}</span>
+                    <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
+                          :class="checklistStatusInfo.badgeClass">
+                      <span class="material-icons text-[10px]">{{ checklistStatusInfo.icon }}</span>
+                      <span>{{ checklistStatusInfo.label }}</span>
                     </div>
                   </div>
                 </div>
@@ -674,6 +670,47 @@ const parsedChecklist = computed(() => {
 
   if (samplings.length === 0 && items.length === 0) return null
   return { hasIssue, samplings, items }
+})
+
+const checklistStatusInfo = computed(() => {
+  if (isWarehouseRejection.value || isRejected.value) {
+    return {
+      status: 'REJECTED',
+      label: 'REJECTED',
+      badgeClass: 'bg-rose-50 text-rose-700 border border-rose-200',
+      headerStyle: { background: 'rgba(239, 68, 68, 0.05)' },
+      iconStyle: 'color: #E11D48',
+      titleStyle: 'color: #9F1239',
+      icon: 'cancel'
+    }
+  }
+
+  const checklist = parsedChecklist.value
+  const hasIssue = checklist?.hasIssue || 
+                   checklist?.samplings?.some(s => !s.compliant) || 
+                   checklist?.items?.some(i => !i.ok)
+
+  if (hasIssue) {
+    return {
+      status: 'ACCEPTED_NOTE',
+      label: 'TERIMA WITH NOTE',
+      badgeClass: 'bg-amber-50 text-amber-700 border border-amber-200',
+      headerStyle: { background: 'rgba(245, 158, 11, 0.06)' },
+      iconStyle: 'color: #D97706',
+      titleStyle: 'color: #92400E',
+      icon: 'warning'
+    }
+  }
+
+  return {
+    status: 'ACCEPTED',
+    label: 'TERIMA',
+    badgeClass: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+    headerStyle: { background: 'rgba(16, 185, 129, 0.04)' },
+    iconStyle: 'color: #059669',
+    titleStyle: 'color: #064E3B',
+    icon: 'check_circle'
+  }
 })
 
 const getWeightVal = (val) => {
