@@ -90,7 +90,7 @@ export class AuthController {
     @CurrentUser() user: JwtPayloadUser,
     @Res({ passthrough: true }) res: Response,
   ) {
-    res.clearCookie('refreshToken', refreshCookieOptions);
+    res.clearCookie('refreshToken', getRefreshCookieOptions());
     return this.authService.logout(user.id);
   }
 
@@ -158,7 +158,7 @@ export class AuthController {
       });
     }
     const result = await this.authService.changePassword(user.id, dto);
-    res.clearCookie('refreshToken', refreshCookieOptions);
+    res.clearCookie('refreshToken', getRefreshCookieOptions());
     return result;
   }
 

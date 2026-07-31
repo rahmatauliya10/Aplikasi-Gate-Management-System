@@ -29,7 +29,7 @@ export function configureApp(app: INestApplication) {
   const allowedOrigins = corsOrigin.split(',').map((o) => o.trim());
 
   app.enableCors({
-    origin: (origin, callback) => {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
