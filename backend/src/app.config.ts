@@ -4,6 +4,16 @@ import { GlobalExceptionFilter } from './common/filters/global-exception.filter'
 import { json, urlencoded } from 'express';
 
 export function configureApp(app: INestApplication) {
+  // Trust proxy for Nginx reverse proxying
+  try {
+    const instance = app.getHttpAdapter().getInstance();
+    if (instance && typeof instance.set === 'function') {
+      instance.set('trust proxy', 1);
+    }
+  } catch (e) {
+    // Non-express adapter fallback
+  }
+
   // Global prefix
   app.setGlobalPrefix('api');
 

@@ -8,6 +8,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
 
+import { getJwtAccessSecret } from '../common/utils/jwt-secrets.util';
+
 @Module({
   imports: [
     UsersModule,
@@ -16,7 +18,7 @@ import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_ACCESS_SECRET'),
+        secret: getJwtAccessSecret(),
         signOptions: { expiresIn: config.get('JWT_ACCESS_EXPIRES_IN', '1h') },
       }),
       inject: [ConfigService],

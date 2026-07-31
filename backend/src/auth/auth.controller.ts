@@ -31,32 +31,20 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 function parseCookieSecure(): boolean {
   const rawValue = process.env.COOKIE_SECURE?.trim().toLowerCase();
-
   if (rawValue === 'true') {
     return true;
   }
-
-  if (rawValue === 'false') {
-    return false;
-  }
-
-  if (rawValue !== undefined && rawValue !== '') {
-    throw new Error(
-      'COOKIE_SECURE hanya boleh bernilai "true" atau "false".',
-    );
-  }
-
-  return process.env.NODE_ENV === 'production';
+  return false;
 }
 
-const isCookieSecure = parseCookieSecure();
-
-const refreshCookieOptions = {
-  httpOnly: true,
-  secure: isCookieSecure,
-  sameSite: 'lax' as const,
-  path: '/',
-};
+function getRefreshCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: parseCookieSecure(),
+    sameSite: 'lax' as const,
+    path: '/',
+  };
+}
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -79,7 +67,7 @@ export class AuthController {
     const result = await this.authService.login(dto);
     if (result.success && result.data?.refreshToken) {
       res.cookie('refreshToken', result.data.refreshToken, {
-        ...refreshCookieOptions,
+        ...getRefreshCookieOptions(),
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
       delete (result.data as any).refreshToken;
@@ -127,7 +115,7 @@ export class AuthController {
     const result = await this.authService.refreshTokens(refreshToken);
     if (result.success && result.data?.refreshToken) {
       res.cookie('refreshToken', result.data.refreshToken, {
-        ...refreshCookieOptions,
+        ...getRefreshCookieOptions(),
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
       delete (result.data as any).refreshToken;

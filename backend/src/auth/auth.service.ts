@@ -12,6 +12,7 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { getJwtAccessSecret, getJwtRefreshSecret } from '../common/utils/jwt-secrets.util';
 
 @Injectable()
 export class AuthService {
@@ -151,12 +152,12 @@ export class AuthService {
       role: user.role,
       tv: user.tokenVersion,
     };
-    const accessSecret = this.config.get('JWT_ACCESS_SECRET');
-    if (!accessSecret) throw new Error('JWT_ACCESS_SECRET is not configured');
+    const accessSecret = getJwtAccessSecret();
+    const refreshSecret = getJwtRefreshSecret();
 
     const accessToken = this.jwtService.sign(payload, { secret: accessSecret });
     const refreshToken = this.jwtService.sign(payload, {
-      secret: this.config.get('JWT_REFRESH_SECRET'),
+      secret: refreshSecret,
       expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d'),
     });
 
@@ -222,7 +223,7 @@ export class AuthService {
 
     let payload: any;
     try {
-      const refreshSecret = this.config.get('JWT_REFRESH_SECRET');
+      const refreshSecret = getJwtRefreshSecret();
       payload = this.jwtService.verify(refreshToken, {
         secret: refreshSecret,
       });
@@ -282,8 +283,8 @@ export class AuthService {
       tv: user.tokenVersion,
     };
 
-    const accessSecret = this.config.get('JWT_ACCESS_SECRET');
-    const refreshSecret = this.config.get('JWT_REFRESH_SECRET');
+    const accessSecret = getJwtAccessSecret();
+    const refreshSecret = getJwtRefreshSecret();
 
     const newAccessToken = this.jwtService.sign(newPayload, {
       secret: accessSecret,
