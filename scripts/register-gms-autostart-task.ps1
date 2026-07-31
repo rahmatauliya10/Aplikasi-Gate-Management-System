@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 [string]$TaskName = "GMS_Production_Autostart"
-[string]$ProjectRootDir = "d:\Data Kacong\Antigravity Project\Aplikasi Gate Management System"
+[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
 [string]$WatchdogScriptPath = Join-Path -Path $ProjectRootDir -ChildPath "scripts\gms-autostart-watchdog.ps1"
 [string]$CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 

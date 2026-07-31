@@ -14,7 +14,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # --- Parameters & Canonical Absolute Paths ---
-[string]$ProjectRootDir = "d:\Data Kacong\Antigravity Project\Aplikasi Gate Management System"
+[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
 [string]$ComposeFilePath = Join-Path -Path $ProjectRootDir -ChildPath "docker-compose.prod.yml"
 [string]$EnvFilePath     = Join-Path -Path $ProjectRootDir -ChildPath "backend\.env"
 [string]$LogDir           = "C:\GMS_Logs"
