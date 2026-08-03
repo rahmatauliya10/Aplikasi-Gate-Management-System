@@ -1,5 +1,5 @@
 @echo off
-TITLE Deploy & Update Production GMS V6 (STRICT MODE)
+TITLE Deploy and Update Production GMS V6 (STRICT MODE)
 SETLOCAL EnableDelayedExpansion
 COLOR 0B
 
@@ -16,7 +16,7 @@ if not exist backend\.env (
     exit /b 1
 )
 
-echo => [1/8] Memeriksa status repositori Git...
+echo [1/8] Memeriksa status repositori Git...
 git diff-index --quiet HEAD -- >nul 2>&1
 if errorlevel 1 (
     echo [!] WARNING: Working tree lokal memiliki perubahan belum tertulis.
@@ -31,12 +31,12 @@ if errorlevel 1 (
 echo [+] Pembaruan Git selesai diselaraskan.
 
 echo.
-echo => [2/8] Sanitasi file .env...
-powershell -NoProfile -Command "(Get-Content -Path 'backend\.env') -replace '\"', '' | Set-Content -Path 'backend\.env'" >nul 2>&1
+echo [2/8] Sanitasi file .env...
+powershell -NoProfile -Command "(Get-Content -Path 'backend\.env') -replace [char]34, '' | Set-Content -Path 'backend\.env'" >nul 2>&1
 echo [+] File .env telah dibersihkan.
 
 echo.
-echo => [3/8] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
+echo [3/8] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
 if not exist deploy\nginx\ssl\server.crt (
     echo [!] Sertifikat SSL belum ditemukan. Menyiapkan folder SSL...
     if not exist deploy\nginx\ssl mkdir deploy\nginx\ssl
@@ -44,11 +44,11 @@ if not exist deploy\nginx\ssl\server.crt (
 echo [+] Sertifikat SSL TLS terkonfigurasi.
 
 echo.
-echo => [4/8] Menghentikan service lama...
+echo [4/8] Menghentikan service lama...
 docker compose -f docker-compose.prod.yml down --remove-orphans >nul 2>&1
 
 echo.
-echo => [5/8] Membangun Images Produksi (No-Cache dengan --env-file)...
+echo [5/8] Membangun Images Produksi (No-Cache dengan --env-file)...
 docker compose -f docker-compose.prod.yml --env-file backend\.env build --no-cache
 if errorlevel 1 (
     echo [!] GAGAL: Proses build Docker image produksi gagal!
@@ -57,7 +57,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo => [6/8] Menjalankan Service Produksi Baru (Nginx, Backend, Frontend, Postgres)...
+echo [6/8] Menjalankan Service Produksi Baru (Nginx, Backend, Frontend, Postgres)...
 docker compose -f docker-compose.prod.yml --env-file backend\.env up -d
 if errorlevel 1 (
     echo [!] GAGAL: Gagal menjalankan container produksi.
@@ -66,7 +66,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo => [7/8] Menjalankan Migrasi Database Prisma...
+echo [7/8] Menjalankan Migrasi Database Prisma...
 docker compose -f docker-compose.prod.yml exec -T backend npx prisma db push --skip-generate
 if errorlevel 1 (
     echo.
@@ -77,7 +77,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo => [8/8] Membersihkan sampah Docker Image...
+echo [8/8] Membersihkan sampah Docker Image...
 docker image prune -f >nul 2>&1
 
 echo.
