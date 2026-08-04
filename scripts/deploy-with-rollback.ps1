@@ -53,10 +53,12 @@ catch {
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
         & docker compose -f $ComposeFile up -d --remove-orphans
+        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
         Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
 
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
         & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile
+        if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
         Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PreviousReleaseTag]." -ForegroundColor Green
     }
     catch {

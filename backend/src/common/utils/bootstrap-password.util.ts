@@ -36,7 +36,8 @@ export function getOrCreateBootstrapAdminPassword(secretFilePath?: string): stri
     fs.writeFileSync(targetPath, newPassword, { mode: 0o600, encoding: 'utf8' });
     console.log(`[BootstrapPassword] Generated secure admin bootstrap password and saved to ${targetPath}`);
   } catch (e) {
-    console.warn(`[BootstrapPassword] Unable to write bootstrap password file at ${targetPath}:`, e);
+    console.error(`[BootstrapPassword] CRITICAL: Unable to write bootstrap password file at ${targetPath}:`, e);
+    throw new Error(`CRITICAL: Failed writing admin bootstrap secret file at ${targetPath}. Refusing to create admin with unretrievable password.`);
   }
 
   return newPassword;

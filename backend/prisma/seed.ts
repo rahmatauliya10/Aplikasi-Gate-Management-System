@@ -49,7 +49,7 @@ async function main() {
         role: Role.ADMIN,
         isActive: true,
         passwordHash: await argon2.hash(tempAdminPassword, hashOptions),
-        mustChangePassword: false,
+        mustChangePassword: true,
         passwordChangedAt: new Date(),
       },
     });

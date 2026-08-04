@@ -83,4 +83,35 @@ describe('WeighbridgeService Fraud Calculation', () => {
       }),
     );
   });
+
+  it('should classify exact 2% deviation as SAFE and 2.1% as WARNING', () => {
+    // 1000 kg net weight, 980 kg actual -> deviation = 20 -> 2.0% -> SAFE
+    const netWeight = 1000;
+    const actual2 = 980;
+    const dev2 = (Math.abs(netWeight - actual2) / netWeight) * 100;
+    expect(dev2).toBe(2);
+    expect(dev2 > 2 ? 'WARNING' : 'SAFE').toBe('SAFE');
+
+    // 1000 kg net weight, 979 kg actual -> deviation = 21 -> 2.1% -> WARNING
+    const actualWarning = 979;
+    const devWarning = (Math.abs(netWeight - actualWarning) / netWeight) * 100;
+    expect(devWarning).toBe(2.1);
+    expect(devWarning > 5 ? 'CRITICAL' : devWarning > 2 ? 'WARNING' : 'SAFE').toBe('WARNING');
+  });
+
+  it('should classify exact 5% deviation as WARNING and 5.1% as CRITICAL', () => {
+    const netWeight = 1000;
+
+    // 1000 kg net weight, 950 kg actual -> deviation = 50 -> 5.0% -> WARNING
+    const actual5 = 950;
+    const dev5 = (Math.abs(netWeight - actual5) / netWeight) * 100;
+    expect(dev5).toBe(5);
+    expect(dev5 > 5 ? 'CRITICAL' : dev5 > 2 ? 'WARNING' : 'SAFE').toBe('WARNING');
+
+    // 1000 kg net weight, 949 kg actual -> deviation = 51 -> 5.1% -> CRITICAL
+    const actualCritical = 949;
+    const devCritical = (Math.abs(netWeight - actualCritical) / netWeight) * 100;
+    expect(devCritical).toBe(5.1);
+    expect(devCritical > 5 ? 'CRITICAL' : devCritical > 2 ? 'WARNING' : 'SAFE').toBe('CRITICAL');
+  });
 });

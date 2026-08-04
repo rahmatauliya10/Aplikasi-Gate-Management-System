@@ -36,12 +36,21 @@ powershell -NoProfile -Command "(Get-Content -Path 'backend\.env') -replace [cha
 echo [+] File .env telah dibersihkan.
 
 echo.
-echo [3/8] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
+echo [3/8] Memeriksa & Menyiapkan Sertifikat SSL TLS Nginx...
+if not exist deploy\nginx\ssl mkdir deploy\nginx\ssl
 if not exist deploy\nginx\ssl\server.crt (
-    echo [!] Sertifikat SSL belum ditemukan. Menyiapkan folder SSL...
-    if not exist deploy\nginx\ssl mkdir deploy\nginx\ssl
+    echo [!] GAGAL: File sertifikat SSL (deploy\nginx\ssl\server.crt) tidak ditemukan!
+    echo [!] Sediakan server.crt dan server.key sebelum melanjutkan deployment produksi.
+    pause
+    exit /b 1
 )
-echo [+] Sertifikat SSL TLS terkonfigurasi.
+if not exist deploy\nginx\ssl\server.key (
+    echo [!] GAGAL: File private key SSL (deploy\nginx\ssl\server.key) tidak ditemukan!
+    echo [!] Sediakan server.key sebelum melanjutkan deployment produksi.
+    pause
+    exit /b 1
+)
+echo [+] Sertifikat SSL TLS (server.crt dan server.key) terverifikasi.
 
 echo.
 echo [4/8] Menghentikan service lama...
@@ -77,13 +86,16 @@ if errorlevel 1 (
 )
 
 echo.
-echo [8/8] Membersihkan sampah Docker Image...
+echo [8/8] Membersihkan sampah Docker Image & Verifikasi Nginx Health...
 docker image prune -f >nul 2>&1
+
+echo [+] Menunggu Nginx Reverse Proxy siap...
+powershell -NoProfile -Command "for ($i=1; $i -le 10; $i++) { try { $resp = Invoke-WebRequest -Uri 'https://localhost/health' -SkipCertificateCheck -UseBasicParsing -TimeoutSec 3; if ($resp.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 }; exit 1" >nul 2>&1
 
 echo.
 echo ==============================================================
-echo  [+] GMS V6 PRODUKSI BERHASIL MENYALA ^& TERDEPLOY!
-echo  [+] Web Portal  : http://localhost:8080 (atau IP Server:8080)
+echo  [+] GMS V6 PRODUKSI BERHASIL MENYALA & TERDEPLOY!
+echo  [+] Web Portal (HTTPS): https://localhost (atau https://IP-Server)
 echo  [+] Gunakan perintah: 'docker compose -f docker-compose.prod.yml logs -f' untuk melacak log
 echo ==============================================================
 echo.

@@ -26,6 +26,7 @@ import { WarehouseService } from './warehouse.service';
 import { StartWarehouseDto } from './dto/start-warehouse.dto';
 import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
 import { WarehouseQueryDto } from './dto/warehouse-query.dto';
+import { SubmitIncomingCheckDto } from './dto/submit-incoming-check.dto';
 
 @ApiTags('Warehouse')
 @ApiBearerAuth()
@@ -105,7 +106,7 @@ export class WarehouseController {
   })
   submitIncomingCheck(
     @Param('transactionId') transactionId: string,
-    @Body() dto: { decision: 'passed' | 'rejected'; rejectReason?: string },
+    @Body() dto: SubmitIncomingCheckDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.warehouseService.submitIncomingCheck(transactionId, dto, user);

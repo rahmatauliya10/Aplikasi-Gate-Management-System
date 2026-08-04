@@ -266,12 +266,13 @@ model WarehouseProcess {
   startBy     User?       @relation("WarehouseStartBy", fields: [startById], references: [id], onDelete: SetNull)
   endBy       User?       @relation("WarehouseEndBy", fields: [endById], references: [id], onDelete: SetNull)
 
+  @@unique([transactionId, processType])
   @@index([transactionId])
 }
 
 model QcVehicleCheck {
   id                   String       @id @default(uuid())
-  transactionId        String
+  transactionId        String       @unique
   result               QcResult?
   vehicleCleanliness   CheckResult?
   vehicleOdor          CheckResult?
@@ -295,7 +296,7 @@ model QcVehicleCheck {
 
 model IncomingMaterialCheck {
   id                 String       @id @default(uuid())
-  transactionId      String
+  transactionId      String       @unique
   result             QcResult?
   odor               CheckResult?
   color              CheckResult?

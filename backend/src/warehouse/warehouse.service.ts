@@ -552,7 +552,7 @@ export class WarehouseService {
 
   async submitIncomingCheck(
     transactionId: string,
-    dto: { decision: 'passed' | 'rejected'; rejectReason?: string },
+    dto: { decision: 'passed' | 'rejected'; rejectReason?: string; remarks?: string; checklist?: any },
     user: JwtPayloadUser,
   ) {
     this.logger.log(
@@ -614,12 +614,14 @@ export class WarehouseService {
         ? 'INCOMING_CHECK_PASSED'
         : 'INCOMING_CHECK_REJECTED';
 
+    const notesContent = dto.remarks || dto.rejectReason || 'Incoming check completed via Warehouse';
+
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       await prismaTx.incomingMaterialCheck.create({
         data: {
           transactionId,
           result: dto.decision === 'passed' ? 'PASS' : 'REJECT',
-          notes: dto.rejectReason || 'Incoming check completed via Warehouse',
+          notes: notesContent,
           checkedById: user.id,
           completedAt: new Date(),
         },
@@ -630,13 +632,13 @@ export class WarehouseService {
         data: {
           status: nextStatus,
           qcEndAt: new Date(),
+          remarks: dto.remarks ? `${tx.remarks ? tx.remarks + ' | ' : ''}GSP Check: ${dto.remarks}` : tx.remarks,
           statusHistory: {
             create: {
               oldStatus: tx.status,
               newStatus: nextStatus,
               changedById: user.id,
-              notes:
-                dto.rejectReason || 'Incoming check processed from Warehouse',
+              notes: notesContent,
             },
           },
         },

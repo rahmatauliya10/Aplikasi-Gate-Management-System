@@ -551,9 +551,8 @@ export class WeighbridgeService {
       // Fraud Detection Logic
       if (tx.actualWeight !== null && tx.actualWeight !== undefined) {
         const deviation = Math.abs(netWeight - tx.actualWeight);
-        const referenceWeight = tx.actualWeight > 0 ? tx.actualWeight : (netWeight > 0 ? netWeight : 0);
         const deviationPercent =
-          referenceWeight > 0 ? (deviation / referenceWeight) * 100 : 0;
+          netWeight > 0 ? (deviation / netWeight) * 100 : 0;
 
         let riskLevel: 'SAFE' | 'WARNING' | 'CRITICAL' = 'SAFE';
         if (deviationPercent > 5) {

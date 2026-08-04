@@ -37,11 +37,18 @@ function parseCookieSecure(): boolean {
   return false;
 }
 
+function parseSameSite(): 'strict' | 'lax' | 'none' {
+  const val = process.env.SAME_SITE?.trim().toLowerCase();
+  if (val === 'lax') return 'lax';
+  if (val === 'none') return 'none';
+  return 'strict';
+}
+
 function getRefreshCookieOptions() {
   return {
     httpOnly: true,
     secure: parseCookieSecure(),
-    sameSite: 'lax' as const,
+    sameSite: parseSameSite(),
     path: '/',
   };
 }
