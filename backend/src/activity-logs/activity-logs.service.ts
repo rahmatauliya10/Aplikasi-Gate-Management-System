@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogQueryDto } from './dto/activity-log-query.dto';
 import { Prisma } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface CreateActivityLogDto {
   userId?: string;
@@ -19,10 +21,39 @@ export interface CreateActivityLogDto {
 @Injectable()
 export class ActivityLogsService {
   private readonly logger = new Logger(ActivityLogsService.name);
+  private readonly fallbackLogPath = path.resolve(process.cwd(), 'logs', 'audit-fallback.jsonl');
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) {
+    this.ensureFallbackDirectory();
+  }
+
+  private ensureFallbackDirectory() {
+    try {
+      const dir = path.dirname(this.fallbackLogPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } catch (err) {
+      this.logger.error(`Unable to create audit log fallback directory: ${err.message}`);
+    }
+  }
+
+  private writeFallbackLog(logData: any, dbError: string) {
+    try {
+      const payload = {
+        timestamp: new Date().toISOString(),
+        fallbackReason: dbError,
+        data: logData,
+      };
+      fs.appendFileSync(this.fallbackLogPath, JSON.stringify(payload) + '\n', { mode: 0o600 });
+      this.logger.warn(`Audit log securely buffered to durable file sink: ${this.fallbackLogPath}`);
+    } catch (fileErr) {
+      this.logger.error(`CRITICAL AUDIT LOSS: Failed DB write and failed fallback sink write: ${fileErr.message}`, fileErr.stack);
+    }
+  }
 
   async logAction(data: CreateActivityLogDto) {
+    let logData: any = { ...data };
     try {
       let desc = data.description;
       if (typeof desc === 'object') {
@@ -42,7 +73,7 @@ export class ActivityLogsService {
         }
       }
 
-      const logData = {
+      logData = {
         ...data,
         description: desc,
         userName,
@@ -53,11 +84,11 @@ export class ActivityLogsService {
         data: logData,
       });
     } catch (error) {
-      // Catch errors so it doesn't break the main business flow
       this.logger.error(
-        `Failed to save activity log: ${error.message}`,
+        `Failed to save activity log to database: ${error.message}. Routing to durable append-only fallback sink.`,
         error.stack,
       );
+      this.writeFallbackLog(logData, error.message || 'Unknown database error');
     }
   }
 

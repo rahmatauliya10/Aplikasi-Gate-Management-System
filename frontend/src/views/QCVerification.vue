@@ -11,7 +11,7 @@
                 <h2 class="text-[10px] font-black text-sky-500 uppercase tracking-[0.2em]">Active Operation</h2>
                 <h3 class="text-xl font-black text-slate-800 tracking-tight mt-0.5">Truck Details</h3>
               </div>
-              <StatusBadge :status="selectedTruck.status" class="shadow-sm" />
+              <StatusBadge :status="selectedTruck.status" :process-type="getProcessType(selectedTruck)" class="shadow-sm" />
             </div>
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
@@ -44,21 +44,22 @@
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9"><StepTimeline :current-step="selectedTruck.status" :process-type="getProcessType(selectedTruck)" /></div>
 
             <div class="mt-6 space-y-5">
-              <!-- GBB Process Checklist -->
-              <div v-if="getProcessType(selectedTruck) === 'GBB'" class="space-y-4">
-                <button @click="openGbbModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
-                  style="background:linear-gradient(135deg,#A0006D,#70004C);">
+              <!-- Stage 1: QC Sampling Awal (Pre-Unloading) for all process types -->
+              <div v-if="selectedTruck.status === 'QC_VEHICLE_PENDING' || selectedTruck.status === 'QC_VEHICLE_IN_PROGRESS'" class="space-y-4">
+                <button @click="openSamplingAwalModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
+                  style="background:linear-gradient(135deg,#6366f1,#3730a3);">
                   <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
-                  <span v-else class="material-icons text-xl">science</span><span class="text-base tracking-wide">{{ isProcessing ? 'Memulai QC...' : 'Analisis QC Kedatangan' }}</span>
+                  <span v-else class="material-icons text-xl">biotech</span>
+                  <span class="text-base tracking-wide">{{ isProcessing ? 'Starting Sampling...' : (getProcessType(selectedTruck) === 'GBJ' ? '📋 Input QC Vehicle Checklist (GBJ)' : '🧪 Enter Initial QC Sampling (Pre-Unloading)') }}</span>
                 </button>
               </div>
 
-              <!-- GBJ Process Checklist -->
-              <div v-if="getProcessType(selectedTruck) === 'GBJ'" class="space-y-4">
-                <button @click="openGbjModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
-                  style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);">
+              <!-- Stage 3: QC Analisis Mutu Lengkap (Post-Unloading) for GBB & GSP -->
+              <div v-else-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="space-y-4">
+                <button @click="openGbbModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
+                  style="background:linear-gradient(135deg,#10B981,#064e3b);">
                   <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
-                  <span v-else class="material-icons text-xl">fact_check</span><span class="text-base tracking-wide">{{ isProcessing ? 'Memulai QC...' : 'Fill Vehicle Checklist' }}</span>
+                  <span v-else class="material-icons text-xl">science</span><span class="text-base tracking-wide">{{ isProcessing ? 'Starting QC Lab...' : '🔬 Enter Complete QC Lab Analysis (Post-Unloading)' }}</span>
                 </button>
               </div>
             </div>
@@ -269,24 +270,101 @@
             </div>
             
             <div class="space-y-1.5 md:col-span-2">
-              <label class="text-[10px] font-black text-indigo-800 uppercase tracking-wider">Note (Optional)</label>
-              <textarea v-model="qcForm.note" class="w-full p-4 bg-slate-50 hover:bg-white focus:bg-white rounded-xl text-sm font-medium text-slate-800 outline-none resize-none h-24 border border-slate-200 focus:border-[#4A8BDF] transition-colors placeholder:font-normal placeholder:text-slate-400" placeholder="Add special notes if needed..."></textarea>
+              <label class="text-[10px] font-black text-indigo-800 uppercase tracking-wider flex items-center justify-between">
+                <span>Notes / Concession Reason</span>
+                <span v-if="qcForm.status === 'ACCEPTED (Note)' || qcForm.status === 'REJECTED'" class="text-red-500 font-bold">* Required for Approve with Note & Reject</span>
+              </label>
+              <textarea v-model="qcForm.note" class="w-full p-4 bg-slate-50 hover:bg-white focus:bg-white rounded-xl text-sm font-medium text-slate-800 outline-none resize-none h-24 border border-slate-200 focus:border-[#4A8BDF] transition-colors placeholder:font-normal placeholder:text-slate-400" placeholder="Enter notes or reason for deviation / rejection..."></textarea>
             </div>
           </div>
         </div>
         
-        <!-- Footer / Actions -->
-        <div class="p-6 border-t border-slate-100 bg-slate-50 flex space-x-4 shrink-0">
-          <button @click="verifyTruck(selectedTruck, false)" class="flex-1 py-3.5 rounded-xl font-black flex items-center justify-center space-x-2 transition-all bg-white text-red-500 border-2 border-red-100 hover:border-red-500 hover:bg-red-50">
-            <span class="material-icons text-lg">cancel</span><span class="text-sm tracking-wide">Reject</span>
+        <!-- 3-Way Industrial Decision Bar -->
+        <div class="p-6 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row gap-3 shrink-0">
+          <button @click="verifyIncomingDecision(selectedTruck, 'REJECT')" :disabled="isProcessing" class="flex-1 py-3.5 px-4 rounded-xl font-black flex items-center justify-center space-x-2 transition-all bg-white text-red-600 border-2 border-red-200 hover:border-red-600 hover:bg-red-50 shadow-sm active:scale-[0.98]">
+            <span class="material-icons text-lg">cancel</span><span class="text-xs sm:text-sm tracking-wide uppercase">Reject</span>
           </button>
-          <button @click="verifyTruck(selectedTruck, true)" class="flex-1 py-3.5 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-xl hover:-translate-y-0.5"
-            style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);">
-            <span class="material-icons text-lg">verified</span><span class="text-sm tracking-wide">Pass Verification</span>
+          <button @click="verifyIncomingDecision(selectedTruck, 'APPROVE_NOTE')" :disabled="isProcessing" class="flex-1 py-3.5 px-4 rounded-xl font-black text-amber-900 flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98]"
+            style="background:linear-gradient(135deg,#fcf1cc,#f59e0b);">
+            <span class="material-icons text-lg">warning</span><span class="text-xs sm:text-sm tracking-wide uppercase">Approve with Note</span>
+          </button>
+          <button @click="verifyIncomingDecision(selectedTruck, 'APPROVE_CLEAN')" :disabled="isProcessing" class="flex-1 py-3.5 px-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98]"
+            style="background:linear-gradient(135deg,#10b981,#047857);">
+            <span class="material-icons text-lg">verified</span><span class="text-xs sm:text-sm tracking-wide uppercase">Approve</span>
           </button>
         </div>
       </div>
     </div>
+    </teleport>
+
+    <!-- Sampling Awal QC Modal (Pre-Unloading GBB/GSP) -->
+    <teleport to="body">
+      <transition name="modal">
+        <div v-if="showSamplingModal" class="fixed inset-0 z-[9998] flex items-center justify-center p-4 sm:p-6" style="background:rgba(2,8,23,0.7);backdrop-filter:blur(10px);" @click.self="showSamplingModal = false">
+          <div class="relative w-[95vw] sm:max-w-xl mx-auto flex flex-col rounded-3xl shadow-2xl overflow-hidden bg-white">
+            <!-- Header -->
+            <div class="px-6 py-5 flex justify-between items-center bg-indigo-900 text-white">
+              <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-800 border border-indigo-700">
+                  <span class="material-icons text-indigo-200 text-xl">biotech</span>
+                </div>
+                <div>
+                  <h3 class="text-base font-black tracking-tight">Form QC Sampling Awal (Pre-Unloading)</h3>
+                  <p class="text-[10px] font-bold text-indigo-300 uppercase tracking-widest mt-0.5">Sampling Fisik Sebelum Bongkar GBB/GSP</p>
+                </div>
+              </div>
+              <button @click="showSamplingModal = false" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-indigo-800 text-indigo-200 transition-colors">
+                <span class="material-icons text-lg">close</span>
+              </button>
+            </div>
+            <!-- Body -->
+            <div class="p-6 space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="space-y-1.5">
+                  <label class="text-[10px] font-black text-slate-600 uppercase tracking-wider">Visual Physical Sample *</label>
+                  <select v-model="samplingForm.visual" class="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none">
+                    <option value="Normal">Normal / Meets Specifications</option>
+                    <option value="Abnormal">Abnormal / Non-Compliant</option>
+                  </select>
+                </div>
+                <div class="space-y-1.5">
+                  <label class="text-[10px] font-black text-slate-600 uppercase tracking-wider">Initial Sample Odor *</label>
+                  <select v-model="samplingForm.odor" class="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none">
+                    <option value="Normal">Normal / Characteristic</option>
+                    <option value="Abnormal">Abnormal / Musty / Rancid</option>
+                  </select>
+                </div>
+              </div>
+              <div class="space-y-1.5">
+                <label class="text-[10px] font-black text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                  <span>Estimated Moisture Content (%) *</span>
+                  <span v-if="samplingForm.moistureEst === null || samplingForm.moistureEst === ''" class="text-red-500 font-bold text-[9px]">* Required</span>
+                </label>
+                <div class="relative">
+                  <input v-model.number="samplingForm.moistureEst" type="number" step="0.1" placeholder="Example: 12.5" class="w-full h-11 pl-4 pr-8 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all" />
+                  <span class="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-black select-none">%</span>
+                </div>
+              </div>
+              <div class="space-y-1.5">
+                <label class="text-[10px] font-black text-slate-700 uppercase tracking-wider">Initial Sampling Notes</label>
+                <textarea v-model="samplingForm.note" rows="3" placeholder="Enter initial physical sampling notes prior to unloading..." class="w-full p-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-sm font-medium text-slate-800 outline-none resize-none transition-all"></textarea>
+              </div>
+            </div>
+            <!-- Footer -->
+            <div class="p-5 bg-slate-50 border-t border-slate-100 flex space-x-3">
+              <button @click="submitSamplingAwal(selectedTruck, false)" :disabled="isProcessing" class="flex-1 py-3 rounded-xl font-black text-red-600 border border-red-200 bg-white hover:bg-red-50 active:scale-[0.98] flex items-center justify-center space-x-1 transition-all">
+                <span class="material-icons text-base">cancel</span><span>REJECT SAMPLING</span>
+              </button>
+              <button @click="submitSamplingAwal(selectedTruck, true)" :disabled="isProcessing || !isSamplingValid" 
+                class="flex-1 py-3 rounded-xl font-black text-white flex items-center justify-center space-x-1 shadow-md transition-all active:scale-[0.98]"
+                :class="!isSamplingValid ? 'opacity-50 cursor-not-allowed bg-slate-400' : 'hover:shadow-lg'"
+                :style="isSamplingValid ? 'background:linear-gradient(135deg,#6366f1,#3730a3);' : ''">
+                <span class="material-icons text-base">verified</span><span>APPROVE SAMPLING AWAL</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
     </teleport>
 
     <!-- GBJ Inspection Modal (Vehicle Checklist) -->
@@ -405,7 +483,11 @@ const getProcessType = (truck) => {
 
 const getStepLabel = (truck) => {
   if (!truck) return '-'
-  const step = truck.step || truck.status || '-'
+  let step = truck.step || truck.status || '-'
+  const pType = getProcessType(truck)
+  if ((pType === 'GBB' || pType === 'GSP') && String(step).startsWith('QC_VEHICLE')) {
+    step = String(step).replace('QC_VEHICLE', 'QC_SAMPLING')
+  }
   return String(step).replace(/_/g, ' ').toUpperCase()
 }
 
@@ -450,6 +532,17 @@ const searchQuery = ref('')
 const selectedWarehouse = ref('ALL')
 const qcForm = ref({ bau: '', warna: '', kadarAir: null, totalFM: null, bijiOK: null, status: '', note: '', pic: authStore.user?.name || 'QC Admin' })
 const isProcessing = ref(false)
+
+const showSamplingModal = ref(false)
+const samplingForm = ref({ visual: 'Normal', odor: 'Normal', moistureEst: null, note: '' })
+
+const isSamplingValid = computed(() => {
+  return samplingForm.value.visual && 
+         samplingForm.value.odor && 
+         samplingForm.value.moistureEst !== null && 
+         samplingForm.value.moistureEst !== '' && 
+         !isNaN(Number(samplingForm.value.moistureEst))
+})
 
 const showChecklistModal = ref(false)
 const checklistStates = ref([])
@@ -582,6 +675,74 @@ const triggerStartQc = async (truck) => {
   return true;
 }
 
+const openSamplingAwalModal = async (truck) => {
+  const success = await triggerStartQc(truck);
+  if (success) {
+    samplingForm.value = { visual: 'Normal', odor: 'Normal', moistureEst: null, note: '' };
+    showSamplingModal.value = true;
+  }
+}
+
+const submitSamplingAwal = async (truck, passed) => {
+  if (isProcessing.value) return;
+
+  if (passed && !isSamplingValid.value) {
+    toast.error('Validasi gagal. Ketiga parameter wajib diisi (*): Fisik Visual, Bau Sampel, dan Estimasi Kadar Air!');
+    return;
+  }
+
+  if (!passed && (!samplingForm.value.note || !samplingForm.value.note.trim())) {
+    toast.error('Alasan penolakan wajib dicantumkan pada kolom catatan sampling!');
+    return;
+  }
+
+  const actionText = passed ? 'Approve Sampling Awal' : 'Reject Sampling Awal';
+  const ok = await confirm({
+    title: `${actionText}?`,
+    message: `Konfirmasi ${actionText.toLowerCase()} untuk armada ${getPlateNumber(truck)}?`,
+    type: passed ? 'success' : 'danger',
+    confirmText: passed ? 'Ya, Approve' : 'Ya, Reject'
+  });
+
+  if (ok) {
+    isProcessing.value = true;
+    try {
+      const payload = {
+        result: passed ? 'PASS' : 'REJECT',
+        vehicleCleanliness: true,
+        vehicleOdor: samplingForm.value.odor === 'Normal',
+        pestEvidence: true,
+        vehicleCondition: samplingForm.value.visual === 'Normal',
+        documentCompleteness: true,
+        sealCondition: true,
+        checklistItems: [
+          { label: 'Sampling Visual', ok: samplingForm.value.visual === 'Normal' },
+          { label: 'Sampling Bau', ok: samplingForm.value.odor === 'Normal' },
+          { label: 'Estimasi Moisture', ok: true, value: samplingForm.value.moistureEst }
+        ],
+        notes: samplingForm.value.note || (passed ? 'Lolos sampling awal QC' : 'Ditolak pada sampling awal QC')
+      };
+
+      const response = await qcStore.submitVehicleResult(truck.id, payload);
+      const updatedTruck = response?.data || response;
+      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
+
+      if (passed) {
+        toast.success(`Sampling Awal ${getPlateNumber(truck)} disetujui. Siap dibongkar di Gudang GBB.`);
+      } else {
+        toast.error(`Sampling Awal ${getPlateNumber(truck)} DITOLAK.`);
+      }
+
+      selectedTruck.value = null;
+      showSamplingModal.value = false;
+    } catch (e) {
+      toast.error('Gagal menyimpan hasil sampling awal');
+    } finally {
+      isProcessing.value = false;
+    }
+  }
+};
+
 const openGbbModal = async (truck) => {
   const success = await triggerStartQc(truck);
   if (success) showVerificationModal.value = true;
@@ -592,11 +753,70 @@ const openGbjModal = async (truck) => {
   if (success) showChecklistModal.value = true;
 }
 
+const verifyIncomingDecision = async (truck, decisionType) => {
+  if (isProcessing.value) return;
+
+  if (decisionType === 'APPROVE_CLEAN' || decisionType === 'APPROVE_NOTE') {
+    if (!qcForm.value.bau || !qcForm.value.warna || qcForm.value.kadarAir === null || qcForm.value.kadarAir === '' || qcForm.value.totalFM === null || qcForm.value.totalFM === '') {
+      toast.error('Validasi gagal. Mohon lengkapi semua parameter hasil uji lab (*)!');
+      return;
+    }
+  }
+
+  if ((decisionType === 'APPROVE_NOTE' || decisionType === 'REJECT') && (!qcForm.value.note || !qcForm.value.note.trim())) {
+    toast.error(decisionType === 'APPROVE_NOTE' ? 'Catatan / Alasan Konsesi Wajib Diisi untuk Approve with Note!' : 'Alasan penolakan wajib dicantumkan pada kolom catatan!');
+    return;
+  }
+
+  const isPass = decisionType !== 'REJECT';
+  const actionLabel = decisionType === 'APPROVE_NOTE' ? 'Approve with Note (Diterima Dengan Catatan)' : (isPass ? 'Approve' : 'Reject');
+  const typeStyle = isPass ? 'success' : 'danger';
+  const confirmBtnText = decisionType === 'APPROVE_NOTE' ? 'Ya, Diterima Dengan Catatan' : (isPass ? 'Approve' : 'Yes, Reject');
+
+  const ok = await confirm({ title: `Konfirmasi ${actionLabel}?`, message: `Lanjutkan proses ${actionLabel} untuk truk bernomor polisi ${getPlateNumber(truck)}?`, type: typeStyle, confirmText: confirmBtnText });
+  if (ok) {
+    isProcessing.value = true;
+    try {
+      const finalNote = decisionType === 'APPROVE_NOTE' 
+        ? `[DITERIMA DENGAN CATATAN] ${qcForm.value.note.trim()}` 
+        : (qcForm.value.note || (isPass ? 'Lolos uji lab mutu GBB' : 'Ditolak hasil uji lab'));
+
+      const payload = {
+        result: isPass ? 'PASS' : 'REJECT',
+        odor: qcForm.value.bau,
+        color: qcForm.value.warna,
+        moisture: Number(qcForm.value.kadarAir),
+        foreignMatter: Number(qcForm.value.totalFM),
+        sampleWeight: Number(qcForm.value.bijiOK || 0),
+        beanCondition: Number(qcForm.value.bijiOK || 100) >= 80,
+        notes: finalNote
+      };
+
+      const response = await qcStore.submitIncomingResult(truck.id, payload);
+      const updatedTruck = response?.data || response;
+      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
+
+      if (isPass) {
+        toast.success(`Analisis Mutu ${getPlateNumber(truck)} disetujui (${decisionType === 'APPROVE_NOTE' ? 'Dengan Catatan' : 'Clean'}). Lanjutkan ke Weighbridge Out.`);
+      } else {
+        toast.error(`Analisis Mutu ${getPlateNumber(truck)} DITOLAK.`);
+      }
+
+      selectedTruck.value = null;
+      showVerificationModal.value = false;
+    } catch (e) {
+      toast.error('Gagal menyimpan analisis mutu');
+    } finally {
+      isProcessing.value = false;
+    }
+  }
+};
+
 const verifyTruck = async (truck, passed) => {
   if (isProcessing.value) return;
-  const isGbb = getProcessType(truck) === 'GBB';
+  const isStage3Incoming = truck.status === 'INCOMING_CHECK_IN_PROGRESS' || truck.status === 'INCOMING_CHECK_PENDING';
 
-  if (isGbb && passed) {
+  if (isStage3Incoming && passed) {
     if (!qcForm.value.bau || !qcForm.value.warna || qcForm.value.kadarAir === null || qcForm.value.kadarAir === '' || qcForm.value.totalFM === null || qcForm.value.totalFM === '' || !qcForm.value.status) {
       toast.error('Validasi gagal. Mohon lengkapi semua field yang wajib diisi (*)!');
       return;
@@ -606,20 +826,20 @@ const verifyTruck = async (truck, passed) => {
   const actionText = passed ? 'Approve' : 'Reject';
   const result = passed ? 'PASS' : 'REJECT';
   
-  const ok = await confirm({ title: `${actionText} Verification?`, message: `${actionText} verification for ${truck.plateNumber}?`, type: passed ? 'success' : 'danger', confirmText: passed ? 'Approve' : 'Yes, Reject' })
+  const ok = await confirm({ title: `${actionText} Verification?`, message: `${actionText} verification for ${getPlateNumber(truck)}?`, type: passed ? 'success' : 'danger', confirmText: passed ? 'Approve' : 'Yes, Reject' })
   if (ok) { 
     isProcessing.value = true;
     try {
       let response;
-      if (isGbb) {
+      if (isStage3Incoming) {
         response = await qcStore.submitIncomingResult(truck.id, { 
           result,
           odor: qcForm.value.bau,
           color: qcForm.value.warna,
           moisture: Number(qcForm.value.kadarAir),
           foreignMatter: Number(qcForm.value.totalFM),
-          sampleWeight: Number(qcForm.value.bijiOK),
-          beanCondition: Number(qcForm.value.bijiOK) >= 80,
+          sampleWeight: Number(qcForm.value.bijiOK || 0),
+          beanCondition: Number(qcForm.value.bijiOK || 100) >= 80,
           notes: qcForm.value.note
         })
       } else {
@@ -628,15 +848,15 @@ const verifyTruck = async (truck, passed) => {
           pestEvidence: checklistStates.value[0]?.status === 'ok',
           documentCompleteness: checklistStates.value[1]?.status === 'ok',
           vehicleCleanliness: checklistStates.value[2]?.status === 'ok',
-          vehicleOdor: checklistStates.value[2]?.status === 'ok',
-          sealCondition: checklistStates.value[3]?.status === 'ok',
-          vehicleCondition: checklistStates.value[4]?.status === 'ok',
+          vehicleOdor: checklistStates.value[3]?.status === 'ok',
+          sealCondition: checklistStates.value[4]?.status === 'ok',
+          vehicleCondition: true,
           checklistItems: checklistStates.value.map((s, idx) => ({
-            label: vehicleChecklist[idx],
+            label: vehicleChecklist[idx] || 'Checklist item',
             ok: s.status === 'ok',
             photo: s.photo || null
           })),
-          notes: 'Completed vehicle checklist'
+          notes: passed ? 'Lolos sampling awal QC' : 'Ditolak pada sampling awal QC'
         };
         response = await qcStore.submitVehicleResult(truck.id, payload)
       }
@@ -644,13 +864,14 @@ const verifyTruck = async (truck, passed) => {
       if (updatedTruck) truckStore.upsertTruck(updatedTruck);
       
       if (passed) {
-        toast.success(`${truck.plateNumber} verification passed! ${isGbb ? 'Proceed to Outbound Weighbridge.' : 'Proceed to GBJ Loading.'}`);
+        toast.success(`${getPlateNumber(truck)} verification passed! ${isStage3Incoming ? 'Proceed to Outbound Weighbridge.' : 'Proceed to Unloading / Warehouse.'}`);
       } else {
-        toast.error(`${truck.plateNumber} verification rejected.`); 
+        toast.error(`${getPlateNumber(truck)} verification rejected.`); 
       }
       
       selectedTruck.value = null; 
       showVerificationModal.value = false;
+      showChecklistModal.value = false;
     } catch(e) {} finally { isProcessing.value = false; }
   }
 }

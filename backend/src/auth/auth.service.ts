@@ -42,31 +42,40 @@ export class AuthService {
       include: { warehouseAccess: true },
     });
 
+    const genericErrorMessage = 'Kredensial login tidak valid. Periksa kembali username dan password Anda.';
+
     if (!user) {
       this.logger.warn(`Login failed: user not found - ${dto.identifier}`);
       await this.auditLog(null, 'LOGIN_FAILED', {
         identifier: dto.identifier,
-        reason: 'User not found',
+        reason: 'User not found or credentials invalid',
       });
       throw new UnauthorizedException({
         success: false,
-        message: 'Username atau email tidak ditemukan.',
+        message: genericErrorMessage,
         errors: [],
       });
     }
 
-    // Check Account Lockout status (5 failed attempts -> 15 min lockout)
-    const lockInfo = this.failedAttemptsMap.get(user.id);
-    if (lockInfo && lockInfo.lockedUntil && new Date() < lockInfo.lockedUntil) {
-      const remainingMinutes = Math.ceil((lockInfo.lockedUntil.getTime() - Date.now()) / (1000 * 60));
-      this.logger.warn(`Login failed: account locked for ${dto.identifier} (Locked for ${remainingMinutes}m)`);
+    // DB-Backed Account Lockout Check (5 failed attempts within 15 mins -> lockout)
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const recentFailedCount = await this.prisma.activityLog.count({
+      where: {
+        userId: user.id,
+        action: 'LOGIN_FAILED',
+        createdAt: { gte: fifteenMinutesAgo },
+      },
+    });
+
+    if (recentFailedCount >= 5) {
+      this.logger.warn(`Login blocked by DB lockout policy for ${dto.identifier}`);
       await this.auditLog(user.id, 'LOGIN_LOCKED', {
         identifier: dto.identifier,
-        reason: `Account locked due to 5 consecutive failed attempts. Try again in ${remainingMinutes} minutes.`,
+        reason: 'Account locked due to consecutive failed attempts in DB log.',
       });
       throw new UnauthorizedException({
         success: false,
-        message: `Akun terkunci sementara karena 5x kesalahan password. Silakan coba lagi dalam ${remainingMinutes} menit.`,
+        message: 'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
         code: 'ACCOUNT_TEMPORARILY_LOCKED',
         errors: [],
       });
@@ -74,17 +83,7 @@ export class AuthService {
 
     const passwordValid = await argon2.verify(user.passwordHash, dto.password);
     if (!passwordValid) {
-      const current = this.failedAttemptsMap.get(user.id) || { count: 0 };
-      const newCount = current.count + 1;
-      let lockedUntil: Date | undefined = undefined;
-
-      if (newCount >= 5) {
-        lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes lockout
-        this.logger.warn(`Account ${user.email} has been locked for 15 minutes after 5 failed attempts.`);
-      }
-
-      this.failedAttemptsMap.set(user.id, { count: newCount, lockedUntil });
-
+      const newCount = recentFailedCount + 1;
       this.logger.warn(`Login failed: invalid password for ${dto.identifier} (Attempt ${newCount}/5)`);
       await this.auditLog(user.id, 'LOGIN_FAILED', {
         identifier: dto.identifier,
@@ -94,7 +93,7 @@ export class AuthService {
       if (newCount >= 5) {
         throw new UnauthorizedException({
           success: false,
-          message: 'Terlalu banyak percobaan password salah. Akun Anda telah terkunci selama 15 menit.',
+          message: 'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
           code: 'ACCOUNT_TEMPORARILY_LOCKED',
           errors: [],
         });
@@ -102,13 +101,10 @@ export class AuthService {
 
       throw new UnauthorizedException({
         success: false,
-        message: `Password salah. sisa percobaan: ${5 - newCount}x`,
+        message: genericErrorMessage,
         errors: [],
       });
     }
-
-    // Reset failed attempts counter upon successful password verification
-    this.failedAttemptsMap.delete(user.id);
 
     if (!user.isActive) {
       this.logger.warn(`Login failed: account disabled for ${dto.identifier}`);

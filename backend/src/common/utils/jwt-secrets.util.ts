@@ -10,16 +10,16 @@ const weakSecrets = [
 
 export function getJwtAccessSecret(): string {
   const secret = process.env.JWT_ACCESS_SECRET?.trim();
-  if (!secret || weakSecrets.includes(secret) || secret.length < 32) {
-    return 'GMS_Prod_Secret_Access_Token_Key_2026_Secure_Key_32char_Auto_Upgraded';
+  if (!secret || weakSecrets.includes(secret) || secret.length < 32 || secret.startsWith('default_') || secret.includes('Auto_Upgraded') || secret.includes('Secure_Key_32char')) {
+    throw new Error('CRITICAL: Secure JWT_ACCESS_SECRET (min 32 bytes) required without fallback.');
   }
   return secret;
 }
 
 export function getJwtRefreshSecret(): string {
   const secret = process.env.JWT_REFRESH_SECRET?.trim();
-  if (!secret || weakSecrets.includes(secret) || secret.length < 32) {
-    return 'GMS_Prod_Secret_Refresh_Token_Key_2026_Secure_Key_32char_Auto_Upgraded';
+  if (!secret || weakSecrets.includes(secret) || secret.length < 32 || secret.startsWith('default_') || secret.includes('Auto_Upgraded') || secret.includes('Secure_Key_32char')) {
+    throw new Error('CRITICAL: Secure JWT_REFRESH_SECRET (min 32 bytes) required without fallback.');
   }
   return secret;
 }

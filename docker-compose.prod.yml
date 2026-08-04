@@ -28,6 +28,7 @@ services:
         max-file: "5"
 
   frontend:
+    image: gms-frontend:${RELEASE_TAG:-latest}
     build: 
       context: ./frontend
       dockerfile: Dockerfile
@@ -49,6 +50,7 @@ services:
         max-file: "5"
 
   backend:
+    image: gms-backend:${RELEASE_TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -58,14 +60,15 @@ services:
       - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER wajib diisi}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD wajib diisi}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-GMS_Prod_Secret_Access_Token_Key_2026_Secure_Key_32char}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-GMS_Prod_Secret_Refresh_Token_Key_2026_Secure_Key_32char}
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET wajib diisi di .env}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET wajib diisi di .env}
       - JWT_ACCESS_EXPIRES_IN=${JWT_ACCESS_EXPIRES_IN:-1h}
       - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN:-7d}
       - PORT=3001
       - NODE_ENV=production
-      - CORS_ORIGIN=${CORS_ORIGIN:-*}
-      - COOKIE_SECURE=false
+      - CORS_ORIGIN=${CORS_ORIGIN:?CORS_ORIGIN wajib diisi di .env}
+      - COOKIE_SECURE=true
+      - SAME_SITE=Strict
       - UPLOAD_DIR=/app/uploads
       - MAX_FILE_SIZE_MB=10
       - LOCAL_BACKUP_DIR=/app/backups/local

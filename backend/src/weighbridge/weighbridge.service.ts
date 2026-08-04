@@ -71,8 +71,10 @@ export class WeighbridgeService {
       statusConditions.push(
         { processType: 'GBB', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GBB', status: 'INCOMING_CHECK_REJECTED' },
+        { processType: 'GBB', status: 'QC_VEHICLE_REJECTED' },
         { processType: 'GSP', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GSP', status: 'INCOMING_CHECK_REJECTED' },
+        { processType: 'GSP', status: 'QC_VEHICLE_REJECTED' },
         { processType: 'GBJ', status: 'WAREHOUSE_DONE' },
         { processType: 'GBJ', status: 'QC_VEHICLE_REJECTED' },
       );
@@ -82,8 +84,10 @@ export class WeighbridgeService {
         { status: 'REGISTERED' },
         { processType: 'GBB', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GBB', status: 'INCOMING_CHECK_REJECTED' },
+        { processType: 'GBB', status: 'QC_VEHICLE_REJECTED' },
         { processType: 'GSP', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GSP', status: 'INCOMING_CHECK_REJECTED' },
+        { processType: 'GSP', status: 'QC_VEHICLE_REJECTED' },
         { processType: 'GBJ', status: 'WAREHOUSE_DONE' },
         { processType: 'GBJ', status: 'QC_VEHICLE_REJECTED' },
       );
@@ -229,7 +233,7 @@ export class WeighbridgeService {
 
     if (tx.processType === 'GBB' || tx.processType === 'GSP') {
       grossWeight = dto.weight;
-      nextStatus = 'WEIGH_IN_DONE';
+      nextStatus = 'QC_VEHICLE_PENDING';
     } else if (tx.processType === 'GBJ') {
       tareWeight = dto.weight;
       nextStatus = 'QC_VEHICLE_PENDING';
@@ -243,6 +247,17 @@ export class WeighbridgeService {
 
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const existingIn = await prismaTx.weighbridgeRecord.findFirst({
+        where: { transactionId, type: 'IN' },
+      });
+      if (existingIn) {
+        throw new BadRequestException({
+          success: false,
+          message: 'Weigh-in has already been processed for this transaction (concurrency lock)',
+          errors: [],
+        });
+      }
+
       await prismaTx.weighbridgeRecord.create({
         data: {
           transactionId,
@@ -374,7 +389,7 @@ export class WeighbridgeService {
 
     let allowedStatuses: string[];
     if (tx.processType === 'GBB' || tx.processType === 'GSP') {
-      allowedStatuses = ['INCOMING_CHECK_PASSED', 'INCOMING_CHECK_REJECTED'];
+      allowedStatuses = ['INCOMING_CHECK_PASSED', 'INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED'];
     } else if (tx.processType === 'GBJ') {
       allowedStatuses = ['WAREHOUSE_DONE', 'QC_VEHICLE_REJECTED'];
     } else {
@@ -482,6 +497,17 @@ export class WeighbridgeService {
 
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const existingOut = await prismaTx.weighbridgeRecord.findFirst({
+        where: { transactionId, type: 'OUT' },
+      });
+      if (existingOut) {
+        throw new BadRequestException({
+          success: false,
+          message: 'Weigh-out has already been processed for this transaction (concurrency lock)',
+          errors: [],
+        });
+      }
+
       await prismaTx.weighbridgeRecord.create({
         data: {
           transactionId,
@@ -525,9 +551,9 @@ export class WeighbridgeService {
       // Fraud Detection Logic
       if (tx.actualWeight !== null && tx.actualWeight !== undefined) {
         const deviation = Math.abs(netWeight - tx.actualWeight);
-        const maxWeight = Math.max(netWeight, tx.actualWeight);
+        const referenceWeight = tx.actualWeight > 0 ? tx.actualWeight : (netWeight > 0 ? netWeight : 0);
         const deviationPercent =
-          maxWeight > 0 ? (deviation / maxWeight) * 100 : 0;
+          referenceWeight > 0 ? (deviation / referenceWeight) * 100 : 0;
 
         let riskLevel: 'SAFE' | 'WARNING' | 'CRITICAL' = 'SAFE';
         if (deviationPercent > 5) {

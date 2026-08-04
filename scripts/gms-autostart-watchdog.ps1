@@ -167,7 +167,7 @@ try {
     }
 
     if (-not $PostgresHealthy) {
-        Write-SanitizedLog -Message "PostgreSQL status check warning: Container did not report healthy within expected window." -Level "WARN"
+        throw "PostgreSQL database container failed to reach healthy state after retries."
     }
 
     # --- Step 7: Wait for Backend Application Endpoint Readiness ---
@@ -189,6 +189,10 @@ try {
             }
         } catch {}
         Start-Sleep -Seconds 4
+    }
+
+    if (-not $BackendReady) {
+        throw "GMS Backend NestJS service failed to reach healthy state after retries."
     }
 
     # --- Step 8: Final Summary & Verification Report ---

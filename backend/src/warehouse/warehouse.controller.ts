@@ -148,6 +148,17 @@ export class WarehouseController {
   @ApiOperation({ summary: 'Upload warehouse attachment' })
   @UseInterceptors(
     require('@nestjs/platform-express').FileInterceptor('file', {
+      fileFilter: (req: any, file: any, cb: any) => {
+        const allowedMimeTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+        const path = require('path');
+        const ext = path.extname(file.originalname).toLowerCase();
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.pdf'];
+        if (allowedMimeTypes.includes(file.mimetype) && allowedExts.includes(ext)) {
+          cb(null, true);
+        } else {
+          cb(new (require('@nestjs/common').BadRequestException)('Invalid upload: only JPG, PNG, and PDF files are allowed.'), false);
+        }
+      },
       storage: require('multer').diskStorage({
         destination: process.env.UPLOAD_DIR || './uploads',
         filename: (req: any, file: any, cb: any) => {

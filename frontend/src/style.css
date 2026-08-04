@@ -570,3 +570,44 @@
 .wizard-next-leave-to   { opacity: 0; transform: translateX(-40px) scale(0.98); }
 .wizard-prev-enter-from { opacity: 0; transform: translateX(-40px) scale(0.98); }
 .wizard-prev-leave-to   { opacity: 0; transform: translateX(40px) scale(0.98); }
+
+/* ============================================================================
+   TASTE-SKILL & INDUSTRIAL UI GUARDRAILS (P2-01 & Ergonomic Field UI)
+   ============================================================================ */
+/* Viewport stability for industrial rugged tablets & terminals */
+.industrial-viewport {
+  min-height: 100dvh;
+}
+
+/* Accessible focus rings for high-speed industrial keyboard/barcode scanner navigation */
+.industrial-interactive:focus-visible {
+  outline: 3px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* Tactile mechanical button press effect for glove touchscreens */
+.industrial-btn-tactile {
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.industrial-btn-tactile:active {
+  transform: scale(0.97);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* Guard against table cell text explosion on compact field displays */
+.industrial-table-cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 250px;
+}
+
+/* Respect operator accessibility & hardware reduced motion settings */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

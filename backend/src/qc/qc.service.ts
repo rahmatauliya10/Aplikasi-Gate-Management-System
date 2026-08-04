@@ -51,12 +51,14 @@ export class QcService {
   async getQueue() {
     const queue = await this.prisma.transaction.findMany({
       where: {
-        OR: [
-          { status: 'QC_VEHICLE_PENDING', processType: 'GBJ' },
-          { status: 'QC_VEHICLE_IN_PROGRESS', processType: 'GBJ' },
-          { status: 'INCOMING_CHECK_PENDING', processType: 'GBB' },
-          { status: 'INCOMING_CHECK_IN_PROGRESS', processType: 'GBB' },
-        ],
+        status: {
+          in: [
+            'QC_VEHICLE_PENDING',
+            'QC_VEHICLE_IN_PROGRESS',
+            'INCOMING_CHECK_PENDING',
+            'INCOMING_CHECK_IN_PROGRESS',
+          ],
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -75,12 +77,9 @@ export class QcService {
     if (!tx) throw new NotFoundException('Transaction not found');
 
     let nextStatus: TransactionStatus;
-    if (tx.processType === 'GBJ' && tx.status === 'QC_VEHICLE_PENDING') {
+    if (tx.status === 'QC_VEHICLE_PENDING') {
       nextStatus = 'QC_VEHICLE_IN_PROGRESS';
-    } else if (
-      tx.processType === 'GBB' &&
-      tx.status === 'INCOMING_CHECK_PENDING'
-    ) {
+    } else if (tx.status === 'INCOMING_CHECK_PENDING') {
       nextStatus = 'INCOMING_CHECK_IN_PROGRESS';
     } else {
       throw new BadRequestException(
@@ -128,9 +127,9 @@ export class QcService {
       include: { qcVehicleChecks: true },
     });
     if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.processType !== 'GBJ')
+    if (!['GBJ', 'GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
-        'Vehicle check is only for GBJ process type',
+        'Invalid process type for preliminary QC sampling & vehicle inspection',
       );
     if (tx.status !== 'QC_VEHICLE_IN_PROGRESS')
       throw new BadRequestException(
@@ -218,9 +217,9 @@ export class QcService {
       include: { incomingMaterialChecks: true },
     });
     if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.processType !== 'GBB')
+    if (!['GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
-        'Incoming check is only for GBB process type',
+        'Incoming check is only for GBB or GSP process types',
       );
     if (tx.status !== 'INCOMING_CHECK_IN_PROGRESS')
       throw new BadRequestException(

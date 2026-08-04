@@ -210,7 +210,11 @@ const getProcessType = (truck) => {
 
 const getStepLabel = (truck) => {
   if (!truck) return '-'
-  const step = truck.step || truck.status || '-'
+  let step = truck.step || truck.status || '-'
+  const pType = getProcessType(truck)
+  if ((pType === 'GBB' || pType === 'GSP') && String(step).startsWith('QC_VEHICLE')) {
+    step = String(step).replace('QC_VEHICLE', 'QC_SAMPLING')
+  }
   return String(step).replace(/_/g, ' ').toUpperCase()
 }
 
@@ -230,14 +234,14 @@ const queueTrucks = computed(() => {
       return t.status === 'WAREHOUSE_DONE' || t.status === 'QC_VEHICLE_REJECTED';
     }
     
-    // Timbang Kedua untuk GBB (Lolos Inspeksi ATAU Inspeksi Ditolak)
+    // Timbang Kedua untuk GBB (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak)
     if (process === 'GBB') {
-      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED';
+      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED';
     }
     
-    // Timbang Kedua untuk GSP (Lolos Inspeksi ATAU Inspeksi Ditolak)
+    // Timbang Kedua untuk GSP (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak)
     if (process === 'GSP') {
-      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED';
+      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED';
     }
     
     return false;
@@ -297,7 +301,8 @@ const weighLabelMap = {
   GBB: { 
     REGISTERED: 'Gross Weight (First Weighing)', 
     INCOMING_CHECK_PASSED: 'Tare Weight (Second Weighing)',
-    INCOMING_CHECK_REJECTED: 'Tare Weight (Second Weighing)'
+    INCOMING_CHECK_REJECTED: 'Tare Weight (Second Weighing)',
+    QC_VEHICLE_REJECTED: 'Tare Weight (Second Weighing)'
   },
   GBJ: { 
     REGISTERED: 'Tare Weight (First Weighing)', 
@@ -306,7 +311,8 @@ const weighLabelMap = {
   },
   GSP: { 
     REGISTERED: 'Gross Weight (First Weighing)', 
-    WAREHOUSE_DONE: 'Tare Weight (Second Weighing)'
+    WAREHOUSE_DONE: 'Tare Weight (Second Weighing)',
+    QC_VEHICLE_REJECTED: 'Tare Weight (Second Weighing)'
   }
 }
 const weighingLabel = computed(() => {

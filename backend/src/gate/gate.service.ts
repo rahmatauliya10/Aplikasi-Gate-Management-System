@@ -20,12 +20,12 @@ export class GateService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private async generateTransactionNumber(): Promise<string> {
+  private async generateTransactionNumber(txClient: any = this.prisma): Promise<string> {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
     const prefix = `GMS-${dateStr}-`;
 
-    const lastTransaction = await this.prisma.transaction.findFirst({
+    const lastTransaction = await txClient.transaction.findFirst({
       where: {
         transactionNumber: {
           startsWith: prefix,
@@ -53,8 +53,6 @@ export class GateService {
     let retries = 3;
     while (retries > 0) {
       try {
-        const transactionNumber = await this.generateTransactionNumber();
-
         transaction = await this.prisma.$transaction(async (tx) => {
           // Database-level concurrency lock on plate number hash
           try {
@@ -62,6 +60,8 @@ export class GateService {
           } catch (e) {
             // Fallback for non-postgres database environments in testing
           }
+
+          const transactionNumber = await this.generateTransactionNumber(tx);
 
           const activeTransaction = await tx.transaction.findFirst({
             where: {

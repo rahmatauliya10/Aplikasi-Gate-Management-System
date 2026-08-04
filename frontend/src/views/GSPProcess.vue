@@ -11,7 +11,7 @@
                 <h2 class="text-[10px] font-black text-[#4A8BDF] uppercase tracking-[0.2em]">Active Operation</h2>
                 <h3 class="text-xl font-black text-slate-800 tracking-tight mt-0.5">Truck Details</h3>
               </div>
-              <StatusBadge :status="selectedTruck.status" class="shadow-sm" />
+              <StatusBadge :status="selectedTruck.status" :process-type="getProcessType(selectedTruck)" class="shadow-sm" />
             </div>
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
@@ -62,7 +62,7 @@
             
             <div class="mt-6 space-y-4">
               <!-- Missing Security Info -->
-              <div v-if="selectedTruck.status === 'WEIGH_IN_DONE' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
+              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
                 <div class="flex items-center space-x-2 text-[#800057] mb-2">
                   <span class="material-icons text-lg">warning_amber</span>
                   <span class="text-[11px] font-black uppercase tracking-wider">Complete Security Data</span>
@@ -320,7 +320,11 @@ const getProcessType = (truck) => {
 
 const getStepLabel = (truck) => {
   if (!truck) return '-'
-  const step = truck.step || truck.status || '-'
+  let step = truck.step || truck.status || '-'
+  const pType = getProcessType(truck)
+  if ((pType === 'GBB' || pType === 'GSP') && String(step).startsWith('QC_VEHICLE')) {
+    step = String(step).replace('QC_VEHICLE', 'QC_SAMPLING')
+  }
   return String(step).replace(/_/g, ' ').toUpperCase()
 }
 
@@ -379,7 +383,7 @@ const checklistStates = ref([])
 const isChecklistComplete = computed(() => checklistStates.value.every(s => s !== null))
 const hasChecklistReject = computed(() => checklistStates.value.some(s => s === false))
 
-const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'WEIGH_IN_DONE' || t.status === 'WAREHOUSE_IN_PROGRESS' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(t) === 'GSP'))
+const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'WAREHOUSE_IN_PROGRESS' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(t) === 'GSP'))
 const filteredGspTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
   if (!keyword) return gspTrucks.value

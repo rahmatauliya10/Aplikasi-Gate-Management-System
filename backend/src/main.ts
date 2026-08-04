@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { configureApp } from './app.config';
+import { getJwtAccessSecret, getJwtRefreshSecret } from './common/utils/jwt-secrets.util';
 
 async function bootstrap() {
   const isProduction = process.env.NODE_ENV === 'production';
@@ -25,25 +26,9 @@ async function bootstrap() {
     );
   }
 
-  // Security Hardening: Auto-upgrade weak or default secrets in production mode
-  if (isProduction) {
-    const weakSecrets = [
-      'super_secret_access_key_gms',
-      'super_secret_refresh_key_gms',
-      'postgres',
-      'admin123',
-      'secret',
-    ];
-    
-    if (weakSecrets.includes(process.env.JWT_ACCESS_SECRET || '') || (process.env.JWT_ACCESS_SECRET || '').length < 32) {
-      new Logger('Bootstrap').warn('JWT_ACCESS_SECRET was default/weak. Auto-upgrading to secure 64-character key.');
-      process.env.JWT_ACCESS_SECRET = 'GMS_Prod_Secret_Access_Token_Key_2026_Secure_Key_32char_Auto_Upgraded';
-    }
-    if (weakSecrets.includes(process.env.JWT_REFRESH_SECRET || '') || (process.env.JWT_REFRESH_SECRET || '').length < 32) {
-      new Logger('Bootstrap').warn('JWT_REFRESH_SECRET was default/weak. Auto-upgrading to secure 64-character key.');
-      process.env.JWT_REFRESH_SECRET = 'GMS_Prod_Secret_Refresh_Token_Key_2026_Secure_Key_32char_Auto_Upgraded';
-    }
-  }
+  // Security Hardening: Enforce fail-fast secret verification without fallbacks
+  getJwtAccessSecret();
+  getJwtRefreshSecret();
 
   app.enableShutdownHooks();
 

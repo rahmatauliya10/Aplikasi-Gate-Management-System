@@ -55,8 +55,8 @@ export class WarehouseService {
     });
 
     const statusConditions: Prisma.TransactionWhereInput[] = [
-      { processType: 'GBB', status: 'WEIGH_IN_DONE' },
-      { processType: 'GSP', status: 'WEIGH_IN_DONE' },
+      { processType: 'GBB', status: 'QC_VEHICLE_PASSED' },
+      { processType: 'GSP', status: 'QC_VEHICLE_PASSED' },
       { processType: 'GBJ', status: 'QC_VEHICLE_PASSED' },
     ];
     andConditions.push({ OR: statusConditions });
@@ -217,10 +217,7 @@ export class WarehouseService {
       });
     }
 
-    const expectedStatus =
-      tx.processType === 'GBB' || tx.processType === 'GSP'
-        ? 'WEIGH_IN_DONE'
-        : 'QC_VEHICLE_PASSED';
+    const expectedStatus = 'QC_VEHICLE_PASSED';
     if (tx.status !== expectedStatus) {
       await this.activityLogsService
         .logAction({
@@ -492,6 +489,7 @@ export class WarehouseService {
           actualWeight: dto.actualWeight,
           actualQuantity: dto.actualQuantity,
           warehouseUnit: dto.unit,
+          remarks: tx.remarks ? (finalRemarks ? `${tx.remarks} | ${finalRemarks}` : tx.remarks) : finalRemarks || null,
           ...(dto.suratJalanNumber && {
             suratJalanNumber: dto.suratJalanNumber,
           }),
@@ -581,6 +579,23 @@ export class WarehouseService {
       });
     }
 
+    if (tx.processType === 'GBB' && user.role === 'WAREHOUSE') {
+      this.logger.warn(`SoD violation: Warehouse role attempted incoming check on GBB transaction ${transactionId}`);
+      await this.activityLogsService.logAction({
+        userId: user.id,
+        action: 'SOD_VIOLATION_BLOCKED',
+        module: 'WAREHOUSE',
+        referenceId: transactionId,
+        description: `Blocked Warehouse role from executing GBB incoming check`,
+        status: 'SUCCESS',
+      }).catch(() => {});
+      throw new ForbiddenException({
+        success: false,
+        message: 'Segregation of Duties (SoD) violation: Akses ditolak! Proses pemeriksaan incoming GBB wajib dieksekusi oleh tim QC atau Admin.',
+        errors: [],
+      });
+    }
+
     const allowedStatuses = ['INCOMING_CHECK_PENDING'];
     if (dto.decision === 'rejected') {
       allowedStatuses.push('WAREHOUSE_IN_PROGRESS');
@@ -661,6 +676,23 @@ export class WarehouseService {
       throw new ForbiddenException({
         success: false,
         message: 'You do not have access to process this transaction type',
+        errors: [],
+      });
+    }
+
+    if (tx.processType === 'GBB' && user.role === 'WAREHOUSE') {
+      this.logger.warn(`SoD violation: Warehouse role attempted QC analysis completion on GBB transaction ${transactionId}`);
+      await this.activityLogsService.logAction({
+        userId: user.id,
+        action: 'SOD_VIOLATION_BLOCKED',
+        module: 'WAREHOUSE',
+        referenceId: transactionId,
+        description: `Blocked Warehouse role from completing GBB QC analysis`,
+        status: 'SUCCESS',
+      }).catch(() => {});
+      throw new ForbiddenException({
+        success: false,
+        message: 'Segregation of Duties (SoD) violation: Akses ditolak! Penutupan analisa QC pada transaksi GBB wajib dieksekusi oleh tim QC atau Admin.',
         errors: [],
       });
     }

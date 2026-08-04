@@ -24,13 +24,17 @@ const api = axios.create({
   withCredentials: true
 })
 
-// ── Request Interceptor ──────────────────────────────
-// Attach access_token from localStorage to every request
+// Attach access_token from in-memory Pinia store to every request
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+  async (config) => {
+    try {
+      const { useAuthStore } = await import('../stores/authStore')
+      const authStore = useAuthStore()
+      if (authStore.token) {
+        config.headers.Authorization = `Bearer ${authStore.token}`
+      }
+    } catch (e) {
+      // Store not initialized yet
     }
     return config
   },
@@ -60,10 +64,14 @@ api.interceptors.response.use(
     }
 
     if (error.response && error.response.status === 401) {
-      // Token expired or invalid — clear auth data
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('user')
+      // Token expired or invalid — clear auth data in memory
+      try {
+        import('../stores/authStore').then(({ useAuthStore }) => {
+          useAuthStore().clearAuth()
+        })
+      } catch (e) {
+        // ignore if unavailable
+      }
 
       const isLoginRequest = error.config && error.config.url && error.config.url.includes('/login');
 

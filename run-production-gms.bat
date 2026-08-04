@@ -66,8 +66,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo [7/8] Menjalankan Migrasi Database Prisma...
-docker compose -f docker-compose.prod.yml exec -T backend npx prisma db push --skip-generate
+echo [7/8] Menjalankan Migrasi Database Prisma (Safe Production Deploy)...
+docker compose -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy
 if errorlevel 1 (
     echo.
     echo [!] GAGAL: Migrasi database Prisma gagal! Deployment dibatalkan demi keamanan data.

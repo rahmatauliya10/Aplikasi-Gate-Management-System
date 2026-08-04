@@ -11,7 +11,7 @@
                 <h2 class="text-[10px] font-black text-[#A0006D] uppercase tracking-[0.2em]">Active Operation</h2>
                 <h3 class="text-xl font-black text-slate-800 tracking-tight mt-0.5">Truck Details</h3>
               </div>
-              <StatusBadge :status="selectedTruck.status" class="shadow-sm" />
+              <StatusBadge :status="selectedTruck.status" :process-type="getProcessType(selectedTruck)" class="shadow-sm" />
             </div>
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
@@ -61,8 +61,39 @@
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9"><StepTimeline :current-step="selectedTruck.status" :process-type="selectedTruck.processType" /></div>
 
             <div class="mt-8 space-y-6">
+              <!-- Otorisasi QC Sampling Awal Confirmation Card -->
+              <!-- Passport Otorisasi Card -->
+              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' || selectedTruck.status === 'WAREHOUSE_IN_PROGRESS'" class="p-4 sm:p-5 rounded-2xl border border-emerald-200/80 shadow-sm transition-all bg-gradient-to-r from-emerald-50/90 via-teal-50/50 to-emerald-50/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div class="flex items-start sm:items-center space-x-3 min-w-0 flex-1">
+                  <div class="w-10 h-10 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0 shadow-sm">
+                    <span class="material-icons text-xl">verified</span>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h4 class="text-xs font-black uppercase tracking-wider text-emerald-950">Initial QC Sampling Authorization</h4>
+                      <span class="px-2 py-0.5 rounded-md text-[9px] font-black bg-emerald-600 text-white uppercase tracking-wider shrink-0 shadow-sm">APPROVED</span>
+                    </div>
+                    <p class="text-[11px] font-medium text-emerald-800 mt-0.5 leading-snug">Cargo authorized safe & eligible for unloading at GBB Warehouse.</p>
+                  </div>
+                </div>
+                <div class="flex items-center sm:flex-col sm:items-end justify-between sm:justify-center border-t sm:border-t-0 pt-2.5 sm:pt-0 border-emerald-200/60 shrink-0">
+                  <span class="text-[9px] font-black uppercase text-emerald-700 tracking-widest">PIC SAMPLING QC</span>
+                  <span class="text-xs font-black text-emerald-950 tracking-tight">{{ selectedTruck.qcVehicleChecks?.[0]?.inspector || selectedTruck.qcDetails?.pic || 'QC Lab Team' }}</span>
+                </div>
+              </div>
+
+              <!-- Start Unloading Button when security data is already present -->
+              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && selectedTruck.suratJalanNumber && selectedTruck.poNumber" class="space-y-4">
+                <button @click="startUnloadingProcess" :disabled="isProcessing" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98]"
+                  style="background:linear-gradient(135deg,#A0006D,#70004C);">
+                  <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
+                  <span v-else class="material-icons text-xl">play_arrow</span>
+                  <span class="text-base tracking-wide uppercase">{{ isProcessing ? 'Starting Process...' : 'Start Cargo Unloading & Roll Weight (GBB Unloading)' }}</span>
+                </button>
+              </div>
+
               <!-- Missing Security Info -->
-              <div v-if="selectedTruck.status === 'WEIGH_IN_DONE' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
+              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
                 <div class="flex items-center space-x-2 text-[#800057] mb-2">
                   <span class="material-icons text-lg">warning_amber</span>
                   <span class="text-[11px] font-black uppercase tracking-wider">Complete Security Data</span>
@@ -87,19 +118,19 @@
                 <WeightInput label="Input Roll Weight GBB (KG)" :is-submitting="isProcessing" @save="handleWeightSave" />
               </div>
 
-              <!-- Incoming Check Start / Resume -->
-              <div v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS' && !isRollWeightUnlocked && !samplingDecision" class="mt-6">
+              <!-- Vehicle & Delivery Checklist Start / Resume -->
+              <div v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS' && !isRollWeightUnlocked" class="mt-6">
                 <button @click="openInspection" class="w-full py-4 rounded-xl flex items-center justify-center space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;transform:translateZ(0)">
                   <span class="material-icons text-xl">fact_check</span>
-                  <span class="font-black tracking-widest uppercase">Start Analisa Incoming Kopi</span>
+                  <span class="font-black tracking-widest uppercase">📋 Run GBB 10-Item Vehicle Inspection (Pre-Unloading)</span>
                 </button>
               </div>
 
-              <!-- Sampling Result Badge -->
-              <div v-if="selectedTruck.status === 'INCOMING_CHECK_REJECTED' || samplingDecision === 'rejected'" class="mt-4 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2)">
+              <!-- Rejection Badge -->
+              <div v-if="selectedTruck.status === 'INCOMING_CHECK_REJECTED'" class="mt-4 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2)">
                 <span class="material-icons text-red-500 text-2xl">cancel</span>
                 <div>
-                  <p class="text-sm font-black text-red-700">Analysis REJECTED</p>
+                  <p class="text-sm font-black text-red-700">Analysis REJECTED by QC / Admin</p>
                   <p class="text-[11px] text-red-500">Truck redirected to outbound weighbridge.</p>
                 </div>
               </div>
@@ -210,55 +241,7 @@
         </div>
       </div>
     </div>
-    
-    <!-- Reject Comment Modal -->
-    <teleport to="body">
-      <transition name="fade">
-        <div v-if="showRejectModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4" @click.self="showRejectModal = false">
-          <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
-          <div class="relative w-[95vw] sm:w-full sm:max-w-md mx-auto rounded-2xl shadow-2xl overflow-hidden" style="background:white;">
-            <!-- Header -->
-            <div class="p-5 flex items-center space-x-3" style="background:linear-gradient(135deg,#FEE2E2,#FFF1F2);border-bottom:1px solid #FECACA;">
-              <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:rgba(220,38,38,0.1);">
-                <span class="material-icons text-red-500 text-xl">report_problem</span>
-              </div>
-              <div>
-                <h3 class="text-base font-black text-red-800">Rejection Reason</h3>
-                <p class="text-[10px] font-bold text-red-400 uppercase tracking-widest">Required before rejecting</p>
-              </div>
-            </div>
-            <!-- Body -->
-            <div class="p-5 space-y-4">
-              <div class="p-3 rounded-xl flex items-center space-x-2" style="background:#FEF2F2;border:1px solid #FECACA;">
-                <span class="material-icons text-red-400 text-sm">info</span>
-                <span class="text-[11px] font-bold text-red-600">{{ getPlateNumber(selectedTruck) }} — Sampling NON-COMPLIANT</span>
-              </div>
-              <div class="space-y-1.5">
-                <label class="text-[10px] font-black text-slate-600 uppercase tracking-wider">Comment / Rejection Reason *</label>
-                <textarea v-model="rejectComment" rows="4" class="w-full p-3 bg-slate-50 rounded-xl text-sm font-medium text-slate-800 outline-none resize-none placeholder:text-slate-600 placeholder:font-normal transition-all focus:ring-2 focus:ring-red-300" style="border:1px solid #E2E8F0;" placeholder="Write the rejection reason in detail..."></textarea>
-                <p v-if="rejectCommentError" class="text-[10px] text-red-500 font-bold">⚠ Comment is required, minimum 10 characters</p>
-              </div>
-            </div>
-            <!-- Footer -->
-            <div class="px-5 pb-5 flex space-x-3">
-              <button @click="showRejectModal = false; rejectComment = ''; rejectCommentError = false"
-                class="flex-1 py-3 rounded-xl text-sm font-black transition-all hover:bg-slate-100" style="border:1px solid #E2E8F0;color:#64748B;">
-                Cancel
-              </button>
-              <button @click="submitReject" :disabled="isProcessing"
-                class="flex-1 py-3 rounded-xl text-sm font-black text-white transition-all hover:shadow-lg active:scale-[0.98] flex items-center justify-center space-x-2"
-                style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
-                <span v-if="isProcessing" class="material-icons text-base animate-spin">autorenew</span>
-                <span v-else class="material-icons text-base">block</span>
-                <span>Reject</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </transition>
-    </teleport>
-
-    <!-- Inspection Modal (Checklist & Sampling) -->
+    <!-- Vehicle & Delivery Checklist Modal -->
     <teleport to="body">
       <transition name="modal">
         <div v-if="showChecklistModal" class="fixed inset-0 z-[9998] flex items-center justify-center p-4" @click.self="closeInspectionModal">
@@ -268,19 +251,17 @@
             <div class="px-8 py-5 flex justify-between items-center bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
               <div class="flex items-center space-x-3">
                 <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-100/50 border border-blue-200">
-                  <span class="material-icons text-[#4A8BDF] text-xl">{{ inspectionStep === 1 ? 'fact_check' : 'science' }}</span>
+                  <span class="material-icons text-[#4A8BDF] text-xl">fact_check</span>
                 </div>
                 <div>
-                  <h3 class="text-base font-black text-slate-800 tracking-tight">
-                    {{ inspectionStep === 1 ? 'Analisa Incoming Checklist' : 'Analisa Kopi Sampling' }}
-                  </h3>
+                  <h3 class="text-base font-black text-slate-800 tracking-tight">GBB 10-Point Vehicle Inspection Checklist</h3>
                   <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-                    Step {{ inspectionStep }} of 2
+                    Physical Vehicle & Cargo Inspection Prior to Roll Weight Entry
                   </p>
                 </div>
               </div>
               <div class="flex items-center space-x-4">
-                <div class="flex flex-col items-end" v-if="inspectionStep === 1">
+                <div class="flex flex-col items-end">
                   <span class="text-[10px] font-black" :class="isChecklistComplete ? 'text-[#3A6ABF]' : 'text-slate-500'">
                     {{ checklistDoneCount }}/{{ vehicleChecklist.length }} Done
                   </span>
@@ -297,109 +278,51 @@
             
             <!-- Body -->
             <div class="p-6 overflow-y-auto" style="background:#FAFBFF;">
-              <!-- Step 1: Checklist -->
-              <transition name="fade-slide" mode="out-in">
-                <div v-if="inspectionStep === 1" key="step1" class="rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-white">
-                  <div v-for="(item, index) in vehicleChecklist" :key="index" class="p-4 transition-colors hover:bg-slate-50" :style="index < vehicleChecklist.length - 1 ? 'border-bottom:1px solid #E2E8F0' : ''">
-                    <div class="flex items-start justify-between">
-                      <div class="text-[13px] leading-tight font-bold text-slate-700 w-2/3 mt-1">{{ index + 1 }}. {{ item }}</div>
-                      <div class="flex space-x-2 shrink-0">
-                        <button @click="checklistStates[index].status = 'ok'; checklistStates[index].photo = null"
-                          class="px-4 py-1.5 rounded-lg text-xs font-black transition-all"
-                          :class="checklistStates[index]?.status === 'ok' ? 'bg-[#4A8BDF] text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'">OK</button>
-                        <button @click="checklistStates[index].status = 'not_ok'"
-                          class="px-4 py-1.5 rounded-lg text-xs font-black transition-all"
-                          :class="checklistStates[index]?.status === 'not_ok' ? 'bg-red-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'">NOT OK</button>
-                      </div>
-                    </div>
-                    <transition name="fade">
-                      <div v-if="checklistStates[index]?.status === 'not_ok'" class="mt-4 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-red-50 border border-red-100">
-                        <div class="flex items-center space-x-2 text-red-600">
-                          <span class="material-icons text-sm">photo_camera</span>
-                          <span class="text-[10px] font-black uppercase tracking-wider">Photo Attachment Required</span>
-                        </div>
-                        <div class="flex items-center bg-white p-2 rounded-lg border border-red-200 shadow-sm w-full sm:w-auto">
-                          <input type="file" @change="handlePhotoUpload($event, index)" class="text-[10px] file:mr-3 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:bg-red-50 file:text-red-700 hover:file:bg-red-100" accept="image/*" />
-                          <span v-if="checklistStates[index].photo" class="text-[10px] text-emerald-600 font-black ml-2 whitespace-nowrap">✓ OK</span>
-                        </div>
-                      </div>
-                    </transition>
-                  </div>
-                </div>
-
-                <!-- Step 2: Sampling Awal -->
-                <div v-else-if="inspectionStep === 2" key="step2" class="space-y-4">
-                  <div class="p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
-                    <div class="space-y-3">
-                      <div v-for="(param, idx) in samplingParams" :key="idx" class="flex items-center justify-between p-4 bg-white rounded-xl shadow-sm" style="border:1px solid rgba(253,224,71,0.5)">
-                        <div class="flex items-center space-x-4">
-                          <span class="material-icons text-[#A0006D] text-2xl">{{ param.icon }}</span>
-                          <div>
-                            <div class="text-[14px] font-black text-slate-800">{{ param.label }}</div>
-                            <div class="text-[11px] text-slate-600 font-medium">{{ param.desc }}</div>
-                          </div>
-                        </div>
-                        <div class="flex space-x-2">
-                          <button type="button" @click="samplingStates[idx] = 'ok'"
-                            class="px-4 py-2 rounded-lg text-[11px] font-black transition-all"
-                            :style="samplingStates[idx] === 'ok' ? 'background:#4A8BDF;color:white;border:1px solid #2A4A9F;box-shadow:0 2px 8px rgba(58,106,191,0.3)' : 'background:white;color:#64748B;border:1px solid #E2E8F0'">COMPLIANT</button>
-                          <button type="button" @click="samplingStates[idx] = 'not_ok'"
-                            class="px-4 py-2 rounded-lg text-[11px] font-black transition-all"
-                            :style="samplingStates[idx] === 'not_ok' ? 'background:#DC2626;color:white;border:1px solid #B91C1C;box-shadow:0 2px 8px rgba(220,38,38,0.3)' : 'background:white;color:#64748B;border:1px solid #E2E8F0'">NON-COMPLIANT</button>
-                        </div>
-                      </div>
+              <div class="rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-white">
+                <div v-for="(item, index) in vehicleChecklist" :key="index" class="p-4 transition-colors hover:bg-slate-50" :style="index < vehicleChecklist.length - 1 ? 'border-bottom:1px solid #E2E8F0' : ''">
+                  <div class="flex items-start justify-between">
+                    <div class="text-[13px] leading-tight font-bold text-slate-700 w-2/3 mt-1">{{ index + 1 }}. {{ item }}</div>
+                    <div class="flex space-x-2 shrink-0">
+                      <button @click="checklistStates[index].status = 'ok'; checklistStates[index].photo = null"
+                        class="px-4 py-1.5 rounded-lg text-xs font-black transition-all"
+                        :class="checklistStates[index]?.status === 'ok' ? 'bg-[#4A8BDF] text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'">OK</button>
+                      <button @click="checklistStates[index].status = 'not_ok'"
+                        class="px-4 py-1.5 rounded-lg text-xs font-black transition-all"
+                        :class="checklistStates[index]?.status === 'not_ok' ? 'bg-red-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'">NOT OK</button>
                     </div>
                   </div>
+                  <transition name="fade">
+                    <div v-if="checklistStates[index]?.status === 'not_ok'" class="mt-4 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-red-50 border border-red-100">
+                      <div class="flex items-center space-x-2 text-red-600">
+                        <span class="material-icons text-sm">photo_camera</span>
+                        <span class="text-[10px] font-black uppercase tracking-wider">Photo Attachment Required</span>
+                      </div>
+                      <div class="flex items-center bg-white p-2 rounded-lg border border-red-200 shadow-sm w-full sm:w-auto">
+                        <input type="file" @change="handlePhotoUpload($event, index)" class="text-[10px] file:mr-3 file:py-1 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:bg-red-50 file:text-red-700 hover:file:bg-red-100" accept="image/*" />
+                        <span v-if="checklistStates[index].photo" class="text-[10px] text-emerald-600 font-black ml-2 whitespace-nowrap">✓ OK</span>
+                      </div>
+                    </div>
+                  </transition>
                 </div>
-              </transition>
+              </div>
             </div>
 
             <!-- Footer -->
             <div class="px-8 py-5 border-t border-slate-100 bg-white">
-              <transition name="fade" mode="out-in">
-                <!-- Footer Step 1 -->
-                <div v-if="inspectionStep === 1" key="footer1">
-                  <div v-if="!isChecklistComplete" class="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-400">
-                    <span class="material-icons text-xl mb-1 animate-pulse">lock</span>
-                    <span class="text-[11px] font-black uppercase tracking-widest">Complete {{ checklistRemaining }} Checklist Items</span>
-                    <p class="text-[9px] font-bold mt-1 text-center">All items must be answered OK or NOT OK + photo attachment to proceed.</p>
-                  </div>
-                  <div v-else class="flex flex-col sm:flex-row gap-3">
-                    <button v-if="hasChecklistNotOk" type="button" @click="showRejectModal = true"
-                      class="py-3.5 px-4 rounded-xl text-xs font-black text-white flex items-center justify-center space-x-1.5 transition-all hover:shadow-lg active:scale-[0.98]"
-                      style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
-                      <span class="material-icons text-base">block</span><span>REJECT VEHICLE</span>
-                    </button>
-                    <button @click="inspectionStep = 2" class="flex-1 flex justify-center items-center py-3.5 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;">
-                      <span class="text-xs font-black uppercase tracking-widest text-white">Proceed to Quality Sampling</span>
-                      <span class="material-icons text-base animate-bounce-right">arrow_forward</span>
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Footer Step 2 -->
-                <div v-else-if="inspectionStep === 2" key="footer2">
-                  <div v-if="!isSamplingFilled" class="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-400">
-                    <span class="material-icons text-xl mb-1 animate-pulse">lock</span>
-                    <span class="text-[11px] font-black uppercase tracking-widest">Complete Initial Sampling</span>
-                    <p class="text-[9px] font-bold mt-1 text-center">All quality parameters must be inspected.</p>
-                  </div>
-                  <div v-else class="flex flex-col sm:flex-row gap-3">
-                    <button v-if="hasAnyIssue" type="button" @click="showRejectModal = true"
-                      class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
-                      style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 4px 12px rgba(220,38,38,0.3)">
-                      <span class="material-icons text-lg">block</span><span>REJECT INSPECTION</span>
-                    </button>
-                    <button type="button" @click="acceptSamplingAndFinish" :disabled="isProcessing"
-                      class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
-                      :style="hasAnyIssue ? 'background:linear-gradient(135deg,#F59E0B,#D97706);box-shadow:0 4px 12px rgba(245,158,11,0.3)' : 'background:linear-gradient(135deg,#4A8BDF,#3A6ABF);box-shadow:0 4px 12px rgba(74,139,223,0.3)'">
-                      <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-                      <span v-else class="material-icons text-lg">{{ hasAnyIssue ? 'warning' : 'check_circle' }}</span>
-                      <span>{{ hasAnyIssue ? 'TERIMA WITH NOTE' : 'ACCEPT & UNLOCK ROLL WEIGHT' }}</span>
-                    </button>
-                  </div>
-                </div>
-              </transition>
+              <div v-if="!isChecklistComplete" class="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-400">
+                <span class="material-icons text-xl mb-1 animate-pulse">lock</span>
+                <span class="text-[11px] font-black uppercase tracking-widest">Complete {{ checklistRemaining }} Checklist Items</span>
+                <p class="text-[9px] font-bold mt-1 text-center">All items must be answered OK or NOT OK + photo attachment to proceed.</p>
+              </div>
+              <div v-else class="flex flex-col sm:flex-row gap-3">
+                <button type="button" @click="submitChecklistAndUnlock" :disabled="isProcessing"
+                  class="flex-1 py-4 rounded-xl text-sm font-black text-white flex items-center justify-center space-x-2 transition-all hover:shadow-lg active:scale-[0.98]"
+                  :style="hasChecklistNotOk ? 'background:linear-gradient(135deg,#F59E0B,#D97706);box-shadow:0 4px 12px rgba(245,158,11,0.3)' : 'background:linear-gradient(135deg,#4A8BDF,#3A6ABF);box-shadow:0 4px 12px rgba(74,139,223,0.3)'">
+                  <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
+                  <span v-else class="material-icons text-lg">{{ hasChecklistNotOk ? 'warning' : 'check_circle' }}</span>
+                  <span>{{ hasChecklistNotOk ? 'SUBMIT WITH NOTE & UNLOCK ROLL WEIGHT' : 'SUBMIT CHECKLIST & UNLOCK ROLL WEIGHT' }}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -442,7 +365,11 @@ const getProcessType = (truck) => {
 
 const getStepLabel = (truck) => {
   if (!truck) return '-'
-  const step = truck.step || truck.status || '-'
+  let step = truck.step || truck.status || '-'
+  const pType = getProcessType(truck)
+  if ((pType === 'GBB' || pType === 'GSP') && String(step).startsWith('QC_VEHICLE')) {
+    step = String(step).replace('QC_VEHICLE', 'QC_SAMPLING')
+  }
   return String(step).replace(/_/g, ' ').toUpperCase()
 }
 
@@ -470,7 +397,6 @@ const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
 const showChecklistModal = ref(false)
 const isChecklistPassed = ref(false)
-const inspectionStep = ref(1)
 const currentPage = ref(1)
 const searchQuery = ref('')
 const isProcessing = ref(false)
@@ -484,13 +410,10 @@ onMounted(async () => {
 })
 
 const openInspection = () => {
-  // Always open modal; state is handled via selectTruck or local memory
   showChecklistModal.value = true
 }
 
 const closeInspectionModal = () => {
-  // Just close the modal — keep status as IN_PROGRESS so user can resume
-  // Checklist and sampling states are preserved in memory
   showChecklistModal.value = false
 }
 
@@ -498,18 +421,7 @@ const rollWeightInput = ref(null)
 const suratJalanInput = ref('')
 const poNumberInput = ref('')
 const checklistStates = ref([])
-const samplingStates = ref([null, null, null])
-const samplingDecision = ref(null)
-const showRejectModal = ref(false)
 const compiledChecklistString = ref('')
-const rejectComment = ref('')
-const rejectCommentError = ref(false)
-
-const samplingParams = [
-  { label: 'Moisture', desc: 'Check moisture content of sample', icon: 'water_drop' },
-  { label: 'Visual', desc: 'Check physical appearance of goods', icon: 'visibility' },
-  { label: 'Odor', desc: 'Check for abnormal odor/smell', icon: 'air' }
-]
 
 const vehicleChecklist = [
   "Vehicle is clean",
@@ -524,11 +436,8 @@ const vehicleChecklist = [
   "Vehicle has no leaks / in good condition"
 ]
 
-const isSamplingFilled = computed(() => samplingStates.value.every(s => s !== null))
-const hasSamplingReject = computed(() => samplingStates.value.some(s => s === 'not_ok'))
 const hasChecklistNotOk = computed(() => checklistStates.value.some(s => s.status === 'not_ok'))
-const hasAnyIssue = computed(() => hasSamplingReject.value || hasChecklistNotOk.value)
-const gbbTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'WEIGH_IN_DONE' || t.status === 'WAREHOUSE_IN_PROGRESS') && getProcessType(t) === 'GBB'))
+const gbbTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'WAREHOUSE_IN_PROGRESS') && getProcessType(t) === 'GBB'))
 const filteredGbbTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
   if (!keyword) return gbbTrucks.value
@@ -554,12 +463,9 @@ const selectTruck = (truck) => {
   suratJalanInput.value = truck.suratJalanNumber || ''
   poNumberInput.value = truck.poNumber || ''
 
-  // Only reset checklist/sampling if selecting a DIFFERENT truck
+  // Only reset checklist if selecting a DIFFERENT truck
   if (!isSameTruck || truck.status === 'WAREHOUSE_IN_PROGRESS') {
-    samplingStates.value = [null, null, null]
-    samplingDecision.value = null
     checklistStates.value = vehicleChecklist.map(() => ({ status: null, photo: null }))
-    inspectionStep.value = 1
     isChecklistPassed.value = false
   }
 }
@@ -588,6 +494,27 @@ const saveSecurityInfo = async () => {
     //
   } finally { isProcessing.value = false; }
 }
+
+const startUnloadingProcess = async () => {
+  if (isProcessing.value) return;
+  isProcessing.value = true;
+  try {
+    const response = await warehouseStore.startProcess(selectedTruck.value.id, { 
+      suratJalanNumber: selectedTruck.value.suratJalanNumber || '-', 
+      poNumber: selectedTruck.value.poNumber || '-' 
+    });
+    const updatedTruck = response?.data || response;
+    if (updatedTruck) {
+      truckStore.upsertTruck(updatedTruck);
+      selectedTruck.value = updatedTruck;
+    }
+    toast.success('Pembongkaran muatan GBB dimulai!');
+  } catch (error) {
+    toast.error('Gagal memulai proses bongkar');
+  } finally {
+    isProcessing.value = false;
+  }
+};
 
 const handlePhotoUpload = (event, index) => {
   const file = event.target.files[0];
@@ -641,42 +568,14 @@ const checklistRemaining = computed(() => {
   return vehicleChecklist.length - checklistDoneCount.value
 })
 
-const submitReject = async () => {
-  if (!rejectComment.value || rejectComment.value.trim().length < 10) {
-    rejectCommentError.value = true
-    return
-  }
-  rejectCommentError.value = false
-  const ok = await confirm({ title: 'Confirm Rejection', message: `REJECT sampling for ${getPlateNumber(selectedTruck.value)}? Truck will be redirected to outbound weighbridge without unloading.`, type: 'danger', confirmText: 'Yes, Reject' })
-  if (ok) {
-    isProcessing.value = true;
-    try {
-      const response = await warehouseStore.submitIncomingCheck(selectedTruck.value.id, { decision: 'rejected', rejectReason: rejectComment.value.trim() })
-      const updatedTruck = response?.data || response;
-      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-      toast.error(`${getPlateNumber(selectedTruck.value)} rejected — ${rejectComment.value.trim()}`)
-      rejectComment.value = ''
-      showRejectModal.value = false
-      showChecklistModal.value = false
-      samplingDecision.value = 'rejected'
-      selectedTruck.value = null
-    } catch(error) {
-      //
-    } finally { isProcessing.value = false; }
-  }
-}
-const acceptSamplingAndFinish = async () => {
+const submitChecklistAndUnlock = () => {
   if (isProcessing.value) return;
   isProcessing.value = true;
   try {
-    // Compile checklist and sampling into a string BEFORE the API call
     let resultStrs = []
-    if (hasAnyIssue.value) {
-      resultStrs.push('DITERIMA DENGAN CATATAN')
+    if (hasChecklistNotOk.value) {
+      resultStrs.push('ACCEPTED WITH NOTE')
     }
-    const samplings = samplingStates.value.map((s, idx) => `${samplingParams[idx].label}: ${s === 'ok' ? 'COMPLIANT' : 'NON-COMPLIANT'}`)
-    resultStrs.push(`Sampling: [${samplings.join(', ')}]`)
-    
     const checks = checklistStates.value.map((s, idx) => {
       let statusStr = s.status === 'ok' ? 'OK' : 'NOT OK';
       if (s.photo) statusStr += `||IMG:${s.photo}`;
@@ -686,21 +585,14 @@ const acceptSamplingAndFinish = async () => {
     
     compiledChecklistString.value = resultStrs.join(' | ')
 
-    // Send remarks to backend so it's persisted immediately
-    const response = await warehouseStore.completeQcAnalysis(selectedTruck.value.id, { remarks: compiledChecklistString.value });
-    const updatedTruck = response?.data || response;
-
-    if (updatedTruck) {
-      updatedTruck.compiledChecklist = compiledChecklistString.value
-      truckStore.upsertTruck(updatedTruck);
+    if (selectedTruck.value) {
+      selectedTruck.value.compiledChecklist = compiledChecklistString.value
+      truckStore.upsertTruck(selectedTruck.value);
     }
     
-    samplingDecision.value = 'accepted'
     isChecklistPassed.value = true
     showChecklistModal.value = false
-    toast.success('Inspection Complete — You can now input the Roll Weight.')
-  } catch (error) {
-    // error handled by store
+    toast.success('Vehicle Checklist Complete — You can now input the Roll Weight.')
   } finally {
     isProcessing.value = false;
   }
@@ -708,7 +600,7 @@ const acceptSamplingAndFinish = async () => {
 
 const isRollWeightUnlocked = computed(() => {
   if (!selectedTruck.value) return false;
-  return selectedTruck.value.qcAnalysisCompleted === true || isChecklistPassed.value;
+  return selectedTruck.value.qcAnalysisCompleted === true || isChecklistPassed.value || Boolean(selectedTruck.value.compiledChecklist);
 })
 
 const handleWeightSave = async (weight) => {

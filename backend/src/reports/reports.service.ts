@@ -106,10 +106,10 @@ export class ReportsService {
     };
   }
 
-  async exportCsv(query: ReportQueryDto, user: JwtPayloadUser) {
+  async *exportCsvStream(query: ReportQueryDto, user: JwtPayloadUser): AsyncGenerator<string, void, unknown> {
     const { processType, startDate, endDate, search } = query;
 
-    this.logger.log(`Export CSV requested by ${user.email}`);
+    this.logger.log(`Export CSV stream requested by ${user.email}`);
 
     const where: Prisma.TransactionWhereInput = {
       status: { in: ['COMPLETED', 'CANCELLED'] },
@@ -133,25 +133,16 @@ export class ReportsService {
       }
     }
 
-    const data = await this.prisma.transaction.findMany({
-      where,
-      include: {
-        fraudChecks: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
     await this.activityLogsService
       .logAction({
         userId: user.id,
-        action: 'REPORT_EXPORT',
+        action: 'REPORT_EXPORT_STREAM',
         module: 'REPORTS',
-        description: `User exported transaction history to CSV`,
+        description: `User initiated streaming CSV export of transaction history`,
         status: 'SUCCESS',
       })
       .catch(() => {});
 
-    // Generate CSV
     const headers = [
       'TRX ID',
       'Plate Number',
@@ -164,6 +155,7 @@ export class ReportsService {
       'WH Scale',
       'Deviation Status',
     ];
+    yield headers.join(',') + '\n';
 
     const escapeCsv = (val: any) => {
       let str = String(val).replace(/"/g, '""');
@@ -173,27 +165,49 @@ export class ReportsService {
       return `"${str}"`;
     };
 
-    const rows = data.map((t) => {
-      const fraud =
-        t.fraudChecks && t.fraudChecks.length > 0
-          ? t.fraudChecks[0].riskLevel
-          : 'SAFE';
-      return [
-        t.transactionNumber,
-        t.plateNumber,
-        t.vendorName,
-        t.processType,
-        t.status,
-        t.gateInAt ? t.gateInAt.toISOString() : '',
-        t.gateOutAt ? t.gateOutAt.toISOString() : '',
-        t.netWeight || 0,
-        t.actualWeight || 0,
-        fraud,
-      ]
-        .map(escapeCsv)
-        .join(',');
-    });
+    let skip = 0;
+    const batchSize = 500;
+    while (true) {
+      const batch = await this.prisma.transaction.findMany({
+        where,
+        skip,
+        take: batchSize,
+        include: { fraudChecks: true },
+        orderBy: { createdAt: 'desc' },
+      });
 
-    return [headers.join(','), ...rows].join('\n');
+      if (batch.length === 0) break;
+
+      for (const t of batch) {
+        const fraud =
+          t.fraudChecks && t.fraudChecks.length > 0
+            ? t.fraudChecks[0].riskLevel
+            : 'SAFE';
+        const row = [
+          t.transactionNumber,
+          t.plateNumber,
+          t.vendorName,
+          t.processType,
+          t.status,
+          t.gateInAt ? t.gateInAt.toISOString() : '',
+          t.gateOutAt ? t.gateOutAt.toISOString() : '',
+          t.netWeight || 0,
+          t.actualWeight || 0,
+          fraud,
+        ].map(escapeCsv).join(',') + '\n';
+        yield row;
+      }
+
+      if (batch.length < batchSize) break;
+      skip += batchSize;
+    }
+  }
+
+  async exportCsv(query: ReportQueryDto, user: JwtPayloadUser): Promise<string> {
+    let output = '';
+    for await (const chunk of this.exportCsvStream(query, user)) {
+      output += chunk;
+    }
+    return output.trimEnd();
   }
 }

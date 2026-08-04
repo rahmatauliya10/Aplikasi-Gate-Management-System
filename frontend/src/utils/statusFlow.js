@@ -1,5 +1,6 @@
 export const requiresVehicleQc = (transaction) => {
-  return transaction?.processType === 'GBJ' || transaction?.warehouseCode === 'GBJ';
+  const code = transaction?.processType || transaction?.warehouseCode;
+  return ['GBJ', 'GBB', 'GSP'].includes(code);
 };
 
 export const requiresIncomingCheck = (transaction) => {
@@ -9,17 +10,17 @@ export const requiresIncomingCheck = (transaction) => {
 
 export const getIncomingCheckLabel = (transaction) => {
   const code = transaction?.processType || transaction?.warehouseCode;
-  if (code === 'GBB') return 'Analisa Incoming Kopi';
+  if (code === 'GBB') return 'Analisis Mutu Lengkap GBB';
   if (code === 'GSP') return 'Incoming Material Check';
   return '';
 };
 
 export const canStartWarehouse = (status, transaction) => {
   const code = transaction?.processType || transaction?.warehouseCode;
-  if (code === 'GBJ') {
+  if (['GBJ', 'GBB', 'GSP'].includes(code)) {
     return status === 'QC_VEHICLE_PASSED';
   }
-  return status === 'WEIGH_IN_DONE';
+  return status === 'QC_VEHICLE_PASSED';
 };
 
 export const canStartIncomingCheck = (status, transaction) => {
@@ -36,7 +37,7 @@ export const canStartWeighOut = (status, transaction) => {
     return status === 'WAREHOUSE_DONE' || status === 'QC_VEHICLE_REJECTED';
   }
   if (code === 'GBB' || code === 'GSP') {
-    return status === 'INCOMING_CHECK_PASSED' || status === 'INCOMING_CHECK_REJECTED';
+    return status === 'INCOMING_CHECK_PASSED' || status === 'INCOMING_CHECK_REJECTED' || status === 'QC_VEHICLE_REJECTED';
   }
   return false;
 };

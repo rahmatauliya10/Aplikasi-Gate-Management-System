@@ -132,8 +132,8 @@ router.beforeEach(async (to, from, next) => {
   const { useAuthStore } = await import('../stores/authStore')
   const authStore = useAuthStore()
   
-  // Ensure auth is initialized from localStorage
-  authStore.initializeAuth()
+  // Ensure auth is initialized via silent refresh if needed
+  await authStore.initializeAuth()
   
   // If not logged in and not heading to login page
   if (to.path !== '/login' && !authStore.isAuthenticated) {

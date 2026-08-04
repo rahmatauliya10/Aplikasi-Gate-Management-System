@@ -1,6 +1,7 @@
 import { PrismaClient, Role } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
+import { getOrCreateBootstrapAdminPassword } from '../src/common/utils/bootstrap-password.util';
 
 const prisma = new PrismaClient();
 
@@ -38,7 +39,7 @@ async function main() {
 
   if (!existingAdmin) {
     console.log(`Seeding admin user with username: ${adminUsername}, email: ${adminEmail}...`);
-    const tempAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'admin123';
+    const tempAdminPassword = getOrCreateBootstrapAdminPassword();
 
     const admin = await prisma.user.create({
       data: {
@@ -53,7 +54,7 @@ async function main() {
       },
     });
     if (!isTest) {
-      console.log(`[SEED] Admin created. Temporary Password: ${tempAdminPassword}`);
+      console.log(`[SEED] Admin created. Bootstrap password preserved in deploy/secrets or environment.`);
     }
     await prisma.userWarehouseAccess.createMany({
       data: [
@@ -65,16 +66,7 @@ async function main() {
     });
     adminId = admin.id;
   } else {
-    console.log('User admin already exists, updating admin password to default...');
-    const tempAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'admin123';
-    await prisma.user.update({
-      where: { id: existingAdmin.id },
-      data: {
-        passwordHash: await argon2.hash(tempAdminPassword, hashOptions),
-        mustChangePassword: false,
-        isActive: true,
-      },
-    });
+    console.log('User admin already exists, skipping creation and preserving existing password (idempotency enforced).');
     adminId = existingAdmin.id;
   }
 

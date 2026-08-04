@@ -1,4 +1,5 @@
-import { Controller, Get, Query, UseGuards, Header } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Header, StreamableFile } from '@nestjs/common';
+import { Readable } from 'stream';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -47,8 +48,8 @@ export class ReportsController {
   async exportHistory(
     @Query() query: ReportQueryDto,
     @CurrentUser() user: JwtPayloadUser,
-  ) {
-    const csvData = await this.reportsService.exportCsv(query, user);
-    return csvData;
+  ): Promise<StreamableFile> {
+    const stream = Readable.from(this.reportsService.exportCsvStream(query, user));
+    return new StreamableFile(stream);
   }
 }

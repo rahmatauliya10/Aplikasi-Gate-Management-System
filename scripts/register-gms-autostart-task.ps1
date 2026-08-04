@@ -3,6 +3,13 @@
 # ==============================================================================
 # Registers 'GMS_Production_Autostart' scheduled task bound to current user logon.
 # Enforces non-SYSTEM user context, 45s delay, retry policies, and ACL security.
+#
+# CRITICAL OPERATIONAL WARNING (P0-07 / Rancher Desktop Compatibility):
+# Do NOT change the trigger to -AtStartup or run under NT AUTHORITY\SYSTEM!
+# Rancher Desktop runs rootless containers utilizing WSL2 / Windows Virtual Machine
+# Platform which requires an active, interactive Windows user logon session. 
+# Running under the headless SYSTEM account causes WSL2 volume mounts to fail
+# and crashes the Docker daemon. Always retain interactive user logon binding!
 # ==============================================================================
 
 Set-StrictMode -Version Latest

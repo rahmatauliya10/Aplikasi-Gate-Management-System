@@ -22,6 +22,7 @@
                   :class="truck.processType === 'GBB' ? 'bg-pink-50 text-[#A0006D] border border-pink-200' : truck.processType === 'GBJ' ? 'bg-indigo-50 text-indigo-600 border border-indigo-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'">
                   {{ truck.processType }}
                 </span>
+                <StatusBadge :status="truck.status" :process-type="truck.processType" />
               </div>
               <div class="flex items-center space-x-1.5 mt-0.5">
                 <span class="text-[10px] font-bold text-slate-500">{{ truck.driverName }}</span>
@@ -75,35 +76,77 @@
                 </div>
               </div>
 
-              <!-- QC Results (only show if qcDetails exist) -->
-              <div v-if="qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+              <!-- 1. Initial QC Sampling Card (For GBB & GSP) -->
+              <div v-if="(truck.processType === 'GBB' || truck.processType === 'GSP') && initialSamplingDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                 <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
                   <div class="flex items-center space-x-2">
-                    <span class="material-icons text-[14px]" :class="truck.processType === 'GBJ' ? 'text-indigo-500' : 'text-blue-500'">{{ truck.processType === 'GBJ' ? 'local_shipping' : 'biotech' }}</span>
-                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">{{ truck.processType === 'GBJ' ? 'QC Vehicle' : 'Quality Analysis' }}</h3>
+                    <span class="material-icons text-indigo-500 text-[14px]">biotech</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Initial QC Sampling (Pre-Unloading)</h3>
                   </div>
-                  <span v-if="!isWarehouseRejection && qcPicLabel" class="text-[9px] font-bold text-slate-400">PIC: {{ qcPicLabel }}</span>
+                  <span class="text-[9px] font-bold text-slate-400">PIC: [SAMPLING QC] {{ initialSamplingDetails.pic || 'QC Inspector' }}</span>
+                </div>
+                <div class="p-3 space-y-2.5">
+                  <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
+                       :style="{ background: initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #10B981, #047857)' }">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-white/90 text-sm">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
+                      <span class="text-xs font-black tracking-widest uppercase">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'REJECTED' : 'APPROVED' }}</span>
+                    </div>
+                    <p v-if="initialSamplingDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ initialSamplingDetails.note }}"</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Quality Analysis (QC Lab) Card (For GBB & GSP) -->
+              <div v-if="(truck.processType === 'GBB' || truck.processType === 'GSP') && qcLabDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-blue-500 text-[14px]">science</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Quality Analysis (QC Lab)</h3>
+                  </div>
+                  <span v-if="!qcLabDetails.isSkipped" class="text-[9px] font-bold text-slate-400">PIC: [LAB QC] {{ qcLabDetails.pic || 'QC Lab Team' }}</span>
                 </div>
                 <div class="p-3">
-                  <div v-if="!isWarehouseRejection && qcMetrics.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
-                    <div v-for="item in qcMetrics" :key="item.label" 
-                         class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
-                      <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
-                      <div class="text-sm font-black text-slate-800 font-mono">{{ item.value }}</div>
-                    </div>
-                  </div>
-                  <!-- QC Status Banner -->
-                  <div v-if="isWarehouseRejection" class="rounded-xl p-3 text-slate-500 relative overflow-hidden bg-slate-50 border border-slate-150 shadow-sm flex items-center space-x-2">
+                  <div v-if="qcLabDetails.isSkipped" class="rounded-xl p-3 text-slate-500 relative overflow-hidden bg-slate-50 border border-slate-200 shadow-sm flex items-center space-x-2">
                     <span class="material-icons text-slate-400 text-sm">next_plan</span>
-                    <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED (REJECTED AT WAREHOUSE)</span>
+                    <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED ({{ qcLabDetails.reason }})</span>
                   </div>
-                  <div v-else class="rounded-xl p-3 text-white relative overflow-hidden"
-                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'linear-gradient(135deg, #F59E0B, #D97706)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)') }">
-                    <div class="flex items-center space-x-2">
-                      <span class="material-icons text-white/80 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'warning' : 'verified') }}</span>
-                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'REJECTED' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'ACCEPTED (WITH NOTE)' : (qcDetails.status || 'ACCEPTED')) }}</span>
+                  <div v-else class="space-y-2.5">
+                    <div v-if="qcMetrics.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
+                      <div v-for="item in qcMetrics" :key="item.label" class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                        <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
+                        <div class="text-sm font-black text-slate-800 font-mono">{{ item.value }}</div>
+                      </div>
                     </div>
-                    <p v-if="qcDetails.note" class="text-[10px] font-bold text-white/80 mt-1 italic">"{{ qcDetails.note }}"</p>
+                    <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
+                         :style="{ background: qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'linear-gradient(135deg, #F59E0B, #D97706)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)') }">
+                      <div class="flex items-center space-x-2">
+                        <span class="material-icons text-white/90 text-sm">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'cancel' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'warning' : 'verified') }}</span>
+                        <span class="text-xs font-black tracking-widest uppercase">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'REJECTED' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? '⚠️ APPROVED WITH NOTE (QUALITY CONCESSION)' : (qcLabDetails.status || 'ACCEPTED')) }}</span>
+                      </div>
+                      <p v-if="qcLabDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcLabDetails.note }}"</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. QC Vehicle Card (For GBJ) -->
+              <div v-if="truck.processType === 'GBJ' && qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-indigo-500 text-[14px]">local_shipping</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">QC Vehicle Inspection</h3>
+                  </div>
+                  <span v-if="qcPicLabel" class="text-[9px] font-bold text-slate-400">PIC: {{ qcPicLabel }}</span>
+                </div>
+                <div class="p-3">
+                  <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
+                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-white/90 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
+                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'REJECTED' : 'ACCEPTED' }}</span>
+                    </div>
+                    <p v-if="qcDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcDetails.note }}"</p>
                   </div>
                 </div>
               </div>
@@ -414,6 +457,7 @@
 
 <script setup>
 import { defineProps, defineEmits, computed, ref } from 'vue'
+import StatusBadge from './StatusBadge.vue'
 import { useAuthStore } from '../stores/authStore'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -474,11 +518,92 @@ const identityFields = computed(() => {
   return fields
 })
 
+const isInitialSamplingRejected = computed(() => {
+  if (!props.truck) return false;
+  const t = props.truck;
+  if (t.status === 'QC_VEHICLE_REJECTED') return true;
+  if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
+    const check = t.qcVehicleChecks[0];
+    if (check.result === 'REJECT' || check.result === 'REJECTED') return true;
+  }
+  if (t.qcSamplingDetails?.status === 'REJECTED' || t.qcSamplingDetails?.status === 'REJECT') return true;
+  if (t.qcDetails && (t.qcDetails.status === 'REJECT' || t.qcDetails.status === 'REJECTED') && t.qcDetails.kadarAir === undefined) {
+    return true;
+  }
+  return false;
+});
+
+const initialSamplingDetails = computed(() => {
+  if (!props.truck) return null;
+  const t = props.truck;
+  if (t.processType !== 'GBB' && t.processType !== 'GSP') return null;
+
+  if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
+    const check = t.qcVehicleChecks[0];
+    return {
+      pic: check.checkedBy?.name || check.inspector || 'QC Inspector',
+      status: check.result === 'PASS' ? 'APPROVED' : check.result === 'REJECT' ? 'REJECTED' : check.result || 'APPROVED',
+      note: check.notes || check.notesStr || ''
+    };
+  }
+
+  if (t.qcSamplingDetails) {
+    return t.qcSamplingDetails;
+  }
+
+  if (t.qcDetails && t.qcDetails.kadarAir === undefined) {
+    return {
+      pic: t.qcDetails.pic || 'QC Inspector',
+      status: (t.qcDetails.status === 'REJECT' || t.qcDetails.status === 'REJECTED' || t.status === 'QC_VEHICLE_REJECTED') ? 'REJECTED' : 'APPROVED',
+      note: t.qcDetails.note || ''
+    };
+  }
+
+  if (t.status === 'QC_VEHICLE_REJECTED' || t.status === 'QC_VEHICLE_PASSED' || t.status === 'QC_VEHICLE_IN_PROGRESS') {
+    return {
+      pic: 'QC Inspector',
+      status: t.status === 'QC_VEHICLE_REJECTED' ? 'REJECTED' : 'APPROVED',
+      note: ''
+    };
+  }
+
+  return null;
+});
+
+const qcLabDetails = computed(() => {
+  if (!props.truck) return null;
+  const t = props.truck;
+  if (t.processType !== 'GBB' && t.processType !== 'GSP') return null;
+
+  if (isInitialSamplingRejected.value) {
+    return { isSkipped: true, reason: 'REJECTED AT INITIAL QC SAMPLING' };
+  }
+
+  if (t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0) {
+    const check = t.incomingMaterialChecks[0];
+    return {
+      pic: check.checkedBy?.name || 'QC Lab Inspector',
+      status: check.result,
+      note: check.notes || check.defectNotes || '',
+      bau: check.odor === 'PASS' ? 'Normal' : check.odor === 'REJECT' ? 'Abnormal' : check.odor || '',
+      warna: check.color === 'PASS' ? 'Normal' : check.color === 'REJECT' ? 'Abnormal' : check.color || '',
+      kadarAir: check.moisture,
+      totalFM: check.foreignMatter,
+      bijiOK: check.sampleWeight
+    };
+  }
+
+  if (t.qcDetails && (t.qcDetails.kadarAir !== undefined || t.status?.startsWith('INCOMING_CHECK'))) {
+    return t.qcDetails;
+  }
+
+  return null;
+});
+
 const qcDetails = computed(() => {
   const sourceDetails = props.truck?.qcDetails;
   let relationDetails = null;
 
-  // GBB / GSP from backend relations
   if (props.truck?.incomingMaterialChecks && props.truck.incomingMaterialChecks.length > 0) {
     const check = props.truck.incomingMaterialChecks[0];
     relationDetails = {
@@ -492,7 +617,6 @@ const qcDetails = computed(() => {
       bijiOK: check.sampleWeight
     };
   }
-  // GBJ from backend relations
   else if (props.truck?.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
     const check = props.truck.qcVehicleChecks[0];
     relationDetails = {
@@ -505,7 +629,6 @@ const qcDetails = computed(() => {
     };
   }
 
-  // Merge sourceDetails and relationDetails if both exist
   if (sourceDetails && relationDetails) {
     return {
       ...relationDetails,
@@ -946,22 +1069,28 @@ const getTimestampVal = (key) => {
 }
 
 const timestampRows = computed(() => {
-  if (props.truck?.processType === 'GBJ') {
+  const pType = props.truck?.processType || 'GBB';
+  const isSamplingRejected = props.truck?.status === 'QC_VEHICLE_REJECTED';
+
+  if (pType === 'GBJ') {
     return [
       { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
       { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-      { label: 'QC Check', value: getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt') || getTimestampVal('qcVehicleEndAt') || getTimestampVal('qcVehicleStartAt') },
-      { label: 'Warehouse', value: getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt') },
+      { label: 'QC Vehicle', value: props.truck?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+      { label: 'GBJ Loading', value: isSamplingRejected ? null : (getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt')) },
       { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
       { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
     ]
   }
   
+  const unloadLabel = pType === 'GSP' ? 'GSP Processing' : 'GBB Unloading';
+
   return [
     { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
     { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-    { label: 'Warehouse', value: getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt') },
-    { label: 'QC Check', value: getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt') || getTimestampVal('incomingCheckEndAt') || getTimestampVal('incomingCheckStartAt') },
+    { label: 'QC Sampling', value: props.truck?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+    { label: unloadLabel, value: isSamplingRejected ? null : (getTimestampVal('warehouseStartAt') || getTimestampVal('warehouseEndAt')) },
+    { label: 'QC Lab Check', value: isSamplingRejected ? null : (props.truck?.incomingMaterialChecks?.[0]?.completedAt || (props.truck?.status?.startsWith('INCOMING_CHECK') ? getTimestampVal('qcEndAt') : null)) },
     { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
     { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
   ]
