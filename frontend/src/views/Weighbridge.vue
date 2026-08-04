@@ -29,7 +29,7 @@
               <button @click="showDetailsModal = true" class="relative w-full overflow-hidden flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl transition-all duration-300 text-xs font-black uppercase tracking-widest text-indigo-600 bg-[#E6F0FA] border border-[#CCE0F5] hover:border-indigo-300 hover:shadow-[0_4px_20px_rgba(74,139,223,0.2)] group">
                 <div class="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-200/50 to-transparent -translate-x-full group-hover:animate-shimmer pointer-events-none"></div>
                 <span class="material-icons text-[18px]">travel_explore</span>
-                <span>LIHAT ANALISA LENGKAP</span>
+                <span>VIEW FULL ANALYSIS</span>
               </button>
             </div>
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9">

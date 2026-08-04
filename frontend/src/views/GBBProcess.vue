@@ -122,7 +122,7 @@
               <div v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS' && !isRollWeightUnlocked" class="mt-6">
                 <button @click="openInspection" class="w-full py-4 rounded-xl flex items-center justify-center space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;transform:translateZ(0)">
                   <span class="material-icons text-xl">fact_check</span>
-                  <span class="font-black tracking-widest uppercase">📋 Run GBB 10-Item Vehicle Inspection (Pre-Unloading)</span>
+                  <span class="font-black tracking-widest uppercase">📋Vehicle Inspection (Pre-Unloading)</span>
                 </button>
               </div>
 
@@ -254,7 +254,7 @@
                   <span class="material-icons text-[#4A8BDF] text-xl">fact_check</span>
                 </div>
                 <div>
-                  <h3 class="text-base font-black text-slate-800 tracking-tight">GBB 10-Point Vehicle Inspection Checklist</h3>
+                  <h3 class="text-base font-black text-slate-800 tracking-tight">Vehicle Inspection Checklist</h3>
                   <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
                     Physical Vehicle & Cargo Inspection Prior to Roll Weight Entry
                   </p>

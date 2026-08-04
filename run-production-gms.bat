@@ -91,6 +91,13 @@ docker image prune -f >nul 2>&1
 
 echo [+] Menunggu Nginx Reverse Proxy siap...
 powershell -NoProfile -Command "for ($i=1; $i -le 10; $i++) { try { $resp = Invoke-WebRequest -Uri 'https://localhost/health' -SkipCertificateCheck -UseBasicParsing -TimeoutSec 3; if ($resp.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 }; exit 1" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo [!] GAGAL: Nginx Reverse Proxy / Health check gagal merespon 200 OK! Deployment dibatalkan demi keamanan.
+    docker compose -f docker-compose.prod.yml stop
+    pause
+    exit /b 1
+)
 
 echo.
 echo ==============================================================

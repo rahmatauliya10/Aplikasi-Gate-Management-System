@@ -10,7 +10,7 @@
             :style="{ width: progressWidth, background: 'linear-gradient(90deg, #4A8BDF, #A0006D)', boxShadow: '0 0 12px rgba(74,139,223,0.4)' }"
           ></div>
         </div>
-
+.
         <!-- Step Items -->
         <div
           v-for="(step, index) in steps"
@@ -82,7 +82,7 @@ const steps = computed(() => {
     { key: 'gate_in', label: 'Gate In' },
     { key: 'weigh_in', label: 'WB In' },
     { key: 'qc_vehicle', label: 'QC Sampling' },
-    { key: 'warehouse', label: 'Bongkar GBB' },
+    { key: 'warehouse', label: 'Loading GBB' },
     { key: 'incoming_check', label: 'QC Lab' },
     { key: 'weigh_out', label: 'WB Out' },
     { key: 'completed', label: 'Dispatch' }

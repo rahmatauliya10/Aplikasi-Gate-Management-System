@@ -73,6 +73,7 @@ describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', (
       expect.objectContaining({
         action: 'SOD_VIOLATION_BLOCKED',
         module: 'WAREHOUSE',
+        status: 'FAILED',
       }),
     );
   });
@@ -92,6 +93,7 @@ describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', (
       expect.objectContaining({
         action: 'SOD_VIOLATION_BLOCKED',
         module: 'WAREHOUSE',
+        status: 'FAILED',
       }),
     );
   });

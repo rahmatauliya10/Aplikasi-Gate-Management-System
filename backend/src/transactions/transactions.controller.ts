@@ -25,6 +25,10 @@ import { CancelTransactionDto } from '../gate/dto/cancel-transaction.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { CorrectTransactionDto } from './dto/correct-transaction.dto';
+import { Req } from '@nestjs/common';
+import type { Request } from 'express';
+
 @ApiTags('Transactions')
 @ApiBearerAuth()
 @Controller('transactions')
@@ -60,6 +64,23 @@ export class TransactionsController {
   @ApiResponse({ status: 404, description: 'Transaction not found' })
   findOne(@Param('id') id: string, @CurrentUser() user: JwtPayloadUser) {
     return this.transactionsService.findOne(id, user);
+  }
+
+  @Post(':id/corrections')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Correct data on a COMPLETED transaction (ADMIN only)' })
+  @ApiResponse({ status: 200, description: 'Completed transaction data corrected successfully' })
+  @ApiResponse({ status: 403, description: 'Forbidden - ADMIN role required' })
+  @ApiResponse({ status: 400, description: 'Transaction is not COMPLETED or reason invalid' })
+  correct(
+    @Param('id') id: string,
+    @Body() dto: CorrectTransactionDto,
+    @CurrentUser() user: JwtPayloadUser,
+    @Req() req: Request,
+  ) {
+    const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip;
+    return this.transactionsService.correctCompletedTransaction(id, dto, user, clientIp);
   }
 
   @Post(':id/cancel')

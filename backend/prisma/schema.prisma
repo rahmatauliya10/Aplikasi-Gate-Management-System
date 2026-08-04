@@ -134,6 +134,7 @@ model User {
   uploadedAttachments       Attachment[]            @relation("UploadedBy")
   acknowledgedFrauds        FraudCheck[]            @relation("AcknowledgedBy")
   systemIssues              SystemIssue[]
+  transactionCorrections    TransactionCorrection[]
 }
 
 model UserWarehouseAccess {
@@ -206,6 +207,7 @@ model Transaction {
   incomingMaterialChecks IncomingMaterialCheck[]
   fraudChecks            FraudCheck[]
   attachments            Attachment[]
+  corrections            TransactionCorrection[]
 
   @@index([status])
   @@index([plateNumber])
@@ -458,4 +460,22 @@ model SystemIssue {
   reporter      User     @relation(fields: [reporterId], references: [id])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model TransactionCorrection {
+  id            String   @id @default(uuid())
+  transactionId String
+  correctedById String
+  reason        String
+  evidenceUrl   String?
+  oldValues     Json
+  newValues     Json
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  correctedBy User        @relation(fields: [correctedById], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([correctedById])
 }

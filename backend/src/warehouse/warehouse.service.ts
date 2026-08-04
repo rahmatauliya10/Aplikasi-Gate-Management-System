@@ -587,7 +587,7 @@ export class WarehouseService {
         module: 'WAREHOUSE',
         referenceId: transactionId,
         description: `Blocked Warehouse role from executing GBB incoming check`,
-        status: 'SUCCESS',
+        status: 'FAILED',
       }).catch(() => {});
       throw new ForbiddenException({
         success: false,
@@ -690,7 +690,7 @@ export class WarehouseService {
         module: 'WAREHOUSE',
         referenceId: transactionId,
         description: `Blocked Warehouse role from completing GBB QC analysis`,
-        status: 'SUCCESS',
+        status: 'FAILED',
       }).catch(() => {});
       throw new ForbiddenException({
         success: false,
