@@ -4,7 +4,7 @@
 # Deploys specified RELEASE_TAG to production using docker-compose.prod.yml.
 # Runs automated watchdog verification post-deployment.
 # Upon any healthcheck failure or explicit rollback request, instantly rolls back
-# to prior stable release tag without rebuilding the failed tag.
+# to prior stable release tag without rebuilding from current working tree.
 # ==============================================================================
 
 param(
@@ -27,19 +27,26 @@ $ErrorActionPreference = "Stop"
 $WorkspaceRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $WorkspaceRoot
 
+function Verify-Image-Exists {
+    param([string]$Tag)
+    $backendImg = & docker images -q "gms-backend:$Tag" 2>$null
+    return (-not [string]::IsNullOrWhiteSpace($backendImg))
+}
+
 if ($RollbackOnly) {
     Write-Host "[GMS AUTOMATED ROLLBACK] Rollback requested. Bypassing build for failed tag [$TargetReleaseTag]..." -ForegroundColor Yellow
     Write-Host "[GMS AUTOMATED ROLLBACK] Directly restoring previous release tag: [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Magenta
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        Write-Host "[GMS AUTOMATED ROLLBACK] Attempting fast rollback using existing image [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Cyan
-        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[GMS AUTOMATED ROLLBACK WARN] Fast rollback image not found. Building previous release tag [$PreviousReleaseTag]..." -ForegroundColor Yellow
-            & docker compose -f $ComposeFile --env-file backend\.env up -d --build --remove-orphans
-            if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
+            throw "Previous release image [gms-backend:$PreviousReleaseTag] does not exist locally. Refusing to build previous tag from working tree."
         }
+
+        Write-Host "[GMS AUTOMATED ROLLBACK] Executing fast rollback using immutable image [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Cyan
+        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
+        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+
         Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
 
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
@@ -49,13 +56,27 @@ if ($RollbackOnly) {
         exit 0
     }
     catch {
-        Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover even after rolling back to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
+        Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover during rollback to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
         exit 2
     }
 }
 
 Write-Host "[GMS Deploy] Starting immutable deployment for Release Tag: [$TargetReleaseTag]..." -ForegroundColor Cyan
 Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
+
+# Pre-flight check: Ensure previous release image exists BEFORE altering the running stack
+Write-Host "[GMS Pre-flight] Verifying immutability requirement: checking availability of previous image [$PreviousReleaseTag]..." -ForegroundColor Cyan
+if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
+    Write-Host "[GMS Pre-flight WARNING] Image [gms-backend:$PreviousReleaseTag] not found. Attempting to snapshot current running container baseline as [$PreviousReleaseTag]..." -ForegroundColor Yellow
+    $runningBackend = & docker ps -q --filter "name=gate-system-backend" 2>$null
+    if (-not [string]::IsNullOrWhiteSpace($runningBackend)) {
+        & docker commit gate-system-backend "gms-backend:$PreviousReleaseTag" 2>$null
+        & docker commit gate-system-frontend "gms-frontend:$PreviousReleaseTag" 2>$null
+        Write-Host "[GMS Pre-flight SUCCESS] Captured current running containers as immutable rollback tag [$PreviousReleaseTag]." -ForegroundColor Green
+    } else {
+        Write-Host "[GMS Pre-flight WARN] No running container stack found to snapshot. Deployment will proceed, but rollback requires an existing immutable image." -ForegroundColor Yellow
+    }
+}
 
 # Step 1: Export RELEASE_TAG environment variable for Compose
 $env:RELEASE_TAG = $TargetReleaseTag
@@ -83,12 +104,13 @@ catch {
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[GMS AUTOMATED ROLLBACK WARN] Fast rollback image not found. Building previous release tag [$PreviousReleaseTag]..." -ForegroundColor Yellow
-            & docker compose -f $ComposeFile --env-file backend\.env up -d --build --remove-orphans
-            if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
+            throw "Previous release image [gms-backend:$PreviousReleaseTag] does not exist. Cannot perform immutable rollback."
         }
+
+        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
+        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+
         Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
 
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"

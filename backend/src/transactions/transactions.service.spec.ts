@@ -228,9 +228,7 @@ describe('TransactionsService State Machine & OCC', () => {
     );
   });
 
-  it(
-    'should throw ConflictException (409) on parallel correction if expectedUpdatedAt is stale',
-    async () => {
+  it('should throw ConflictException (409) on parallel correction if expectedUpdatedAt is stale', async () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',
@@ -268,9 +266,7 @@ describe('TransactionsService State Machine & OCC', () => {
     ).rejects.toThrow(ConflictException);
   });
 
-  it(
-    'should rethrow error inside transaction if activity log fails to ensure atomic rollback',
-    async () => {
+  it('should rethrow error inside transaction if activity log fails to ensure atomic rollback', async () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',
