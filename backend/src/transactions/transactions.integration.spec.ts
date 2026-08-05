@@ -40,8 +40,7 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
 
     service = module.get<TransactionsService>(TransactionsService);
     prismaService = module.get<PrismaService>(PrismaService);
-    activityLogsService =
-      module.get<ActivityLogsService>(ActivityLogsService);
+    activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
   });
 
   it('should reject stale OCC update with ConflictException 409', async () => {

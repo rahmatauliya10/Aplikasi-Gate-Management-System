@@ -19,11 +19,19 @@ describe('Auth Security (e2e)', () => {
       );
     }
     const testUrl = new URL(process.env.DATABASE_URL_TEST);
+    if (!['postgres:', 'postgresql:'].includes(testUrl.protocol)) {
+      throw new Error('DATABASE_URL_TEST harus berupa PostgreSQL URL');
+    }
     const dbName = decodeURIComponent(
       testUrl.pathname.replace(/^\//, ''),
     ).toLowerCase();
-    if (!dbName.includes('test')) {
-      throw new Error('DATABASE_URL_TEST database name must contain test');
+    const allowedTestDatabases = new Set([
+      'gms_test_db',
+      'test_gms',
+      'gms_test',
+    ]);
+    if (!allowedTestDatabases.has(dbName)) {
+      throw new Error(`DATABASE_URL_TEST database "${dbName}" tidak diizinkan`);
     }
     process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
 
@@ -39,6 +47,9 @@ describe('Auth Security (e2e)', () => {
   });
 
   afterAll(async () => {
+    if (prisma) {
+      await prisma.$disconnect().catch(() => {});
+    }
     if (app) {
       await app.close();
     }
@@ -50,6 +61,7 @@ describe('Auth Security (e2e)', () => {
     let temporaryPassword = '';
 
     beforeAll(async () => {
+      if (!prisma) return;
       // Clean up previous test runs safely
       await prisma.user.deleteMany({ where: { username: 'test_sec_user' } });
 

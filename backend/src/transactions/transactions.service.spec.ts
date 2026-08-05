@@ -21,7 +21,7 @@ describe('TransactionsService State Machine & OCC', () => {
               update: jest.fn(),
               updateMany: jest.fn(),
             },
-            $transaction: jest.fn((cb) =>
+            $transaction: jest.fn((cb: any) =>
               cb({
                 transaction: { update: jest.fn(), updateMany: jest.fn() },
                 transactionStatusHistory: { create: jest.fn() },
@@ -38,8 +38,7 @@ describe('TransactionsService State Machine & OCC', () => {
 
     service = module.get<TransactionsService>(TransactionsService);
     prismaService = module.get<PrismaService>(PrismaService);
-    activityLogsService =
-      module.get<ActivityLogsService>(ActivityLogsService);
+    activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
   });
 
   it('should deny cancel if status is COMPLETED', async () => {

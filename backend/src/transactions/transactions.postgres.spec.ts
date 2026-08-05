@@ -10,25 +10,22 @@ const rawTestDbUrl = process.env.DATABASE_URL_TEST?.replace(/^"|"$/g, '');
 if (rawTestDbUrl) {
   try {
     const parsedUrl = new URL(rawTestDbUrl);
+    if (!['postgres:', 'postgresql:'].includes(parsedUrl.protocol)) {
+      delete process.env.DATABASE_URL;
+      throw new Error('DATABASE_URL_TEST harus berupa PostgreSQL URL');
+    }
     const dbName = decodeURIComponent(
       parsedUrl.pathname.replace(/^\//, ''),
     ).toLowerCase();
-    const allowedTestDatabases = ['gms_test_db', 'test_gms', 'gms_test'];
-    const isTestDb =
-      dbName.includes('test') || allowedTestDatabases.includes(dbName);
-    const isForbiddenDb = [
-      'postgres',
-      'template1',
-      'production',
-      'gms_prod',
-      'gms_production',
-    ].includes(dbName);
+    const allowedTestDatabases = new Set([
+      'gms_test_db',
+      'test_gms',
+      'gms_test',
+    ]);
 
-    if (!isTestDb || isForbiddenDb) {
+    if (!allowedTestDatabases.has(dbName)) {
       delete process.env.DATABASE_URL;
-      throw new Error(
-        'DATABASE_URL_TEST must explicitly point to a test database pathname (e.g. database name containing test)',
-      );
+      throw new Error(`DATABASE_URL_TEST database "${dbName}" tidak diizinkan`);
     }
     process.env.DATABASE_URL = rawTestDbUrl;
   } catch (err: any) {
@@ -61,8 +58,7 @@ describePgTest('TransactionsService PG Rollback Integration', () => {
 
     service = module.get<TransactionsService>(TransactionsService);
     prisma = module.get<PrismaService>(PrismaService);
-    activityLogsService =
-      module.get<ActivityLogsService>(ActivityLogsService);
+    activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
   });
 
   afterEach(async () => {
@@ -147,18 +143,24 @@ describePgTest('TransactionsService PG Rollback Integration', () => {
       expect(corrections).toHaveLength(0);
     } finally {
       // Guaranteed cleanup of fixture records
-      if (testTxId) {
-        await prisma.transactionCorrection.deleteMany({
-          where: { transactionId: testTxId },
-        });
-        await prisma.transaction.deleteMany({
-          where: { id: testTxId },
-        });
+      if (prisma && testTxId) {
+        await prisma.transactionCorrection
+          ?.deleteMany({
+            where: { transactionId: testTxId },
+          })
+          .catch(() => {});
+        await prisma.transaction
+          ?.deleteMany({
+            where: { id: testTxId },
+          })
+          .catch(() => {});
       }
-      if (adminUserId) {
-        await prisma.user.deleteMany({
-          where: { id: adminUserId },
-        });
+      if (prisma && adminUserId) {
+        await prisma.user
+          ?.deleteMany({
+            where: { id: adminUserId },
+          })
+          .catch(() => {});
       }
     }
   });

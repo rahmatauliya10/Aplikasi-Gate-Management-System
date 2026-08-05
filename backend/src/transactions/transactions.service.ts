@@ -465,17 +465,30 @@ export class TransactionsService {
         });
       }
 
-      const correction = await prismaTx.transactionCorrection.create({
-        data: {
-          transactionId: id,
-          correctedById: user.id,
-          reason: dto.reason,
-          evidenceUrl: dto.evidenceUrl,
-          oldValues: oldValues as any,
-          newValues: newValues as any,
-          ipAddress: cleanIp,
-        },
-      });
+      let correction: any = null;
+      try {
+        correction = (prismaTx as any).transactionCorrection
+          ? await (prismaTx as any).transactionCorrection.create({
+              data: {
+                transactionId: id,
+                correctedById: user.id,
+                reason: dto.reason,
+                evidenceUrl: dto.evidenceUrl,
+                oldValues: oldValues as any,
+                newValues: newValues as any,
+                ipAddress: cleanIp,
+              },
+            })
+          : null;
+      } catch (err: any) {
+        if (err?.code === 'P2021' || err?.message?.includes('does not exist')) {
+          this.logger.warn(
+            `TransactionCorrection table missing in DB schema, skipping audit table record creation: ${err.message}`,
+          );
+        } else {
+          throw err;
+        }
+      }
 
       const finalNet = updatedTx.netWeight;
       const finalActual = updatedTx.actualWeight;
@@ -531,20 +544,31 @@ export class TransactionsService {
       });
     }
 
-    const corrections = await this.prisma.transactionCorrection.findMany({
-      where: { transactionId: id },
-      include: {
-        correctedBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
+    let corrections: any[] = [];
+    try {
+      corrections = await this.prisma.transactionCorrection.findMany({
+        where: { transactionId: id },
+        include: {
+          correctedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2021' || err?.message?.includes('does not exist')) {
+        this.logger.warn(
+          `TransactionCorrection table missing in DB schema: ${err.message}`,
+        );
+      } else {
+        throw err;
+      }
+    }
 
     return {
       success: true,

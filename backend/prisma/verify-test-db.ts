@@ -59,9 +59,16 @@ async function main() {
       process.exit(1);
     }
 
-    // 6. Ensure test database name contains 'test'
-    if (!testDb.toLowerCase().includes('test')) {
-      console.error('ERROR: Nama database pengujian harus mengandung kata test.');
+    // 6. Ensure test database name is in allowed exact set
+    const allowedTestDatabases = new Set([
+      'gms_test_db',
+      'test_gms',
+      'gms_test',
+    ]);
+    if (!allowedTestDatabases.has(testDb.toLowerCase())) {
+      console.error(
+        `ERROR: DATABASE_URL_TEST database "${testDb}" tidak diizinkan.`,
+      );
       process.exit(1);
     }
 
