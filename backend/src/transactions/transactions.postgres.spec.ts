@@ -8,18 +8,36 @@ import { CargoProcessType, ProcessType } from '@prisma/client';
 const rawTestDbUrl = process.env.DATABASE_URL_TEST?.replace(/^"|"$/g, '');
 
 if (rawTestDbUrl) {
-  const isTestDb =
-    rawTestDbUrl.includes('_test') ||
-    rawTestDbUrl.includes('test_gms') ||
-    rawTestDbUrl.includes('gms_test');
+  try {
+    const parsedUrl = new URL(rawTestDbUrl);
+    const dbName = decodeURIComponent(
+      parsedUrl.pathname.replace(/^\//, ''),
+    ).toLowerCase();
+    const allowedTestDatabases = ['gms_test_db', 'test_gms', 'gms_test'];
+    const isTestDb =
+      dbName.includes('test') || allowedTestDatabases.includes(dbName);
+    const isForbiddenDb = [
+      'postgres',
+      'template1',
+      'production',
+      'gms_prod',
+      'gms_production',
+    ].includes(dbName);
 
-  if (!isTestDb) {
+    if (!isTestDb || isForbiddenDb) {
+      delete process.env.DATABASE_URL;
+      throw new Error(
+        'DATABASE_URL_TEST must explicitly point to a test database pathname (e.g. database name containing test)',
+      );
+    }
+    process.env.DATABASE_URL = rawTestDbUrl;
+  } catch (err: any) {
     delete process.env.DATABASE_URL;
-    throw new Error(
-      'DATABASE_URL_TEST must explicitly point to a test database (e.g. ending in _test or test_gms)',
-    );
+    if (err.message.includes('DATABASE_URL_TEST')) {
+      throw err;
+    }
+    throw new Error(`Invalid DATABASE_URL_TEST format: ${err.message}`);
   }
-  process.env.DATABASE_URL = rawTestDbUrl;
 } else {
   // If DATABASE_URL_TEST is absent, remove DATABASE_URL to avoid fallbacks to production
   delete process.env.DATABASE_URL;

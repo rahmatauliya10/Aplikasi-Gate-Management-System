@@ -18,8 +18,10 @@ describe('Auth Security (e2e)', () => {
         'DATABASE_URL_TEST environment variable is required for E2E tests',
       );
     }
-    if (!process.env.DATABASE_URL_TEST.includes('_test')) {
-      throw new Error('DATABASE_URL_TEST database name must end with _test');
+    const testUrl = new URL(process.env.DATABASE_URL_TEST);
+    const dbName = decodeURIComponent(testUrl.pathname.replace(/^\//, '')).toLowerCase();
+    if (!dbName.includes('test')) {
+      throw new Error('DATABASE_URL_TEST database name must contain test');
     }
     process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
 

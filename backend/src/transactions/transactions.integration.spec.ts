@@ -134,7 +134,7 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
       .spyOn(prismaService, '$transaction')
       .mockImplementation(async (cb: any) => {
         try {
-          return cb(mockTxScope);
+          return await cb(mockTxScope);
         } catch (err) {
           // Reset mock transaction state simulating DB rollback
           correctionCreatedInTx = false;
