@@ -91,6 +91,11 @@ if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
 $env:RELEASE_TAG = $TargetReleaseTag
 
 try {
+    # Step 1.5: Database preflight audit and migration
+    Write-Host "[GMS Preflight & Migration] Running database preflight audit and Prisma migration..." -ForegroundColor Cyan
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:prepare:prod
+    if ($LASTEXITCODE -ne 0) { throw "Database preflight duplicate audit or Prisma migration failed with exit code $LASTEXITCODE." }
+
     Write-Host "[GMS Deploy] Building and booting containers for release [$TargetReleaseTag]..." -ForegroundColor Cyan
     & docker compose -f $ComposeFile --env-file backend\.env up -d --build --remove-orphans
     if ($LASTEXITCODE -ne 0) { throw "Docker compose up terminated with error code $LASTEXITCODE." }

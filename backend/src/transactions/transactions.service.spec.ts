@@ -266,7 +266,7 @@ describe('TransactionsService State Machine & OCC', () => {
     ).rejects.toThrow(ConflictException);
   });
 
-  it('should rethrow error inside transaction if activity log fails to ensure atomic rollback', async () => {
+  it('should rethrow error if activity log fails during atomic rollback', async () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',

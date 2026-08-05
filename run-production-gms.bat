@@ -25,7 +25,7 @@ if not exist backend\.env (
     exit /b 1
 )
 
-echo [1/8] Memeriksa status repositori ^& commit SHA...
+echo [1/4] Memeriksa status repositori ^& commit SHA...
 for /f "tokens=*" %%a in ('git rev-parse --short HEAD') do set CURRENT_COMMIT=%%a
 echo [+] Target release commit SHA: [%CURRENT_COMMIT%]
 set RELEASE_TAG=%CURRENT_COMMIT%
@@ -37,7 +37,7 @@ if exist deploy\current_release.txt (
 echo [+] Previous release commit SHA: [%PREVIOUS_RELEASE_TAG%]
 
 echo.
-echo [2/8] Memeriksa keberadaan ^& format file .env...
+echo [2/4] Memeriksa keberadaan ^& format file .env...
 if not exist backend\.env (
     echo [!] GAGAL: File backend\.env tidak ditemukan!
     pause
@@ -46,7 +46,7 @@ if not exist backend\.env (
 echo [+] Config backend\.env terverifikasi.
 
 echo.
-echo [3/8] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
+echo [3/4] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
 if not exist deploy\nginx\ssl mkdir deploy\nginx\ssl
 if not exist deploy\nginx\ssl\server.crt (
     echo [!] GAGAL: File sertifikat SSL (deploy\nginx\ssl\server.crt) tidak ditemukan!
@@ -61,52 +61,17 @@ if not exist deploy\nginx\ssl\server.key (
 echo [+] Sertifikat SSL TLS (server.crt dan server.key) terverifikasi.
 
 echo.
-echo [4/8] Membangun Images Produksi Baru (Build Before Stop)...
-docker compose -f docker-compose.prod.yml --env-file backend\.env build --no-cache
-if errorlevel 1 (
-    echo [!] GAGAL: Proses build Docker image produksi gagal! Stack lama tetap berjalan aman.
-    pause
-    exit /b 1
-)
-
-echo.
-echo [5/8] Menjalankan One-Shot Preflight Audit ^& Database Migration...
-docker compose -f docker-compose.prod.yml --env-file backend\.env run --rm backend npm run db:prepare:prod
-if errorlevel 1 (
-    echo [!] GAGAL: Preflight duplikat database atau migrasi Prisma gagal! Deployment dibatalkan.
-    pause
-    exit /b 1
-)
-
-echo.
-echo [6/8] Menyalakan versi baru (Without Build)...
-docker compose -f docker-compose.prod.yml --env-file backend\.env up -d --no-build --remove-orphans
-if errorlevel 1 (
-    echo [!] GAGAL: Gagal menjalankan container produksi.
-    pause
-    exit /b 1
-)
-
-echo.
-echo [7/8] Verifikasi Health Check Nginx ^& Reverse Proxy...
-echo [+] Menunggu Nginx Reverse Proxy siap...
-powershell -NoProfile -Command "[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}; for ($i=1; $i -le 10; $i++) { try { $resp = Invoke-WebRequest -Uri 'https://localhost/health' -UseBasicParsing -TimeoutSec 3; if ($resp.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 }; exit 1" >nul 2>&1
+echo [4/4] Menjalankan Immutable Deployment Orchestrator (deploy-with-rollback.ps1)...
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-with-rollback.ps1 -TargetReleaseTag "%CURRENT_COMMIT%" -PreviousReleaseTag "%PREVIOUS_RELEASE_TAG%"
 if errorlevel 1 (
     echo.
-    echo [!] GAGAL: Nginx Reverse Proxy / Health check gagal merespon 200 OK!
-    echo [!] Memulai proses rollback otomatis ke previous release [%PREVIOUS_RELEASE_TAG%]...
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-with-rollback.ps1 -TargetReleaseTag "%CURRENT_COMMIT%" -PreviousReleaseTag "%PREVIOUS_RELEASE_TAG%" -RollbackOnly
+    echo [!] GAGAL: Deployment produksi gagal atau dibatalkan oleh orchestrator!
     pause
     exit /b 1
 )
 
-REM Record release tag to stable tracking file AFTER successful health check
-if not exist deploy mkdir deploy
-echo %CURRENT_COMMIT%> deploy\current_release.txt
-echo [+] Tracked release [%CURRENT_COMMIT%] as verified active release.
-
 echo.
-echo [8/8] Membersihkan Docker Image Prune setelah verifikasi sukses...
+echo [Post-Deploy] Membersihkan Docker Image Prune setelah verifikasi sukses...
 docker image prune -f >nul 2>&1
 
 echo.

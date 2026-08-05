@@ -4,15 +4,34 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { CargoProcessType, ProcessType } from '@prisma/client';
 
-const testDbUrl = process.env.DATABASE_URL_TEST || process.env.DATABASE_URL;
+// Ensure test database isolation before Prisma or Nest services are instantiated
+const rawTestDbUrl = process.env.DATABASE_URL_TEST?.replace(/^"|"$/g, '');
+
+if (rawTestDbUrl) {
+  const isTestDb =
+    rawTestDbUrl.includes('_test') ||
+    rawTestDbUrl.includes('test_gms') ||
+    rawTestDbUrl.includes('gms_test');
+
+  if (!isTestDb) {
+    delete process.env.DATABASE_URL;
+    throw new Error(
+      'DATABASE_URL_TEST must explicitly point to a test database (e.g. ending in _test or test_gms)',
+    );
+  }
+  process.env.DATABASE_URL = rawTestDbUrl;
+} else {
+  // If DATABASE_URL_TEST is absent, remove DATABASE_URL to avoid fallbacks to production
+  delete process.env.DATABASE_URL;
+}
+
 const isPgTestAvailable = Boolean(
-  testDbUrl &&
-    (testDbUrl.includes('_test') || testDbUrl.includes('test_gms')),
+  rawTestDbUrl && process.env.DATABASE_URL === rawTestDbUrl,
 );
 
 const describePgTest = isPgTestAvailable ? describe : describe.skip;
 
-describePgTest('TransactionsService True PostgreSQL Integration & Rollback', () => {
+describePgTest('TransactionsService PG Rollback Integration', () => {
   let service: TransactionsService;
   let prisma: PrismaService;
   let activityLogsService: ActivityLogsService;
@@ -34,7 +53,7 @@ describePgTest('TransactionsService True PostgreSQL Integration & Rollback', () 
     }
   });
 
-  it('should verify physical PostgreSQL rollback on audit failure when DB is available', async () => {
+  it('should verify physical PostgreSQL rollback on audit failure', async () => {
     let testTxId: string | undefined;
     let adminUserId: string | undefined;
 

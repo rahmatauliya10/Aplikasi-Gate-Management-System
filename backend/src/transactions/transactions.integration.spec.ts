@@ -44,7 +44,7 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
       module.get<ActivityLogsService>(ActivityLogsService);
   });
 
-  it('should reject stale concurrent OCC update with ConflictException (409)', async () => {
+  it('should reject stale OCC update with ConflictException 409', async () => {
     const initialTx = {
       id: 'tx-occ-101',
       status: 'COMPLETED',
@@ -91,7 +91,7 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
     ).rejects.toThrow(ConflictException);
   });
 
-  it('should ensure database rollback when activity log audit step fails', async () => {
+  it('should ensure database rollback when audit step fails', async () => {
     const initialTx = {
       id: 'tx-audit-202',
       status: 'COMPLETED',
@@ -134,7 +134,7 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
       .spyOn(prismaService, '$transaction')
       .mockImplementation(async (cb: any) => {
         try {
-          return await cb(mockTxScope);
+          return cb(mockTxScope);
         } catch (err) {
           // Reset mock transaction state simulating DB rollback
           correctionCreatedInTx = false;
