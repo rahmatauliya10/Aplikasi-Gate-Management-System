@@ -3,7 +3,8 @@
 # ==============================================================================
 # Deploys specified RELEASE_TAG to production using docker-compose.prod.yml.
 # Runs automated watchdog verification post-deployment.
-# Upon any healthcheck failure, instantly rolls back to the prior stable release tag.
+# Upon any healthcheck failure or explicit rollback request, instantly rolls back
+# to prior stable release tag without rebuilding the failed tag.
 # ==============================================================================
 
 param(
@@ -14,7 +15,10 @@ param(
     [string]$PreviousReleaseTag = "stable",
 
     [Parameter(Mandatory=$false)]
-    [string]$ComposeFile = "docker-compose.prod.yml"
+    [string]$ComposeFile = "docker-compose.prod.yml",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$RollbackOnly
 )
 
 Set-StrictMode -Version Latest
@@ -22,6 +26,28 @@ $ErrorActionPreference = "Stop"
 
 $WorkspaceRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $WorkspaceRoot
+
+if ($RollbackOnly) {
+    Write-Host "[GMS AUTOMATED ROLLBACK] Rollback requested. Bypassing build for failed tag [$TargetReleaseTag]..." -ForegroundColor Yellow
+    Write-Host "[GMS AUTOMATED ROLLBACK] Directly restoring previous release tag: [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Magenta
+
+    $env:RELEASE_TAG = $PreviousReleaseTag
+    try {
+        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
+        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+        Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
+
+        $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
+        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile
+        if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
+        Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PreviousReleaseTag]." -ForegroundColor Green
+        exit 0
+    }
+    catch {
+        Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover even after rolling back to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
+        exit 2
+    }
+}
 
 Write-Host "[GMS Deploy] Starting immutable deployment for Release Tag: [$TargetReleaseTag]..." -ForegroundColor Cyan
 Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
@@ -31,7 +57,7 @@ $env:RELEASE_TAG = $TargetReleaseTag
 
 try {
     Write-Host "[GMS Deploy] Building and booting containers for release [$TargetReleaseTag]..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile up -d --build --remove-orphans
+    & docker compose -f $ComposeFile --env-file backend\.env up -d --build --remove-orphans
     if ($LASTEXITCODE -ne 0) { throw "Docker compose up terminated with error code $LASTEXITCODE." }
 
     # Step 2: Execute automated health watchdog check
@@ -52,7 +78,7 @@ catch {
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        & docker compose -f $ComposeFile up -d --no-build --remove-orphans
+        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
         Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
 

@@ -37,3 +37,7 @@ backend/backups/local/*
 backend/backups/nas/*
 !backend/backups/nas/.gitkeep
 
+# Deployment Runtime Tracker
+deploy/current_release.txt
+
+

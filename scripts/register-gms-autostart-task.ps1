@@ -52,7 +52,8 @@ if ($UnattendedMode) {
     $Trigger = New-ScheduledTaskTrigger -AtStartup
     $Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 } else {
-    Write-Host "[GMS Autostart] Registering trigger as AtLogOn for user session compatibility..." -ForegroundColor Yellow
+    Write-Host "[GMS Autostart Requirement SLA] Registering trigger as AtLogOn for user session compatibility..." -ForegroundColor Yellow
+    Write-Host "[GMS Autostart Requirement SLA] Official SLA requirement: Automatic container watchdog recovery upon user login (AtLogOn)." -ForegroundColor Cyan
     $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
     $Principal = New-ScheduledTaskPrincipal -UserId $CurrentUser -LogonType Interactive -RunLevel Highest
 }

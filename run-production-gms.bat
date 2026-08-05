@@ -71,7 +71,7 @@ if errorlevel 1 (
 
 echo.
 echo [5/8] Menjalankan One-Shot Preflight Audit ^& Database Migration...
-docker compose -f docker-compose.prod.yml run --rm backend npm run db:prepare:prod
+docker compose -f docker-compose.prod.yml --env-file backend\.env run --rm backend npm run db:prepare:prod
 if errorlevel 1 (
     echo [!] GAGAL: Preflight duplikat database atau migrasi Prisma gagal! Deployment dibatalkan.
     pause
@@ -95,7 +95,7 @@ if errorlevel 1 (
     echo.
     echo [!] GAGAL: Nginx Reverse Proxy / Health check gagal merespon 200 OK!
     echo [!] Memulai proses rollback otomatis ke previous release [%PREVIOUS_RELEASE_TAG%]...
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-with-rollback.ps1 -TargetReleaseTag "%CURRENT_COMMIT%" -PreviousReleaseTag "%PREVIOUS_RELEASE_TAG%"
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-with-rollback.ps1 -TargetReleaseTag "%CURRENT_COMMIT%" -PreviousReleaseTag "%PREVIOUS_RELEASE_TAG%" -RollbackOnly
     pause
     exit /b 1
 )

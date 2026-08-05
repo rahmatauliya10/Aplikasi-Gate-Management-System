@@ -16,7 +16,11 @@ describe('TransactionsService State Machine & OCC', () => {
         {
           provide: PrismaService,
           useValue: {
-            transaction: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+            transaction: {
+              findUnique: jest.fn(),
+              update: jest.fn(),
+              updateMany: jest.fn(),
+            },
             $transaction: jest.fn((cb) =>
               cb({
                 transaction: { update: jest.fn(), updateMany: jest.fn() },
@@ -34,7 +38,8 @@ describe('TransactionsService State Machine & OCC', () => {
 
     service = module.get<TransactionsService>(TransactionsService);
     prismaService = module.get<PrismaService>(PrismaService);
-    activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
+    activityLogsService =
+      module.get<ActivityLogsService>(ActivityLogsService);
   });
 
   it('should deny cancel if status is COMPLETED', async () => {
@@ -64,6 +69,98 @@ describe('TransactionsService State Machine & OCC', () => {
 
     await expect(
       service.remove('tx-1', { id: 'admin', role: 'ADMIN' } as any),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should throw BadRequestException when evidenceUrl is empty', async () => {
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    };
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    const dto = {
+      reason: 'Koreksi tanpa evidence URL',
+      evidenceUrl: '',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      grossWeight: 10500,
+    };
+
+    await expect(
+      service.correctCompletedTransaction('tx-1', dto, {
+        id: 'admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should throw BadRequestException when grossWeight is less than tareWeight', async () => {
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    };
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    const dto = {
+      reason: 'Koreksi salah input gross < tare',
+      evidenceUrl: 'https://storage.gms.local/evidence/ticket-123.pdf',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      grossWeight: 2000,
+      tareWeight: 3000,
+    };
+
+    await expect(
+      service.correctCompletedTransaction('tx-1', dto, {
+        id: 'admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should throw BadRequestException when correction contains no field changes (no-op)', async () => {
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      netWeight: 7000,
+      driverName: 'Pak Supri',
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    };
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    const dto = {
+      reason: 'Koreksi tanpa mengubah nilai apapun',
+      evidenceUrl: 'https://storage.gms.local/evidence/ticket-123.pdf',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      driverName: 'Pak Supri',
+    };
+
+    await expect(
+      service.correctCompletedTransaction('tx-1', dto, {
+        id: 'admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -142,7 +239,7 @@ describe('TransactionsService State Machine & OCC', () => {
 
     const mockPrismaTx = {
       transaction: {
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }), // 0 updated due to concurrent update
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
 

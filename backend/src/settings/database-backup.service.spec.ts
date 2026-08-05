@@ -142,6 +142,20 @@ describe('DatabaseBackupService', () => {
     });
   });
 
+  describe('performScheduledOrManualBackup', () => {
+    it('should generate full backup manifest (PG_CUSTOM or JSON_SNAPSHOT fallback)', async () => {
+      const manifest = await service.performScheduledOrManualBackup(
+        'MANUAL_EXPLICIT',
+        mockAdminUser,
+      );
+
+      expect(manifest).toBeDefined();
+      expect(manifest.backupId).toBeDefined();
+      expect(['PG_CUSTOM', 'JSON_SNAPSHOT']).toContain(manifest.dumpFormat);
+      expect(manifest.createdBy.email).toBe(mockAdminUser.email);
+    });
+  });
+
   describe('restoreDatabase', () => {
     it('should throw UnauthorizedException if admin password is wrong', async () => {
       const hashedPassword = await argon2.hash('SecretAdmin123');

@@ -31,10 +31,17 @@
               </div>
             </div>
           </div>
-          <button @click="close"
-            class="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:bg-red-50 hover:text-red-500 text-slate-400">
-            <span class="material-icons text-lg">close</span>
-          </button>
+          <div class="flex items-center space-x-2">
+            <button v-if="isAdmin && truck.status === 'COMPLETED'" @click="openCorrectionModal"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1.5 transition-all shadow-sm">
+              <span class="material-icons text-sm">edit_note</span>
+              <span>Koreksi Admin</span>
+            </button>
+            <button @click="close"
+              class="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:bg-red-50 hover:text-red-500 text-slate-400">
+              <span class="material-icons text-lg">close</span>
+            </button>
+          </div>
         </div>
 
         <!-- Body -->
@@ -448,9 +455,57 @@
       </div>
       
       <!-- Image Container -->
-      <img :src="selectedPhoto" class="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain ring-1 ring-white/10" />
-    </div>
-  </transition>
+      <!-- Admin Correction Modal Overlay -->
+      <transition name="modal">
+        <div v-if="showCorrectionModal" class="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" @click.self="showCorrectionModal = false">
+          <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div class="flex items-center space-x-2">
+                <span class="material-icons text-amber-600">edit_note</span>
+                <h3 class="text-base font-bold text-slate-800">Koreksi Data Transaksi (Admin Only)</h3>
+              </div>
+              <button @click="showCorrectionModal = false" class="text-slate-400 hover:text-slate-600">
+                <span class="material-icons">close</span>
+              </button>
+            </div>
+
+            <div v-if="correctionError" class="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-bold">
+              {{ correctionError }}
+            </div>
+
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="block font-bold text-slate-600 mb-1">Gross Weight (kg)</label>
+                <input v-model.number="correctionForm.grossWeight" type="number" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono" />
+              </div>
+              <div>
+                <label class="block font-bold text-slate-600 mb-1">Tare Weight (kg)</label>
+                <input v-model.number="correctionForm.tareWeight" type="number" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono" />
+              </div>
+              <div>
+                <label class="block font-bold text-slate-600 mb-1">Nama Supir</label>
+                <input v-model="correctionForm.driverName" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500" />
+              </div>
+              <div>
+                <label class="block font-bold text-slate-600 mb-1">Alasan Koreksi (Wajib, min 10 karakter)</label>
+                <textarea v-model="correctionForm.reason" rows="2" placeholder="Contoh: Koreksi penimbangan gross dari tiket timbang fisik..." class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"></textarea>
+              </div>
+              <div>
+                <label class="block font-bold text-slate-600 mb-1">URL Bukti Dokumen (Wajib)</label>
+                <input v-model="correctionForm.evidenceUrl" type="url" placeholder="https://storage.gms.local/evidence/ticket-123.pdf" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono" />
+              </div>
+            </div>
+
+            <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+              <button @click="showCorrectionModal = false" class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
+              <button @click="submitCorrection" :disabled="correctionLoading" class="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg flex items-center space-x-1 disabled:opacity-50">
+                <span v-if="correctionLoading" class="material-icons animate-spin text-sm">sync</span>
+                <span>Simpan Koreksi</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </transition>
   
   </teleport>
 </template>
@@ -477,6 +532,73 @@ const settingsStore = useSettingsStore()
 const { confirm } = useConfirm()
 
 const selectedPhoto = ref(null)
+
+const isAdmin = computed(() => {
+  const role = authStore.user?.role || authStore.role
+  return role === 'ADMIN'
+})
+
+const showCorrectionModal = ref(false)
+const correctionLoading = ref(false)
+const correctionError = ref(null)
+const correctionForm = ref({
+  grossWeight: null,
+  tareWeight: null,
+  driverName: '',
+  reason: '',
+  evidenceUrl: '',
+})
+
+const openCorrectionModal = () => {
+  correctionForm.value = {
+    grossWeight: props.truck?.grossWeight || null,
+    tareWeight: props.truck?.tareWeight || null,
+    driverName: props.truck?.driverName || '',
+    reason: '',
+    evidenceUrl: '',
+  }
+  correctionError.value = null
+  showCorrectionModal.value = true
+}
+
+const submitCorrection = async () => {
+  if (!correctionForm.value.reason || correctionForm.value.reason.length < 10) {
+    correctionError.value = 'Alasan koreksi wajib diisi minimal 10 karakter.'
+    return
+  }
+  if (!correctionForm.value.evidenceUrl || !correctionForm.value.evidenceUrl.trim()) {
+    correctionError.value = 'Bukti dokumen (evidenceUrl) wajib diisi.'
+    return
+  }
+
+  correctionLoading.value = true
+  correctionError.value = null
+
+  try {
+    const payload = {
+      reason: correctionForm.value.reason,
+      evidenceUrl: correctionForm.value.evidenceUrl,
+      expectedUpdatedAt: props.truck?.updatedAt || props.truck?.timestamps?.updatedAt,
+    }
+    if (correctionForm.value.grossWeight !== null && correctionForm.value.grossWeight !== props.truck?.grossWeight) {
+      payload.grossWeight = Number(correctionForm.value.grossWeight)
+    }
+    if (correctionForm.value.tareWeight !== null && correctionForm.value.tareWeight !== props.truck?.tareWeight) {
+      payload.tareWeight = Number(correctionForm.value.tareWeight)
+    }
+    if (correctionForm.value.driverName && correctionForm.value.driverName !== props.truck?.driverName) {
+      payload.driverName = correctionForm.value.driverName
+    }
+
+    await truckStore.correctTruck(props.truck.id, payload)
+    showCorrectionModal.value = false
+    close()
+  } catch (err) {
+    correctionError.value = err.gmsMessage || err.response?.data?.message || err.message || 'Gagal menyimpan koreksi data'
+  } finally {
+    correctionLoading.value = false
+  }
+}
 
 const handleDelete = async () => {
   const ok = await confirm({
