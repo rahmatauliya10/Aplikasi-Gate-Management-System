@@ -455,7 +455,11 @@
       </div>
       
       <!-- Image Container -->
-      <!-- Admin Correction Modal Overlay -->
+      <img :src="selectedPhoto" class="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain ring-1 ring-white/10" />
+    </div>
+  </transition>
+
+  <!-- Admin Correction Modal Overlay -->
       <transition name="modal">
         <div v-if="showCorrectionModal" class="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" @click.self="showCorrectionModal = false">
           <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
