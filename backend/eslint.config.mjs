@@ -39,7 +39,7 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/restrict-template-expressions': 'off',
       'no-constant-binary-expression': 'off',
-      "prettier/prettier": ["error", { endOfLine: "auto" }],
+      "prettier/prettier": ["error", { endOfLine: "lf" }],
     },
   },
 );
