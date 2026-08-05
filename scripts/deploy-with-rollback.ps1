@@ -30,7 +30,8 @@ Set-Location -Path $WorkspaceRoot
 function Verify-Image-Exists {
     param([string]$Tag)
     $backendImg = & docker images -q "gms-backend:$Tag" 2>$null
-    return (-not [string]::IsNullOrWhiteSpace($backendImg))
+    $frontendImg = & docker images -q "gms-frontend:$Tag" 2>$null
+    return ((-not [string]::IsNullOrWhiteSpace($backendImg)) -and (-not [string]::IsNullOrWhiteSpace($frontendImg)))
 }
 
 if ($RollbackOnly) {
@@ -40,10 +41,10 @@ if ($RollbackOnly) {
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
         if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
-            throw "Previous release image [gms-backend:$PreviousReleaseTag] does not exist locally. Refusing to build previous tag from working tree."
+            throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist locally. Refusing to build previous tag from working tree."
         }
 
-        Write-Host "[GMS AUTOMATED ROLLBACK] Executing fast rollback using immutable image [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Cyan
+        Write-Host "[GMS AUTOMATED ROLLBACK] Executing fast rollback using immutable image pair [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Cyan
         & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
 
@@ -64,17 +65,25 @@ if ($RollbackOnly) {
 Write-Host "[GMS Deploy] Starting immutable deployment for Release Tag: [$TargetReleaseTag]..." -ForegroundColor Cyan
 Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
 
-# Pre-flight check: Ensure previous release image exists BEFORE altering the running stack
-Write-Host "[GMS Pre-flight] Verifying immutability requirement: checking availability of previous image [$PreviousReleaseTag]..." -ForegroundColor Cyan
+# Pre-flight check: Ensure previous release image pair exists BEFORE altering the running stack
+Write-Host "[GMS Pre-flight] Verifying immutability requirement: checking availability of previous image pair [$PreviousReleaseTag]..." -ForegroundColor Cyan
 if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
-    Write-Host "[GMS Pre-flight WARNING] Image [gms-backend:$PreviousReleaseTag] not found. Attempting to snapshot current running container baseline as [$PreviousReleaseTag]..." -ForegroundColor Yellow
+    Write-Host "[GMS Pre-flight WARNING] Image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] incomplete. Attempting to snapshot current running container baseline..." -ForegroundColor Yellow
     $runningBackend = & docker ps -q --filter "name=gate-system-backend" 2>$null
-    if (-not [string]::IsNullOrWhiteSpace($runningBackend)) {
+    $runningFrontend = & docker ps -q --filter "name=gate-system-frontend" 2>$null
+
+    if ((-not [string]::IsNullOrWhiteSpace($runningBackend)) -and (-not [string]::IsNullOrWhiteSpace($runningFrontend))) {
         & docker commit gate-system-backend "gms-backend:$PreviousReleaseTag" 2>$null
+        $commitBackendExit = $LASTEXITCODE
         & docker commit gate-system-frontend "gms-frontend:$PreviousReleaseTag" 2>$null
-        Write-Host "[GMS Pre-flight SUCCESS] Captured current running containers as immutable rollback tag [$PreviousReleaseTag]." -ForegroundColor Green
+        $commitFrontendExit = $LASTEXITCODE
+
+        if ($commitBackendExit -ne 0 -or $commitFrontendExit -ne 0 -or (-not (Verify-Image-Exists -Tag $PreviousReleaseTag))) {
+            throw "Container snapshot commit failed or image pair verification failed post-commit."
+        }
+        Write-Host "[GMS Pre-flight SUCCESS] Captured current running backend & frontend containers as immutable rollback tag [$PreviousReleaseTag]." -ForegroundColor Green
     } else {
-        Write-Host "[GMS Pre-flight WARN] No running container stack found to snapshot. Deployment will proceed, but rollback requires an existing immutable image." -ForegroundColor Yellow
+        throw "Neither rollback image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] nor active container pair [gate-system-backend, gate-system-frontend] is available. Deployment aborted for safety before stack alteration."
     }
 }
 
@@ -105,7 +114,7 @@ catch {
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
         if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
-            throw "Previous release image [gms-backend:$PreviousReleaseTag] does not exist. Cannot perform immutable rollback."
+            throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist. Cannot perform immutable rollback."
         }
 
         & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
