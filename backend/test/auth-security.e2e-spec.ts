@@ -19,7 +19,9 @@ describe('Auth Security (e2e)', () => {
       );
     }
     const testUrl = new URL(process.env.DATABASE_URL_TEST);
-    const dbName = decodeURIComponent(testUrl.pathname.replace(/^\//, '')).toLowerCase();
+    const dbName = decodeURIComponent(
+      testUrl.pathname.replace(/^\//, ''),
+    ).toLowerCase();
     if (!dbName.includes('test')) {
       throw new Error('DATABASE_URL_TEST database name must contain test');
     }

@@ -258,11 +258,11 @@ describe('TransactionsService State Machine & OCC', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction(
-        'tx-1',
-        dto,
-        { id: 'admin-1', role: 'ADMIN', email: 'admin@gms.local' } as any,
-      ),
+      service.correctCompletedTransaction('tx-1', dto, {
+        id: 'admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -303,11 +303,11 @@ describe('TransactionsService State Machine & OCC', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction(
-        'tx-1',
-        dto,
-        { id: 'admin-1', role: 'ADMIN', email: 'admin@gms.local' } as any,
-      ),
+      service.correctCompletedTransaction('tx-1', dto, {
+        id: 'admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any),
     ).rejects.toThrow('Audit DB disk full failure');
   });
 });
