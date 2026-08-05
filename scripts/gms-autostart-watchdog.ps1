@@ -153,7 +153,7 @@ try {
 
     while (-not $PostgresHealthy -and $PgCheckCount -lt 20) {
         $PgCheckCount++
-        [string]$PgContainerId = (& docker compose -f $ComposeFilePath ps -q postgres 2>&1).ToString().Trim()
+        [string]$PgContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q postgres 2>&1).ToString().Trim()
         
         if ($PgContainerId) {
             [string]$PgStatus = (& docker inspect --format="{{.State.Health.Status}}" $PgContainerId 2>&1).ToString().Trim()
@@ -178,7 +178,7 @@ try {
     while (-not $BackendReady -and $BackendCheckCount -lt 15) {
         $BackendCheckCount++
         try {
-            [string]$BackendContainerId = (& docker compose -f $ComposeFilePath ps -q backend 2>&1).ToString().Trim()
+            [string]$BackendContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q backend 2>&1).ToString().Trim()
             if ($BackendContainerId) {
                 [string]$HealthStatus = (& docker inspect --format="{{.State.Health.Status}}" $BackendContainerId 2>&1).ToString().Trim()
                 if ($HealthStatus -eq "healthy") {

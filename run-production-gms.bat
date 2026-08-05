@@ -90,7 +90,7 @@ if errorlevel 1 (
 echo.
 echo [7/8] Verifikasi Health Check Nginx ^& Reverse Proxy...
 echo [+] Menunggu Nginx Reverse Proxy siap...
-powershell -NoProfile -Command "for ($i=1; $i -le 10; $i++) { try { $resp = Invoke-WebRequest -Uri 'https://localhost/health' -SkipCertificateCheck -UseBasicParsing -TimeoutSec 3; if ($resp.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 }; exit 1" >nul 2>&1
+powershell -NoProfile -Command "[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}; for ($i=1; $i -le 10; $i++) { try { $resp = Invoke-WebRequest -Uri 'https://localhost/health' -UseBasicParsing -TimeoutSec 3; if ($resp.StatusCode -eq 200) { exit 0 } } catch {}; Start-Sleep -Seconds 2 }; exit 1" >nul 2>&1
 if errorlevel 1 (
     echo.
     echo [!] GAGAL: Nginx Reverse Proxy / Health check gagal merespon 200 OK!

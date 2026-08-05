@@ -33,8 +33,13 @@ if ($RollbackOnly) {
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
-        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+        Write-Host "[GMS AUTOMATED ROLLBACK] Attempting fast rollback using existing image [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Cyan
+        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[GMS AUTOMATED ROLLBACK WARN] Fast rollback image not found. Building previous release tag [$PreviousReleaseTag]..." -ForegroundColor Yellow
+            & docker compose -f $ComposeFile --env-file backend\.env up -d --build --remove-orphans
+            if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+        }
         Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
 
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
@@ -78,8 +83,12 @@ catch {
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
-        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[GMS AUTOMATED ROLLBACK WARN] Fast rollback image not found. Building previous release tag [$PreviousReleaseTag]..." -ForegroundColor Yellow
+            & docker compose -f $ComposeFile --env-file backend\.env up -d --build --remove-orphans
+            if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+        }
         Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
 
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"

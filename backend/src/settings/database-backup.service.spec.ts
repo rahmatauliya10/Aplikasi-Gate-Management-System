@@ -142,9 +142,9 @@ describe('DatabaseBackupService', () => {
     });
   });
 
-  describe('performScheduledOrManualBackup', () => {
+  describe('runAutomatedScheduledBackup', () => {
     it('should generate full backup manifest (PG_CUSTOM or JSON_SNAPSHOT fallback)', async () => {
-      const manifest = await service.performScheduledOrManualBackup(
+      const manifest = await service.runAutomatedScheduledBackup(
         'MANUAL_EXPLICIT',
         mockAdminUser,
       );

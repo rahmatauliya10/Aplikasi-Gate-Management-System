@@ -426,7 +426,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         backupId,
         system: 'GMS_GATE_MANAGEMENT_SYSTEM',
         version: '1.0.0',
-        createdAt: new Date().toISOString(),
+        createdAt: createdAtIso,
         createdBy: {
           id: user.id,
           email: user.email,

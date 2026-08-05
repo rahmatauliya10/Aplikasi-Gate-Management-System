@@ -83,7 +83,11 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction('tx-occ-101', staleDto, adminUser as any),
+      service.correctCompletedTransaction(
+        'tx-occ-101',
+        staleDto,
+        adminUser as any,
+      ),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -116,6 +120,9 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
         }),
         findUnique: jest.fn().mockResolvedValue(initialTx),
       },
+      fraudCheck: {
+        create: jest.fn().mockResolvedValue({ id: 'fc-1' }),
+      },
     };
 
     jest
@@ -138,7 +145,9 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
 
     jest
       .spyOn(activityLogsService, 'logAction')
-      .mockRejectedValue(new Error('Audit log insertion failed - Disk I/O error'));
+      .mockRejectedValue(
+        new Error('Audit log insertion failed - Disk I/O error'),
+      );
 
     const dto = {
       reason: 'Validation of transaction rollback on audit log failure',
@@ -154,7 +163,11 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction('tx-audit-202', dto, adminUser as any),
+      service.correctCompletedTransaction(
+        'tx-audit-202',
+        dto,
+        adminUser as any,
+      ),
     ).rejects.toThrow('Audit log insertion failed - Disk I/O error');
 
     // Confirm that due to transaction rollback, state remained clean
