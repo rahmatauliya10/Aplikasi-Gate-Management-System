@@ -19,6 +19,7 @@ if not exist backend\.env (
 echo [1/8] Memeriksa status repositori & commit SHA...
 for /f "tokens=*" %%a in ('git rev-parse --short HEAD') do set CURRENT_COMMIT=%%a
 echo [+] Target release commit SHA: [%CURRENT_COMMIT%]
+set RELEASE_TAG=%CURRENT_COMMIT%
 
 echo.
 echo [2/8] Memeriksa keberadaan & format file .env...
@@ -63,19 +64,19 @@ if errorlevel 1 (
 )
 
 echo.
-echo [6/8] Menjalankan Preflight Cleanup & Migrasi Database Prisma...
-docker compose -f docker-compose.prod.yml exec -T backend npm run prisma:preflight
+echo [6/8] Menjalankan Migrasi Database Prisma & Preflight Audit...
+docker compose -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy
 if errorlevel 1 (
-    echo [!] GAGAL: Preflight pembersihan duplikat database gagal! Deployment dibatalkan.
+    echo.
+    echo [!] GAGAL: Migrasi database Prisma gagal! Deployment dibatalkan demi keamanan data.
     docker compose -f docker-compose.prod.yml stop
     pause
     exit /b 1
 )
 
-docker compose -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy
+docker compose -f docker-compose.prod.yml exec -T backend npm run prisma:preflight -- --report-only
 if errorlevel 1 (
-    echo.
-    echo [!] GAGAL: Migrasi database Prisma gagal! Deployment dibatalkan demi keamanan data.
+    echo [!] GAGAL: Preflight audit duplikat database gagal!
     docker compose -f docker-compose.prod.yml stop
     pause
     exit /b 1

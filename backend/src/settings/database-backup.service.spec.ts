@@ -21,25 +21,84 @@ describe('DatabaseBackupService', () => {
   beforeEach(async () => {
     prismaService = {
       user: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'user-1', email: 'admin@gms.local' }]),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'user-1', email: 'admin@gms.local' }]),
         findUnique: jest.fn(),
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
-      userWarehouseAccess: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      transaction: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      transactionStatusHistory: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      weighbridgeRecord: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null), deleteMany: jest.fn(), createMany: jest.fn() },
-      warehouseProcess: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      qcVehicleCheck: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      incomingMaterialCheck: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      attachment: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      fraudCheck: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      activityLog: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      appSetting: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      announcement: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      systemIssue: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
-      transactionCorrection: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
+      userWarehouseAccess: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      transaction: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      transactionStatusHistory: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      weighbridgeRecord: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      warehouseProcess: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      qcVehicleCheck: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      incomingMaterialCheck: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      attachment: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      fraudCheck: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      activityLog: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      appSetting: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      announcement: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      systemIssue: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      transactionCorrection: {
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
       $transaction: jest.fn().mockImplementation((cb) => cb(prismaService)),
     };
 
@@ -94,7 +153,12 @@ describe('DatabaseBackupService', () => {
       const backup = await service.generateBackup(mockAdminUser);
 
       await expect(
-        service.restoreDatabase(mockAdminUser, backup, 'WrongPassword', '127.0.0.1'),
+        service.restoreDatabase(
+          mockAdminUser,
+          backup,
+          'WrongPassword',
+          '127.0.0.1',
+        ),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -109,7 +173,12 @@ describe('DatabaseBackupService', () => {
       backup.data.users = [{ id: 'hacked-user' }];
 
       await expect(
-        service.restoreDatabase(mockAdminUser, backup, 'SecretAdmin123', '127.0.0.1'),
+        service.restoreDatabase(
+          mockAdminUser,
+          backup,
+          'SecretAdmin123',
+          '127.0.0.1',
+        ),
       ).rejects.toThrow(BadRequestException);
     });
   });

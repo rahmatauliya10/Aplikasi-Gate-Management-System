@@ -48,7 +48,7 @@ describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', (
     role: 'WAREHOUSE',
     name: 'Operator WH',
     warehouseAccess: ['GBB'],
-  } as any;
+  };
 
   const adminUser: JwtPayloadUser = {
     id: 'user-admin-1',
@@ -56,7 +56,7 @@ describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', (
     role: 'ADMIN',
     name: 'Admin User',
     warehouseAccess: ['GBB', 'GBJ', 'GSP'],
-  } as any;
+  };
 
   it('should THROW ForbiddenException (403) when WAREHOUSE role calls submitIncomingCheck on GBB transaction', async () => {
     mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
@@ -66,7 +66,11 @@ describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', (
     });
 
     await expect(
-      service.submitIncomingCheck('tx-123', { decision: 'passed' }, warehouseUser),
+      service.submitIncomingCheck(
+        'tx-123',
+        { decision: 'passed' },
+        warehouseUser,
+      ),
     ).rejects.toThrow(ForbiddenException);
 
     expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(

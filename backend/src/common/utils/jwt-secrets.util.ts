@@ -15,19 +15,33 @@ const weakSecrets = [
 function isWeakOrPlaceholder(secret: string): boolean {
   if (!secret || secret.length < 32) return true;
   if (weakSecrets.includes(secret)) return true;
-  if (secret.startsWith('default_') || secret.startsWith('CHANGE_ME') || secret.startsWith('generate_at_least_32')) return true;
-  if (secret.includes('Auto_Upgraded') || secret.includes('Secure_Key_32char') || secret.includes('PLACEHOLDER')) return true;
+  if (
+    secret.startsWith('default_') ||
+    secret.startsWith('CHANGE_ME') ||
+    secret.startsWith('generate_at_least_32')
+  )
+    return true;
+  if (
+    secret.includes('Auto_Upgraded') ||
+    secret.includes('Secure_Key_32char') ||
+    secret.includes('PLACEHOLDER')
+  )
+    return true;
   return false;
 }
 
 export function getJwtAccessSecret(): string {
   const secret = process.env.JWT_ACCESS_SECRET?.trim() || '';
   if (isWeakOrPlaceholder(secret)) {
-    throw new Error('CRITICAL: Secure JWT_ACCESS_SECRET (min 32 bytes random hex) required. Public placeholders are strictly rejected.');
+    throw new Error(
+      'CRITICAL: Secure JWT_ACCESS_SECRET (min 32 bytes random hex) required. Public placeholders are strictly rejected.',
+    );
   }
   const refreshSecret = process.env.JWT_REFRESH_SECRET?.trim() || '';
   if (secret === refreshSecret) {
-    throw new Error('CRITICAL: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be distinct keys.');
+    throw new Error(
+      'CRITICAL: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be distinct keys.',
+    );
   }
   return secret;
 }
@@ -35,11 +49,15 @@ export function getJwtAccessSecret(): string {
 export function getJwtRefreshSecret(): string {
   const secret = process.env.JWT_REFRESH_SECRET?.trim() || '';
   if (isWeakOrPlaceholder(secret)) {
-    throw new Error('CRITICAL: Secure JWT_REFRESH_SECRET (min 32 bytes random hex) required. Public placeholders are strictly rejected.');
+    throw new Error(
+      'CRITICAL: Secure JWT_REFRESH_SECRET (min 32 bytes random hex) required. Public placeholders are strictly rejected.',
+    );
   }
   const accessSecret = process.env.JWT_ACCESS_SECRET?.trim() || '';
   if (secret === accessSecret) {
-    throw new Error('CRITICAL: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be distinct keys.');
+    throw new Error(
+      'CRITICAL: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be distinct keys.',
+    );
   }
   return secret;
 }

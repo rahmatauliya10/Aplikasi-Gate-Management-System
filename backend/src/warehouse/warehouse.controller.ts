@@ -154,10 +154,18 @@ export class WarehouseController {
         const path = require('path');
         const ext = path.extname(file.originalname).toLowerCase();
         const allowedExts = ['.jpg', '.jpeg', '.png', '.pdf'];
-        if (allowedMimeTypes.includes(file.mimetype) && allowedExts.includes(ext)) {
+        if (
+          allowedMimeTypes.includes(file.mimetype) &&
+          allowedExts.includes(ext)
+        ) {
           cb(null, true);
         } else {
-          cb(new (require('@nestjs/common').BadRequestException)('Invalid upload: only JPG, PNG, and PDF files are allowed.'), false);
+          cb(
+            new (require('@nestjs/common').BadRequestException)(
+              'Invalid upload: only JPG, PNG, and PDF files are allowed.',
+            ),
+            false,
+          );
         }
       },
       storage: require('multer').diskStorage({

@@ -68,8 +68,13 @@ export class TransactionsController {
 
   @Get(':id/corrections')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Get correction history for a transaction (ADMIN only)' })
-  @ApiResponse({ status: 200, description: 'Correction history retrieved successfully' })
+  @ApiOperation({
+    summary: 'Get correction history for a transaction (ADMIN only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Correction history retrieved successfully',
+  })
   @ApiResponse({ status: 404, description: 'Transaction not found' })
   getCorrections(@Param('id') id: string) {
     return this.transactionsService.getTransactionCorrections(id);
@@ -78,10 +83,18 @@ export class TransactionsController {
   @Post(':id/corrections')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Correct data on a COMPLETED transaction (ADMIN only)' })
-  @ApiResponse({ status: 200, description: 'Completed transaction data corrected successfully' })
+  @ApiOperation({
+    summary: 'Correct data on a COMPLETED transaction (ADMIN only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Completed transaction data corrected successfully',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden - ADMIN role required' })
-  @ApiResponse({ status: 400, description: 'Transaction is not COMPLETED or reason/evidence invalid' })
+  @ApiResponse({
+    status: 400,
+    description: 'Transaction is not COMPLETED or reason/evidence invalid',
+  })
   correct(
     @Param('id') id: string,
     @Body() dto: CorrectTransactionDto,
@@ -89,8 +102,16 @@ export class TransactionsController {
     @Req() req: Request,
   ) {
     const rawForwarded = req.headers['x-forwarded-for'];
-    const clientIp = typeof rawForwarded === 'string' ? rawForwarded.split(',')[0].trim() : req.ip || '127.0.0.1';
-    return this.transactionsService.correctCompletedTransaction(id, dto, user, clientIp);
+    const clientIp =
+      typeof rawForwarded === 'string'
+        ? rawForwarded.split(',')[0].trim()
+        : req.ip || '127.0.0.1';
+    return this.transactionsService.correctCompletedTransaction(
+      id,
+      dto,
+      user,
+      clientIp,
+    );
   }
 
   @Post(':id/cancel')

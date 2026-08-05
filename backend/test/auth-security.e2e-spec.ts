@@ -14,7 +14,9 @@ describe('Auth Security (e2e)', () => {
     // Note: E2E tests should be run with a separate DATABASE_URL_TEST
     // to avoid wiping out operational database data.
     if (!process.env.DATABASE_URL_TEST) {
-      throw new Error('DATABASE_URL_TEST environment variable is required for E2E tests');
+      throw new Error(
+        'DATABASE_URL_TEST environment variable is required for E2E tests',
+      );
     }
     if (!process.env.DATABASE_URL_TEST.includes('_test')) {
       throw new Error('DATABASE_URL_TEST database name must end with _test');
@@ -33,7 +35,9 @@ describe('Auth Security (e2e)', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   describe('Account Lifecycle & Password Security Scenarios', () => {
@@ -115,9 +119,11 @@ describe('Auth Security (e2e)', () => {
 
       expect(res.body.data.mustChangePassword).toBe(true);
       userAccessToken = res.body.data.accessToken;
-      
+
       const cookies = res.headers['set-cookie'] || [];
-      const refreshCookie = cookies.find((c: string) => c.startsWith('refreshToken='));
+      const refreshCookie = cookies.find((c: string) =>
+        c.startsWith('refreshToken='),
+      );
       if (refreshCookie) {
         userRefreshToken = refreshCookie.split(';')[0].split('=')[1];
       }

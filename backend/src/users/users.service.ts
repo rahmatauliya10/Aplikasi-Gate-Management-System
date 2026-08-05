@@ -254,7 +254,7 @@ export class UsersService {
         throw new BadRequestException({
           success: false,
           message:
-              'Warehouse role requires at least 1 warehouse access selection',
+            'Warehouse role requires at least 1 warehouse access selection',
           errors: [],
         });
       }

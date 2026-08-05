@@ -52,7 +52,10 @@ describe('WeighbridgeService Fraud Calculation', () => {
         findUnique: jest.fn().mockResolvedValue(mockTx),
         update: jest.fn().mockResolvedValue(mockTx),
       },
-      weighbridgeRecord: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
+      weighbridgeRecord: {
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       transactionStatusHistory: { create: jest.fn() },
       fraudCheck: { create: jest.fn() },
     };
@@ -96,7 +99,9 @@ describe('WeighbridgeService Fraud Calculation', () => {
     const actualWarning = 979;
     const devWarning = (Math.abs(netWeight - actualWarning) / netWeight) * 100;
     expect(devWarning).toBe(2.1);
-    expect(devWarning > 5 ? 'CRITICAL' : devWarning > 2 ? 'WARNING' : 'SAFE').toBe('WARNING');
+    expect(
+      devWarning > 5 ? 'CRITICAL' : devWarning > 2 ? 'WARNING' : 'SAFE',
+    ).toBe('WARNING');
   });
 
   it('should classify exact 5% deviation as WARNING and 5.1% as CRITICAL', () => {
@@ -106,12 +111,17 @@ describe('WeighbridgeService Fraud Calculation', () => {
     const actual5 = 950;
     const dev5 = (Math.abs(netWeight - actual5) / netWeight) * 100;
     expect(dev5).toBe(5);
-    expect(dev5 > 5 ? 'CRITICAL' : dev5 > 2 ? 'WARNING' : 'SAFE').toBe('WARNING');
+    expect(dev5 > 5 ? 'CRITICAL' : dev5 > 2 ? 'WARNING' : 'SAFE').toBe(
+      'WARNING',
+    );
 
     // 1000 kg net weight, 949 kg actual -> deviation = 51 -> 5.1% -> CRITICAL
     const actualCritical = 949;
-    const devCritical = (Math.abs(netWeight - actualCritical) / netWeight) * 100;
+    const devCritical =
+      (Math.abs(netWeight - actualCritical) / netWeight) * 100;
     expect(devCritical).toBe(5.1);
-    expect(devCritical > 5 ? 'CRITICAL' : devCritical > 2 ? 'WARNING' : 'SAFE').toBe('CRITICAL');
+    expect(
+      devCritical > 5 ? 'CRITICAL' : devCritical > 2 ? 'WARNING' : 'SAFE',
+    ).toBe('CRITICAL');
   });
 });

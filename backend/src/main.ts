@@ -3,7 +3,10 @@ import { AppModule } from './app.module';
 import { Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { configureApp } from './app.config';
-import { getJwtAccessSecret, getJwtRefreshSecret } from './common/utils/jwt-secrets.util';
+import {
+  getJwtAccessSecret,
+  getJwtRefreshSecret,
+} from './common/utils/jwt-secrets.util';
 
 async function bootstrap() {
   const isProduction = process.env.NODE_ENV === 'production';

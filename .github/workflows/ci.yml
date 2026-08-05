@@ -50,8 +50,8 @@ jobs:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
         run: |
           npx prisma generate
-          npm run prisma:preflight
           npx prisma migrate deploy
+          npm run prisma:preflight -- --report-only
 
       - name: Build Backend Production Bundle
         working-directory: ./backend
@@ -74,6 +74,7 @@ jobs:
         working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          DATABASE_URL_TEST: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
           JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test

@@ -21,7 +21,11 @@ const execFileAsync = promisify(execFile);
 export interface BackupManifest {
   backupId: string;
   database: string;
-  backupType: 'AUTOMATIC_6HR' | 'MANUAL_PRE_UPDATE' | 'MANUAL_EXPLICIT' | 'AUTO_PRE_RESTORE';
+  backupType:
+    | 'AUTOMATIC_6HR'
+    | 'MANUAL_PRE_UPDATE'
+    | 'MANUAL_EXPLICIT'
+    | 'AUTO_PRE_RESTORE';
   applicationVersion: string;
   postgresVersion: string;
   schemaMigrationVersion: string;
@@ -64,6 +68,7 @@ export interface BackupSystemStatus {
 
 export interface DatabaseBackupPayload {
   metadata: {
+    backupId?: string;
     system: string;
     version: string;
     createdAt: string;
@@ -92,7 +97,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
   onApplicationBootstrap() {
     this.ensureBackupDirectories();
     this.scheduleIntervalBackups();
-    this.performSlaCatchUpCheck();
+    void this.performSlaCatchUpCheck();
   }
 
   private get localBackupDir(): string {
@@ -116,7 +121,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         fs.mkdirSync(this.localBackupDir, { recursive: true });
       }
     } catch (e: any) {
-      this.logger.error(`Could not create local backup directory (${this.localBackupDir}): ${e.message}`);
+      this.logger.error(
+        `Could not create local backup directory (${this.localBackupDir}): ${e.message}`,
+      );
     }
 
     try {
@@ -124,7 +131,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         fs.mkdirSync(this.offsiteBackupDir, { recursive: true });
       }
     } catch (e: any) {
-      this.logger.warn(`Could not create offsite backup directory (${this.offsiteBackupDir}): ${e.message}`);
+      this.logger.warn(
+        `Could not create offsite backup directory (${this.offsiteBackupDir}): ${e.message}`,
+      );
     }
   }
 
@@ -183,7 +192,8 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     let lastBackupAgeHours = 999;
     let lastBackupTimestamp: string | null = null;
     let localBackupStatus: 'VERIFIED' | 'FAILED' | 'NONE' = 'NONE';
-    let offsiteBackupStatus: 'VERIFIED' | 'PENDING' | 'FAILED' | 'NONE' = 'NONE';
+    let offsiteBackupStatus: 'VERIFIED' | 'PENDING' | 'FAILED' | 'NONE' =
+      'NONE';
 
     if (latestVerified) {
       lastBackupTimestamp = latestVerified.createdAt;
@@ -204,12 +214,18 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     // P0-01 Fix: Read persistent restore drill test result from file
     let lastRestoreTestDate: string | null = null;
     let lastRestoreTestStatus: 'PASSED' | 'FAILED' | 'NONE' = 'NONE';
-    const restoreHistoryPath = path.join(this.localBackupDir, 'restore_history.json');
+    const restoreHistoryPath = path.join(
+      this.localBackupDir,
+      'restore_history.json',
+    );
     if (fs.existsSync(restoreHistoryPath)) {
       try {
-        const restoreLog = JSON.parse(fs.readFileSync(restoreHistoryPath, 'utf8'));
+        const restoreLog = JSON.parse(
+          fs.readFileSync(restoreHistoryPath, 'utf8'),
+        );
         lastRestoreTestDate = restoreLog.lastTestDate || null;
-        lastRestoreTestStatus = restoreLog.status === 'PASSED' ? 'PASSED' : 'FAILED';
+        lastRestoreTestStatus =
+          restoreLog.status === 'PASSED' ? 'PASSED' : 'FAILED';
       } catch (e) {
         // Ignore read errors
       }
@@ -223,7 +239,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         const stats = fs.statfsSync(this.localBackupDir);
         storageFreeBytes = stats.bavail * stats.bsize;
         const totalBytes = stats.blocks * stats.bsize;
-        storagePercent = Math.round(((totalBytes - storageFreeBytes) / totalBytes) * 100);
+        storagePercent = Math.round(
+          ((totalBytes - storageFreeBytes) / totalBytes) * 100,
+        );
       } else {
         // Fallback default if statfsSync not supported on environment
         storageFreeBytes = 50 * 1024 * 1024 * 1024;
@@ -272,17 +290,24 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           }
         }
       } catch (e: any) {
-        this.logger.error(`Error reading backup history from ${dir}: ${e.message}`);
+        this.logger.error(
+          `Error reading backup history from ${dir}: ${e.message}`,
+        );
       }
     }
 
     return manifests.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
   }
 
   async runAutomatedScheduledBackup(
-    type: 'AUTOMATIC_6HR' | 'MANUAL_PRE_UPDATE' | 'MANUAL_EXPLICIT' | 'AUTO_PRE_RESTORE' = 'AUTOMATIC_6HR',
+    type:
+      | 'AUTOMATIC_6HR'
+      | 'MANUAL_PRE_UPDATE'
+      | 'MANUAL_EXPLICIT'
+      | 'AUTO_PRE_RESTORE' = 'AUTOMATIC_6HR',
     userPayload?: JwtPayloadUser,
   ): Promise<BackupManifest> {
     if (this.isBackupRunning) {
@@ -308,7 +333,11 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
   }
 
   private async createNativePgDumpBackup(
-    type: 'AUTOMATIC_6HR' | 'MANUAL_PRE_UPDATE' | 'MANUAL_EXPLICIT' | 'AUTO_PRE_RESTORE',
+    type:
+      | 'AUTOMATIC_6HR'
+      | 'MANUAL_PRE_UPDATE'
+      | 'MANUAL_EXPLICIT'
+      | 'AUTO_PRE_RESTORE',
     user: JwtPayloadUser,
   ): Promise<BackupManifest> {
     this.ensureBackupDirectories();
@@ -391,10 +420,15 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
 
     const jsonPayload: DatabaseBackupPayload = {
       metadata: {
+        backupId,
         system: 'GMS_GATE_MANAGEMENT_SYSTEM',
         version: '1.0.0',
         createdAt: new Date().toISOString(),
-        createdBy: { id: user.id, email: user.email, name: user.name || 'Admin' },
+        createdBy: {
+          id: user.id,
+          email: user.email,
+          name: user.name || 'Admin',
+        },
         totalRecords: Object.values(recordCounts).reduce((a, b) => a + b, 0),
         checksum: this.calculateChecksumForData(data),
       },
@@ -444,15 +478,24 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         localSnapshotPath = path.join(activeLocalDir, snapshotFileName);
 
         try {
-          fs.writeFileSync(localSnapshotPath, this.safeJsonStringify(jsonPayload));
+          fs.writeFileSync(
+            localSnapshotPath,
+            this.safeJsonStringify(jsonPayload),
+          );
         } catch (err: any) {
-          this.logger.error(`Failed to write backup snapshot to fallback disk: ${err.message}`, err.stack);
+          this.logger.error(
+            `Failed to write backup snapshot to fallback disk: ${err.message}`,
+            err.stack,
+          );
           throw new InternalServerErrorException(
             `Gagal menyimpan file backup ke media penyimpanan server (${err.message}). Periksa izin lokasi direktori atau ruang penyimpanan disk.`,
           );
         }
       } else {
-        this.logger.error(`Failed to write backup snapshot to disk: ${e.message}`, e.stack);
+        this.logger.error(
+          `Failed to write backup snapshot to disk: ${e.message}`,
+          e.stack,
+        );
         throw new InternalServerErrorException(
           `Gagal menyimpan file backup ke media penyimpanan server (${e.message}). Periksa izin lokasi direktori atau ruang penyimpanan disk.`,
         );
@@ -462,7 +505,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     // Attempt Native pg_dump using child_process execFile (shell: false)
     let pgDumpSuccess = false;
     try {
-      const dbUrl = process.env.DATABASE_URL || 'postgresql://postgres:postgres@postgres:5432/gms';
+      const dbUrl =
+        process.env.DATABASE_URL ||
+        'postgresql://postgres:postgres@postgres:5432/gms';
       const parsedUrl = new URL(dbUrl);
       const host = parsedUrl.hostname || 'postgres';
       const port = parsedUrl.port || '5432';
@@ -493,7 +538,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         pgDumpSuccess = true;
       }
     } catch (e: any) {
-      this.logger.warn(`Native pg_dump unavailable or failed (${e.message}). Using Application Data Snapshot.`);
+      this.logger.warn(
+        `Native pg_dump unavailable or failed (${e.message}). Using Application Data Snapshot.`,
+      );
     }
 
     // Fallback JSON dump if native pg_dump binary is absent
@@ -507,21 +554,31 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
 
     // Write dummy globals SQL for completeness
     try {
-      fs.writeFileSync(localGlobalsPath, `-- GMS Globals Dump ${timestamp}\n-- Roles and tablespaces\n`);
+      fs.writeFileSync(
+        localGlobalsPath,
+        `-- GMS Globals Dump ${timestamp}\n-- Roles and tablespaces\n`,
+      );
     } catch (e: any) {
       this.logger.warn(`Could not write globals sql file: ${e.message}`);
     }
 
     // P0-02 & P0-05 Fix: Physical Attachments Byte Archive & Checksum Manifest
     const attachmentsArchiveName = `gms_${timestamp}_attachments.json`;
-    const localAttachmentsPath = path.join(activeLocalDir, attachmentsArchiveName);
+    const localAttachmentsPath = path.join(
+      activeLocalDir,
+      attachmentsArchiveName,
+    );
     let attachmentsCount = 0;
     let attachmentsChecksum = '';
     try {
       const uploadDir = process.env.UPLOAD_DIR || './uploads';
       const resolvedUploadDir = path.resolve(uploadDir);
       if (fs.existsSync(resolvedUploadDir)) {
-        const uploadFiles = fs.readdirSync(resolvedUploadDir).filter((f) => !fs.statSync(path.join(resolvedUploadDir, f)).isDirectory());
+        const uploadFiles = fs
+          .readdirSync(resolvedUploadDir)
+          .filter(
+            (f) => !fs.statSync(path.join(resolvedUploadDir, f)).isDirectory(),
+          );
         const attachmentManifest = uploadFiles.map((f) => {
           const filePath = path.join(resolvedUploadDir, f);
           const fileBuffer = fs.readFileSync(filePath);
@@ -533,19 +590,35 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           };
         });
         attachmentsCount = attachmentManifest.length;
-        fs.writeFileSync(localAttachmentsPath, this.safeJsonStringify({ count: attachmentsCount, files: attachmentManifest }));
-        attachmentsChecksum = this.calculateChecksumForFile(localAttachmentsPath);
+        fs.writeFileSync(
+          localAttachmentsPath,
+          this.safeJsonStringify({
+            count: attachmentsCount,
+            files: attachmentManifest,
+          }),
+        );
+        attachmentsChecksum =
+          this.calculateChecksumForFile(localAttachmentsPath);
       }
     } catch (e: any) {
       this.logger.warn(`Could not archive physical attachments: ${e.message}`);
     }
 
-    const dumpChecksum = fs.existsSync(localDumpPath) ? this.calculateChecksumForFile(localDumpPath) : '';
-    const globalsChecksum = fs.existsSync(localGlobalsPath) ? this.calculateChecksumForFile(localGlobalsPath) : '';
+    const dumpChecksum = fs.existsSync(localDumpPath)
+      ? this.calculateChecksumForFile(localDumpPath)
+      : '';
+    const globalsChecksum = fs.existsSync(localGlobalsPath)
+      ? this.calculateChecksumForFile(localGlobalsPath)
+      : '';
 
     // P1-04 Fix: Status VERIFIED only if dump file exists, size > 0, and checksum non-empty
-    const isDumpValid = fs.existsSync(localDumpPath) && fs.statSync(localDumpPath).size > 0 && dumpChecksum.length > 0;
-    const localStatus: 'VERIFIED' | 'FAILED' = isDumpValid ? 'VERIFIED' : 'FAILED';
+    const isDumpValid =
+      fs.existsSync(localDumpPath) &&
+      fs.statSync(localDumpPath).size > 0 &&
+      dumpChecksum.length > 0;
+    const localStatus: 'VERIFIED' | 'FAILED' = isDumpValid
+      ? 'VERIFIED'
+      : 'FAILED';
 
     const manifest: BackupManifest = {
       backupId,
@@ -566,7 +639,8 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         dump: dumpFileName,
         globals: globalsFileName,
         manifest: manifestFileName,
-        attachmentsArchive: attachmentsCount > 0 ? attachmentsArchiveName : undefined,
+        attachmentsArchive:
+          attachmentsCount > 0 ? attachmentsArchiveName : undefined,
       },
       attachmentsCount,
       localStatus,
@@ -589,22 +663,45 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     try {
       if (fs.existsSync(this.offsiteBackupDir)) {
         const offsiteDumpPath = path.join(this.offsiteBackupDir, dumpFileName);
-        const offsiteGlobalsPath = path.join(this.offsiteBackupDir, globalsFileName);
-        const offsiteManifestPath = path.join(this.offsiteBackupDir, manifestFileName);
-        const offsiteSnapshotPath = path.join(this.offsiteBackupDir, snapshotFileName);
-        const offsiteAttachmentsPath = path.join(this.offsiteBackupDir, attachmentsArchiveName);
+        const offsiteGlobalsPath = path.join(
+          this.offsiteBackupDir,
+          globalsFileName,
+        );
+        const offsiteManifestPath = path.join(
+          this.offsiteBackupDir,
+          manifestFileName,
+        );
+        const offsiteSnapshotPath = path.join(
+          this.offsiteBackupDir,
+          snapshotFileName,
+        );
+        const offsiteAttachmentsPath = path.join(
+          this.offsiteBackupDir,
+          attachmentsArchiveName,
+        );
 
-        if (fs.existsSync(localDumpPath)) fs.copyFileSync(localDumpPath, offsiteDumpPath);
-        if (fs.existsSync(localGlobalsPath)) fs.copyFileSync(localGlobalsPath, offsiteGlobalsPath);
-        if (fs.existsSync(localSnapshotPath)) fs.copyFileSync(localSnapshotPath, offsiteSnapshotPath);
-        if (fs.existsSync(localAttachmentsPath)) fs.copyFileSync(localAttachmentsPath, offsiteAttachmentsPath);
+        if (fs.existsSync(localDumpPath))
+          fs.copyFileSync(localDumpPath, offsiteDumpPath);
+        if (fs.existsSync(localGlobalsPath))
+          fs.copyFileSync(localGlobalsPath, offsiteGlobalsPath);
+        if (fs.existsSync(localSnapshotPath))
+          fs.copyFileSync(localSnapshotPath, offsiteSnapshotPath);
+        if (fs.existsSync(localAttachmentsPath))
+          fs.copyFileSync(localAttachmentsPath, offsiteAttachmentsPath);
 
-        const offsiteDumpChecksum = this.calculateChecksumForFile(offsiteDumpPath);
+        const offsiteDumpChecksum =
+          this.calculateChecksumForFile(offsiteDumpPath);
         if (offsiteDumpChecksum === dumpChecksum) {
           manifest.offsiteStatus = 'VERIFIED';
           try {
-            fs.writeFileSync(localManifestPath, this.safeJsonStringify(manifest));
-            fs.writeFileSync(offsiteManifestPath, this.safeJsonStringify(manifest));
+            fs.writeFileSync(
+              localManifestPath,
+              this.safeJsonStringify(manifest),
+            );
+            fs.writeFileSync(
+              offsiteManifestPath,
+              this.safeJsonStringify(manifest),
+            );
           } catch (e: any) {
             // Ignore offsite write error
           }
@@ -625,8 +722,14 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     return manifest;
   }
 
-  async generateBackup(user: JwtPayloadUser, ipAddress?: string): Promise<DatabaseBackupPayload> {
-    const manifest = await this.runAutomatedScheduledBackup('MANUAL_EXPLICIT', user);
+  async generateBackup(
+    user: JwtPayloadUser,
+    ipAddress?: string,
+  ): Promise<DatabaseBackupPayload> {
+    const manifest = await this.runAutomatedScheduledBackup(
+      'MANUAL_EXPLICIT',
+      user,
+    );
     const timestamp = manifest.createdAt.replace(/[:.]/g, '-');
     const snapshotName = `gms_${timestamp}_snapshot.json`;
     const dirsToSearch = [this.localBackupDir, this.uploadBackupDir];
@@ -638,7 +741,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           const content = fs.readFileSync(snapshotPath, 'utf8');
           return JSON.parse(content);
         } catch (e) {
-          this.logger.error(`Error reading snapshot file from ${snapshotPath}: ${e.message}`);
+          this.logger.error(
+            `Error reading snapshot file from ${snapshotPath}: ${e.message}`,
+          );
         }
       }
     }
@@ -650,7 +755,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           const content = fs.readFileSync(dumpPath, 'utf8');
           return JSON.parse(content);
         } catch (e) {
-          this.logger.warn(`Dump file is binary or unparseable. Returning manifest structure.`);
+          this.logger.warn(
+            `Dump file is binary or unparseable. Returning manifest structure.`,
+          );
         }
       }
     }
@@ -661,7 +768,10 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         version: '1.0.0',
         createdAt: manifest.createdAt,
         createdBy: manifest.createdBy,
-        totalRecords: Object.values(manifest.recordCounts).reduce((a, b) => a + b, 0),
+        totalRecords: Object.values(manifest.recordCounts).reduce(
+          (a, b) => a + b,
+          0,
+        ),
         checksum: manifest.checksums.dump,
       },
       data: {},
@@ -684,7 +794,8 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     if (!adminUser || !adminUser.passwordHash) {
       throw new UnauthorizedException({
         success: false,
-        message: 'Pengguna admin tidak ditemukan atau tidak memiliki kredensial valid.',
+        message:
+          'Pengguna admin tidak ditemukan atau tidak memiliki kredensial valid.',
       });
     }
 
@@ -698,25 +809,32 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         userId: user.id,
         action: 'DATABASE_RESTORE',
         module: 'SETTINGS',
-        description: 'Database restore blocked: Invalid admin password confirmation',
+        description:
+          'Database restore blocked: Invalid admin password confirmation',
         status: 'FAILED',
         ipAddress,
       });
       throw new UnauthorizedException({
         success: false,
-        message: 'Konfirmasi password admin tidak valid. Pemulihan database dibatalkan.',
+        message:
+          'Konfirmasi password admin tidak valid. Pemulihan database dibatalkan.',
       });
     }
 
     // 2. Automatically generate a Pre-Restore backup snapshot first (P1-03 Fix)
     try {
       this.logger.log('Creating Auto Pre-Restore Backup snapshot...');
-      const preRestoreManifest = await this.runAutomatedScheduledBackup('AUTO_PRE_RESTORE', user);
+      const preRestoreManifest = await this.runAutomatedScheduledBackup(
+        'AUTO_PRE_RESTORE',
+        user,
+      );
       if (preRestoreManifest.localStatus !== 'VERIFIED') {
         throw new Error('Pre-restore backup failed verification.');
       }
     } catch (e: any) {
-      this.logger.error(`Auto Pre-Restore Backup failed: ${e.message}. Aborting restore.`);
+      this.logger.error(
+        `Auto Pre-Restore Backup failed: ${e.message}. Aborting restore.`,
+      );
       await this.activityLogsService.logAction({
         userId: user.id,
         action: 'DATABASE_RESTORE',
@@ -740,23 +858,28 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     ) {
       throw new BadRequestException({
         success: false,
-        message: 'Format berkas backup tidak dikenali atau bukan merupakan backup resmi GMS.',
+        message:
+          'Format berkas backup tidak dikenali atau bukan merupakan backup resmi GMS.',
       });
     }
 
-    const calculatedChecksum = this.calculateChecksumForData(backupPayload.data);
+    const calculatedChecksum = this.calculateChecksumForData(
+      backupPayload.data,
+    );
     if (calculatedChecksum !== backupPayload.metadata.checksum) {
       await this.activityLogsService.logAction({
         userId: user.id,
         action: 'DATABASE_RESTORE',
         module: 'SETTINGS',
-        description: 'Database restore blocked: Backup file checksum mismatch / corrupted',
+        description:
+          'Database restore blocked: Backup file checksum mismatch / corrupted',
         status: 'FAILED',
         ipAddress,
       });
       throw new BadRequestException({
         success: false,
-        message: 'Integritas data gagal! Berkas backup mengalami perubahan atau korupsi (Checksum Mismatch).',
+        message:
+          'Integritas data gagal! Berkas backup mengalami perubahan atau korupsi (Checksum Mismatch).',
       });
     }
 
@@ -781,21 +904,78 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           await tx.user.deleteMany();
 
           const d = backupPayload.data;
-          if (d.users?.length) await tx.user.createMany({ data: d.users, skipDuplicates: true });
-          if (d.userWarehouseAccess?.length) await tx.userWarehouseAccess.createMany({ data: d.userWarehouseAccess, skipDuplicates: true });
-          if (d.transactions?.length) await tx.transaction.createMany({ data: d.transactions, skipDuplicates: true });
-          if (d.transactionStatusHistory?.length) await tx.transactionStatusHistory.createMany({ data: d.transactionStatusHistory, skipDuplicates: true });
-          if (d.weighbridgeRecords?.length) await tx.weighbridgeRecord.createMany({ data: d.weighbridgeRecords, skipDuplicates: true });
-          if (d.warehouseProcesses?.length) await tx.warehouseProcess.createMany({ data: d.warehouseProcesses, skipDuplicates: true });
-          if (d.qcVehicleChecks?.length) await tx.qcVehicleCheck.createMany({ data: d.qcVehicleChecks, skipDuplicates: true });
-          if (d.incomingMaterialChecks?.length) await tx.incomingMaterialCheck.createMany({ data: d.incomingMaterialChecks, skipDuplicates: true });
-          if (d.attachments?.length) await tx.attachment.createMany({ data: d.attachments, skipDuplicates: true });
-          if (d.fraudChecks?.length) await tx.fraudCheck.createMany({ data: d.fraudChecks, skipDuplicates: true });
-          if (d.transactionCorrections?.length) await tx.transactionCorrection.createMany({ data: d.transactionCorrections, skipDuplicates: true });
-          if (d.activityLogs?.length) await tx.activityLog.createMany({ data: d.activityLogs, skipDuplicates: true });
-          if (d.appSettings?.length) await tx.appSetting.createMany({ data: d.appSettings, skipDuplicates: true });
-          if (d.announcements?.length) await tx.announcement.createMany({ data: d.announcements, skipDuplicates: true });
-          if (d.systemIssues?.length) await tx.systemIssue.createMany({ data: d.systemIssues, skipDuplicates: true });
+          if (d.users?.length)
+            await tx.user.createMany({ data: d.users, skipDuplicates: true });
+          if (d.userWarehouseAccess?.length)
+            await tx.userWarehouseAccess.createMany({
+              data: d.userWarehouseAccess,
+              skipDuplicates: true,
+            });
+          if (d.transactions?.length)
+            await tx.transaction.createMany({
+              data: d.transactions,
+              skipDuplicates: true,
+            });
+          if (d.transactionStatusHistory?.length)
+            await tx.transactionStatusHistory.createMany({
+              data: d.transactionStatusHistory,
+              skipDuplicates: true,
+            });
+          if (d.weighbridgeRecords?.length)
+            await tx.weighbridgeRecord.createMany({
+              data: d.weighbridgeRecords,
+              skipDuplicates: true,
+            });
+          if (d.warehouseProcesses?.length)
+            await tx.warehouseProcess.createMany({
+              data: d.warehouseProcesses,
+              skipDuplicates: true,
+            });
+          if (d.qcVehicleChecks?.length)
+            await tx.qcVehicleCheck.createMany({
+              data: d.qcVehicleChecks,
+              skipDuplicates: true,
+            });
+          if (d.incomingMaterialChecks?.length)
+            await tx.incomingMaterialCheck.createMany({
+              data: d.incomingMaterialChecks,
+              skipDuplicates: true,
+            });
+          if (d.attachments?.length)
+            await tx.attachment.createMany({
+              data: d.attachments,
+              skipDuplicates: true,
+            });
+          if (d.fraudChecks?.length)
+            await tx.fraudCheck.createMany({
+              data: d.fraudChecks,
+              skipDuplicates: true,
+            });
+          if (d.transactionCorrections?.length)
+            await tx.transactionCorrection.createMany({
+              data: d.transactionCorrections,
+              skipDuplicates: true,
+            });
+          if (d.activityLogs?.length)
+            await tx.activityLog.createMany({
+              data: d.activityLogs,
+              skipDuplicates: true,
+            });
+          if (d.appSettings?.length)
+            await tx.appSetting.createMany({
+              data: d.appSettings,
+              skipDuplicates: true,
+            });
+          if (d.announcements?.length)
+            await tx.announcement.createMany({
+              data: d.announcements,
+              skipDuplicates: true,
+            });
+          if (d.systemIssues?.length)
+            await tx.systemIssue.createMany({
+              data: d.systemIssues,
+              skipDuplicates: true,
+            });
         },
         {
           timeout: 60000,
@@ -806,29 +986,40 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       let restoredAttachmentsCount = 0;
       try {
         const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        if (!fs.existsSync(uploadDir))
+          fs.mkdirSync(uploadDir, { recursive: true });
 
         // Search for attachment archive file corresponding to backup history or checksum
         const history = await this.getBackupHistory();
         const matchedManifest = history.find(
           (m) =>
+            (backupPayload.metadata.backupId &&
+              m.backupId === backupPayload.metadata.backupId) ||
             m.checksums?.dump === backupPayload.metadata.checksum ||
             m.createdAt === backupPayload.metadata.createdAt,
-        ) || history[0];
+        );
 
         if (matchedManifest && matchedManifest.artifacts?.attachmentsArchive) {
-          const archivePath = path.join(this.localBackupDir, matchedManifest.artifacts.attachmentsArchive);
+          const archivePath = path.join(
+            this.localBackupDir,
+            matchedManifest.artifacts.attachmentsArchive,
+          );
           if (fs.existsSync(archivePath)) {
-            const archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+            const archiveContent = JSON.parse(
+              fs.readFileSync(archivePath, 'utf8'),
+            );
             if (archiveContent.files && Array.isArray(archiveContent.files)) {
               for (const file of archiveContent.files) {
                 if (file.fileName && file.base64Content) {
                   const targetPath = path.join(uploadDir, file.fileName);
                   const buffer = Buffer.from(file.base64Content, 'base64');
                   fs.writeFileSync(targetPath, buffer);
-                  const restoredChecksum = this.calculateChecksumForBuffer(buffer);
+                  const restoredChecksum =
+                    this.calculateChecksumForBuffer(buffer);
                   if (file.checksum && restoredChecksum !== file.checksum) {
-                    throw new Error(`Checksum mismatch during attachment file restore: ${file.fileName}`);
+                    throw new Error(
+                      `Checksum mismatch during attachment file restore: ${file.fileName}`,
+                    );
                   }
                   restoredAttachmentsCount++;
                 }
@@ -837,14 +1028,18 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           }
         }
       } catch (fileErr: any) {
-        this.logger.error(`Attachment file restoration error: ${fileErr.message}`);
+        this.logger.error(
+          `Attachment file restoration error: ${fileErr.message}`,
+        );
         throw new BadRequestException({
           success: false,
           message: `Gagal memulihkan berkas fisik attachment: ${fileErr.message}`,
         });
       }
 
-      this.logger.log(`Database restore completed successfully by ${user.email} (${restoredAttachmentsCount} attachment files restored)`);
+      this.logger.log(
+        `Database restore completed successfully by ${user.email} (${restoredAttachmentsCount} attachment files restored)`,
+      );
 
       await this.activityLogsService.logAction({
         userId: user.id,
@@ -864,7 +1059,10 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         },
       };
     } catch (error: any) {
-      this.logger.error(`Database restore failed during transaction: ${error.message}`, error.stack);
+      this.logger.error(
+        `Database restore failed during transaction: ${error.message}`,
+        error.stack,
+      );
       await this.activityLogsService.logAction({
         userId: user.id,
         action: 'DATABASE_RESTORE',
@@ -888,8 +1086,14 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         const toDelete = history.slice(30);
         for (const item of toDelete) {
           const dumpPath = path.join(this.localBackupDir, item.artifacts.dump);
-          const globalsPath = path.join(this.localBackupDir, item.artifacts.globals);
-          const manifestPath = path.join(this.localBackupDir, item.artifacts.manifest);
+          const globalsPath = path.join(
+            this.localBackupDir,
+            item.artifacts.globals,
+          );
+          const manifestPath = path.join(
+            this.localBackupDir,
+            item.artifacts.manifest,
+          );
 
           if (fs.existsSync(dumpPath)) fs.unlinkSync(dumpPath);
           if (fs.existsSync(globalsPath)) fs.unlinkSync(globalsPath);

@@ -1,9 +1,17 @@
-import { IsNotEmpty, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CorrectTransactionDto {
   @ApiProperty({
-    description: 'Detailed reason for correction (mandatory, min 10 characters)',
+    description:
+      'Detailed reason for correction (mandatory, min 10 characters)',
     example: 'Koreksi kesalahan catat berat gross dari nota timbang manual',
   })
   @IsString()
@@ -11,12 +19,18 @@ export class CorrectTransactionDto {
   @MinLength(10)
   reason: string;
 
-  @ApiProperty({ description: 'URL or path to supporting evidence document (mandatory for COMPLETED correction)' })
+  @ApiProperty({
+    description:
+      'URL or path to supporting evidence document (mandatory for COMPLETED correction)',
+  })
   @IsString()
   @IsNotEmpty()
   evidenceUrl: string;
 
-  @ApiPropertyOptional({ description: 'Optional expected updatedAt ISO timestamp for optimistic concurrency control' })
+  @ApiPropertyOptional({
+    description:
+      'Optional expected updatedAt ISO timestamp for optimistic concurrency control',
+  })
   @IsOptional()
   @IsString()
   expectedUpdatedAt?: string;

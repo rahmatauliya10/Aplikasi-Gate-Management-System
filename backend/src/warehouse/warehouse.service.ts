@@ -489,7 +489,11 @@ export class WarehouseService {
           actualWeight: dto.actualWeight,
           actualQuantity: dto.actualQuantity,
           warehouseUnit: dto.unit,
-          remarks: tx.remarks ? (finalRemarks ? `${tx.remarks} | ${finalRemarks}` : tx.remarks) : finalRemarks || null,
+          remarks: tx.remarks
+            ? finalRemarks
+              ? `${tx.remarks} | ${finalRemarks}`
+              : tx.remarks
+            : finalRemarks || null,
           ...(dto.suratJalanNumber && {
             suratJalanNumber: dto.suratJalanNumber,
           }),
@@ -552,7 +556,12 @@ export class WarehouseService {
 
   async submitIncomingCheck(
     transactionId: string,
-    dto: { decision: 'passed' | 'rejected'; rejectReason?: string; remarks?: string; checklist?: any },
+    dto: {
+      decision: 'passed' | 'rejected';
+      rejectReason?: string;
+      remarks?: string;
+      checklist?: any;
+    },
     user: JwtPayloadUser,
   ) {
     this.logger.log(
@@ -580,18 +589,23 @@ export class WarehouseService {
     }
 
     if (tx.processType === 'GBB' && user.role === 'WAREHOUSE') {
-      this.logger.warn(`SoD violation: Warehouse role attempted incoming check on GBB transaction ${transactionId}`);
-      await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'SOD_VIOLATION_BLOCKED',
-        module: 'WAREHOUSE',
-        referenceId: transactionId,
-        description: `Blocked Warehouse role from executing GBB incoming check`,
-        status: 'FAILED',
-      }).catch(() => {});
+      this.logger.warn(
+        `SoD violation: Warehouse role attempted incoming check on GBB transaction ${transactionId}`,
+      );
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'SOD_VIOLATION_BLOCKED',
+          module: 'WAREHOUSE',
+          referenceId: transactionId,
+          description: `Blocked Warehouse role from executing GBB incoming check`,
+          status: 'FAILED',
+        })
+        .catch(() => {});
       throw new ForbiddenException({
         success: false,
-        message: 'Segregation of Duties (SoD) violation: Akses ditolak! Proses pemeriksaan incoming GBB wajib dieksekusi oleh tim QC atau Admin.',
+        message:
+          'Segregation of Duties (SoD) violation: Akses ditolak! Proses pemeriksaan incoming GBB wajib dieksekusi oleh tim QC atau Admin.',
         errors: [],
       });
     }
@@ -614,7 +628,10 @@ export class WarehouseService {
         ? 'INCOMING_CHECK_PASSED'
         : 'INCOMING_CHECK_REJECTED';
 
-    const notesContent = dto.remarks || dto.rejectReason || 'Incoming check completed via Warehouse';
+    const notesContent =
+      dto.remarks ||
+      dto.rejectReason ||
+      'Incoming check completed via Warehouse';
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       await prismaTx.incomingMaterialCheck.create({
@@ -632,7 +649,9 @@ export class WarehouseService {
         data: {
           status: nextStatus,
           qcEndAt: new Date(),
-          remarks: dto.remarks ? `${tx.remarks ? tx.remarks + ' | ' : ''}GSP Check: ${dto.remarks}` : tx.remarks,
+          remarks: dto.remarks
+            ? `${tx.remarks ? tx.remarks + ' | ' : ''}GSP Check: ${dto.remarks}`
+            : tx.remarks,
           statusHistory: {
             create: {
               oldStatus: tx.status,
@@ -683,18 +702,23 @@ export class WarehouseService {
     }
 
     if (tx.processType === 'GBB' && user.role === 'WAREHOUSE') {
-      this.logger.warn(`SoD violation: Warehouse role attempted QC analysis completion on GBB transaction ${transactionId}`);
-      await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'SOD_VIOLATION_BLOCKED',
-        module: 'WAREHOUSE',
-        referenceId: transactionId,
-        description: `Blocked Warehouse role from completing GBB QC analysis`,
-        status: 'FAILED',
-      }).catch(() => {});
+      this.logger.warn(
+        `SoD violation: Warehouse role attempted QC analysis completion on GBB transaction ${transactionId}`,
+      );
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'SOD_VIOLATION_BLOCKED',
+          module: 'WAREHOUSE',
+          referenceId: transactionId,
+          description: `Blocked Warehouse role from completing GBB QC analysis`,
+          status: 'FAILED',
+        })
+        .catch(() => {});
       throw new ForbiddenException({
         success: false,
-        message: 'Segregation of Duties (SoD) violation: Akses ditolak! Penutupan analisa QC pada transaksi GBB wajib dieksekusi oleh tim QC atau Admin.',
+        message:
+          'Segregation of Duties (SoD) violation: Akses ditolak! Penutupan analisa QC pada transaksi GBB wajib dieksekusi oleh tim QC atau Admin.',
         errors: [],
       });
     }

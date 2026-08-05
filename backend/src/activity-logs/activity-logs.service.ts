@@ -21,7 +21,11 @@ export interface CreateActivityLogDto {
 @Injectable()
 export class ActivityLogsService {
   private readonly logger = new Logger(ActivityLogsService.name);
-  private readonly fallbackLogPath = path.resolve(process.cwd(), 'logs', 'audit-fallback.jsonl');
+  private readonly fallbackLogPath = path.resolve(
+    process.cwd(),
+    'logs',
+    'audit-fallback.jsonl',
+  );
 
   constructor(private prisma: PrismaService) {
     this.ensureFallbackDirectory();
@@ -34,7 +38,9 @@ export class ActivityLogsService {
         fs.mkdirSync(dir, { recursive: true });
       }
     } catch (err) {
-      this.logger.error(`Unable to create audit log fallback directory: ${err.message}`);
+      this.logger.error(
+        `Unable to create audit log fallback directory: ${err.message}`,
+      );
     }
   }
 
@@ -45,14 +51,24 @@ export class ActivityLogsService {
         fallbackReason: dbError,
         data: logData,
       };
-      fs.appendFileSync(this.fallbackLogPath, JSON.stringify(payload) + '\n', { mode: 0o600 });
-      this.logger.warn(`Audit log securely buffered to durable file sink: ${this.fallbackLogPath}`);
+      fs.appendFileSync(this.fallbackLogPath, JSON.stringify(payload) + '\n', {
+        mode: 0o600,
+      });
+      this.logger.warn(
+        `Audit log securely buffered to durable file sink: ${this.fallbackLogPath}`,
+      );
     } catch (fileErr) {
-      this.logger.error(`CRITICAL AUDIT LOSS: Failed DB write and failed fallback sink write: ${fileErr.message}`, fileErr.stack);
+      this.logger.error(
+        `CRITICAL AUDIT LOSS: Failed DB write and failed fallback sink write: ${fileErr.message}`,
+        fileErr.stack,
+      );
     }
   }
 
-  async logAction(data: CreateActivityLogDto) {
+  async logAction(
+    data: CreateActivityLogDto,
+    prismaTx?: Prisma.TransactionClient,
+  ) {
     let logData: any = { ...data };
     try {
       let desc = data.description;
@@ -63,8 +79,10 @@ export class ActivityLogsService {
       let userName = data.userName;
       let role = data.role;
 
+      const client = prismaTx || this.prisma;
+
       if (data.userId && (!userName || !role)) {
-        const user = await this.prisma.user.findFirst({
+        const user = await client.user.findFirst({
           where: { id: data.userId },
         });
         if (user) {
@@ -80,7 +98,7 @@ export class ActivityLogsService {
         role,
       };
 
-      await this.prisma.activityLog.create({
+      await client.activityLog.create({
         data: logData,
       });
     } catch (error) {

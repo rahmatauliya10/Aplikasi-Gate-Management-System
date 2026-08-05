@@ -106,7 +106,10 @@ export class ReportsService {
     };
   }
 
-  async *exportCsvStream(query: ReportQueryDto, user: JwtPayloadUser): AsyncGenerator<string, void, unknown> {
+  async *exportCsvStream(
+    query: ReportQueryDto,
+    user: JwtPayloadUser,
+  ): AsyncGenerator<string, void, unknown> {
     const { processType, startDate, endDate, search } = query;
 
     this.logger.log(`Export CSV stream requested by ${user.email}`);
@@ -183,18 +186,21 @@ export class ReportsService {
           t.fraudChecks && t.fraudChecks.length > 0
             ? t.fraudChecks[0].riskLevel
             : 'SAFE';
-        const row = [
-          t.transactionNumber,
-          t.plateNumber,
-          t.vendorName,
-          t.processType,
-          t.status,
-          t.gateInAt ? t.gateInAt.toISOString() : '',
-          t.gateOutAt ? t.gateOutAt.toISOString() : '',
-          t.netWeight || 0,
-          t.actualWeight || 0,
-          fraud,
-        ].map(escapeCsv).join(',') + '\n';
+        const row =
+          [
+            t.transactionNumber,
+            t.plateNumber,
+            t.vendorName,
+            t.processType,
+            t.status,
+            t.gateInAt ? t.gateInAt.toISOString() : '',
+            t.gateOutAt ? t.gateOutAt.toISOString() : '',
+            t.netWeight || 0,
+            t.actualWeight || 0,
+            fraud,
+          ]
+            .map(escapeCsv)
+            .join(',') + '\n';
         yield row;
       }
 
@@ -203,7 +209,10 @@ export class ReportsService {
     }
   }
 
-  async exportCsv(query: ReportQueryDto, user: JwtPayloadUser): Promise<string> {
+  async exportCsv(
+    query: ReportQueryDto,
+    user: JwtPayloadUser,
+  ): Promise<string> {
     let output = '';
     for await (const chunk of this.exportCsvStream(query, user)) {
       output += chunk;

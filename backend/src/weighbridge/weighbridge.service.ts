@@ -253,7 +253,8 @@ export class WeighbridgeService {
       if (existingIn) {
         throw new BadRequestException({
           success: false,
-          message: 'Weigh-in has already been processed for this transaction (concurrency lock)',
+          message:
+            'Weigh-in has already been processed for this transaction (concurrency lock)',
           errors: [],
         });
       }
@@ -389,7 +390,11 @@ export class WeighbridgeService {
 
     let allowedStatuses: string[];
     if (tx.processType === 'GBB' || tx.processType === 'GSP') {
-      allowedStatuses = ['INCOMING_CHECK_PASSED', 'INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED'];
+      allowedStatuses = [
+        'INCOMING_CHECK_PASSED',
+        'INCOMING_CHECK_REJECTED',
+        'QC_VEHICLE_REJECTED',
+      ];
     } else if (tx.processType === 'GBJ') {
       allowedStatuses = ['WAREHOUSE_DONE', 'QC_VEHICLE_REJECTED'];
     } else {
@@ -503,7 +508,8 @@ export class WeighbridgeService {
       if (existingOut) {
         throw new BadRequestException({
           success: false,
-          message: 'Weigh-out has already been processed for this transaction (concurrency lock)',
+          message:
+            'Weigh-out has already been processed for this transaction (concurrency lock)',
           errors: [],
         });
       }

@@ -12,7 +12,10 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { getJwtAccessSecret, getJwtRefreshSecret } from '../common/utils/jwt-secrets.util';
+import {
+  getJwtAccessSecret,
+  getJwtRefreshSecret,
+} from '../common/utils/jwt-secrets.util';
 
 @Injectable()
 export class AuthService {
@@ -25,7 +28,10 @@ export class AuthService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private failedAttemptsMap = new Map<string, { count: number; lockedUntil?: Date }>();
+  private failedAttemptsMap = new Map<
+    string,
+    { count: number; lockedUntil?: Date }
+  >();
 
   async login(dto: LoginDto) {
     this.logger.log(`Login attempt for identifier: ${dto.identifier}`);
@@ -42,7 +48,8 @@ export class AuthService {
       include: { warehouseAccess: true },
     });
 
-    const genericErrorMessage = 'Kredensial login tidak valid. Periksa kembali username dan password Anda.';
+    const genericErrorMessage =
+      'Kredensial login tidak valid. Periksa kembali username dan password Anda.';
 
     if (!user) {
       this.logger.warn(`Login failed: user not found - ${dto.identifier}`);
@@ -68,14 +75,17 @@ export class AuthService {
     });
 
     if (recentFailedCount >= 5) {
-      this.logger.warn(`Login blocked by DB lockout policy for ${dto.identifier}`);
+      this.logger.warn(
+        `Login blocked by DB lockout policy for ${dto.identifier}`,
+      );
       await this.auditLog(user.id, 'LOGIN_LOCKED', {
         identifier: dto.identifier,
         reason: 'Account locked due to consecutive failed attempts in DB log.',
       });
       throw new UnauthorizedException({
         success: false,
-        message: 'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
+        message:
+          'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
         code: 'ACCOUNT_TEMPORARILY_LOCKED',
         errors: [],
       });
@@ -84,7 +94,9 @@ export class AuthService {
     const passwordValid = await argon2.verify(user.passwordHash, dto.password);
     if (!passwordValid) {
       const newCount = recentFailedCount + 1;
-      this.logger.warn(`Login failed: invalid password for ${dto.identifier} (Attempt ${newCount}/5)`);
+      this.logger.warn(
+        `Login failed: invalid password for ${dto.identifier} (Attempt ${newCount}/5)`,
+      );
       await this.auditLog(user.id, 'LOGIN_FAILED', {
         identifier: dto.identifier,
         reason: `Invalid password (Attempt ${newCount}/5)`,
@@ -93,7 +105,8 @@ export class AuthService {
       if (newCount >= 5) {
         throw new UnauthorizedException({
           success: false,
-          message: 'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
+          message:
+            'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
           code: 'ACCOUNT_TEMPORARILY_LOCKED',
           errors: [],
         });

@@ -3,7 +3,10 @@ import * as path from 'path';
 import { getOrCreateBootstrapAdminPassword } from './bootstrap-password.util';
 
 describe('BootstrapPasswordUtil (TDD Secure Password Distribution)', () => {
-  const testSecretPath = path.resolve(__dirname, '../../../../test_bootstrap_secret.txt');
+  const testSecretPath = path.resolve(
+    __dirname,
+    '../../../../test_bootstrap_secret.txt',
+  );
   let originalAdminPassword: string | undefined;
 
   beforeEach(() => {
@@ -45,7 +48,9 @@ describe('BootstrapPasswordUtil (TDD Secure Password Distribution)', () => {
   });
 
   it('should be idempotent and re-use existing bootstrap password if file exists', () => {
-    fs.writeFileSync(testSecretPath, 'GMS_ExistingSavedPassword2026!', { mode: 0o600 });
+    fs.writeFileSync(testSecretPath, 'GMS_ExistingSavedPassword2026!', {
+      mode: 0o600,
+    });
     const pwd = getOrCreateBootstrapAdminPassword(testSecretPath);
     expect(pwd).toBe('GMS_ExistingSavedPassword2026!');
   });

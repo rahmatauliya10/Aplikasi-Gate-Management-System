@@ -20,7 +20,9 @@ export class GateService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private async generateTransactionNumber(txClient: any = this.prisma): Promise<string> {
+  private async generateTransactionNumber(
+    txClient: any = this.prisma,
+  ): Promise<string> {
     const today = new Date();
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
     const prefix = `GMS-${dateStr}-`;

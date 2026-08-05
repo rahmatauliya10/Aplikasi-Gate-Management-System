@@ -32,7 +32,9 @@ export class DatabaseBackupController {
   constructor(private backupService: DatabaseBackupService) {}
 
   @Get('status')
-  @ApiOperation({ summary: 'Get backup system health status and enterprise metrics' })
+  @ApiOperation({
+    summary: 'Get backup system health status and enterprise metrics',
+  })
   @ApiResponse({ status: 200, description: 'System status retrieved' })
   async getStatus() {
     const status = await this.backupService.getSystemStatus();
@@ -74,14 +76,20 @@ export class DatabaseBackupController {
 
   @Post('backup')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Generate and download database backup file (Admin only)' })
-  @ApiResponse({ status: 200, description: 'Backup file generated successfully' })
+  @ApiOperation({
+    summary: 'Generate and download database backup file (Admin only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Backup file generated successfully',
+  })
   async downloadBackup(
     @CurrentUser() user: JwtPayloadUser,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
     const backupData = await this.backupService.generateBackup(user, ipAddress);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -102,7 +110,8 @@ export class DatabaseBackupController {
     @Body('adminPassword') adminPasswordConfirm: string,
     @Req() req: Request,
   ) {
-    const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
 
     let payload = backupData;
     if (typeof backupData === 'string') {

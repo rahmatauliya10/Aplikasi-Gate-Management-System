@@ -77,13 +77,28 @@ describe('TransactionsService State Machine', () => {
     };
 
     const mockPrismaTx = {
-      transactionCorrection: { create: jest.fn().mockResolvedValue({ id: 'corr-1' }) },
-      transaction: { update: jest.fn().mockResolvedValue({ ...mockTx, grossWeight: 10500, netWeight: 7500 }) },
+      transactionCorrection: {
+        create: jest.fn().mockResolvedValue({ id: 'corr-1' }),
+      },
+      transaction: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ updatedAt: new Date('2026-08-01T00:00:00Z') }),
+        update: jest.fn().mockResolvedValue({
+          ...mockTx,
+          grossWeight: 10500,
+          netWeight: 7500,
+        }),
+      },
       fraudCheck: { create: jest.fn().mockResolvedValue({ id: 'fraud-1' }) },
     };
 
-    jest.spyOn(prismaService.transaction, 'findUnique').mockResolvedValue(mockTx as any);
-    jest.spyOn(prismaService, '$transaction').mockImplementation(async (cb: any) => cb(mockPrismaTx));
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockPrismaTx));
 
     const dto = {
       reason: 'Koreksi penimbangan gross di tiket fisik timbang',
@@ -91,7 +106,17 @@ describe('TransactionsService State Machine', () => {
       grossWeight: 10500,
     };
 
-    const result = await service.correctCompletedTransaction('tx-1', dto as any, { id: 'admin-1', role: 'ADMIN', email: 'admin@gms.local' } as any);
+    const userPayload = {
+      id: 'admin-1',
+      role: 'ADMIN',
+      email: 'admin@gms.local',
+    };
+
+    const result = await service.correctCompletedTransaction(
+      'tx-1',
+      dto,
+      userPayload as any,
+    );
 
     expect(result.success).toBe(true);
     expect(mockPrismaTx.transactionCorrection.create).toHaveBeenCalledWith(
@@ -106,8 +131,16 @@ describe('TransactionsService State Machine', () => {
   });
 
   it('should reject correction if evidenceUrl is missing or empty', async () => {
-    const mockTx = { id: 'tx-1', status: 'COMPLETED', grossWeight: 10000, tareWeight: 3000, netWeight: 7000 };
-    jest.spyOn(prismaService.transaction, 'findUnique').mockResolvedValue(mockTx as any);
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      netWeight: 7000,
+    };
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
 
     const dto = {
       reason: 'Koreksi penimbangan gross tanpa bukti',
@@ -115,13 +148,25 @@ describe('TransactionsService State Machine', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction('tx-1', dto as any, { id: 'admin-1', role: 'ADMIN' } as any),
+      service.correctCompletedTransaction(
+        'tx-1',
+        dto as any,
+        { id: 'admin-1', role: 'ADMIN' } as any,
+      ),
     ).rejects.toThrow(BadRequestException);
   });
 
   it('should reject correction if grossWeight is less than tareWeight', async () => {
-    const mockTx = { id: 'tx-1', status: 'COMPLETED', grossWeight: 10000, tareWeight: 3000, netWeight: 7000 };
-    jest.spyOn(prismaService.transaction, 'findUnique').mockResolvedValue(mockTx as any);
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      netWeight: 7000,
+    };
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
 
     const dto = {
       reason: 'Koreksi berat salah memasukkan nilai gross',
@@ -130,13 +175,26 @@ describe('TransactionsService State Machine', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction('tx-1', dto as any, { id: 'admin-1', role: 'ADMIN' } as any),
+      service.correctCompletedTransaction(
+        'tx-1',
+        dto as any,
+        { id: 'admin-1', role: 'ADMIN' } as any,
+      ),
     ).rejects.toThrow(BadRequestException);
   });
 
   it('should reject correction if no values are different (identical submission)', async () => {
-    const mockTx = { id: 'tx-1', status: 'COMPLETED', grossWeight: 10000, tareWeight: 3000, netWeight: 7000, driverName: 'Pak Supri' };
-    jest.spyOn(prismaService.transaction, 'findUnique').mockResolvedValue(mockTx as any);
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      netWeight: 7000,
+      driverName: 'Pak Supri',
+    };
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
 
     const dto = {
       reason: 'Koreksi nilai yang sama persis',
@@ -146,7 +204,11 @@ describe('TransactionsService State Machine', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction('tx-1', dto as any, { id: 'admin-1', role: 'ADMIN' } as any),
+      service.correctCompletedTransaction(
+        'tx-1',
+        dto as any,
+        { id: 'admin-1', role: 'ADMIN' } as any,
+      ),
     ).rejects.toThrow(BadRequestException);
   });
 });
