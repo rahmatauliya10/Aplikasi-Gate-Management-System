@@ -356,6 +356,37 @@ export class TransactionsService {
       });
     }
 
+    if (!dto.evidenceUrl || !dto.evidenceUrl.trim()) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Bukti dokumen (evidenceUrl) wajib diisi untuk koreksi transaksi COMPLETED.',
+        errors: [],
+      });
+    }
+
+    if (dto.expectedUpdatedAt) {
+      const currentTxTime = new Date(tx.updatedAt).getTime();
+      const expectedTime = new Date(dto.expectedUpdatedAt).getTime();
+      if (isNaN(expectedTime) || currentTxTime !== expectedTime) {
+        throw new BadRequestException({
+          success: false,
+          message: 'Data transaksi telah diperbarui oleh pengguna lain. Silakan muat ulang data terbaru sebelum melakukan koreksi.',
+          errors: [],
+        });
+      }
+    }
+
+    const newGross = dto.grossWeight !== undefined ? dto.grossWeight : tx.grossWeight;
+    const newTare = dto.tareWeight !== undefined ? dto.tareWeight : tx.tareWeight;
+
+    if (newGross !== null && newTare !== null && newGross < newTare) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Berat kotor (Gross Weight) tidak boleh lebih kecil dari berat kosong (Tare Weight).',
+        errors: [],
+      });
+    }
+
     const oldValues: Record<string, any> = {};
     const newValues: Record<string, any> = {};
 
@@ -374,18 +405,15 @@ export class TransactionsService {
     const updateData: Prisma.TransactionUpdateInput = {};
 
     for (const field of allowlist) {
-      if (dto[field] !== undefined) {
+      if (dto[field] !== undefined && dto[field] !== (tx as any)[field]) {
         oldValues[field] = (tx as any)[field];
         newValues[field] = dto[field];
         (updateData as any)[field] = dto[field];
       }
     }
 
-    const newGross = dto.grossWeight !== undefined ? dto.grossWeight : tx.grossWeight;
-    const newTare = dto.tareWeight !== undefined ? dto.tareWeight : tx.tareWeight;
-
     if (newGross !== null && newTare !== null) {
-      const computedNet = Math.max(0, newGross - newTare);
+      const computedNet = newGross - newTare;
       if (computedNet !== tx.netWeight) {
         oldValues['netWeight'] = tx.netWeight;
         newValues['netWeight'] = computedNet;
@@ -396,10 +424,12 @@ export class TransactionsService {
     if (Object.keys(newValues).length === 0) {
       throw new BadRequestException({
         success: false,
-        message: 'Tidak ada data perubahan yang dikirimkan.',
+        message: 'Tidak ada data perubahan nilai yang berbeda dari data transaksi saat ini.',
         errors: [],
       });
     }
+
+    const cleanIp = ipAddress ? ipAddress.split(',')[0].trim() : null;
 
     const result = await this.prisma.$transaction(async (prismaTx) => {
       const correction = await prismaTx.transactionCorrection.create({
@@ -407,10 +437,10 @@ export class TransactionsService {
           transactionId: id,
           correctedById: user.id,
           reason: dto.reason,
-          evidenceUrl: dto.evidenceUrl || null,
+          evidenceUrl: dto.evidenceUrl,
           oldValues: oldValues as any,
           newValues: newValues as any,
-          ipAddress: ipAddress || null,
+          ipAddress: cleanIp,
         },
       });
 
@@ -439,22 +469,55 @@ export class TransactionsService {
         });
       }
 
+      await this.activityLogsService.logAction({
+        userId: user.id,
+        action: 'TRANSACTION_DATA_CORRECTED',
+        module: 'TRANSACTIONS',
+        referenceId: id,
+        description: `Admin ${user.email} corrected COMPLETED transaction ${tx.transactionNumber}. Reason: ${dto.reason}`,
+        status: 'SUCCESS',
+        ipAddress: cleanIp || undefined,
+      });
+
       return { updatedTx, correction };
     });
-
-    await this.activityLogsService.logAction({
-      userId: user.id,
-      action: 'TRANSACTION_DATA_CORRECTED',
-      module: 'TRANSACTIONS',
-      referenceId: id,
-      description: `Admin ${user.email} corrected COMPLETED transaction ${tx.transactionNumber}. Reason: ${dto.reason}`,
-      status: 'SUCCESS',
-    }).catch(() => {});
 
     return {
       success: true,
       message: 'Data transaksi COMPLETED berhasil dikoreksi oleh Admin.',
       data: result,
+    };
+  }
+
+  async getTransactionCorrections(id: string) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id },
+    });
+    if (!tx) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Transaksi tidak ditemukan.',
+      });
+    }
+
+    const corrections = await this.prisma.transactionCorrection.findMany({
+      where: { transactionId: id },
+      include: {
+        correctedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      success: true,
+      data: corrections,
     };
   }
 }

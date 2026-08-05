@@ -40,9 +40,9 @@ jobs:
         working-directory: ./backend
         run: npm ci
 
-      - name: Run ESLint & TypeScript Type Checking
+      - name: Run ESLint & TypeScript Type Checking (Check-Only)
         working-directory: ./backend
-        run: npm run lint --if-present
+        run: npm run lint:check
 
       - name: Generate Prisma Client & Validate Migrations
         working-directory: ./backend
@@ -50,6 +50,7 @@ jobs:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
         run: |
           npx prisma generate
+          npm run prisma:preflight
           npx prisma migrate deploy
 
       - name: Build Backend Production Bundle
@@ -68,6 +69,15 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test
         run: npm test
+
+      - name: Execute Backend E2E Integration Test Suite
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          NODE_ENV: test
+        run: npm run test:e2e --if-present
 
   frontend-verification:
     name: Frontend Build & Bundle Verification
@@ -105,10 +115,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Execute npm Security Audit (Backend)
+      - name: Execute Production Security Audit (Backend)
         working-directory: ./backend
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
 
-      - name: Execute npm Security Audit (Frontend)
+      - name: Execute Production Security Audit (Frontend)
         working-directory: ./frontend
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high

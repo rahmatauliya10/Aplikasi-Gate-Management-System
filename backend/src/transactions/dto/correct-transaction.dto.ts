@@ -11,10 +11,15 @@ export class CorrectTransactionDto {
   @MinLength(10)
   reason: string;
 
-  @ApiPropertyOptional({ description: 'Optional URL or path to supporting evidence document' })
+  @ApiProperty({ description: 'URL or path to supporting evidence document (mandatory for COMPLETED correction)' })
+  @IsString()
+  @IsNotEmpty()
+  evidenceUrl: string;
+
+  @ApiPropertyOptional({ description: 'Optional expected updatedAt ISO timestamp for optimistic concurrency control' })
   @IsOptional()
   @IsString()
-  evidenceUrl?: string;
+  expectedUpdatedAt?: string;
 
   @ApiPropertyOptional({ description: 'Corrected gross weight in kg' })
   @IsOptional()

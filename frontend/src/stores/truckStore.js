@@ -103,6 +103,26 @@ export const useTruckStore = defineStore('truck', () => {
         }
     }
 
+    const correctTruck = async (id, correctionData) => {
+        loading.value = true;
+        error.value = null;
+        try {
+            const response = await truckService.correct(id, correctionData);
+            const resultData = response.data?.data;
+            if (resultData && resultData.updatedTx) {
+                upsertTruck(resultData.updatedTx);
+            }
+            const notificationStore = useNotificationStore();
+            notificationStore.addNotification('Data Corrected', 'Transaction data successfully corrected by Admin.', 'success');
+            return resultData;
+        } catch (err) {
+            error.value = err.gmsMessage || getErrorMessage(err);
+            throw err;
+        } finally {
+            loading.value = false;
+        }
+    }
+
     const updateTruckWeight = (id, type, weight) => {
         const truck = trucks.value.find(t => String(t.id) === String(id))
         if (truck) {
@@ -162,6 +182,7 @@ export const useTruckStore = defineStore('truck', () => {
         updateTruckStatus,
         cancelTruck,
         deleteTruck,
+        correctTruck,
         updateTruckWeight,
         updateTruckDetails,
         upsertTruck,

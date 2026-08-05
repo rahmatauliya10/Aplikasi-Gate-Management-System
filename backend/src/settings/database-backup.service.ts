@@ -334,6 +334,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       appSettings,
       announcements,
       systemIssues,
+      transactionCorrections,
     ] = await Promise.all([
       this.prisma.user.findMany(),
       this.prisma.userWarehouseAccess.findMany(),
@@ -349,6 +350,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       this.prisma.appSetting.findMany(),
       this.prisma.announcement.findMany(),
       this.prisma.systemIssue.findMany(),
+      this.prisma.transactionCorrection.findMany(),
     ]);
 
     const recordCounts = {
@@ -366,6 +368,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       appSettings: appSettings.length,
       announcements: announcements.length,
       systemIssues: systemIssues.length,
+      transactionCorrections: transactionCorrections.length,
     };
 
     const data = {
@@ -383,6 +386,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       appSettings,
       announcements,
       systemIssues,
+      transactionCorrections,
     };
 
     const jsonPayload: DatabaseBackupPayload = {
@@ -760,6 +764,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     try {
       await this.prisma.$transaction(
         async (tx) => {
+          await tx.transactionCorrection.deleteMany();
           await tx.fraudCheck.deleteMany();
           await tx.attachment.deleteMany();
           await tx.incomingMaterialCheck.deleteMany();
@@ -786,6 +791,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           if (d.incomingMaterialChecks?.length) await tx.incomingMaterialCheck.createMany({ data: d.incomingMaterialChecks, skipDuplicates: true });
           if (d.attachments?.length) await tx.attachment.createMany({ data: d.attachments, skipDuplicates: true });
           if (d.fraudChecks?.length) await tx.fraudCheck.createMany({ data: d.fraudChecks, skipDuplicates: true });
+          if (d.transactionCorrections?.length) await tx.transactionCorrection.createMany({ data: d.transactionCorrections, skipDuplicates: true });
           if (d.activityLogs?.length) await tx.activityLog.createMany({ data: d.activityLogs, skipDuplicates: true });
           if (d.appSettings?.length) await tx.appSetting.createMany({ data: d.appSettings, skipDuplicates: true });
           if (d.announcements?.length) await tx.announcement.createMany({ data: d.announcements, skipDuplicates: true });
@@ -796,17 +802,22 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         },
       );
 
-      // P0-02 Fix: Restore physical upload attachment files to disk
+      // Restore physical upload attachment files to disk matching specific backup payload
       let restoredAttachmentsCount = 0;
       try {
         const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
         if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-        // Search for attachment archive file in backup directory
+        // Search for attachment archive file corresponding to backup history or checksum
         const history = await this.getBackupHistory();
-        const latest = history[0];
-        if (latest && latest.artifacts?.attachmentsArchive) {
-          const archivePath = path.join(this.localBackupDir, latest.artifacts.attachmentsArchive);
+        const matchedManifest = history.find(
+          (m) =>
+            m.checksums?.dump === backupPayload.metadata.checksum ||
+            m.createdAt === backupPayload.metadata.createdAt,
+        ) || history[0];
+
+        if (matchedManifest && matchedManifest.artifacts?.attachmentsArchive) {
+          const archivePath = path.join(this.localBackupDir, matchedManifest.artifacts.attachmentsArchive);
           if (fs.existsSync(archivePath)) {
             const archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
             if (archiveContent.files && Array.isArray(archiveContent.files)) {

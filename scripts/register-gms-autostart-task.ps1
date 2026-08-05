@@ -12,6 +12,11 @@
 # and crashes the Docker daemon. Always retain interactive user logon binding!
 # ==============================================================================
 
+param(
+    [Parameter(Mandatory=$false)]
+    [switch]$UnattendedMode
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -20,7 +25,7 @@ $ErrorActionPreference = "Stop"
 [string]$WatchdogScriptPath = Join-Path -Path $ProjectRootDir -ChildPath "scripts\gms-autostart-watchdog.ps1"
 [string]$CurrentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
-Write-Host "Registering Scheduled Task: $TaskName for user: $CurrentUser..."
+Write-Host "Registering Scheduled Task: $TaskName (UnattendedMode=$UnattendedMode)..."
 
 # --- Check Script File Existence ---
 if (-not (Test-Path -Path $WatchdogScriptPath -PathType Leaf)) {
@@ -31,21 +36,16 @@ if (-not (Test-Path -Path $WatchdogScriptPath -PathType Leaf)) {
 [string]$Arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$WatchdogScriptPath`""
 $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $Arguments -WorkingDirectory $ProjectRootDir
 
-# --- Define Task Trigger (At Log On of Runtime User) ---
-$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
-
-# --- Define Task Settings ---
-$Settings = New-ScheduledTaskSettingsSet `
-    -MultipleInstance IgnoreNew `
-    -RestartCount 10 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 15) `
-    -StartWhenAvailable `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries
-
-# --- Define Principal (Run under user context, Highest privileges if available) ---
-$Principal = New-ScheduledTaskPrincipal -UserId $CurrentUser -LogonType Interactive -RunLevel Highest
+# --- Define Task Trigger & Principal ---
+if ($UnattendedMode) {
+    Write-Host "[GMS Autostart] Registering trigger as AtStartup for unattended server boot..." -ForegroundColor Cyan
+    $Trigger = New-ScheduledTaskTrigger -AtStartup
+    $Principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+} else {
+    Write-Host "[GMS Autostart] Registering trigger as AtLogOn for user session compatibility..." -ForegroundColor Yellow
+    $Trigger = New-ScheduledTaskTrigger -AtLogOn -User $CurrentUser
+    $Principal = New-ScheduledTaskPrincipal -UserId $CurrentUser -LogonType Interactive -RunLevel Highest
+}
 
 # --- Register Task ---
 try {

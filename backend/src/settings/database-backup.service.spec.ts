@@ -39,6 +39,7 @@ describe('DatabaseBackupService', () => {
       appSetting: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
       announcement: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
       systemIssue: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
+      transactionCorrection: { findMany: jest.fn().mockResolvedValue([]), deleteMany: jest.fn(), createMany: jest.fn() },
       $transaction: jest.fn().mockImplementation((cb) => cb(prismaService)),
     };
 

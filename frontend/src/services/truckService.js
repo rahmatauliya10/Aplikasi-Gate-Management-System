@@ -77,6 +77,23 @@ const truckService = {
   },
 
   /**
+   * Correct completed transaction (ADMIN only)
+   * @param {Number|String} id 
+   * @param {Object} data - { reason, evidenceUrl, grossWeight, tareWeight, actualWeight, etc. }
+   */
+  correct(id, data) {
+    return api.post(`/transactions/${id}/corrections`, data)
+  },
+
+  /**
+   * Get correction history for a transaction (ADMIN only)
+   * @param {Number|String} id 
+   */
+  getCorrections(id) {
+    return api.get(`/transactions/${id}/corrections`)
+  },
+
+  /**
    * Delete a transaction completely
    * @param {Number|String} id 
    */

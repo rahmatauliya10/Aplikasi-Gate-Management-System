@@ -52,7 +52,7 @@ describe('WeighbridgeService Fraud Calculation', () => {
         findUnique: jest.fn().mockResolvedValue(mockTx),
         update: jest.fn().mockResolvedValue(mockTx),
       },
-      weighbridgeRecord: { create: jest.fn() },
+      weighbridgeRecord: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
       transactionStatusHistory: { create: jest.fn() },
       fraudCheck: { create: jest.fn() },
     };
