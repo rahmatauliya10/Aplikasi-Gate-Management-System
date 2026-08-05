@@ -52,7 +52,7 @@ catch {
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        & docker compose -f $ComposeFile up -d --remove-orphans
+        & docker compose -f $ComposeFile up -d --no-build --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
         Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
 

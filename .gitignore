@@ -30,3 +30,10 @@ secrets/
 *.pem
 *.crt
 *.key
+
+# Backup Runtime Artifacts
+backend/backups/local/*
+!backend/backups/local/.gitkeep
+backend/backups/nas/*
+!backend/backups/nas/.gitkeep
+

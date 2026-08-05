@@ -101,7 +101,10 @@ export class ActivityLogsService {
       await client.activityLog.create({
         data: logData,
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (prismaTx) {
+        throw error;
+      }
       this.logger.error(
         `Failed to save activity log to database: ${error.message}. Routing to durable append-only fallback sink.`,
         error.stack,

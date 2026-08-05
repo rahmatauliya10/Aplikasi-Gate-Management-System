@@ -370,19 +370,6 @@ export class TransactionsService {
       });
     }
 
-    if (dto.expectedUpdatedAt) {
-      const currentTxTime = new Date(tx.updatedAt).getTime();
-      const expectedTime = new Date(dto.expectedUpdatedAt).getTime();
-      if (isNaN(expectedTime) || currentTxTime !== expectedTime) {
-        throw new BadRequestException({
-          success: false,
-          message:
-            'Data transaksi telah diperbarui oleh pengguna lain. Silakan muat ulang data terbaru sebelum melakukan koreksi.',
-          errors: [],
-        });
-      }
-    }
-
     const newGross =
       dto.grossWeight !== undefined ? dto.grossWeight : tx.grossWeight;
     const newTare =
@@ -414,11 +401,14 @@ export class TransactionsService {
 
     const updateData: Prisma.TransactionUpdateInput = {};
 
+    const txRecord = tx as Record<string, any>;
     for (const field of allowlist) {
-      if (dto[field] !== undefined && dto[field] !== (tx as any)[field]) {
-        oldValues[field] = (tx as any)[field];
-        newValues[field] = dto[field];
-        (updateData as any)[field] = dto[field];
+      const dtoVal = dto[field];
+      const txVal = txRecord[field];
+      if (dtoVal !== undefined && dtoVal !== txVal) {
+        oldValues[field] = txVal;
+        newValues[field] = dtoVal;
+        (updateData as Record<string, any>)[field] = dtoVal;
       }
     }
 
@@ -443,27 +433,36 @@ export class TransactionsService {
     const cleanIp = ipAddress ? ipAddress.split(',')[0].trim() : null;
 
     const result = await this.prisma.$transaction(async (prismaTx) => {
-      if (dto.expectedUpdatedAt) {
-        const freshTx = await prismaTx.transaction.findUnique({
-          where: { id },
-          select: { updatedAt: true },
+      // OCC: Atomic conditional update to prevent race conditions
+      const expectedDate = new Date(dto.expectedUpdatedAt);
+      const updateResult = await prismaTx.transaction.updateMany({
+        where: {
+          id,
+          updatedAt: expectedDate,
+          status: 'COMPLETED',
+        },
+        data: updateData,
+      });
+
+      if (updateResult.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Data transaksi telah diperbarui oleh pengguna lain. Silakan muat ulang data terbaru sebelum melakukan koreksi.',
+          errors: [],
         });
-        if (!freshTx) {
-          throw new NotFoundException({
-            success: false,
-            message: 'Transaksi tidak ditemukan.',
-          });
-        }
-        const currentTxTime = new Date(freshTx.updatedAt).getTime();
-        const expectedTime = new Date(dto.expectedUpdatedAt).getTime();
-        if (isNaN(expectedTime) || currentTxTime !== expectedTime) {
-          throw new ConflictException({
-            success: false,
-            message:
-              'Data transaksi telah diperbarui oleh pengguna lain. Silakan muat ulang data terbaru sebelum melakukan koreksi.',
-            errors: [],
-          });
-        }
+      }
+
+      const updatedTx = await prismaTx.transaction.findUnique({
+        where: { id },
+      });
+
+      if (!updatedTx) {
+        throw new NotFoundException({
+          success: false,
+          message: 'Transaksi tidak ditemukan setelah pembaruan.',
+          errors: [],
+        });
       }
 
       const correction = await prismaTx.transactionCorrection.create({
@@ -476,11 +475,6 @@ export class TransactionsService {
           newValues: newValues as any,
           ipAddress: cleanIp,
         },
-      });
-
-      const updatedTx = await prismaTx.transaction.update({
-        where: { id },
-        data: updateData,
       });
 
       const finalNet = updatedTx.netWeight;

@@ -41,6 +41,7 @@ export interface BackupManifest {
     dump: string;
     globals: string;
     manifest: string;
+    snapshot?: string;
     attachmentsArchive?: string;
   };
   attachmentsCount?: number;
@@ -49,6 +50,7 @@ export interface BackupManifest {
   checksums: {
     dump: string;
     globals: string;
+    snapshot?: string;
     attachmentsArchive?: string;
   };
 }
@@ -342,7 +344,8 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
   ): Promise<BackupManifest> {
     this.ensureBackupDirectories();
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const createdAtIso = new Date().toISOString();
+    const timestamp = createdAtIso.replace(/[:.]/g, '-');
     const backupId = `BKP-${timestamp}`;
     const dumpFileName = `gms_${timestamp}.dump`;
     const globalsFileName = `gms_${timestamp}_globals.sql`;
@@ -620,6 +623,10 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       ? 'VERIFIED'
       : 'FAILED';
 
+    const snapshotChecksum = fs.existsSync(localSnapshotPath)
+      ? this.calculateChecksumForFile(localSnapshotPath)
+      : '';
+
     const manifest: BackupManifest = {
       backupId,
       database: 'gms',
@@ -628,7 +635,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       postgresVersion: '15-alpine',
       schemaMigrationVersion: '2026072701',
       dumpFormat: pgDumpSuccess ? 'PG_CUSTOM' : 'JSON_SNAPSHOT',
-      createdAt: new Date().toISOString(),
+      createdAt: createdAtIso,
       createdBy: {
         id: user.id,
         email: user.email,
@@ -638,6 +645,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       artifacts: {
         dump: dumpFileName,
         globals: globalsFileName,
+        snapshot: snapshotFileName,
         manifest: manifestFileName,
         attachmentsArchive:
           attachmentsCount > 0 ? attachmentsArchiveName : undefined,
@@ -647,6 +655,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       offsiteStatus: 'PENDING',
       checksums: {
         dump: dumpChecksum,
+        snapshot: snapshotChecksum,
         globals: globalsChecksum,
         attachmentsArchive: attachmentsChecksum || undefined,
       },
@@ -731,7 +740,8 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       user,
     );
     const timestamp = manifest.createdAt.replace(/[:.]/g, '-');
-    const snapshotName = `gms_${timestamp}_snapshot.json`;
+    const snapshotName =
+      manifest.artifacts?.snapshot || `gms_${timestamp}_snapshot.json`;
     const dirsToSearch = [this.localBackupDir, this.uploadBackupDir];
 
     for (const dir of dirsToSearch) {

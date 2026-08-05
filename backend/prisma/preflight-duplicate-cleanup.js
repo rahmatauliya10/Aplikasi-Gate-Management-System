@@ -7,10 +7,14 @@ async function main() {
 
   const args = process.argv.slice(2);
   const isExecuteCleanup = args.includes('--execute-cleanup') && args.includes('--approve');
+  const isFailOnDuplicates = args.includes('--fail-on-duplicates');
   const isReportOnly = !isExecuteCleanup || args.includes('--report-only');
 
   if (isReportOnly) {
     console.log('[MODE]: REPORT-ONLY (DRY-RUN). No data will be deleted.');
+    if (isFailOnDuplicates) {
+      console.log('[OPTION]: --fail-on-duplicates ENABLED (Will exit code 2 if duplicates exist).');
+    }
     console.log('To execute cleanup, run with: --execute-cleanup --approve\n');
   } else {
     console.log('[MODE]: EXECUTE CLEANUP (DESTRUCTIVE MODE).');
@@ -158,9 +162,19 @@ async function main() {
       }
     }
 
+    const totalDuplicates = qcCleaned + incomingCleaned + warehouseCleaned;
+
     console.log('\n===================================================');
     console.log('  SUCCESS: PREFLIGHT MIGRATION AUDIT COMPLETED     ');
     console.log('===================================================');
+
+    if (isReportOnly && isFailOnDuplicates && totalDuplicates > 0) {
+      console.error(`\n[PREFLIGHT BLOCKER]: Found ${totalDuplicates} total duplicate records in database.`);
+      console.error('Migration halted due to --fail-on-duplicates flag.');
+      console.error('Run cleanup runbook before re-attempting migration.');
+      process.exit(2);
+    }
+
     process.exit(0);
   } catch (e) {
     console.error(`\nERROR PREFLIGHT MIGRATION CHECK GAGAL: ${e.message}`);

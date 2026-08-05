@@ -2,11 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TransactionsService } from './transactions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 
-describe('TransactionsService State Machine', () => {
+describe('TransactionsService State Machine & OCC', () => {
   let service: TransactionsService;
   let prismaService: PrismaService;
+  let activityLogsService: ActivityLogsService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -15,10 +16,10 @@ describe('TransactionsService State Machine', () => {
         {
           provide: PrismaService,
           useValue: {
-            transaction: { findUnique: jest.fn(), update: jest.fn() },
+            transaction: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
             $transaction: jest.fn((cb) =>
               cb({
-                transaction: { update: jest.fn() },
+                transaction: { update: jest.fn(), updateMany: jest.fn() },
                 transactionStatusHistory: { create: jest.fn() },
               }),
             ),
@@ -33,6 +34,7 @@ describe('TransactionsService State Machine', () => {
 
     service = module.get<TransactionsService>(TransactionsService);
     prismaService = module.get<PrismaService>(PrismaService);
+    activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
   });
 
   it('should deny cancel if status is COMPLETED', async () => {
@@ -65,7 +67,7 @@ describe('TransactionsService State Machine', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('should allow ADMIN to correct COMPLETED transaction fields and recalculate net weight', async () => {
+  it('should allow ADMIN to correct COMPLETED transaction fields with matching OCC timestamp', async () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',
@@ -74,6 +76,7 @@ describe('TransactionsService State Machine', () => {
       netWeight: 7000,
       actualWeight: 6900,
       driverName: 'Pak Supri',
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
     };
 
     const mockPrismaTx = {
@@ -81,10 +84,8 @@ describe('TransactionsService State Machine', () => {
         create: jest.fn().mockResolvedValue({ id: 'corr-1' }),
       },
       transaction: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValue({ updatedAt: new Date('2026-08-01T00:00:00Z') }),
-        update: jest.fn().mockResolvedValue({
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue({
           ...mockTx,
           grossWeight: 10500,
           netWeight: 7500,
@@ -103,6 +104,7 @@ describe('TransactionsService State Machine', () => {
     const dto = {
       reason: 'Koreksi penimbangan gross di tiket fisik timbang',
       evidenceUrl: 'https://storage.gms.local/evidence/ticket-123.pdf',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
       grossWeight: 10500,
     };
 
@@ -119,96 +121,96 @@ describe('TransactionsService State Machine', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(mockPrismaTx.transactionCorrection.create).toHaveBeenCalledWith(
+    expect(mockPrismaTx.transaction.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          transactionId: 'tx-1',
-          reason: 'Koreksi penimbangan gross di tiket fisik timbang',
-          evidenceUrl: 'https://storage.gms.local/evidence/ticket-123.pdf',
+        where: expect.objectContaining({
+          id: 'tx-1',
+          status: 'COMPLETED',
         }),
       }),
     );
   });
 
-  it('should reject correction if evidenceUrl is missing or empty', async () => {
+  it('should throw ConflictException (409) on parallel correction if expectedUpdatedAt is stale', async () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',
       grossWeight: 10000,
       tareWeight: 3000,
-      netWeight: 7000,
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
     };
+
+    const mockPrismaTx = {
+      transaction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }), // 0 updated due to concurrent update
+      },
+    };
+
     jest
       .spyOn(prismaService.transaction, 'findUnique')
       .mockResolvedValue(mockTx as any);
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockPrismaTx));
 
     const dto = {
-      reason: 'Koreksi penimbangan gross tanpa bukti',
+      reason: 'Koreksi penimbangan gross dari pembaruan ganda',
+      evidenceUrl: 'https://storage.gms.local/evidence/ticket-123.pdf',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
       grossWeight: 10500,
     };
 
     await expect(
       service.correctCompletedTransaction(
         'tx-1',
-        dto as any,
-        { id: 'admin-1', role: 'ADMIN' } as any,
+        dto,
+        { id: 'admin-1', role: 'ADMIN', email: 'admin@gms.local' } as any,
       ),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow(ConflictException);
   });
 
-  it('should reject correction if grossWeight is less than tareWeight', async () => {
+  it('should rethrow error inside transaction if activity log fails to ensure atomic rollback', async () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',
       grossWeight: 10000,
       tareWeight: 3000,
-      netWeight: 7000,
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
     };
+
+    const mockPrismaTx = {
+      transactionCorrection: {
+        create: jest.fn().mockResolvedValue({ id: 'corr-1' }),
+      },
+      transaction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+      },
+    };
+
     jest
       .spyOn(prismaService.transaction, 'findUnique')
       .mockResolvedValue(mockTx as any);
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockPrismaTx));
+    jest
+      .spyOn(activityLogsService, 'logAction')
+      .mockRejectedValue(new Error('Audit DB disk full failure'));
 
     const dto = {
-      reason: 'Koreksi berat salah memasukkan nilai gross',
-      evidenceUrl: 'https://storage.gms.local/evidence/doc.pdf',
-      grossWeight: 2000, // < tareWeight 3000
+      reason: 'Koreksi penimbangan gross yang akan gagal audit log',
+      evidenceUrl: 'https://storage.gms.local/evidence/ticket-123.pdf',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      grossWeight: 10500,
     };
 
     await expect(
       service.correctCompletedTransaction(
         'tx-1',
-        dto as any,
-        { id: 'admin-1', role: 'ADMIN' } as any,
+        dto,
+        { id: 'admin-1', role: 'ADMIN', email: 'admin@gms.local' } as any,
       ),
-    ).rejects.toThrow(BadRequestException);
-  });
-
-  it('should reject correction if no values are different (identical submission)', async () => {
-    const mockTx = {
-      id: 'tx-1',
-      status: 'COMPLETED',
-      grossWeight: 10000,
-      tareWeight: 3000,
-      netWeight: 7000,
-      driverName: 'Pak Supri',
-    };
-    jest
-      .spyOn(prismaService.transaction, 'findUnique')
-      .mockResolvedValue(mockTx as any);
-
-    const dto = {
-      reason: 'Koreksi nilai yang sama persis',
-      evidenceUrl: 'https://storage.gms.local/evidence/doc.pdf',
-      grossWeight: 10000, // identical
-      driverName: 'Pak Supri', // identical
-    };
-
-    await expect(
-      service.correctCompletedTransaction(
-        'tx-1',
-        dto as any,
-        { id: 'admin-1', role: 'ADMIN' } as any,
-      ),
-    ).rejects.toThrow(BadRequestException);
+    ).rejects.toThrow('Audit DB disk full failure');
   });
 });

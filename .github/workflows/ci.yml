@@ -50,8 +50,8 @@ jobs:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
         run: |
           npx prisma generate
+          npm run prisma:preflight -- --report-only --fail-on-duplicates
           npx prisma migrate deploy
-          npm run prisma:preflight -- --report-only
 
       - name: Build Backend Production Bundle
         working-directory: ./backend

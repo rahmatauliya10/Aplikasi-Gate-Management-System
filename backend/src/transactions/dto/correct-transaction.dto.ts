@@ -1,4 +1,5 @@
 import {
+  IsISO8601,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -27,13 +28,14 @@ export class CorrectTransactionDto {
   @IsNotEmpty()
   evidenceUrl: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description:
-      'Optional expected updatedAt ISO timestamp for optimistic concurrency control',
+      'Expected updatedAt ISO timestamp for optimistic concurrency control (mandatory)',
   })
-  @IsOptional()
   @IsString()
-  expectedUpdatedAt?: string;
+  @IsNotEmpty()
+  @IsISO8601()
+  expectedUpdatedAt: string;
 
   @ApiPropertyOptional({ description: 'Corrected gross weight in kg' })
   @IsOptional()
