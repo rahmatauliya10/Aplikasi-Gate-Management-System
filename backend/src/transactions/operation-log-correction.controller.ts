@@ -36,7 +36,8 @@ export class OperationLogCorrectionController {
   @Get(':id/operation-log-corrections')
   @Roles('ADMIN')
   @ApiOperation({
-    summary: 'Get operation log correction history and attribution for a transaction (ADMIN only)',
+    summary:
+      'Get operation log correction history and attribution for a transaction (ADMIN only)',
   })
   @ApiResponse({
     status: 200,
@@ -51,17 +52,22 @@ export class OperationLogCorrectionController {
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Submit atomic operation log correction across modules (ADMIN only)',
+    summary:
+      'Submit atomic operation log correction across modules (ADMIN only)',
   })
   @ApiResponse({
     status: 200,
     description: 'Operation log data corrected and audited atomically',
   })
   @ApiResponse({ status: 403, description: 'Forbidden - ADMIN role required' })
-  @ApiResponse({ status: 409, description: 'Conflict - Stale revision / OCC failure' })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - Stale revision / OCC failure',
+  })
   @ApiResponse({
     status: 400,
-    description: 'Transaction is not terminal or allowlist/business rule validation failed',
+    description:
+      'Transaction is not terminal or allowlist/business rule validation failed',
   })
   correctOperationLog(
     @Param('id') id: string,

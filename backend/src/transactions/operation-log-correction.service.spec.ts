@@ -2,7 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { OperationLogCorrectionService } from './operation-log-correction.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { CorrectionAction, CorrectionTargetModule } from '@prisma/client';
 
 describe('OperationLogCorrectionService', () => {
@@ -53,7 +57,12 @@ describe('OperationLogCorrectionService', () => {
     await expect(
       service.correctOperationLog(
         'tx-1',
-        { reasonCode: 'TYPO', remark: 'Koreksi typo lapangan #1234', expectedRevision: 1, items: [] } as any,
+        {
+          reasonCode: 'TYPO',
+          remark: 'Koreksi typo lapangan #1234',
+          expectedRevision: 1,
+          items: [],
+        } as any,
         { id: 'usr-1', role: 'SECURITY', email: 'sec@gms.local' },
       ),
     ).rejects.toThrow(ForbiddenException);

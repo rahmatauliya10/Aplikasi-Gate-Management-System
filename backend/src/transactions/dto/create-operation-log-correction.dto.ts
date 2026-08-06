@@ -39,7 +39,8 @@ export class CorrectionItemDto {
   fieldName: string;
 
   @ApiProperty({
-    description: 'New proposed value for the field (old value is auto-extracted by server)',
+    description:
+      'New proposed value for the field (old value is auto-extracted by server)',
   })
   @IsNotEmpty()
   newValue: any;
@@ -71,8 +72,10 @@ export class CreateOperationLogCorrectionDto {
   reasonCode: string;
 
   @ApiProperty({
-    description: 'Detailed explanation for the correction (mandatory, min 10 chars)',
-    example: 'Koreksi kesalahan catat berat gross dari nota timbang manual lapangan #992',
+    description:
+      'Detailed explanation for the correction (mandatory, min 10 chars)',
+    example:
+      'Koreksi kesalahan catat berat gross dari nota timbang manual lapangan #992',
   })
   @IsString()
   @IsNotEmpty()
@@ -87,7 +90,8 @@ export class CreateOperationLogCorrectionDto {
   evidenceUrl?: string;
 
   @ApiProperty({
-    description: 'Expected transaction revision number for Optimistic Concurrency Control (OCC)',
+    description:
+      'Expected transaction revision number for Optimistic Concurrency Control (OCC)',
     example: 1,
   })
   @IsInt()
