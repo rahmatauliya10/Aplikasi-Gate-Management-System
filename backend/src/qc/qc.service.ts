@@ -91,7 +91,7 @@ export class QcService {
       where: { id: transactionId },
       data: {
         status: nextStatus,
-        qcStartAt: new Date(),
+        qcStartAt: tx.qcStartAt || new Date(),
         statusHistory: {
           create: {
             newStatus: nextStatus,
@@ -131,9 +131,12 @@ export class QcService {
       throw new BadRequestException(
         'Invalid process type for preliminary QC sampling & vehicle inspection',
       );
-    if (tx.status !== 'QC_VEHICLE_IN_PROGRESS')
+    if (
+      tx.status !== 'QC_VEHICLE_IN_PROGRESS' &&
+      tx.status !== 'QC_VEHICLE_PENDING'
+    )
       throw new BadRequestException(
-        'Transaction must be in QC_VEHICLE_IN_PROGRESS state. Did you start QC?',
+        'Transaction must be in QC_VEHICLE_PENDING or QC_VEHICLE_IN_PROGRESS state.',
       );
     if (tx.qcVehicleChecks.length > 0)
       throw new BadRequestException(
@@ -169,7 +172,7 @@ export class QcService {
           notes: dto.notes,
           checklistItems: dto.checklistItems || null,
           checkedById: userId,
-          startedAt: tx.qcStartAt,
+          startedAt: tx.qcStartAt || new Date(),
           completedAt: new Date(),
         },
       });
@@ -178,7 +181,11 @@ export class QcService {
         where: { id: transactionId },
         data: {
           status: nextStatus,
+          qcStartAt: tx.qcStartAt || new Date(),
           qcEndAt: new Date(),
+          ...(nextStatus === 'QC_VEHICLE_PASSED'
+            ? { warehouseStartAt: new Date() }
+            : {}),
           statusHistory: {
             create: {
               newStatus: nextStatus,
@@ -221,9 +228,12 @@ export class QcService {
       throw new BadRequestException(
         'Incoming check is only for GBB or GSP process types',
       );
-    if (tx.status !== 'INCOMING_CHECK_IN_PROGRESS')
+    if (
+      tx.status !== 'INCOMING_CHECK_IN_PROGRESS' &&
+      tx.status !== 'INCOMING_CHECK_PENDING'
+    )
       throw new BadRequestException(
-        'Transaction must be in INCOMING_CHECK_IN_PROGRESS state. Did you start QC?',
+        'Transaction must be in INCOMING_CHECK_PENDING or INCOMING_CHECK_IN_PROGRESS state.',
       );
     if (tx.incomingMaterialChecks.length > 0)
       throw new BadRequestException(
@@ -262,7 +272,7 @@ export class QcService {
           defectNotes: dto.defectNotes,
           notes: dto.notes,
           checkedById: userId,
-          startedAt: tx.qcStartAt,
+          startedAt: tx.qcStartAt || new Date(),
           completedAt: new Date(),
         },
       });
@@ -271,6 +281,7 @@ export class QcService {
         where: { id: transactionId },
         data: {
           status: nextStatus,
+          qcStartAt: tx.qcStartAt || new Date(),
           qcEndAt: new Date(),
           statusHistory: {
             create: {

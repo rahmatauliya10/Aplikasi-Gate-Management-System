@@ -290,6 +290,9 @@ export class WeighbridgeService {
 
       if (grossWeight !== null) updateData.grossWeight = grossWeight;
       if (tareWeight !== null) updateData.tareWeight = tareWeight;
+      if (nextStatus === 'QC_VEHICLE_PENDING' && !tx.qcStartAt) {
+        updateData.qcStartAt = new Date();
+      }
 
       return prismaTx.transaction.update({
         where: { id: transactionId },

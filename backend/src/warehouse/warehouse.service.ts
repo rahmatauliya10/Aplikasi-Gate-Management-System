@@ -241,8 +241,8 @@ export class WarehouseService {
         data: {
           transactionId,
           processType: tx.processType,
-          startAt: new Date(),
-          startById: user.id,
+          startAt: tx.warehouseStartAt || new Date(),
+          startById: tx.warehouseStartById || user.id,
           remarks: dto.remarks || null,
         },
       });
@@ -251,8 +251,8 @@ export class WarehouseService {
         where: { id: transactionId },
         data: {
           status: 'WAREHOUSE_IN_PROGRESS',
-          warehouseStartAt: new Date(),
-          warehouseStartById: user.id,
+          warehouseStartAt: tx.warehouseStartAt || new Date(),
+          warehouseStartById: tx.warehouseStartById || user.id,
           ...(dto.suratJalanNumber && {
             suratJalanNumber: dto.suratJalanNumber,
           }),
@@ -380,20 +380,23 @@ export class WarehouseService {
       });
     }
 
-    if (tx.status !== 'WAREHOUSE_IN_PROGRESS' || !tx.warehouseStartAt) {
+    if (
+      tx.status !== 'WAREHOUSE_IN_PROGRESS' &&
+      tx.status !== 'QC_VEHICLE_PASSED'
+    ) {
       await this.activityLogsService
         .logAction({
           userId: user.id,
           action: 'WAREHOUSE_FLOW_REJECTED',
           module: 'WAREHOUSE',
           referenceId: transactionId,
-          description: `Warehouse complete rejected: Transaction is not in WAREHOUSE_IN_PROGRESS status`,
+          description: `Warehouse complete rejected: Transaction is not in WAREHOUSE_IN_PROGRESS or QC_VEHICLE_PASSED status`,
           status: 'SUCCESS',
         })
         .catch(() => {});
       throw new BadRequestException({
         success: false,
-        message: `Transaction must be in WAREHOUSE_IN_PROGRESS status (current: ${tx.status})`,
+        message: `Transaction must be in WAREHOUSE_IN_PROGRESS or QC_VEHICLE_PASSED status (current: ${tx.status})`,
         errors: [],
       });
     }
@@ -464,8 +467,8 @@ export class WarehouseService {
           data: {
             transactionId,
             processType: tx.processType,
-            startAt: tx.warehouseStartAt,
-            startById: tx.warehouseStartById,
+            startAt: tx.warehouseStartAt || new Date(),
+            startById: tx.warehouseStartById || user.id,
             endAt: new Date(),
             endById: user.id,
             actualWeight: dto.actualWeight,
@@ -484,6 +487,8 @@ export class WarehouseService {
         where: { id: transactionId },
         data: {
           status: nextStatus,
+          warehouseStartAt: tx.warehouseStartAt || new Date(),
+          warehouseStartById: tx.warehouseStartById || user.id,
           warehouseEndAt: new Date(),
           warehouseEndById: user.id,
           actualWeight: dto.actualWeight,

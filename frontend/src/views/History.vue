@@ -16,9 +16,9 @@
         </button>
 
         <!-- CSV Export Button -->
-        <button @click="exportData" class="btn-primary px-6 py-2.5 text-xs flex items-center space-x-1.5 shadow-[0_4px_12px_rgba(74,139,223,0.25)] hover:shadow-lg transition-all duration-300">
+        <button @click="exportData" class="px-5 py-2.5 text-xs rounded-xl bg-[#4A8BDF] text-white hover:bg-[#3B72C4] font-black flex items-center space-x-1.5 shadow-sm hover:shadow-md transition-all duration-300">
           <span class="material-icons text-base">download</span>
-          <span class="font-black">EXPORT CSV</span>
+          <span>EXPORT CSV</span>
         </button>
       </div>
     </PageHeader>
@@ -126,43 +126,88 @@
     </div>
 
     <!-- ═══ FILTER CONTROL HUB ═══ -->
-    <div class="bg-white/80 backdrop-blur-xl border border-white/50 shadow-md rounded-2xl p-4 sm:p-5 flex flex-col space-y-4 md:space-y-0 md:flex-row md:items-center md:justify-between gap-4 animate-fadeInUp">
-      <!-- Search Input -->
-      <div class="relative flex-1 max-w-md">
-        <input v-model="searchQuery" type="text" placeholder="Search Plate, Driver, or Vendor..." 
-          class="w-full h-11 pl-11 pr-10 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all shadow-inner">
-        <span class="material-icons absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
-        <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
-          <span class="material-icons text-base">close</span>
+    <div class="bg-white border border-slate-200/80 shadow-sm rounded-2xl p-4 sm:p-5 space-y-4 animate-fadeInUp">
+      <!-- ROW 1: Search + Date Presets + Mode Toggle -->
+      <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+        <!-- Search Input -->
+        <div class="relative flex-1 max-w-md">
+          <input v-model="searchQuery" type="text" placeholder="Cari No. Plat, Nama Supir, atau Vendor..." 
+            class="w-full h-11 pl-11 pr-10 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
+          <span class="material-icons absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
+          <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+            <span class="material-icons text-base">close</span>
+          </button>
+        </div>
+
+        <!-- Date Range Quick Presets -->
+        <div class="flex items-center space-x-1 p-1 rounded-2xl bg-slate-100/90 border border-slate-200/50 shadow-inner">
+          <button v-for="p in [{ key: 'ALL', label: 'SEMUA' }, { key: 'TODAY', label: 'HARI INI' }, { key: 'THIS_WEEK', label: 'MINGGU INI' }, { key: 'THIS_MONTH', label: 'BULAN INI' }]" :key="p.key"
+                  @click="applyDatePreset(p.key)"
+                  :class="datePreset === p.key ? 'bg-white shadow-xs text-[#4A8BDF] font-black rounded-xl border-b-2 border-[#4A8BDF]' : 'text-slate-500 hover:text-slate-800 font-bold'"
+                  class="px-4 py-2 text-[11px] tracking-wider transition-all duration-200">
+            {{ p.label }}
+          </button>
+        </div>
+
+        <!-- Mode Toggle -->
+        <div class="flex items-center space-x-1 p-1 rounded-2xl bg-slate-100/90 border border-slate-200/50 shadow-inner shrink-0">
+          <button @click="currentMode = 'time'" :class="currentMode === 'time' ? 'bg-white shadow-xs text-[#4A8BDF] font-black rounded-xl' : 'text-slate-500 hover:text-slate-800 font-bold'" class="px-4 py-2 text-[11px] tracking-wider transition-all duration-200 flex items-center">
+            <span class="material-icons text-sm mr-1.5 text-[#4A8BDF]">schedule</span> TIMELINE
+          </button>
+          <button @click="currentMode = 'fraud'" :class="currentMode === 'fraud' ? 'bg-white shadow-xs text-rose-600 font-black rounded-xl' : 'text-slate-500 hover:text-slate-800 font-bold'" class="px-4 py-2 text-[11px] tracking-wider transition-all duration-200 flex items-center">
+            <span class="material-icons text-sm mr-1.5 text-rose-500">policy</span> SCALE AUDIT
+          </button>
+        </div>
+      </div>
+
+      <div class="w-full h-px bg-slate-100"></div>
+
+      <!-- ROW 2: Custom Date Range Picker -->
+      <div class="flex items-center space-x-3">
+        <span class="material-icons text-[#4A8BDF] text-xl">event</span>
+        <span class="text-xs font-black text-slate-500 uppercase tracking-widest">PERIODE:</span>
+        
+        <div class="relative">
+          <input type="date" v-model="startDate" @change="datePreset = 'CUSTOM'" class="h-11 px-4 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] cursor-pointer" title="Tanggal Mulai" />
+        </div>
+        <span class="text-xs font-bold text-slate-400">s/d</span>
+        <div class="relative">
+          <input type="date" v-model="endDate" @change="datePreset = 'CUSTOM'" class="h-11 px-4 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] cursor-pointer" title="Tanggal Akhir" />
+        </div>
+        <button v-if="startDate || endDate" @click="applyDatePreset('ALL')" class="text-rose-500 hover:bg-rose-50 rounded-xl px-2.5 py-1 text-xs font-black transition-colors" title="Reset Tanggal">
+          ✕ Reset
         </button>
       </div>
 
-      <!-- Advanced Selectors -->
-      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
-        <!-- Status Filter -->
-        <div class="flex flex-col">
-          <select v-model="statusFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
-            <option value="ALL">All Operational Statuses</option>
+      <!-- ROW 3: Operational Filter Cards + Dark Sort Selector -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <!-- 1. Status Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">format_list_bulleted</span>
+          <select v-model="statusFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
+            <option value="ALL">Semua Status</option>
             <option value="COMPLETED">Completed Only</option>
             <option value="CANCELLED">Cancelled / Voided</option>
             <option value="ACTIVE">Active &amp; Reopened</option>
           </select>
         </div>
 
-        <!-- Destination Filter -->
-        <div class="flex flex-col">
-          <select v-model="destinationFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
-            <option value="ALL">All Hubs (GBB/GBJ/GSP)</option>
+        <!-- 2. Hub Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">hub</span>
+          <select v-model="destinationFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
+            <option value="ALL">Semua Hub (GBB/GBJ/GSP)</option>
             <option value="GBB">GBB (Raw Materials)</option>
             <option value="GBJ">GBJ (Finished Goods)</option>
             <option value="GSP">GSP (Spareparts)</option>
           </select>
         </div>
 
-        <!-- Bottleneck Filter -->
-        <div class="flex flex-col">
-          <select v-model="bottleneckFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
-            <option value="ALL">All Bottlenecks</option>
+        <!-- 3. Bottleneck Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">filter_alt</span>
+          <select v-model="bottleneckFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
+            <option value="ALL">Semua Bottleneck</option>
             <option value="waitingIn">Delay: Weigh In</option>
             <option value="warehouse">Delay: Warehouse</option>
             <option value="qc">Delay: Quality Control</option>
@@ -170,24 +215,26 @@
           </select>
         </div>
 
-        <!-- Integrity Filter -->
-        <div class="flex flex-col">
-          <select v-model="integrityFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#EF4444] focus:ring-4 focus:ring-[#EF4444]/10 transition-all">
-            <option value="ALL">All Integrity Statuses</option>
-            <option value="SAFE">SAFE (Matched)</option>
-            <option value="WARNING">WARNING (Shrinkage)</option>
-            <option value="CRITICAL">CRITICAL (Investigate)</option>
+        <!-- 4. Integrity Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">extension</span>
+          <select v-model="integrityFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#EF4444] transition-all cursor-pointer">
+            <option value="ALL">Semua Integrasi</option>
+            <option value="SAFE">SAFE (Sesuai)</option>
+            <option value="WARNING">WARNING (Penyusutan)</option>
+            <option value="CRITICAL">CRITICAL (Investigasi)</option>
           </select>
         </div>
 
-        <!-- Mode Toggle -->
-        <div class="flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200/50 shadow-inner">
-          <button @click="currentMode = 'time'" :class="currentMode === 'time' ? 'bg-white shadow-md text-[#4A8BDF] scale-105' : 'text-slate-500 hover:text-slate-800'" class="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-300 flex items-center">
-            <span class="material-icons text-sm mr-1.5">schedule</span> TIMELINE
-          </button>
-          <button @click="currentMode = 'fraud'" :class="currentMode === 'fraud' ? 'bg-white shadow-md text-red-600 scale-105' : 'text-slate-500 hover:text-slate-800'" class="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-300 flex items-center">
-            <span class="material-icons text-sm mr-1.5">policy</span> SCALE AUDIT
-          </button>
+        <!-- 5. Dark Sort Selector -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-white/80 text-base pointer-events-none">schedule</span>
+          <select v-model="sortBy" class="w-full h-11 pl-10 pr-8 bg-[#0f172a] text-white border border-slate-900 shadow-md rounded-2xl text-xs font-black outline-none focus:ring-2 focus:ring-slate-700 transition-all cursor-pointer">
+            <option value="gateInDesc">Datang Terbaru</option>
+            <option value="gateInAsc">Datang Terawal (Pertama)</option>
+            <option value="tatDesc">TAT Terlama</option>
+            <option value="deviationDesc">Deviasi Terbesar</option>
+          </select>
         </div>
       </div>
     </div>
@@ -206,7 +253,12 @@
               </th>
               <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Vehicle ID</th>
               <template v-if="currentMode === 'time'">
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Registration</th>
+                <th class="px-5 py-2 text-left text-[9.5px] font-black text-[#4A8BDF] uppercase tracking-widest w-[140px]">
+                  <div class="flex items-center space-x-1">
+                    <span class="material-icons text-xs">event</span>
+                    <span>Kedatangan (Date &amp; Time)</span>
+                  </div>
+                </th>
                 <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[110px]">Timb. In</th>
                 <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Warehouse</th>
                 <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">QC Check</th>
@@ -240,33 +292,49 @@
                 </td>
 
                 <!-- Plate Number & Cargo Type -->
-                <td class="px-5 py-3 border-y border-slate-100">
-                  <div class="flex items-center space-x-2.5">
-                    <div class="flex flex-col items-center justify-center bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 shadow-inner shrink-0">
-                      <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-widest leading-none">{{ getPlateNumber(truck) }}</span>
+                <td class="px-5 py-3 border-y border-slate-100 min-w-[220px]">
+                  <div class="flex items-center space-x-3">
+                    <!-- License Plate Dark Card -->
+                    <div class="flex flex-col items-center justify-center bg-slate-900 px-3 py-2 rounded-xl border border-slate-700 shadow-inner shrink-0">
+                      <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-wider leading-none">{{ getPlateNumber(truck) }}</span>
+                      <span v-if="getVendor(truck) !== '-'" class="text-[8.5px] font-bold text-slate-400 mt-1 max-w-[75px] truncate leading-none" :title="getVendor(truck)">{{ getVendor(truck) }}</span>
                     </div>
-                    <div class="flex flex-col min-w-0">
-                      <div class="flex items-center flex-wrap gap-1">
-                        <span class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border text-center self-start" 
-                          :style="getProcessBadgeStyle(truck)">
+
+                    <!-- Badges Row -->
+                    <div class="flex flex-col space-y-1 min-w-0">
+                      <div class="flex items-center space-x-1.5">
+                        <span class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border shrink-0" :style="getProcessBadgeStyle(truck)">
                           {{ getProcessType(truck) }}
                         </span>
-                        <!-- Status Badge -->
-                        <span v-if="truck.status === 'CANCELLED'" class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-rose-50 border border-rose-200 text-rose-600">CANCELLED</span>
-                        <span v-else-if="truck.status === 'COMPLETED'" class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-emerald-50 border border-emerald-200 text-emerald-600">COMPLETED</span>
-                        <span v-else class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-amber-50 border border-amber-200 text-amber-700 animate-pulse">{{ truck.status || 'ACTIVE' }}</span>
-                        <!-- Revision Tag -->
-                        <span v-if="truck.revision && truck.revision > 1" class="px-1 py-0.5 bg-slate-800 border border-slate-700 text-[#4A8BDF] text-[7.5px] font-black rounded uppercase tracking-wider shadow-sm" title="Modified via Operation Log Correction">REV #{{ truck.revision }}</span>
+                        
+                        <span v-if="truck.status === 'CANCELLED'" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-rose-50 border border-rose-200 text-rose-600 shrink-0">CANCELLED</span>
+                        <span v-else-if="truck.status === 'COMPLETED'" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 shrink-0">COMPLETED</span>
+                        <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ truck.status || 'ACTIVE' }}</span>
                       </div>
-                      <span class="text-[9px] font-bold text-slate-400 mt-1 truncate max-w-[120px]">{{ getVendor(truck) }}</span>
+
+                      <div v-if="truck.revision && truck.revision > 1">
+                        <span class="inline-flex items-center px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-[#4A8BDF] text-[8px] font-mono font-black rounded uppercase tracking-wider shadow-xs" title="Modified via Operation Log Correction">
+                          REV #{{ truck.revision }}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </td>
 
                 <!-- MODE 1: TIME TIMELINE ANALYTICS -->
                 <template v-if="currentMode === 'time'">
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] text-slate-600 font-bold">
-                    {{ formatTime(truck.timestamps?.gateInAt || truck.gateInAt) }}
+                  <!-- Kedatangan (Tanggal & Waktu) -->
+                  <td class="px-5 py-3 border-y border-slate-100 whitespace-nowrap">
+                    <div class="flex flex-col">
+                      <div class="flex items-center space-x-1 text-slate-800 font-bold text-[11px]">
+                        <span class="material-icons text-slate-400 text-xs">calendar_today</span>
+                        <span>{{ formatArrivalDateTime(truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt).date }}</span>
+                      </div>
+                      <div class="flex items-center space-x-1 text-[#4A8BDF] font-black font-mono text-[10.5px] mt-0.5">
+                        <span class="material-icons text-xs">schedule</span>
+                        <span>{{ formatArrivalDateTime(truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt).time }}</span>
+                      </div>
+                    </div>
                   </td>
                   
                   <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'waitingIn')">
@@ -316,10 +384,12 @@
                   </td>
                   
                   <td class="px-5 py-3 border-y border-slate-100 text-right">
-                    <div class="inline-flex items-center px-2 py-1 rounded-lg border font-mono" :class="truck.durations.total > 90 ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-slate-50 border-slate-100 text-slate-800'">
-                      <span class="text-xs font-black">{{ truck.durations.total }}</span>
-                      <span class="text-[8px] font-black opacity-60 ml-0.5 uppercase">min</span>
-                    </div>
+                    <ProcessTimerBadge 
+                      :start-time="truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt" 
+                      :end-time="truck.completedAt || truck.cancelledAt || (truck.durations?.total ? new Date((new Date(truck.gateInAt || truck.createdAt)).getTime() + truck.durations.total * 60000) : null)"
+                      :sla-minutes="90"
+                      :compact="true"
+                    />
                   </td>
                 </template>
 
@@ -598,6 +668,7 @@ import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import truckService from '../services/truckService'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pagination from '../components/Pagination.vue'
 import { useToast } from '../composables/useToast'
@@ -646,11 +717,104 @@ const selectedTruck = ref({})
 const searchQuery = ref('')
 const expandedRowId = ref(null)
 
-// Advanced Filters
+// Advanced Filters & Date Range State
 const statusFilter = ref('ALL')
 const destinationFilter = ref('ALL')
 const bottleneckFilter = ref('ALL')
 const integrityFilter = ref('ALL')
+const datePreset = ref('ALL')
+const startDate = ref('')
+const endDate = ref('')
+const sortBy = ref('gateInDesc')
+
+const applyDatePreset = (preset) => {
+  datePreset.value = preset
+  const today = new Date()
+  const todayStr = today.toISOString().split('T')[0]
+
+  if (preset === 'TODAY') {
+    startDate.value = todayStr
+    endDate.value = todayStr
+  } else if (preset === 'THIS_WEEK') {
+    const day = today.getDay()
+    const firstDay = new Date(today)
+    firstDay.setDate(today.getDate() - (day === 0 ? 6 : day - 1))
+    startDate.value = firstDay.toISOString().split('T')[0]
+    endDate.value = todayStr
+  } else if (preset === 'THIS_MONTH') {
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+    startDate.value = firstDay.toISOString().split('T')[0]
+    endDate.value = todayStr
+  } else if (preset === 'ALL') {
+    startDate.value = ''
+    endDate.value = ''
+  }
+  currentPage.value = 1
+}
+
+const formatArrivalDateTime = (isoString) => {
+  if (!isoString) return { date: '-', time: '-' }
+  const d = new Date(isoString)
+  if (isNaN(d.getTime())) return { date: '-', time: '-' }
+  const date = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return { date, time }
+}
+
+const extractMoistureValue = (target) => {
+  if (!target) return null;
+
+  // 1. Direct property check
+  if (target.moisture !== undefined && target.moisture !== null) return Number(target.moisture);
+  if (target.kadarAir !== undefined && target.kadarAir !== null) return Number(target.kadarAir);
+  if (target.initialMoisture !== undefined && target.initialMoisture !== null) return Number(target.initialMoisture);
+  if (target.moistureEst !== undefined && target.moistureEst !== null) return Number(target.moistureEst);
+
+  // 2. ChecklistItems array or object
+  const items = target.checklistItems;
+  if (Array.isArray(items)) {
+    const mItem = items.find(i => i && i.label && (
+      i.label.toLowerCase().includes('moisture') || 
+      i.label.toLowerCase().includes('kadar air') || 
+      i.label.toLowerCase().includes('estimasi')
+    ));
+    if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
+      return Number(mItem.value);
+    }
+  } else if (typeof items === 'object' && items !== null) {
+    if (items.initialMoisture !== undefined && items.initialMoisture !== null) return Number(items.initialMoisture);
+    if (items.moisture !== undefined && items.moisture !== null) return Number(items.moisture);
+    if (items.kadarAir !== undefined && items.kadarAir !== null) return Number(items.kadarAir);
+    if (Array.isArray(items.items)) {
+      const mItem = items.items.find(i => i && i.label && (
+        i.label.toLowerCase().includes('moisture') || 
+        i.label.toLowerCase().includes('kadar air') || 
+        i.label.toLowerCase().includes('estimasi')
+      ));
+      if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
+        return Number(mItem.value);
+      }
+    }
+  }
+
+  // 3. qcVehicleChecks / incomingMaterialChecks on truck object
+  if (target.incomingMaterialChecks && target.incomingMaterialChecks.length > 0) {
+    const im = target.incomingMaterialChecks[0];
+    if (im.moisture !== undefined && im.moisture !== null) return Number(im.moisture);
+  }
+  if (target.qcVehicleChecks && target.qcVehicleChecks.length > 0) {
+    const qv = target.qcVehicleChecks[0];
+    const val = extractMoistureValue(qv);
+    if (val !== null && !isNaN(val)) return val;
+  }
+  if (target.qcDetails) {
+    if (target.qcDetails.kadarAir !== undefined && target.qcDetails.kadarAir !== null) return Number(target.qcDetails.kadarAir);
+    if (target.qcDetails.moisture !== undefined && target.qcDetails.moisture !== null) return Number(target.qcDetails.moisture);
+    if (target.qcDetails.initialMoisture !== undefined && target.qcDetails.initialMoisture !== null) return Number(target.qcDetails.initialMoisture);
+  }
+
+  return null;
+}
 
 // Pagination State
 const currentPage = ref(1)
@@ -692,7 +856,10 @@ const getPlateNumber = (truck) => {
 
 const getVendor = (truck) => {
   if (!truck) return '-'
-  return truck.vendorName || truck.vendor || truck.vehicle?.companyName || truck.companyName || truck.cargo?.supplierOrCustomer || '-'
+  const val = truck.vendorName || truck.vendor || truck.vehicle?.companyName || truck.companyName || truck.cargo?.supplierOrCustomer || ''
+  const plate = getPlateNumber(truck)
+  if (!val || val === plate || val === truck.licensePlate) return '-'
+  return val
 }
 
 const getProcessType = (truck) => {
@@ -738,7 +905,7 @@ const analyzedTrucks = computed(() => {
       qcDetails = {
         status: im.result,
         note: im.notes || im.defectNotes || '',
-        kadarAir: im.moisture,
+        kadarAir: extractMoistureValue(im) ?? extractMoistureValue(truck),
         totalFM: im.foreignMatter,
         bijiOK: im.beanCondition === 'PASS' || im.result === 'PASS' ? 100 : 0,
         pic: im.checkedBy?.name || 'N/A'
@@ -748,7 +915,7 @@ const analyzedTrucks = computed(() => {
       qcDetails = {
         status: qv.result,
         note: qv.notes || '',
-        kadarAir: null,
+        kadarAir: extractMoistureValue(qv) ?? extractMoistureValue(truck),
         totalFM: null,
         bijiOK: null,
         pic: qv.checkedBy?.name || 'N/A',
@@ -768,11 +935,11 @@ const analyzedTrucks = computed(() => {
   }).filter(Boolean)
 })
 
-// Multi-criteria filters
+// Multi-criteria filters + Date Range + Sorting
 const filteredAnalyzedTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
   
-  return analyzedTrucks.value.filter(truck => {
+  const filtered = analyzedTrucks.value.filter(truck => {
     // 1. Text Search matching
     const plate = getPlateNumber(truck).toLowerCase()
     const driver = (truck.driverName || '').toLowerCase()
@@ -796,7 +963,28 @@ const filteredAnalyzedTrucks = computed(() => {
     else if (statusFilter.value === 'CANCELLED') matchesStatus = truck.status === 'CANCELLED'
     else if (statusFilter.value === 'ACTIVE') matchesStatus = truck.status !== 'COMPLETED' && truck.status !== 'CANCELLED'
 
-    return matchesKeyword && matchesDest && matchesBottleneck && matchesIntegrity && matchesStatus
+    // 6. Date Range filter (Gate In Arrival Date)
+    let matchesDate = true
+    const arrTime = truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt
+    if (arrTime) {
+      const arrDateStr = new Date(arrTime).toISOString().split('T')[0]
+      if (startDate.value && arrDateStr < startDate.value) matchesDate = false
+      if (endDate.value && arrDateStr > endDate.value) matchesDate = false
+    }
+
+    return matchesKeyword && matchesDest && matchesBottleneck && matchesIntegrity && matchesStatus && matchesDate
+  })
+
+  // Sorting logic
+  return filtered.sort((a, b) => {
+    const timeA = new Date(a.gateInAt || a.timestamps?.gateInAt || a.createdAt || 0).getTime()
+    const timeB = new Date(b.gateInAt || b.timestamps?.gateInAt || b.createdAt || 0).getTime()
+    
+    if (sortBy.value === 'gateInAsc') return timeA - timeB // Datang Terawal / Pertama (Oldest first)
+    if (sortBy.value === 'gateInDesc') return timeB - timeA // Datang Terbaru / Terakhir (Newest first)
+    if (sortBy.value === 'tatDesc') return (b.durations?.totalTat || 0) - (a.durations?.totalTat || 0)
+    if (sortBy.value === 'deviationDesc') return (b.fraud?.diffPercent || 0) - (a.fraud?.diffPercent || 0)
+    return timeB - timeA
   })
 })
 

@@ -11,7 +11,16 @@
                 <h2 class="text-[10px] font-black text-sky-500 uppercase tracking-[0.2em]">Active Operation</h2>
                 <h3 class="text-xl font-black text-slate-800 tracking-tight mt-0.5">Truck Details</h3>
               </div>
-              <StatusBadge :status="selectedTruck.status" :process-type="getProcessType(selectedTruck)" class="shadow-sm" />
+              <div class="flex items-center gap-2">
+                <ProcessTimerBadge 
+                  v-if="selectedTruck.qcStartAt || selectedTruck.weighInAt" 
+                  :start-time="selectedTruck.qcStartAt || selectedTruck.weighInAt" 
+                  :end-time="selectedTruck.qcEndAt"
+                  :sla-minutes="15"
+                  label="QC Timer"
+                />
+                <StatusBadge :status="selectedTruck.status" :process-type="getProcessType(selectedTruck)" class="shadow-sm" />
+              </div>
             </div>
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
@@ -151,6 +160,13 @@
                       :class="(truck.status === 'QC_VEHICLE_PENDING' || truck.status === 'INCOMING_CHECK_PENDING') ? 'bg-sky-50 text-sky-600 border border-sky-200' : 'bg-slate-50 text-slate-700 border border-slate-200'">
                       {{ getStepLabel(truck) }}
                     </span>
+                    <ProcessTimerBadge 
+                      v-if="truck.qcStartAt || truck.weighInAt" 
+                      :start-time="truck.qcStartAt || truck.weighInAt" 
+                      :end-time="truck.qcEndAt"
+                      :sla-minutes="15"
+                      :compact="true"
+                    />
                   </div>
                   <button class="relative overflow-hidden px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all duration-300"
                     :class="selectedTruck?.id === truck.id ? 'bg-sky-500 text-[#4A8BDF] shadow-[0_4px_12px_rgba(14,165,233,0.4)]' : 'bg-slate-100 text-slate-600 group-hover:bg-sky-50 group-hover:text-sky-600'">
@@ -280,17 +296,23 @@
         </div>
         
         <!-- 3-Way Industrial Decision Bar -->
-        <div class="p-6 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row gap-3 shrink-0">
-          <button @click="verifyIncomingDecision(selectedTruck, 'REJECT')" :disabled="isProcessing" class="flex-1 py-3.5 px-4 rounded-xl font-black flex items-center justify-center space-x-2 transition-all bg-white text-red-600 border-2 border-red-200 hover:border-red-600 hover:bg-red-50 shadow-sm active:scale-[0.98]">
-            <span class="material-icons text-lg">cancel</span><span class="text-xs sm:text-sm tracking-wide uppercase">Reject</span>
+        <div class="p-5 border-t border-slate-100 bg-slate-50/80 flex flex-col sm:flex-row items-center gap-3 shrink-0">
+          <button @click="verifyIncomingDecision(selectedTruck, 'REJECT')" :disabled="isProcessing" 
+            class="flex-1 w-full py-3.5 px-4 rounded-xl font-black text-white bg-rose-600 hover:bg-rose-700 active:scale-95 flex items-center justify-center space-x-2 transition-all shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50">
+            <span class="material-icons text-lg">cancel</span>
+            <span class="text-xs sm:text-sm tracking-wide uppercase">REJECT</span>
           </button>
-          <button @click="verifyIncomingDecision(selectedTruck, 'APPROVE_NOTE')" :disabled="isProcessing" class="flex-1 py-3.5 px-4 rounded-xl font-black text-amber-900 flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98]"
-            style="background:linear-gradient(135deg,#fcf1cc,#f59e0b);">
-            <span class="material-icons text-lg">warning</span><span class="text-xs sm:text-sm tracking-wide uppercase">Approve with Note</span>
+          
+          <button @click="verifyIncomingDecision(selectedTruck, 'APPROVE_NOTE')" :disabled="isProcessing" 
+            class="flex-1 w-full py-3.5 px-4 rounded-xl font-black text-white bg-amber-500 hover:bg-amber-600 active:scale-95 flex items-center justify-center space-x-2 transition-all shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50">
+            <span class="material-icons text-lg">warning</span>
+            <span class="text-xs sm:text-sm tracking-wide uppercase">APPROVE WITH NOTE</span>
           </button>
-          <button @click="verifyIncomingDecision(selectedTruck, 'APPROVE_CLEAN')" :disabled="isProcessing" class="flex-1 py-3.5 px-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98]"
-            style="background:linear-gradient(135deg,#10b981,#047857);">
-            <span class="material-icons text-lg">verified</span><span class="text-xs sm:text-sm tracking-wide uppercase">Approve</span>
+          
+          <button @click="verifyIncomingDecision(selectedTruck, 'APPROVE_CLEAN')" :disabled="isProcessing" 
+            class="flex-1 w-full py-3.5 px-4 rounded-xl font-black text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 flex items-center justify-center space-x-2 transition-all shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50">
+            <span class="material-icons text-lg">verified</span>
+            <span class="text-xs sm:text-sm tracking-wide uppercase">APPROVE</span>
           </button>
         </div>
       </div>
@@ -352,14 +374,17 @@
             </div>
             <!-- Footer -->
             <div class="p-5 bg-slate-50 border-t border-slate-100 flex space-x-3">
-              <button @click="submitSamplingAwal(selectedTruck, false)" :disabled="isProcessing" class="flex-1 py-3 rounded-xl font-black text-red-600 border border-red-200 bg-white hover:bg-red-50 active:scale-[0.98] flex items-center justify-center space-x-1 transition-all">
-                <span class="material-icons text-base">cancel</span><span>REJECT SAMPLING</span>
+              <button @click="submitSamplingAwal(selectedTruck, false)" :disabled="isProcessing" 
+                class="flex-1 py-3.5 px-4 rounded-xl font-black text-white bg-rose-600 hover:bg-rose-700 active:scale-95 flex items-center justify-center space-x-2 transition-all shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50">
+                <span class="material-icons text-lg">cancel</span>
+                <span class="text-xs sm:text-sm tracking-wide uppercase">REJECT SAMPLING</span>
               </button>
+              
               <button @click="submitSamplingAwal(selectedTruck, true)" :disabled="isProcessing || !isSamplingValid" 
-                class="flex-1 py-3 rounded-xl font-black text-white flex items-center justify-center space-x-1 shadow-md transition-all active:scale-[0.98]"
-                :class="!isSamplingValid ? 'opacity-50 cursor-not-allowed bg-slate-400' : 'hover:shadow-lg'"
-                :style="isSamplingValid ? 'background:linear-gradient(135deg,#6366f1,#3730a3);' : ''">
-                <span class="material-icons text-base">verified</span><span>APPROVE SAMPLING AWAL</span>
+                class="flex-1 py-3.5 px-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-xs hover:shadow-md active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                :class="!isSamplingValid ? 'bg-slate-300 text-slate-500' : 'bg-emerald-600 hover:bg-emerald-700'">
+                <span class="material-icons text-lg">verified</span>
+                <span class="text-xs sm:text-sm tracking-wide uppercase">APPROVE SAMPLING AWAL</span>
               </button>
             </div>
           </div>
@@ -460,6 +485,7 @@ import { useQcStore } from '../stores/qcStore'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 import StatusBadge from '../components/StatusBadge.vue'
+import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StepTimeline from '../components/StepTimeline.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
@@ -715,11 +741,14 @@ const submitSamplingAwal = async (truck, passed) => {
         vehicleCondition: samplingForm.value.visual === 'Normal',
         documentCompleteness: true,
         sealCondition: true,
-        checklistItems: [
-          { label: 'Sampling Visual', ok: samplingForm.value.visual === 'Normal' },
-          { label: 'Sampling Bau', ok: samplingForm.value.odor === 'Normal' },
-          { label: 'Estimasi Moisture', ok: true, value: samplingForm.value.moistureEst }
-        ],
+        checklistItems: {
+          initialMoisture: Number(samplingForm.value.moistureEst),
+          items: [
+            { label: 'Sampling Visual', ok: samplingForm.value.visual === 'Normal' },
+            { label: 'Sampling Bau', ok: samplingForm.value.odor === 'Normal' },
+            { label: 'Estimasi Moisture', ok: true, value: Number(samplingForm.value.moistureEst) }
+          ]
+        },
         notes: samplingForm.value.note || (passed ? 'Lolos sampling awal QC' : 'Ditolak pada sampling awal QC')
       };
 
