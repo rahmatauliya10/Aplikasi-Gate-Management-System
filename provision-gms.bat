@@ -61,15 +61,12 @@ del temp_check.txt >nul 2>&1
 
 echo.
 echo Melakukan seeding database dengan akun default...
-cd backend
-call npx prisma db seed
+%COMPOSE_CMD% run --rm backend npx prisma db seed
 if %errorlevel% neq 0 (
     echo ERROR: Seeding database gagal!
-    cd ..
     pause
     exit /b 1
 )
-cd ..
 
 echo.
 echo ===================================================

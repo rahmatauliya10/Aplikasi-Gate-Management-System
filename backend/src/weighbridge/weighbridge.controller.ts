@@ -29,7 +29,7 @@ import { WeighbridgeQueryDto } from './dto/weighbridge-query.dto';
 @ApiBearerAuth()
 @Controller('weighbridge')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'SECURITY')
+@Roles('ADMIN', 'SECURITY', 'QC', 'WAREHOUSE')
 export class WeighbridgeController {
   constructor(private weighbridgeService: WeighbridgeService) {}
 

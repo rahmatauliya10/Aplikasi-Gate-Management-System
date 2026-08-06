@@ -309,4 +309,47 @@ describe('TransactionsService State Machine & OCC', () => {
       } as any),
     ).rejects.toThrow('Audit DB disk full failure');
   });
+
+  it('should fail closed (throw error and abort transaction) if transactionCorrection table creation fails with P2021', async () => {
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      grossWeight: 10000,
+      tareWeight: 3000,
+      updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+    };
+
+    const p2021Error = Object.assign(new Error('Table transactionCorrection does not exist'), { code: 'P2021' });
+    const mockPrismaTx = {
+      transactionCorrection: {
+        create: jest.fn().mockRejectedValue(p2021Error),
+      },
+      transaction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+      },
+    };
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockPrismaTx));
+
+    const dto = {
+      reason: 'Koreksi yang seharusnya dibatalkan jika audit tabel tidak ada',
+      evidenceUrl: 'https://storage.gms.local/evidence/ticket-123.pdf',
+      expectedUpdatedAt: '2026-08-01T00:00:00.000Z',
+      grossWeight: 10500,
+    };
+
+    await expect(
+      service.correctCompletedTransaction('tx-1', dto, {
+        id: 'admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any),
+    ).rejects.toThrow('Table transactionCorrection does not exist');
+  });
 });

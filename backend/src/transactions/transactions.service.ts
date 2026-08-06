@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -48,14 +49,74 @@ export class TransactionsService {
       ];
     }
 
-    const skip = (page - 1) * limit;
+    try {
+      const parsedPage = Number(page) || 1;
+      const parsedLimit = Number(limit) || 10;
+      const skip = (parsedPage - 1) * parsedLimit;
 
-    const [total, data] = await Promise.all([
-      this.prisma.transaction.count({ where }),
-      this.prisma.transaction.findMany({
-        where,
-        skip,
-        take: limit,
+      const [total, data] = await Promise.all([
+        this.prisma.transaction.count({ where }),
+        this.prisma.transaction.findMany({
+          where,
+          skip,
+          take: parsedLimit,
+          include: {
+            statusHistory: { orderBy: { changedAt: 'desc' } },
+            weighbridgeRecords: true,
+            warehouseProcesses: true,
+            qcVehicleChecks: {
+              include: { checkedBy: { select: { id: true, name: true } } },
+            },
+            incomingMaterialChecks: {
+              include: { checkedBy: { select: { id: true, name: true } } },
+            },
+            weighInBy: { select: { id: true, name: true } },
+            weighOutBy: { select: { id: true, name: true } },
+            warehouseStartBy: { select: { id: true, name: true } },
+            warehouseEndBy: { select: { id: true, name: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
+
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'TRANSACTIONS_LIST_VIEW',
+          module: 'TRANSACTIONS',
+          description: 'User viewed transaction list',
+          status: 'SUCCESS',
+        })
+        .catch(() => {});
+
+      return {
+        success: true,
+        message: 'Transactions retrieved successfully',
+        data,
+        meta: {
+          page: parsedPage,
+          limit: parsedLimit,
+          total,
+          totalPages: Math.ceil(total / parsedLimit),
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Error retrieving transactions list: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `Gagal mengambil data transaksi: ${error.message || 'Database query error'}`,
+      );
+    }
+  }
+
+  async findActive(user: JwtPayloadUser) {
+    this.logger.log(`Find active transactions by user ${user.email}`);
+
+    try {
+      const data = await this.prisma.transaction.findMany({
+        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
         include: {
           statusHistory: { orderBy: { changedAt: 'desc' } },
           weighbridgeRecords: true,
@@ -72,68 +133,32 @@ export class TransactionsService {
           warehouseEndBy: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: 'desc' },
-      }),
-    ]);
+      });
 
-    await this.activityLogsService.logAction({
-      userId: user.id,
-      action: 'TRANSACTIONS_LIST_VIEW',
-      module: 'TRANSACTIONS',
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'TRANSACTIONS_ACTIVE_VIEW',
+          module: 'TRANSACTIONS',
+          description: 'User viewed active transactions list',
+          status: 'SUCCESS',
+        })
+        .catch(() => {});
 
-      description: 'User viewed transaction list',
-      status: 'SUCCESS',
-    });
-
-    return {
-      success: true,
-      message: 'Transactions retrieved successfully',
-      data,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
-  }
-
-  async findActive(user: JwtPayloadUser) {
-    this.logger.log(`Find active transactions by user ${user.email}`);
-
-    const data = await this.prisma.transaction.findMany({
-      where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
-      include: {
-        statusHistory: { orderBy: { changedAt: 'desc' } },
-        weighbridgeRecords: true,
-        warehouseProcesses: true,
-        qcVehicleChecks: {
-          include: { checkedBy: { select: { id: true, name: true } } },
-        },
-        incomingMaterialChecks: {
-          include: { checkedBy: { select: { id: true, name: true } } },
-        },
-        weighInBy: { select: { id: true, name: true } },
-        weighOutBy: { select: { id: true, name: true } },
-        warehouseStartBy: { select: { id: true, name: true } },
-        warehouseEndBy: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    await this.activityLogsService.logAction({
-      userId: user.id,
-      action: 'TRANSACTIONS_ACTIVE_VIEW',
-      module: 'TRANSACTIONS',
-
-      description: 'User viewed active transactions list',
-      status: 'SUCCESS',
-    });
-
-    return {
-      success: true,
-      message: 'Active transactions retrieved successfully',
-      data,
-    };
+      return {
+        success: true,
+        message: 'Active transactions retrieved successfully',
+        data,
+      };
+    } catch (error: any) {
+      this.logger.error(
+        `Error retrieving active transactions: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `Gagal mengambil data transaksi aktif: ${error.message || 'Database query error'}`,
+      );
+    }
   }
 
   async findOne(id: string, user: JwtPayloadUser) {
@@ -465,30 +490,17 @@ export class TransactionsService {
         });
       }
 
-      let correction: any = null;
-      try {
-        correction = (prismaTx as any).transactionCorrection
-          ? await (prismaTx as any).transactionCorrection.create({
-              data: {
-                transactionId: id,
-                correctedById: user.id,
-                reason: dto.reason,
-                evidenceUrl: dto.evidenceUrl,
-                oldValues: oldValues as any,
-                newValues: newValues as any,
-                ipAddress: cleanIp,
-              },
-            })
-          : null;
-      } catch (err: any) {
-        if (err?.code === 'P2021' || err?.message?.includes('does not exist')) {
-          this.logger.warn(
-            `TransactionCorrection table missing in DB schema, skipping audit table record creation: ${err.message}`,
-          );
-        } else {
-          throw err;
-        }
-      }
+      const correction = await prismaTx.transactionCorrection.create({
+        data: {
+          transactionId: id,
+          correctedById: user.id,
+          reason: dto.reason,
+          evidenceUrl: dto.evidenceUrl,
+          oldValues: oldValues as any,
+          newValues: newValues as any,
+          ipAddress: cleanIp,
+        },
+      });
 
       const finalNet = updatedTx.netWeight;
       const finalActual = updatedTx.actualWeight;
@@ -544,31 +556,20 @@ export class TransactionsService {
       });
     }
 
-    let corrections: any[] = [];
-    try {
-      corrections = await this.prisma.transactionCorrection.findMany({
-        where: { transactionId: id },
-        include: {
-          correctedBy: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              role: true,
-            },
+    const corrections = await this.prisma.transactionCorrection.findMany({
+      where: { transactionId: id },
+      include: {
+        correctedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
           },
         },
-        orderBy: { createdAt: 'desc' },
-      });
-    } catch (err: any) {
-      if (err?.code === 'P2021' || err?.message?.includes('does not exist')) {
-        this.logger.warn(
-          `TransactionCorrection table missing in DB schema: ${err.message}`,
-        );
-      } else {
-        throw err;
-      }
-    }
+      },
+      orderBy: { createdAt: 'desc' },
+    });
 
     return {
       success: true,

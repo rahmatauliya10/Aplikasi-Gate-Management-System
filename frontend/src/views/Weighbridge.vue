@@ -234,14 +234,14 @@ const queueTrucks = computed(() => {
       return t.status === 'WAREHOUSE_DONE' || t.status === 'QC_VEHICLE_REJECTED';
     }
     
-    // Timbang Kedua untuk GBB (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak)
+    // Timbang Kedua untuk GBB (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak ATAU Bongkar Selesai)
     if (process === 'GBB') {
-      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED';
+      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED' || t.status === 'WAREHOUSE_DONE';
     }
     
-    // Timbang Kedua untuk GSP (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak)
+    // Timbang Kedua untuk GSP (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak ATAU Bongkar Selesai)
     if (process === 'GSP') {
-      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED';
+      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED' || t.status === 'WAREHOUSE_DONE';
     }
     
     return false;
@@ -302,7 +302,8 @@ const weighLabelMap = {
     REGISTERED: 'Gross Weight (First Weighing)', 
     INCOMING_CHECK_PASSED: 'Tare Weight (Second Weighing)',
     INCOMING_CHECK_REJECTED: 'Tare Weight (Second Weighing)',
-    QC_VEHICLE_REJECTED: 'Tare Weight (Second Weighing)'
+    QC_VEHICLE_REJECTED: 'Tare Weight (Second Weighing)',
+    WAREHOUSE_DONE: 'Tare Weight (Second Weighing)'
   },
   GBJ: { 
     REGISTERED: 'Tare Weight (First Weighing)', 
@@ -311,6 +312,8 @@ const weighLabelMap = {
   },
   GSP: { 
     REGISTERED: 'Gross Weight (First Weighing)', 
+    INCOMING_CHECK_PASSED: 'Tare Weight (Second Weighing)',
+    INCOMING_CHECK_REJECTED: 'Tare Weight (Second Weighing)',
     WAREHOUSE_DONE: 'Tare Weight (Second Weighing)',
     QC_VEHICLE_REJECTED: 'Tare Weight (Second Weighing)'
   }
@@ -325,12 +328,11 @@ const previousWeight = computed(() => {
   if (!selectedTruck.value || selectedTruck.value.status === 'REGISTERED') return null
   const t = selectedTruck.value
   const pt = getProcessType(t)
-  // Backend returns flat fields: grossWeight, tareWeight
-  // Fallback to nested weights object for backward compat with mock data
+  const inRecord = t.weighbridgeRecords?.find?.(r => r.type === 'IN')
   if (pt === 'GBB' || pt === 'GSP') {
-    return t.grossWeight ?? t.weights?.gross ?? null
+    return t.grossWeight ?? inRecord?.weight ?? t.weights?.gross ?? null
   }
-  return t.tareWeight ?? t.weights?.tare ?? null
+  return t.tareWeight ?? inRecord?.weight ?? t.weights?.tare ?? null
 })
 
 const selectTruck = (truck) => { selectedTruck.value = truck }

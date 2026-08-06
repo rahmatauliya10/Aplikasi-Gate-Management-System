@@ -298,7 +298,20 @@
                  </button>
               </td>
             </tr>
-            <tr v-if="activeTrucks.length === 0">
+            <tr v-if="activeTrucks.length === 0 && storeError">
+              <td colspan="7" class="px-4 sm:px-8 py-12 sm:py-16 text-center border border-rose-100 rounded-2xl bg-rose-50/40 shadow-sm">
+                 <div class="w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-2xl bg-rose-100 flex items-center justify-center mb-3">
+                   <span class="material-icons text-rose-600 text-2xl sm:text-3xl">cloud_off</span>
+                 </div>
+                 <p class="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-widest">Active Fleet Sync Error</p>
+                 <p class="text-[10px] sm:text-xs font-bold text-rose-600 mt-1 max-w-sm mx-auto">{{ storeError }}</p>
+                 <button @click="retryFetch" class="mt-4 px-4 py-2 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-[10px] sm:text-[11px] font-black uppercase tracking-wider rounded-xl shadow-sm transition-all inline-flex items-center space-x-1.5">
+                   <span class="material-icons text-sm">refresh</span>
+                   <span>Retry Sync</span>
+                 </button>
+              </td>
+            </tr>
+            <tr v-else-if="activeTrucks.length === 0">
               <td colspan="7" class="px-4 sm:px-8 py-16 sm:py-24 text-center border border-slate-100 rounded-2xl bg-white shadow-sm">
                  <div class="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-2xl bg-slate-50 flex items-center justify-center mb-4">
                    <span class="material-icons text-slate-200 text-2xl sm:text-3xl">check_circle</span>
@@ -381,6 +394,11 @@ const targetTat = computed(() => settingsStore.targetTat)
 const currentDate = new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
 const activeTrucks = computed(() => truckStore.activeTrucks)
+const storeError = computed(() => truckStore.error)
+const retryFetch = () => {
+  truckStore.fetchTrucks()
+  fetchDashboardStats()
+}
 const totalTrucks = computed(() => stats.value?.summary?.totalToday || 0)
 const activeTruckCount = computed(() => stats.value?.summary?.totalActive || 0)
 const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted || 0)

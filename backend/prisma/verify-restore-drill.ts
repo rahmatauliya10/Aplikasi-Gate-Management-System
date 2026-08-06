@@ -37,7 +37,7 @@ async function main() {
     console.log(`[1/5] Terhubung ke Database Pengujian (${dbName})...`);
     await prisma.$connect();
 
-    console.log('\n[2/5] Mengambil snapshot data awal dari seluruh 15 tabel database & attachment files...');
+    console.log('\n[2/5] Mengambil snapshot data awal dari seluruh 16 tabel database & attachment files...');
     const [
       users,
       userWarehouseAccess,
@@ -54,6 +54,7 @@ async function main() {
       announcements,
       systemIssues,
       transactionCorrections,
+      transactionCorrectionItems,
     ] = await Promise.all([
       prisma.user.findMany(),
       prisma.userWarehouseAccess.findMany(),
@@ -70,6 +71,7 @@ async function main() {
       prisma.announcement.findMany(),
       prisma.systemIssue.findMany(),
       prisma.transactionCorrection.findMany(),
+      prisma.transactionCorrectionItem.findMany(),
     ]);
 
     const initialCounts = {
@@ -88,10 +90,11 @@ async function main() {
       announcements: announcements.length,
       systemIssues: systemIssues.length,
       transactionCorrections: transactionCorrections.length,
+      transactionCorrectionItems: transactionCorrectionItems.length,
     };
 
     const totalRecordsBefore = Object.values(initialCounts).reduce((a, b) => a + b, 0);
-    console.log(`- Snapshot awal berhasil diambil (${totalRecordsBefore} total record dari 15 tabel).`);
+    console.log(`- Snapshot awal berhasil diambil (${totalRecordsBefore} total record dari 16 tabel).`);
 
     const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
     let uploadFilesCount = 0;
@@ -102,6 +105,7 @@ async function main() {
 
     console.log('\n[3/5] Melakukan Wipe Database Test (Clean Reset Simulation)...');
     await prisma.$transaction(async (tx) => {
+      await tx.transactionCorrectionItem.deleteMany();
       await tx.transactionCorrection.deleteMany();
       await tx.fraudCheck.deleteMany();
       await tx.attachment.deleteMany();
@@ -123,7 +127,7 @@ async function main() {
     const txCountAfterWipe = await prisma.transaction.count();
     console.log(`- Status Pasca-Wipe: Users=${userCountAfterWipe}, Transactions=${txCountAfterWipe} (Clean Reset OK).`);
 
-    console.log('\n[4/5] Memulihkan seluruh data 15 tabel dari snapshot (Full Atomic Restore)...');
+    console.log('\n[4/5] Memulihkan seluruh data 16 tabel dari snapshot (Full Atomic Restore)...');
     await prisma.$transaction(async (tx) => {
       if (users.length > 0) await tx.user.createMany({ data: users as any, skipDuplicates: true });
       if (userWarehouseAccess.length > 0) await tx.userWarehouseAccess.createMany({ data: userWarehouseAccess as any, skipDuplicates: true });
@@ -136,13 +140,14 @@ async function main() {
       if (attachments.length > 0) await tx.attachment.createMany({ data: attachments as any, skipDuplicates: true });
       if (fraudChecks.length > 0) await tx.fraudCheck.createMany({ data: fraudChecks as any, skipDuplicates: true });
       if (transactionCorrections.length > 0) await tx.transactionCorrection.createMany({ data: transactionCorrections as any, skipDuplicates: true });
+      if (transactionCorrectionItems.length > 0) await tx.transactionCorrectionItem.createMany({ data: transactionCorrectionItems as any, skipDuplicates: true });
       if (activityLogs.length > 0) await tx.activityLog.createMany({ data: activityLogs as any, skipDuplicates: true });
       if (appSettings.length > 0) await tx.appSetting.createMany({ data: appSettings as any, skipDuplicates: true });
       if (announcements.length > 0) await tx.announcement.createMany({ data: announcements as any, skipDuplicates: true });
       if (systemIssues.length > 0) await tx.systemIssue.createMany({ data: systemIssues as any, skipDuplicates: true });
     });
 
-    console.log('\n[5/5] Memverifikasi integritas data pasca-pemulihan untuk seluruh 15 tabel...');
+    console.log('\n[5/5] Memverifikasi integritas data pasca-pemulihan untuk seluruh 16 tabel...');
     const restoredCounts = {
       users: await prisma.user.count(),
       userWarehouseAccess: await prisma.userWarehouseAccess.count(),
@@ -159,6 +164,7 @@ async function main() {
       announcements: await prisma.announcement.count(),
       systemIssues: await prisma.systemIssue.count(),
       transactionCorrections: await prisma.transactionCorrection.count(),
+      transactionCorrectionItems: await prisma.transactionCorrectionItem.count(),
     };
 
     const totalRecordsAfter = Object.values(restoredCounts).reduce((a, b) => a + b, 0);
@@ -178,7 +184,7 @@ async function main() {
     const restoreLog = {
       lastTestDate: new Date().toISOString(),
       status: 'PASSED',
-      details: `Full DR Restore Drill verified 100% record match across all 15 tables (${totalRecordsAfter} total records restored, ${uploadFilesCount} attachment files verified).`,
+      details: `Full DR Restore Drill verified 100% record match across all 16 tables (${totalRecordsAfter} total records restored, ${uploadFilesCount} attachment files verified).`,
       recordCounts: restoredCounts,
     };
     fs.writeFileSync(path.join(backupDir, 'restore_history.json'), JSON.stringify(restoreLog, null, 2));

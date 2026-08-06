@@ -24,9 +24,9 @@ export class CorrectTransactionDto {
     description:
       'URL or path to supporting evidence document (mandatory for COMPLETED correction)',
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  evidenceUrl: string;
+  evidenceUrl?: string;
 
   @ApiProperty({
     description:

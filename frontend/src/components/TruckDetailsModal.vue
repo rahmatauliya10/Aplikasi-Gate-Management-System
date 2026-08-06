@@ -32,10 +32,11 @@
             </div>
           </div>
           <div class="flex items-center space-x-2">
-            <button v-if="isAdmin && truck.status === 'COMPLETED'" @click="openCorrectionModal"
-              class="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1.5 transition-all shadow-sm">
-              <span class="material-icons text-sm">edit_note</span>
+            <button v-if="isAdmin && (truck.status === 'COMPLETED' || truck.status === 'CANCELLED' || truck.status === 'IN_PROGRESS')" @click="openCorrectionModal"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1.5 transition-all shadow-sm active:scale-95">
+              <span class="material-icons text-sm text-amber-600">edit_note</span>
               <span>Koreksi Admin</span>
+              <span v-if="truck.revision" class="ml-1 px-1.5 py-0.5 bg-amber-200/80 text-amber-950 rounded text-[9px] font-mono font-black">Rev #{{ truck.revision }}</span>
             </button>
             <button @click="close"
               class="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:bg-red-50 hover:text-red-500 text-slate-400">
@@ -416,6 +417,72 @@
               </div>
             </div>
           </div>
+
+          <!-- Full-Width Audit Trail & Correction History (Admin Only / When Available) -->
+          <div v-if="isAdmin && (historyLoading || auditHistory.length > 0 || truck.revision > 1)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
+            <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/80">
+              <div class="flex items-center space-x-2">
+                <span class="material-icons text-amber-600 text-[16px]">history_edu</span>
+                <h3 class="text-[11px] font-black text-slate-700 uppercase tracking-[0.15em]">Audit Trail & Operation Log History</h3>
+                <span v-if="truck.revision" class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[9px] font-black font-mono">Rev #{{ truck.revision }}</span>
+              </div>
+              <button @click="fetchCorrectionHistory" class="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 transition-colors">
+                <span class="material-icons text-[13px]">refresh</span> Reload
+              </button>
+            </div>
+
+            <!-- Loading state -->
+            <div v-if="historyLoading" class="p-6 flex flex-col items-center justify-center text-slate-400 space-y-2">
+              <span class="material-icons animate-spin text-2xl text-amber-600">sync</span>
+              <span class="text-xs font-bold">Memuat riwayat koreksi dan audit trail...</span>
+            </div>
+
+            <!-- Empty state -->
+            <div v-else-if="!auditHistory.length" class="p-6 text-center text-slate-400">
+              <p class="text-xs font-medium">Belum ada catatan koreksi log operasi pada transaksi ini.</p>
+            </div>
+
+            <!-- History List -->
+            <div v-else class="divide-y divide-slate-100 max-h-60 overflow-y-auto custom-scrollbar">
+              <div v-for="(log, idx) in auditHistory" :key="idx" class="p-3 hover:bg-slate-50/60 transition-colors text-xs space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center space-x-2">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-black tracking-wider text-white"
+                      :class="log.action === 'MODIFY_FIELD' ? 'bg-amber-600' : log.action === 'OVERRIDE_STATUS' ? 'bg-red-600' : 'bg-blue-600'">
+                      {{ log.action || 'MODIFY' }}
+                    </span>
+                    <span class="font-bold text-slate-700 font-mono text-[11px]">{{ log.module || 'TRANSACTION' }}</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono">{{ formatTimeFull(log.createdAt) }}</span>
+                </div>
+                
+                <div class="flex items-center justify-between text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <div class="flex items-center gap-2">
+                    <span class="text-slate-500 font-bold">Oleh Admin:</span>
+                    <span class="font-black text-slate-800">{{ log.user?.name || log.userId || 'System Admin' }}</span>
+                  </div>
+                  <div v-if="log.evidenceUrl" class="flex items-center gap-1 text-[#4A8BDF] font-bold">
+                    <span class="material-icons text-[13px]">attachment</span>
+                    <a :href="log.evidenceUrl" target="_blank" class="hover:underline">Bukti Lampiran</a>
+                  </div>
+                  <span v-else class="text-slate-400 italic text-[10px]">Tanpa Lampiran</span>
+                </div>
+
+                <div class="text-slate-700 text-xs font-medium bg-white p-2 rounded border border-slate-100 shadow-2xs">
+                  <span class="font-black text-slate-900">Alasan:</span> {{ log.reason || 'Koreksi operasional log admin.' }}
+                </div>
+
+                <!-- Field Level Diff Item if available -->
+                <div v-if="log.items && log.items.length" class="mt-1 space-y-1">
+                  <div v-for="(item, iIdx) in log.items" :key="iIdx" class="grid grid-cols-3 gap-2 bg-slate-50/90 border border-slate-200/70 rounded-lg p-2 text-[10px] font-mono items-center">
+                    <div class="text-slate-600 font-bold truncate">Field: <span class="text-slate-900 font-black text-[11px]">{{ item.fieldName }}</span></div>
+                    <div class="text-red-700 font-medium truncate">Old: <span class="line-through">{{ item.oldValue || '-' }}</span></div>
+                    <div class="text-emerald-700 font-bold truncate">New: <span>{{ item.newValue || '-' }}</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Footer (Compact) -->
@@ -459,53 +526,130 @@
     </div>
   </transition>
 
-  <!-- Admin Correction Modal Overlay -->
+  <!-- Admin Correction Modal Overlay (Fail-Closed & High-Accountability UI) -->
       <transition name="modal">
         <div v-if="showCorrectionModal" class="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" @click.self="showCorrectionModal = false">
-          <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+          <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
             <div class="flex items-center justify-between border-b border-slate-100 pb-3">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-amber-600">edit_note</span>
-                <h3 class="text-base font-bold text-slate-800">Koreksi Data Transaksi (Admin Only)</h3>
+                <h3 class="text-base font-black text-slate-800">Koreksi Log Operasi (Admin & Auditor)</h3>
               </div>
-              <button @click="showCorrectionModal = false" class="text-slate-400 hover:text-slate-600">
+              <button @click="showCorrectionModal = false" class="text-slate-400 hover:text-slate-600 transition-colors">
                 <span class="material-icons">close</span>
               </button>
             </div>
 
-            <div v-if="correctionError" class="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-bold">
-              {{ correctionError }}
+            <!-- Error Banner -->
+            <div v-if="correctionError" class="p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-bold flex items-start gap-2">
+              <span class="material-icons text-base text-red-600 shrink-0">error_outline</span>
+              <span>{{ correctionError }}</span>
             </div>
 
-            <div class="space-y-3 text-xs">
-              <div>
-                <label class="block font-bold text-slate-600 mb-1">Gross Weight (kg)</label>
-                <input v-model.number="correctionForm.grossWeight" type="number" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono" />
+            <!-- OCC Concurrency Conflict Warning Banner (Fail-Closed) -->
+            <div v-if="occConflictError" class="p-4 bg-amber-50 border-2 border-amber-400 text-amber-950 rounded-xl text-xs space-y-2">
+              <div class="flex items-center gap-2 font-black">
+                <span class="material-icons text-amber-600 text-base">verified_user</span>
+                <span class="uppercase tracking-wide">Konflik Konkurensi (OCC Protect)</span>
               </div>
-              <div>
-                <label class="block font-bold text-slate-600 mb-1">Tare Weight (kg)</label>
-                <input v-model.number="correctionForm.tareWeight" type="number" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono" />
-              </div>
-              <div>
-                <label class="block font-bold text-slate-600 mb-1">Nama Supir</label>
-                <input v-model="correctionForm.driverName" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500" />
-              </div>
-              <div>
-                <label class="block font-bold text-slate-600 mb-1">Alasan Koreksi (Wajib, min 10 karakter)</label>
-                <textarea v-model="correctionForm.reason" rows="2" placeholder="Contoh: Koreksi penimbangan gross dari tiket timbang fisik..." class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"></textarea>
-              </div>
-              <div>
-                <label class="block font-bold text-slate-600 mb-1">URL Bukti Dokumen (Wajib)</label>
-                <input v-model="correctionForm.evidenceUrl" type="url" placeholder="https://storage.gms.local/evidence/ticket-123.pdf" class="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono" />
+              <p class="font-medium text-slate-700">{{ occConflictError }}</p>
+              <div class="flex justify-end pt-1">
+                <button @click="fetchCorrectionHistory; showCorrectionModal = false" type="button" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-sm">
+                  <span class="material-icons text-[14px]">refresh</span> Refresh Data
+                </button>
               </div>
             </div>
 
-            <div class="flex justify-end space-x-2 pt-2 border-t border-slate-100">
-              <button @click="showCorrectionModal = false" class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg">Batal</button>
-              <button @click="submitCorrection" :disabled="correctionLoading" class="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg flex items-center space-x-1 disabled:opacity-50">
-                <span v-if="correctionLoading" class="material-icons animate-spin text-sm">sync</span>
-                <span>Simpan Koreksi</span>
-              </button>
+            <!-- Sensitive Change Confirmation Notice Box -->
+            <div v-if="showSensitiveConfirm" class="p-4 bg-red-50/90 border-2 border-red-300 rounded-xl space-y-3 animate-fade">
+              <div class="flex items-center space-x-2 text-red-800 font-black text-xs uppercase tracking-wider">
+                <span class="material-icons text-red-600 text-base">warning</span>
+                <span>Konfirmasi Perubahan Sensitif (Status / Bobot Ekstrim)</span>
+              </div>
+              <p class="text-xs text-slate-700 font-medium leading-relaxed">
+                Anda mendeteksi modifikasi <b>Status Transaksi</b> atau perubahan angka signifikan yang berdampak pada rekonsiliasi tonase. Tindakan ini dicatat permanen dalam Audit Trail (Old/New Value).
+              </p>
+              <div class="flex justify-end space-x-2 pt-1">
+                <button @click="showSensitiveConfirm = false" type="button" class="px-3 py-1.5 bg-white text-slate-700 font-bold text-xs rounded-lg border border-slate-200 hover:bg-slate-100">Batal</button>
+                <button @click="executeCorrectionSubmission" type="button" class="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow-sm">Ya, Lanjutkan Koreksi</button>
+              </div>
+            </div>
+
+            <!-- Main Form (Hidden if confirming sensitive change) -->
+            <div v-else class="space-y-4">
+              <!-- 1. Alasan Koreksi (Wajib) -->
+              <div>
+                <label class="block font-bold text-slate-700 mb-1 text-[11px] uppercase tracking-wider">Kategori Alasan Koreksi <span class="text-red-500">*</span></label>
+                <select v-model="correctionForm.reasonCategory" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all text-xs">
+                  <option value="" disabled>-- Pilih Kategori Alasan Koreksi (Wajib) --</option>
+                  <option value="SALAH_INPUT_ANGKA">Salah Input Angka / Penimbangan</option>
+                  <option value="PENYESUAIAN_DOKUMEN">Penyesuaian Dokumen / Surat Jalan</option>
+                  <option value="PERUBAHAN_KONDISI_LAPANGAN">Perubahan Kondisi Aktual di Lapangan</option>
+                  <option value="KOREKSI_STATUS_SENSITIF">Koreksi Status Transaksi (Sensitif)</option>
+                  <option value="LAINNYA">Lainnya (Jelaskan di catatan)</option>
+                </select>
+              </div>
+
+              <!-- 2. Catatan Singkat (Wajib, min 10 karakter) -->
+              <div>
+                <div class="flex justify-between items-center mb-1">
+                  <label class="block font-bold text-slate-700 text-[11px] uppercase tracking-wider">Catatan Singkat & Penjelasan <span class="text-red-500">*</span></label>
+                  <span class="text-[10px] font-mono font-bold" :class="correctionForm.remark.trim().length < 10 ? 'text-amber-600' : 'text-emerald-600'">
+                    {{ correctionForm.remark.trim().length }} / min. 10 karakter
+                  </span>
+                </div>
+                <textarea v-model="correctionForm.remark" rows="3" placeholder="Jelaskan secara akurat alasan koreksi ini agar dapat diverifikasi Auditor..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all text-xs"></textarea>
+              </div>
+
+              <!-- 3. Lampiran (Opsional) -->
+              <div>
+                <label class="block font-bold text-slate-700 mb-1 text-[11px] uppercase tracking-wider">URL / Bukti Dokumen <span class="text-slate-400 font-normal">(Opsional)</span></label>
+                <input v-model="correctionForm.evidenceUrl" type="url" placeholder="https://storage.gms.local/evidence/ticket-123.pdf" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all font-mono text-xs" />
+              </div>
+
+              <!-- 4. Target Nilai Koreksi -->
+              <div class="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80 space-y-3">
+                <h4 class="text-[11px] font-black text-slate-700 uppercase tracking-widest flex items-center gap-1.5 border-b border-slate-200/60 pb-2">
+                  <span class="material-icons text-sm text-amber-600">tune</span>
+                  <span>Nilai Koreksi & Status (Old vs New Value)</span>
+                </h4>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block font-bold text-slate-600 mb-1 text-[11px]">Gross Weight (kg)</label>
+                    <input v-model.number="correctionForm.grossWeight" type="number" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white font-mono focus:ring-2 focus:ring-amber-500 transition-all text-xs" />
+                    <span class="text-[10px] font-mono text-slate-400 block mt-0.5">Current: {{ props.truck?.grossWeight || 0 }} kg</span>
+                  </div>
+                  <div>
+                    <label class="block font-bold text-slate-600 mb-1 text-[11px]">Tare Weight (kg)</label>
+                    <input v-model.number="correctionForm.tareWeight" type="number" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white font-mono focus:ring-2 focus:ring-amber-500 transition-all text-xs" />
+                    <span class="text-[10px] font-mono text-slate-400 block mt-0.5">Current: {{ props.truck?.tareWeight || 0 }} kg</span>
+                  </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block font-bold text-slate-600 mb-1 text-[11px]">Nama Supir / PIC</label>
+                    <input v-model="correctionForm.driverName" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 transition-all text-xs font-semibold" />
+                  </div>
+                  <div>
+                    <label class="block font-bold text-slate-600 mb-1 text-[11px]">Status Transaksi</label>
+                    <select v-model="correctionForm.status" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white font-bold text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all">
+                      <option value="COMPLETED">COMPLETED</option>
+                      <option value="CANCELLED">CANCELLED</option>
+                      <option value="IN_PROGRESS">IN_PROGRESS (Reopen)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Footer action -->
+              <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                <button @click="showCorrectionModal = false" type="button" class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Batal</button>
+                <button @click="submitCorrection" type="button" :disabled="correctionLoading" class="px-5 py-2 text-xs font-black text-white bg-amber-600 hover:bg-amber-700 rounded-lg flex items-center space-x-1.5 transition-all shadow-sm active:scale-95 disabled:opacity-50">
+                  <span v-if="correctionLoading" class="material-icons animate-spin text-sm">sync</span>
+                  <span class="material-icons text-sm" v-else>save</span>
+                  <span>Simpan & Catat Audit</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -515,12 +659,13 @@
 </template>
 
 <script setup>
-import { defineProps, defineEmits, computed, ref } from 'vue'
+import { defineProps, defineEmits, computed, ref, watch } from 'vue'
 import StatusBadge from './StatusBadge.vue'
 import { useAuthStore } from '../stores/authStore'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useConfirm } from '../composables/useConfirm'
+import truckService from '../services/truckService'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -545,60 +690,143 @@ const isAdmin = computed(() => {
 const showCorrectionModal = ref(false)
 const correctionLoading = ref(false)
 const correctionError = ref(null)
+const occConflictError = ref(null)
+const showSensitiveConfirm = ref(false)
+const auditHistory = ref([])
+const historyLoading = ref(false)
+
 const correctionForm = ref({
   grossWeight: null,
   tareWeight: null,
   driverName: '',
-  reason: '',
+  status: 'COMPLETED',
+  reasonCategory: '',
+  remark: '',
   evidenceUrl: '',
 })
+
+const fetchCorrectionHistory = async () => {
+  if (!props.truck?.id || !isAdmin.value) return
+  historyLoading.value = true
+  try {
+    const res = await truckStore.fetchOperationLogCorrections(props.truck.id)
+    auditHistory.value = res?.data || []
+  } catch (err) {
+    try {
+      const resOld = await truckService.getCorrections(props.truck.id)
+      auditHistory.value = resOld.data?.data || []
+    } catch (e) {
+      auditHistory.value = []
+    }
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+watch(() => props.isOpen, (newVal) => {
+  if (newVal) {
+    fetchCorrectionHistory()
+  }
+}, { immediate: true })
 
 const openCorrectionModal = () => {
   correctionForm.value = {
     grossWeight: props.truck?.grossWeight || null,
     tareWeight: props.truck?.tareWeight || null,
     driverName: props.truck?.driverName || '',
-    reason: '',
+    status: props.truck?.status || 'COMPLETED',
+    reasonCategory: '',
+    remark: '',
     evidenceUrl: '',
   }
   correctionError.value = null
+  occConflictError.value = null
+  showSensitiveConfirm.value = false
   showCorrectionModal.value = true
 }
 
-const submitCorrection = async () => {
-  if (!correctionForm.value.reason || correctionForm.value.reason.length < 10) {
-    correctionError.value = 'Alasan koreksi wajib diisi minimal 10 karakter.'
+const submitCorrection = () => {
+  if (!correctionForm.value.reasonCategory) {
+    correctionError.value = 'Kategori / Alasan koreksi wajib dipilih.'
     return
   }
-  if (!correctionForm.value.evidenceUrl || !correctionForm.value.evidenceUrl.trim()) {
-    correctionError.value = 'Bukti dokumen (evidenceUrl) wajib diisi.'
+  if (!correctionForm.value.remark || correctionForm.value.remark.trim().length < 10) {
+    correctionError.value = 'Catatan singkat koreksi wajib diisi minimal 10 karakter.'
     return
   }
 
+  // Check for sensitive changes (status change or huge weight deviation)
+  const statusChanged = correctionForm.value.status !== props.truck?.status
+  const grossDiff = Math.abs((Number(correctionForm.value.grossWeight) || 0) - (Number(props.truck?.grossWeight) || 0))
+  if ((statusChanged || grossDiff >= 1000) && !showSensitiveConfirm.value) {
+    showSensitiveConfirm.value = true
+    return
+  }
+
+  executeCorrectionSubmission()
+}
+
+const executeCorrectionSubmission = async () => {
   correctionLoading.value = true
   correctionError.value = null
+  occConflictError.value = null
 
   try {
-    const payload = {
-      reason: correctionForm.value.reason,
-      evidenceUrl: correctionForm.value.evidenceUrl,
-      expectedUpdatedAt: props.truck?.updatedAt || props.truck?.timestamps?.updatedAt,
+    const combinedReason = `[${correctionForm.value.reasonCategory}] ${correctionForm.value.remark.trim()}`
+    const items = []
+    if (correctionForm.value.grossWeight !== null && Number(correctionForm.value.grossWeight) !== Number(props.truck?.grossWeight)) {
+      items.push({ fieldName: 'grossWeight', oldValue: String(props.truck?.grossWeight || 0), newValue: String(correctionForm.value.grossWeight) })
     }
-    if (correctionForm.value.grossWeight !== null && correctionForm.value.grossWeight !== props.truck?.grossWeight) {
-      payload.grossWeight = Number(correctionForm.value.grossWeight)
-    }
-    if (correctionForm.value.tareWeight !== null && correctionForm.value.tareWeight !== props.truck?.tareWeight) {
-      payload.tareWeight = Number(correctionForm.value.tareWeight)
+    if (correctionForm.value.tareWeight !== null && Number(correctionForm.value.tareWeight) !== Number(props.truck?.tareWeight)) {
+      items.push({ fieldName: 'tareWeight', oldValue: String(props.truck?.tareWeight || 0), newValue: String(correctionForm.value.tareWeight) })
     }
     if (correctionForm.value.driverName && correctionForm.value.driverName !== props.truck?.driverName) {
-      payload.driverName = correctionForm.value.driverName
+      items.push({ fieldName: 'driverName', oldValue: String(props.truck?.driverName || ''), newValue: String(correctionForm.value.driverName) })
+    }
+    if (correctionForm.value.status && correctionForm.value.status !== props.truck?.status) {
+      items.push({ fieldName: 'status', oldValue: String(props.truck?.status || ''), newValue: String(correctionForm.value.status) })
     }
 
-    await truckStore.correctTruck(props.truck.id, payload)
+    const payload = {
+      targetModule: 'TRANSACTION',
+      action: correctionForm.value.status !== props.truck?.status ? 'OVERRIDE_STATUS' : 'MODIFY_FIELD',
+      reason: combinedReason,
+      evidenceUrl: correctionForm.value.evidenceUrl?.trim() || undefined,
+      expectedRevision: props.truck?.revision || 1,
+      items: items.length > 0 ? items : undefined,
+      grossWeight: correctionForm.value.grossWeight ? Number(correctionForm.value.grossWeight) : undefined,
+      tareWeight: correctionForm.value.tareWeight ? Number(correctionForm.value.tareWeight) : undefined,
+      driverName: correctionForm.value.driverName || undefined,
+    }
+
+    try {
+      await truckStore.correctOperationLogTruck(props.truck.id, payload)
+    } catch (apiErr) {
+      const status = apiErr?.response?.status
+      const msg = apiErr?.response?.data?.message || apiErr?.message || ''
+      if (status === 409 || msg.toLowerCase().includes('conflict') || msg.toLowerCase().includes('revision') || msg.toLowerCase().includes('konkurensi')) {
+        occConflictError.value = 'Konflik Konkurensi! Data telah diubah oleh operator/Admin lain (OCC protect). Silakan segarkan data (Refresh) terlebih dahulu.'
+        correctionLoading.value = false
+        return
+      }
+      if (status === 404) {
+        await truckStore.correctTruck(props.truck.id, {
+          reason: combinedReason,
+          evidenceUrl: correctionForm.value.evidenceUrl?.trim() || undefined,
+          grossWeight: payload.grossWeight,
+          tareWeight: payload.tareWeight,
+          driverName: payload.driverName,
+        })
+      } else {
+        throw apiErr
+      }
+    }
+
     showCorrectionModal.value = false
-    close()
+    showSensitiveConfirm.value = false
+    await fetchCorrectionHistory()
   } catch (err) {
-    correctionError.value = err.gmsMessage || err.response?.data?.message || err.message || 'Gagal menyimpan koreksi data'
+    correctionError.value = err.gmsMessage || err.response?.data?.message || err.message || 'Gagal menyimpan koreksi (Transaksi dibatalkan secara atomik / fail-closed).'
   } finally {
     correctionLoading.value = false
   }

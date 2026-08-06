@@ -72,9 +72,11 @@ export class WeighbridgeService {
         { processType: 'GBB', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GBB', status: 'INCOMING_CHECK_REJECTED' },
         { processType: 'GBB', status: 'QC_VEHICLE_REJECTED' },
+        { processType: 'GBB', status: 'WAREHOUSE_DONE' },
         { processType: 'GSP', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GSP', status: 'INCOMING_CHECK_REJECTED' },
         { processType: 'GSP', status: 'QC_VEHICLE_REJECTED' },
+        { processType: 'GSP', status: 'WAREHOUSE_DONE' },
         { processType: 'GBJ', status: 'WAREHOUSE_DONE' },
         { processType: 'GBJ', status: 'QC_VEHICLE_REJECTED' },
       );
@@ -85,9 +87,11 @@ export class WeighbridgeService {
         { processType: 'GBB', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GBB', status: 'INCOMING_CHECK_REJECTED' },
         { processType: 'GBB', status: 'QC_VEHICLE_REJECTED' },
+        { processType: 'GBB', status: 'WAREHOUSE_DONE' },
         { processType: 'GSP', status: 'INCOMING_CHECK_PASSED' },
         { processType: 'GSP', status: 'INCOMING_CHECK_REJECTED' },
         { processType: 'GSP', status: 'QC_VEHICLE_REJECTED' },
+        { processType: 'GSP', status: 'WAREHOUSE_DONE' },
         { processType: 'GBJ', status: 'WAREHOUSE_DONE' },
         { processType: 'GBJ', status: 'QC_VEHICLE_REJECTED' },
       );
@@ -394,6 +398,7 @@ export class WeighbridgeService {
         'INCOMING_CHECK_PASSED',
         'INCOMING_CHECK_REJECTED',
         'QC_VEHICLE_REJECTED',
+        'WAREHOUSE_DONE',
       ];
     } else if (tx.processType === 'GBJ') {
       allowedStatuses = ['WAREHOUSE_DONE', 'QC_VEHICLE_REJECTED'];
@@ -455,7 +460,17 @@ export class WeighbridgeService {
     let finalTareWeight: number;
 
     if (tx.processType === 'GBB' || tx.processType === 'GSP') {
-      if (tx.grossWeight === null || tx.grossWeight === undefined) {
+      let gross = tx.grossWeight;
+      if (gross === null || gross === undefined) {
+        const inRecord = await this.prisma.weighbridgeRecord.findFirst({
+          where: { transactionId, type: 'IN' },
+        });
+        if (inRecord) {
+          gross = inRecord.weight;
+        }
+      }
+
+      if (gross === null || gross === undefined) {
         throw new BadRequestException({
           success: false,
           message:
@@ -463,7 +478,7 @@ export class WeighbridgeService {
           errors: [],
         });
       }
-      finalGrossWeight = tx.grossWeight;
+      finalGrossWeight = gross;
       finalTareWeight = dto.weight;
     } else if (tx.processType === 'GBJ') {
       if (tx.tareWeight === null || tx.tareWeight === undefined) {

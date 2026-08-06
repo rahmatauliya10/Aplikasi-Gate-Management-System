@@ -98,6 +98,24 @@ enum RiskLevel {
   INVALID_DATA
 }
 
+enum CorrectionTargetModule {
+  TRANSACTION
+  WEIGHBRIDGE
+  QC_VEHICLE
+  QC_MATERIAL
+  INCOMING_MATERIAL
+  WAREHOUSE
+  STATUS
+  ATTACHMENT
+  REMARK
+}
+
+enum CorrectionAction {
+  CORRECT_DATA
+  CORRECT_RECORDED_STATUS
+  REOPEN_WORKFLOW
+}
+
 model User {
   id                         String    @id @default(uuid())
   email                      String    @unique
@@ -195,6 +213,7 @@ model Transaction {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  revision  Int      @default(1)
 
   weighInBy              User?                      @relation("WeighInByUser", fields: [weighInById], references: [id], onDelete: SetNull)
   weighOutBy             User?                      @relation("WeighOutByUser", fields: [weighOutById], references: [id], onDelete: SetNull)
@@ -463,19 +482,43 @@ model SystemIssue {
 }
 
 model TransactionCorrection {
-  id            String   @id @default(uuid())
-  transactionId String
-  correctedById String
-  reason        String
-  evidenceUrl   String?
-  oldValues     Json
-  newValues     Json
-  ipAddress     String?
-  createdAt     DateTime @default(now())
+  id               String           @id @default(uuid())
+  transactionId    String
+  correctedById    String
+  correctionNumber String?          @unique @default(uuid())
+  action           CorrectionAction @default(CORRECT_DATA)
+  reasonCode       String           @default("OTHER")
+  reason           String
+  remark           String           @default("")
+  evidenceUrl      String?
+  oldValues        Json
+  newValues        Json
+  expectedRevision Int              @default(1)
+  ipAddress        String?
+  createdAt        DateTime         @default(now())
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  correctedBy User        @relation(fields: [correctedById], references: [id], onDelete: Restrict)
+  transaction      Transaction                 @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  correctedBy      User                        @relation(fields: [correctedById], references: [id], onDelete: Restrict)
+  items            TransactionCorrectionItem[]
 
   @@index([transactionId])
   @@index([correctedById])
+  @@index([correctionNumber])
+}
+
+model TransactionCorrectionItem {
+  id             String                 @id @default(uuid())
+  correctionId   String
+  targetModule   CorrectionTargetModule
+  targetRecordId String?
+  fieldName      String
+  oldValue       Json?
+  newValue       Json?
+  itemRemark     String?
+  createdAt      DateTime               @default(now())
+
+  correction     TransactionCorrection  @relation(fields: [correctionId], references: [id], onDelete: Cascade)
+
+  @@index([correctionId])
+  @@index([targetModule, targetRecordId])
 }

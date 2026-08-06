@@ -94,6 +94,20 @@ const truckService = {
   },
 
   /**
+   * Correct operation log across modules (ADMIN only, fail-closed atomic)
+   */
+  correctOperationLog(id, data) {
+    return api.post(`/transactions/${id}/operation-log-corrections`, data)
+  },
+
+  /**
+   * Get operation log correction history and attribution (ADMIN only)
+   */
+  getOperationLogCorrections(id) {
+    return api.get(`/transactions/${id}/operation-log-corrections`)
+  },
+
+  /**
    * Delete a transaction completely
    * @param {Number|String} id 
    */

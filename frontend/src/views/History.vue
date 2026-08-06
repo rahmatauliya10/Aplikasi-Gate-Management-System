@@ -139,6 +139,16 @@
 
       <!-- Advanced Selectors -->
       <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+        <!-- Status Filter -->
+        <div class="flex flex-col">
+          <select v-model="statusFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
+            <option value="ALL">All Operational Statuses</option>
+            <option value="COMPLETED">Completed Only</option>
+            <option value="CANCELLED">Cancelled / Voided</option>
+            <option value="ACTIVE">Active &amp; Reopened</option>
+          </select>
+        </div>
+
         <!-- Destination Filter -->
         <div class="flex flex-col">
           <select v-model="destinationFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
@@ -236,11 +246,19 @@
                       <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-widest leading-none">{{ getPlateNumber(truck) }}</span>
                     </div>
                     <div class="flex flex-col min-w-0">
-                      <span class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border text-center self-start" 
-                        :style="getProcessBadgeStyle(truck)">
-                        {{ getProcessType(truck) }}
-                      </span>
-                      <span class="text-[9px] font-bold text-slate-400 mt-1 truncate max-w-[80px]">{{ getVendor(truck) }}</span>
+                      <div class="flex items-center flex-wrap gap-1">
+                        <span class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border text-center self-start" 
+                          :style="getProcessBadgeStyle(truck)">
+                          {{ getProcessType(truck) }}
+                        </span>
+                        <!-- Status Badge -->
+                        <span v-if="truck.status === 'CANCELLED'" class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-rose-50 border border-rose-200 text-rose-600">CANCELLED</span>
+                        <span v-else-if="truck.status === 'COMPLETED'" class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-emerald-50 border border-emerald-200 text-emerald-600">COMPLETED</span>
+                        <span v-else class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-amber-50 border border-amber-200 text-amber-700 animate-pulse">{{ truck.status || 'ACTIVE' }}</span>
+                        <!-- Revision Tag -->
+                        <span v-if="truck.revision && truck.revision > 1" class="px-1 py-0.5 bg-slate-800 border border-slate-700 text-[#4A8BDF] text-[7.5px] font-black rounded uppercase tracking-wider shadow-sm" title="Modified via Operation Log Correction">REV #{{ truck.revision }}</span>
+                      </div>
+                      <span class="text-[9px] font-bold text-slate-400 mt-1 truncate max-w-[120px]">{{ getVendor(truck) }}</span>
                     </div>
                   </div>
                 </td>
@@ -531,6 +549,22 @@
                 </div>
               </td>
             </tr>
+            <!-- Error State (Taste Skill / UI UX Pro Max: Explicit Interactive Failure State) -->
+            <tr v-else-if="errorMessage" key="error-history">
+              <td :colspan="currentMode === 'time' ? 10 : 8" class="px-5 py-20 text-center">
+                <div class="flex flex-col items-center justify-center max-w-md mx-auto p-6 bg-rose-50/50 border border-rose-100 rounded-2xl shadow-sm">
+                  <div class="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center mb-3">
+                    <span class="material-icons text-2xl text-rose-600">cloud_off</span>
+                  </div>
+                  <h4 class="text-xs font-black uppercase tracking-widest text-slate-800">Server Synchronization Failed</h4>
+                  <p class="text-[11px] font-bold text-rose-600 mt-1">{{ errorMessage }}</p>
+                  <button @click="fetchHistory" class="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-sm transition-all flex items-center space-x-1.5">
+                    <span class="material-icons text-sm">refresh</span>
+                    <span>Retry Connection</span>
+                  </button>
+                </div>
+              </td>
+            </tr>
             <!-- Empty State -->
             <tr v-else-if="filteredAnalyzedTrucks.length === 0" key="empty-history">
               <td :colspan="currentMode==='time' ? 10 : 8" class="px-5 py-24 text-center">
@@ -578,22 +612,31 @@ const handleTruckDeleted = (id) => {
   rawCompletedTrucks.value = rawCompletedTrucks.value.filter(t => String(t.id) !== String(id))
 }
 const loading = ref(false)
+const errorMessage = ref(null)
 
-onMounted(async () => {
+const fetchHistory = async () => {
   loading.value = true
+  errorMessage.value = null
   try {
-    const res = await truckService.getCompleted({ limit: 100 })
+    // Fetch all historical transactions (COMPLETED, CANCELLED, REOPENED/ACTIVE) to ensure no operation log data is missing
+    const res = await truckService.getAll({ limit: 1000 })
     rawCompletedTrucks.value = res.data?.data || res.data || []
   } catch (err) {
     // Don't show toast for password-change-required redirect (handled by interceptor)
     const is403Redirect = err.response?.status === 403 && err.response?.data?.code === 'PASSWORD_CHANGE_REQUIRED'
     if (!is403Redirect) {
       console.warn('[History] Mount-time fetch failed:', err.message)
-      toast.error(err.gmsMessage || 'Failed to load history data')
+      const msg = err.gmsMessage || err.response?.data?.message || 'Failed to load history data'
+      errorMessage.value = msg
+      toast.error(msg)
     }
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => {
+  fetchHistory()
 })
 
 // Reactive View State
@@ -604,6 +647,7 @@ const searchQuery = ref('')
 const expandedRowId = ref(null)
 
 // Advanced Filters
+const statusFilter = ref('ALL')
 const destinationFilter = ref('ALL')
 const bottleneckFilter = ref('ALL')
 const integrityFilter = ref('ALL')
@@ -746,7 +790,13 @@ const filteredAnalyzedTrucks = computed(() => {
     // 4. Integrity status filter
     const matchesIntegrity = integrityFilter.value === 'ALL' || truck.fraud.status === integrityFilter.value
 
-    return matchesKeyword && matchesDest && matchesBottleneck && matchesIntegrity
+    // 5. Operational Status filter (COMPLETED, CANCELLED, ACTIVE/REOPENED)
+    let matchesStatus = true
+    if (statusFilter.value === 'COMPLETED') matchesStatus = truck.status === 'COMPLETED'
+    else if (statusFilter.value === 'CANCELLED') matchesStatus = truck.status === 'CANCELLED'
+    else if (statusFilter.value === 'ACTIVE') matchesStatus = truck.status !== 'COMPLETED' && truck.status !== 'CANCELLED'
+
+    return matchesKeyword && matchesDest && matchesBottleneck && matchesIntegrity && matchesStatus
   })
 })
 
@@ -766,7 +816,7 @@ watch(filteredAnalyzedTrucks, () => {
     currentPage.value = 1
   }
 })
-watch([searchQuery, destinationFilter, bottleneckFilter, integrityFilter], () => {
+watch([searchQuery, statusFilter, destinationFilter, bottleneckFilter, integrityFilter], () => {
   currentPage.value = 1
 })
 

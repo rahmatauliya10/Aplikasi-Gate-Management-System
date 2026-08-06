@@ -367,6 +367,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       announcements,
       systemIssues,
       transactionCorrections,
+      transactionCorrectionItems,
     ] = await Promise.all([
       this.prisma.user.findMany(),
       this.prisma.userWarehouseAccess.findMany(),
@@ -383,6 +384,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       this.prisma.announcement.findMany(),
       this.prisma.systemIssue.findMany(),
       this.prisma.transactionCorrection.findMany(),
+      this.prisma.transactionCorrectionItem.findMany(),
     ]);
 
     const recordCounts = {
@@ -401,6 +403,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       announcements: announcements.length,
       systemIssues: systemIssues.length,
       transactionCorrections: transactionCorrections.length,
+      transactionCorrectionItems: transactionCorrectionItems.length,
     };
 
     const data = {
@@ -419,6 +422,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       announcements,
       systemIssues,
       transactionCorrections,
+      transactionCorrectionItems,
     };
 
     const jsonPayload: DatabaseBackupPayload = {
@@ -897,6 +901,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     try {
       await this.prisma.$transaction(
         async (tx) => {
+          await tx.transactionCorrectionItem.deleteMany();
           await tx.transactionCorrection.deleteMany();
           await tx.fraudCheck.deleteMany();
           await tx.attachment.deleteMany();
@@ -964,6 +969,11 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           if (d.transactionCorrections?.length)
             await tx.transactionCorrection.createMany({
               data: d.transactionCorrections,
+              skipDuplicates: true,
+            });
+          if (d.transactionCorrectionItems?.length)
+            await tx.transactionCorrectionItem.createMany({
+              data: d.transactionCorrectionItems,
               skipDuplicates: true,
             });
           if (d.activityLogs?.length)

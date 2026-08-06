@@ -124,4 +124,62 @@ describe('WeighbridgeService Fraud Calculation', () => {
       devCritical > 5 ? 'CRITICAL' : devCritical > 2 ? 'WARNING' : 'SAFE',
     ).toBe('CRITICAL');
   });
+
+  it('should allow GBB weigh-out when status is WAREHOUSE_DONE and use fallback IN record weight if grossWeight is missing on transaction', async () => {
+    const mockTx = {
+      id: 'tx-gbb-1',
+      status: 'WAREHOUSE_DONE',
+      processType: 'GBB',
+      grossWeight: null, // missing on root transaction
+      tareWeight: null,
+      actualWeight: null,
+    };
+
+    const txClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+        update: jest.fn().mockResolvedValue({ ...mockTx, status: 'WEIGH_OUT_DONE' }),
+      },
+      weighbridgeRecord: {
+        create: jest.fn(),
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null) // OUT duplicate check
+          .mockResolvedValueOnce({ weight: 15000 }), // IN record fallback search
+      },
+      transactionStatusHistory: { create: jest.fn() },
+      fraudCheck: { create: jest.fn() },
+    };
+
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(txClient));
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    jest
+      .spyOn(prismaService.weighbridgeRecord, 'findFirst')
+      .mockImplementation((args: any) => {
+        if (args?.where?.type === 'OUT') return Promise.resolve(null);
+        if (args?.where?.type === 'IN') return Promise.resolve({ weight: 15000 } as any);
+        return Promise.resolve(null);
+      });
+
+    const result = await service.submitWeighOut('tx-gbb-1', { weight: 5000 }, {
+      id: 'user-1',
+    } as any);
+
+    expect(txClient.transaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'WEIGH_OUT_DONE',
+          grossWeight: 15000,
+          tareWeight: 5000,
+          netWeight: 10000,
+        }),
+      }),
+    );
+  });
 });
