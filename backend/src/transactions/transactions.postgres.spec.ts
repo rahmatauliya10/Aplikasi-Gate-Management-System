@@ -3,6 +3,7 @@ import { TransactionsService } from './transactions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { CargoProcessType, ProcessType } from '@prisma/client';
+import { execSync } from 'child_process';
 
 // Ensure test database isolation before Prisma or Nest services are instantiated
 const rawTestDbUrl = process.env.DATABASE_URL_TEST?.replace(/^"|"$/g, '');
@@ -50,6 +51,19 @@ describePgTest('TransactionsService PG Rollback Integration', () => {
   let service: TransactionsService;
   let prisma: PrismaService;
   let activityLogsService: ActivityLogsService;
+
+  beforeAll(() => {
+    if (isPgTestAvailable) {
+      try {
+        execSync('npx prisma db push --accept-data-loss --skip-generate', {
+          env: process.env,
+          stdio: 'ignore',
+        });
+      } catch {
+        // Fallback gracefully if db push already run
+      }
+    }
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
