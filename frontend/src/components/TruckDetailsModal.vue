@@ -1161,8 +1161,6 @@
                     <input v-model="correctionForm.qcvNotes" type="text" placeholder="Catatan pemeriksaan sampling pre-unloading & kondisi kendaraan..." class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="correctionForm.qcvNotes !== qcvOriginal.notes ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                   </div>
                 </div>
-
-                </div>
               </div>
 
               <!-- Footer action -->
