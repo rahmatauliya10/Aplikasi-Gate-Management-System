@@ -138,7 +138,9 @@ describe('WeighbridgeService Fraud Calculation', () => {
     const txClient = {
       transaction: {
         findUnique: jest.fn().mockResolvedValue(mockTx),
-        update: jest.fn().mockResolvedValue({ ...mockTx, status: 'WEIGH_OUT_DONE' }),
+        update: jest
+          .fn()
+          .mockResolvedValue({ ...mockTx, status: 'WEIGH_OUT_DONE' }),
       },
       weighbridgeRecord: {
         create: jest.fn(),
@@ -163,7 +165,8 @@ describe('WeighbridgeService Fraud Calculation', () => {
       .spyOn(prismaService.weighbridgeRecord, 'findFirst')
       .mockImplementation((args: any) => {
         if (args?.where?.type === 'OUT') return Promise.resolve(null);
-        if (args?.where?.type === 'IN') return Promise.resolve({ weight: 15000 } as any);
+        if (args?.where?.type === 'IN')
+          return Promise.resolve({ weight: 15000 } as any);
         return Promise.resolve(null);
       });
 

@@ -10,7 +10,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { CreateOperationLogCorrectionDto } from './dto/create-operation-log-correction.dto';
-import { CorrectionAction, CorrectionTargetModule, TransactionStatus } from '@prisma/client';
+import {
+  CorrectionAction,
+  CorrectionTargetModule,
+  TransactionStatus,
+} from '@prisma/client';
 
 const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   TRANSACTION: [
@@ -104,7 +108,7 @@ export class OperationLogCorrectionService {
       }
 
       if (
-        !['COMPLETED', 'CANCELLED'].includes(tx.status as string) &&
+        !['COMPLETED', 'CANCELLED'].includes(tx.status) &&
         dto.action !== CorrectionAction.REOPEN_WORKFLOW
       ) {
         throw new BadRequestException(
@@ -134,35 +138,52 @@ export class OperationLogCorrectionService {
         }
 
         let extractedOldValue: any = null;
-        if (item.targetModule === CorrectionTargetModule.TRANSACTION || item.targetModule === CorrectionTargetModule.STATUS || item.targetModule === CorrectionTargetModule.REMARK) {
+        if (
+          item.targetModule === CorrectionTargetModule.TRANSACTION ||
+          item.targetModule === CorrectionTargetModule.STATUS ||
+          item.targetModule === CorrectionTargetModule.REMARK
+        ) {
           extractedOldValue = (tx as any)[item.fieldName];
           txUpdateData[item.fieldName] = item.newValue;
           if (item.fieldName === 'status') {
             statusUpdatedTo = item.newValue as string;
           }
-        } else if (item.targetModule === CorrectionTargetModule.WEIGHBRIDGE && tx.weighbridgeRecords?.length > 0) {
+        } else if (
+          item.targetModule === CorrectionTargetModule.WEIGHBRIDGE &&
+          tx.weighbridgeRecords?.length > 0
+        ) {
           const rec = tx.weighbridgeRecords[tx.weighbridgeRecords.length - 1];
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.weighbridgeRecord.update({
             where: { id: item.targetRecordId || rec.id },
             data: { [item.fieldName]: item.newValue },
           });
-        } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE && tx.warehouseProcesses?.length > 0) {
+        } else if (
+          item.targetModule === CorrectionTargetModule.WAREHOUSE &&
+          tx.warehouseProcesses?.length > 0
+        ) {
           const rec = tx.warehouseProcesses[tx.warehouseProcesses.length - 1];
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.warehouseProcess.update({
             where: { id: item.targetRecordId || rec.id },
             data: { [item.fieldName]: item.newValue },
           });
-        } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE && tx.qcVehicleChecks?.length > 0) {
+        } else if (
+          item.targetModule === CorrectionTargetModule.QC_VEHICLE &&
+          tx.qcVehicleChecks?.length > 0
+        ) {
           const rec = tx.qcVehicleChecks[tx.qcVehicleChecks.length - 1];
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.qcVehicleCheck.update({
             where: { id: item.targetRecordId || rec.id },
             data: { [item.fieldName]: item.newValue },
           });
-        } else if (item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL && tx.incomingMaterialChecks?.length > 0) {
-          const rec = tx.incomingMaterialChecks[tx.incomingMaterialChecks.length - 1];
+        } else if (
+          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL &&
+          tx.incomingMaterialChecks?.length > 0
+        ) {
+          const rec =
+            tx.incomingMaterialChecks[tx.incomingMaterialChecks.length - 1];
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.incomingMaterialCheck.update({
             where: { id: item.targetRecordId || rec.id },
@@ -254,7 +275,9 @@ export class OperationLogCorrectionService {
       }
 
       // Step 12: Increment Revision & Apply Updates
-      txUpdateData.revision = (tx as any).revision ? (tx as any).revision + 1 : 2;
+      txUpdateData.revision = (tx as any).revision
+        ? (tx as any).revision + 1
+        : 2;
 
       const updatedTx = await prismaTx.transaction.update({
         where: { id },
@@ -262,12 +285,20 @@ export class OperationLogCorrectionService {
       });
 
       // Step 9: Append Status History if Status Changed or Reopened
-      if (statusUpdatedTo || dto.action === CorrectionAction.CORRECT_RECORDED_STATUS || dto.action === CorrectionAction.REOPEN_WORKFLOW) {
-        const targetStatus = statusUpdatedTo || (dto.action === CorrectionAction.REOPEN_WORKFLOW ? 'QC_VEHICLE_PENDING' : tx.status);
+      if (
+        statusUpdatedTo ||
+        dto.action === CorrectionAction.CORRECT_RECORDED_STATUS ||
+        dto.action === CorrectionAction.REOPEN_WORKFLOW
+      ) {
+        const targetStatus =
+          statusUpdatedTo ||
+          (dto.action === CorrectionAction.REOPEN_WORKFLOW
+            ? 'QC_VEHICLE_PENDING'
+            : tx.status);
         await prismaTx.transactionStatusHistory.create({
           data: {
             transactionId: id,
-            oldStatus: tx.status as TransactionStatus,
+            oldStatus: tx.status,
             newStatus: targetStatus as TransactionStatus,
             notes: `ADMIN_CORRECTION: ${dto.remark} (Correction: ${correctionNumber})`,
             changedById: user?.id || null,
@@ -315,7 +346,8 @@ export class OperationLogCorrectionService {
 
     return {
       success: true,
-      message: 'Operation Log berhasil dikoreksi dan dicatat secara atomik oleh Admin.',
+      message:
+        'Operation Log berhasil dikoreksi dan dicatat secara atomik oleh Admin.',
       data: result,
     };
   }
@@ -338,7 +370,9 @@ export class OperationLogCorrectionService {
     }
 
     try {
-      const corrections = await (this.prisma.transactionCorrection as any).findMany({
+      const corrections = await (
+        this.prisma.transactionCorrection as any
+      ).findMany({
         where: { transactionId },
         include: {
           correctedBy: {
@@ -368,7 +402,9 @@ export class OperationLogCorrectionService {
         data: corrections,
       };
     } catch (err: any) {
-      this.logger.error(`Failed to fetch operation log corrections: ${err.message}`);
+      this.logger.error(
+        `Failed to fetch operation log corrections: ${err.message}`,
+      );
       throw new InternalServerErrorException(
         'Gagal mengambil riwayat koreksi Operation Log (Layanan Audit Tidak Bersedia).',
       );

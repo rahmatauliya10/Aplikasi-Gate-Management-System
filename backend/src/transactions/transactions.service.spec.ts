@@ -319,7 +319,10 @@ describe('TransactionsService State Machine & OCC', () => {
       updatedAt: new Date('2026-08-01T00:00:00.000Z'),
     };
 
-    const p2021Error = Object.assign(new Error('Table transactionCorrection does not exist'), { code: 'P2021' });
+    const p2021Error = Object.assign(
+      new Error('Table transactionCorrection does not exist'),
+      { code: 'P2021' },
+    );
     const mockPrismaTx = {
       transactionCorrection: {
         create: jest.fn().mockRejectedValue(p2021Error),

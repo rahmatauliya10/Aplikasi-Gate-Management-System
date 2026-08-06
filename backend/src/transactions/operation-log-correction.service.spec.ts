@@ -81,7 +81,9 @@ describe('OperationLogCorrectionService', () => {
       },
     };
 
-    jest.spyOn(mockPrismaService, '$transaction').mockImplementation(async (cb: any) => cb(mockTxClient));
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
 
     const dto = {
       reasonCode: 'SALAH_INPUT_ANGKA',
@@ -97,7 +99,11 @@ describe('OperationLogCorrectionService', () => {
     };
 
     await expect(
-      service.correctOperationLog('tx-1', dto as any, { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' }),
+      service.correctOperationLog('tx-1', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      }),
     ).rejects.toThrow(ConflictException);
   });
 
@@ -115,7 +121,9 @@ describe('OperationLogCorrectionService', () => {
       },
     };
 
-    jest.spyOn(mockPrismaService, '$transaction').mockImplementation(async (cb: any) => cb(mockTxClient));
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
 
     const dto = {
       reasonCode: 'LAINNYA',
@@ -131,7 +139,11 @@ describe('OperationLogCorrectionService', () => {
     };
 
     await expect(
-      service.correctOperationLog('tx-1', dto as any, { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' }),
+      service.correctOperationLog('tx-1', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      }),
     ).rejects.toThrow(BadRequestException);
   });
 
@@ -146,8 +158,17 @@ describe('OperationLogCorrectionService', () => {
       actualWeight: 7050,
     };
 
-    const mockCorrection = { id: 'cor-991', correctionNumber: 'COR-2026-10291', items: [] };
-    const mockUpdatedTx = { ...mockTx, grossWeight: 11000, netWeight: 8000, revision: 2 };
+    const mockCorrection = {
+      id: 'cor-991',
+      correctionNumber: 'COR-2026-10291',
+      items: [],
+    };
+    const mockUpdatedTx = {
+      ...mockTx,
+      grossWeight: 11000,
+      netWeight: 8000,
+      revision: 2,
+    };
 
     const mockTxClient = {
       transaction: {
@@ -162,8 +183,12 @@ describe('OperationLogCorrectionService', () => {
       },
     };
 
-    jest.spyOn(mockPrismaService, '$transaction').mockImplementation(async (cb: any) => cb(mockTxClient));
-    jest.spyOn(mockActivityLogsService, 'logAction').mockResolvedValue(true as any);
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+    jest
+      .spyOn(mockActivityLogsService, 'logAction')
+      .mockResolvedValue(true as any);
 
     const dto = {
       action: CorrectionAction.CORRECT_DATA,
@@ -180,7 +205,7 @@ describe('OperationLogCorrectionService', () => {
       ],
     };
 
-    const res = await service.correctOperationLog('tx-1', dto as any, {
+    const res = await service.correctOperationLog('tx-1', dto, {
       id: 'adm-1',
       role: 'ADMIN',
       email: 'admin@gms.local',
