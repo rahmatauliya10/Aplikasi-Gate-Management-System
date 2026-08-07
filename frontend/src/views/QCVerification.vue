@@ -325,66 +325,66 @@
         <div v-if="showSamplingModal" class="fixed inset-0 z-[9998] flex items-center justify-center p-4 sm:p-6" style="background:rgba(2,8,23,0.7);backdrop-filter:blur(10px);" @click.self="showSamplingModal = false">
           <div class="relative w-[95vw] sm:max-w-xl mx-auto flex flex-col rounded-3xl shadow-2xl overflow-hidden bg-white">
             <!-- Header -->
-            <div class="px-6 py-5 flex justify-between items-center bg-indigo-900 text-white">
+            <div class="px-8 py-5 flex justify-between items-center bg-slate-50 border-b border-slate-100 sticky top-0 z-10 shrink-0">
               <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-800 border border-indigo-700">
-                  <span class="material-icons text-indigo-200 text-xl">biotech</span>
+                <div class="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-50 border border-indigo-100">
+                  <span class="material-icons text-indigo-600 text-xl">biotech</span>
                 </div>
                 <div>
-                  <h3 class="text-base font-black tracking-tight">Form QC Sampling Awal (Pre-Unloading)</h3>
-                  <p class="text-[10px] font-bold text-indigo-300 uppercase tracking-widest mt-0.5">Sampling Fisik Sebelum Bongkar GBB/GSP</p>
+                  <h3 class="text-base font-black text-slate-800 tracking-tight">Form QC Sampling Awal</h3>
+                  <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Pre-Unloading Sampling GBB/GSP</p>
                 </div>
               </div>
-              <button @click="showSamplingModal = false" class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-indigo-800 text-indigo-200 transition-colors">
+              <button @click="showSamplingModal = false" class="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-slate-200 text-slate-500">
                 <span class="material-icons text-lg">close</span>
               </button>
             </div>
             <!-- Body -->
-            <div class="p-6 space-y-4">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div class="space-y-1.5">
-                  <label class="text-[10px] font-black text-slate-600 uppercase tracking-wider">Visual Physical Sample *</label>
-                  <select v-model="samplingForm.visual" class="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none">
+            <div class="p-6 space-y-5 bg-[#FAFBFF]">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div class="space-y-2">
+                  <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Visual Physical Sample *</label>
+                  <select v-model="samplingForm.visual" class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all">
                     <option value="Normal">Normal / Meets Specifications</option>
                     <option value="Abnormal">Abnormal / Non-Compliant</option>
                   </select>
                 </div>
-                <div class="space-y-1.5">
-                  <label class="text-[10px] font-black text-slate-600 uppercase tracking-wider">Initial Sample Odor *</label>
-                  <select v-model="samplingForm.odor" class="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none">
+                <div class="space-y-2">
+                  <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Initial Sample Odor *</label>
+                  <select v-model="samplingForm.odor" class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 shadow-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all">
                     <option value="Normal">Normal / Characteristic</option>
                     <option value="Abnormal">Abnormal / Musty / Rancid</option>
                   </select>
                 </div>
               </div>
-              <div class="space-y-1.5">
-                <label class="text-[10px] font-black text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                  <span>Estimated Moisture Content (%) *</span>
-                  <span v-if="samplingForm.moistureEst === null || samplingForm.moistureEst === ''" class="text-red-500 font-bold text-[9px]">* Required</span>
+              <div class="space-y-2">
+                <label class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Estimated Moisture Content (%) *</span>
+                  <span v-if="samplingForm.moistureEst === null || samplingForm.moistureEst === ''" class="text-rose-500 font-bold text-[9px] uppercase tracking-widest bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100">* Required</span>
                 </label>
                 <div class="relative">
-                  <input v-model.number="samplingForm.moistureEst" type="number" step="0.1" placeholder="Example: 12.5" class="w-full h-11 pl-4 pr-8 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all" />
-                  <span class="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-black select-none">%</span>
+                  <input v-model.number="samplingForm.moistureEst" type="number" step="0.1" placeholder="Example: 12.5" class="w-full h-11 pl-4 pr-10 bg-white border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-xl text-sm font-semibold text-slate-700 shadow-sm outline-none transition-all placeholder:text-slate-400 placeholder:font-medium" />
+                  <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center text-slate-400 font-black select-none pointer-events-none w-5 h-5 bg-slate-50 rounded text-xs border border-slate-100">%</div>
                 </div>
               </div>
-              <div class="space-y-1.5">
-                <label class="text-[10px] font-black text-slate-700 uppercase tracking-wider">Initial Sampling Notes</label>
-                <textarea v-model="samplingForm.note" rows="3" placeholder="Enter initial physical sampling notes prior to unloading..." class="w-full p-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl text-sm font-medium text-slate-800 outline-none resize-none transition-all"></textarea>
+              <div class="space-y-2">
+                <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Initial Sampling Notes</label>
+                <textarea v-model="samplingForm.note" rows="3" placeholder="Enter initial physical sampling notes prior to unloading..." class="w-full p-4 bg-white border border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-xl text-sm font-medium text-slate-700 shadow-sm outline-none resize-none transition-all placeholder:text-slate-400"></textarea>
               </div>
             </div>
             <!-- Footer -->
-            <div class="p-5 bg-slate-50 border-t border-slate-100 flex space-x-3">
+            <div class="p-6 bg-white border-t border-slate-100 flex items-center justify-end space-x-3">
               <button @click="submitSamplingAwal(selectedTruck, false)" :disabled="isProcessing" 
-                class="flex-1 py-3.5 px-4 rounded-xl font-black text-white bg-rose-600 hover:bg-rose-700 active:scale-95 flex items-center justify-center space-x-2 transition-all shadow-xs hover:shadow-md cursor-pointer disabled:opacity-50">
-                <span class="material-icons text-lg">cancel</span>
-                <span class="text-xs sm:text-sm tracking-wide uppercase">REJECT SAMPLING</span>
+                class="px-5 py-2.5 rounded-xl font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-100 active:scale-[0.98] flex items-center justify-center space-x-2 transition-all cursor-pointer disabled:opacity-50">
+                <span class="material-icons text-sm">cancel</span>
+                <span class="text-xs sm:text-sm tracking-wide">Reject</span>
               </button>
               
               <button @click="submitSamplingAwal(selectedTruck, true)" :disabled="isProcessing || !isSamplingValid" 
-                class="flex-1 py-3.5 px-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-xs hover:shadow-md active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                :class="!isSamplingValid ? 'bg-slate-300 text-slate-500' : 'bg-emerald-600 hover:bg-emerald-700'">
-                <span class="material-icons text-lg">verified</span>
-                <span class="text-xs sm:text-sm tracking-wide uppercase">APPROVE SAMPLING AWAL</span>
+                class="px-6 py-2.5 rounded-xl font-bold text-white flex items-center justify-center space-x-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                :class="!isSamplingValid ? 'bg-slate-300' : 'bg-[#3A6ABF] hover:bg-[#2e549c] hover:shadow-md border border-[#3A6ABF]'">
+                <span class="material-icons text-sm">verified</span>
+                <span class="text-xs sm:text-sm tracking-wide">Approve Sampling</span>
               </button>
             </div>
           </div>

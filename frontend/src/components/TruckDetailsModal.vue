@@ -24,7 +24,7 @@
                 </span>
                 <StatusBadge :status="truck.status" :process-type="truck.processType" />
                 <ProcessTimerBadge 
-                  :start-time="truck.warehouseStartAt || truck.qcStartAt || truck.weighInAt || truck.gateInAt || truck.createdAt" 
+                  :start-time="activeStageStartTime" 
                   :end-time="truck.completedAt || truck.cancelledAt"
                   :sla-minutes="60"
                   label="Durasi"
@@ -783,24 +783,47 @@
 
                 <!-- TAB 2: IDENTITY -->
                 <div v-if="activeCorrectionTab === 'IDENTITY'" class="space-y-3 animate-fade">
-                  <div class="grid grid-cols-2 gap-3">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Nama Supir / PIC</label>
-                      <input v-model="correctionForm.driverName" type="text" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 transition-all text-xs font-semibold" :class="correctionForm.driverName !== (props.truck?.driverName || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.driverName" type="text" placeholder="Nama supir..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.driverName !== (props.truck?.driverName || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
-                    <div>
-                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. Surat Jalan / DO</label>
-                      <input v-model="correctionForm.suratJalanNumber" type="text" placeholder="Nomor surat jalan..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 transition-all text-xs font-mono" :class="correctionForm.suratJalanNumber !== (props.truck?.suratJalanNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
-                    </div>
-                  </div>
-                  <div class="grid grid-cols-2 gap-3">
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Vendor / Ekspedisi</label>
-                      <input v-model="correctionForm.vendorName" type="text" placeholder="Nama perusahaan vendor..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 transition-all text-xs font-semibold" :class="correctionForm.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.vendorName" type="text" placeholder="Nama perusahaan vendor..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Jenis Kendaraan / Armada</label>
-                      <input v-model="correctionForm.vehicleType" type="text" placeholder="Tronton / Colt Diesel / dll..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 transition-all text-xs font-semibold" :class="correctionForm.vehicleType !== (props.truck?.vehicleType || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.vehicleType" type="text" placeholder="Tronton / Wingbox / dll..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vehicleType !== (props.truck?.vehicleType || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. HP Supir / Driver Phone</label>
+                      <input v-model="correctionForm.driverPhone" type="text" placeholder="08123456789..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.driverPhone !== (props.truck?.driverPhone || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. Surat Jalan / Delivery Note (SJ)</label>
+                      <input v-model="correctionForm.suratJalanNumber" type="text" placeholder="Nomor surat jalan..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.suratJalanNumber !== (props.truck?.suratJalanNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Logistics PO / No. PO</label>
+                      <input v-model="correctionForm.poNumber" type="text" placeholder="Nomor PO..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.poNumber !== (props.truck?.poNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Permit Card / No. VMS</label>
+                      <input v-model="correctionForm.permitCardNumber" type="text" placeholder="Nomor Permit Card / VMS..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.permitCardNumber !== (props.truck?.permitCardNumber || props.truck?.permitCard || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. KTP / ID Number</label>
+                      <input v-model="correctionForm.guestIdNumber" type="text" placeholder="Nomor KTP / Guest ID..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.guestIdNumber !== (props.truck?.guestIdNumber || props.truck?.guestId || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                   </div>
                 </div>
@@ -1210,6 +1233,26 @@ const isAdmin = computed(() => {
   return role === 'ADMIN'
 })
 
+const activeStageStartTime = computed(() => {
+  const t = props.truck
+  if (!t) return null
+  const status = t.status || ''
+
+  if (['COMPLETED', 'CANCELLED', 'DISPATCHED'].includes(status)) {
+    return t.gateInAt || t.createdAt
+  }
+  if (['INCOMING_CHECK_PENDING', 'INCOMING_CHECK_IN_PROGRESS', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_IN_PROGRESS'].includes(status)) {
+    return t.qcStartAt || t.weighInAt || t.gateInAt || t.createdAt
+  }
+  if (['WAREHOUSE_IN_PROGRESS', 'WAREHOUSE_DONE'].includes(status)) {
+    return t.warehouseStartAt || t.qcStartAt || t.weighInAt || t.gateInAt || t.createdAt
+  }
+  if (['WEIGH_IN_DONE', 'WEIGH_OUT_DONE'].includes(status)) {
+    return t.weighInAt || t.gateInAt || t.createdAt
+  }
+  return t.gateInAt || t.createdAt
+})
+
 const showCorrectionModal = ref(false)
 const correctionLoading = ref(false)
 const correctionError = ref(null)
@@ -1456,6 +1499,9 @@ const openCorrectionModal = () => {
     suratJalanNumber: props.truck?.suratJalanNumber || '',
     vendorName: props.truck?.vendorName || props.truck?.vendor || '',
     vehicleType: props.truck?.vehicleType || '',
+    poNumber: props.truck?.poNumber || '',
+    permitCardNumber: props.truck?.permitCardNumber || props.truck?.permitCard || '',
+    guestIdNumber: props.truck?.guestIdNumber || props.truck?.guestId || '',
     grossWeight: props.truck?.grossWeight || null,
     tareWeight: props.truck?.tareWeight || null,
     actualWeight: props.truck?.actualWeight !== undefined && props.truck?.actualWeight !== null ? props.truck.actualWeight : (props.truck?.warehouseProcesses?.[0]?.actualWeight || null),
@@ -1535,20 +1581,29 @@ const executeCorrectionSubmission = async () => {
 
   try {
     const items = []
-    if (correctionForm.value.driverName && correctionForm.value.driverName !== (props.truck?.driverName || '')) {
+    if (correctionForm.value.driverName !== undefined && correctionForm.value.driverName !== (props.truck?.driverName || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'driverName', newValue: String(correctionForm.value.driverName) })
     }
-    if (correctionForm.value.driverPhone && correctionForm.value.driverPhone !== (props.truck?.driverPhone || '')) {
+    if (correctionForm.value.driverPhone !== undefined && correctionForm.value.driverPhone !== (props.truck?.driverPhone || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'driverPhone', newValue: String(correctionForm.value.driverPhone) })
     }
-    if (correctionForm.value.suratJalanNumber && correctionForm.value.suratJalanNumber !== (props.truck?.suratJalanNumber || '')) {
+    if (correctionForm.value.suratJalanNumber !== undefined && correctionForm.value.suratJalanNumber !== (props.truck?.suratJalanNumber || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'suratJalanNumber', newValue: String(correctionForm.value.suratJalanNumber) })
     }
-    if (correctionForm.value.vendorName && correctionForm.value.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '')) {
+    if (correctionForm.value.vendorName !== undefined && correctionForm.value.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'vendorName', newValue: String(correctionForm.value.vendorName) })
     }
-    if (correctionForm.value.vehicleType && correctionForm.value.vehicleType !== (props.truck?.vehicleType || '')) {
+    if (correctionForm.value.vehicleType !== undefined && correctionForm.value.vehicleType !== (props.truck?.vehicleType || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'vehicleType', newValue: String(correctionForm.value.vehicleType) })
+    }
+    if (correctionForm.value.poNumber !== undefined && correctionForm.value.poNumber !== (props.truck?.poNumber || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'poNumber', newValue: String(correctionForm.value.poNumber) })
+    }
+    if (correctionForm.value.permitCardNumber !== undefined && correctionForm.value.permitCardNumber !== (props.truck?.permitCardNumber || props.truck?.permitCard || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'permitCardNumber', newValue: String(correctionForm.value.permitCardNumber) })
+    }
+    if (correctionForm.value.guestIdNumber !== undefined && correctionForm.value.guestIdNumber !== (props.truck?.guestIdNumber || props.truck?.guestId || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'guestIdNumber', newValue: String(correctionForm.value.guestIdNumber) })
     }
 
     if (correctionForm.value.grossWeight !== null && Number(correctionForm.value.grossWeight) !== Number(props.truck?.grossWeight)) {
@@ -1747,20 +1802,21 @@ const handleDelete = async () => {
 }
 
 const identityFields = computed(() => {
+  const permitCardVal = props.truck?.permitCardNumber || props.truck?.permitCard
+  const guestIdVal = props.truck?.guestIdNumber || props.truck?.guestId
+
   const fields = [
     { label: 'Driver Name', value: props.truck?.driverName },
     { label: 'Carrier Vendor', value: props.truck?.vendorName || props.truck?.vendor },
     { label: 'Vehicle Type', value: props.truck?.vehicleType },
     { label: 'Process Type', value: props.truck?.processType === 'GBB' ? 'Raw Material (Unloading)' : props.truck?.processType === 'GBJ' ? 'Finished Goods (Loading)' : props.truck?.processType === 'GSP' ? 'Sparepart Warehouse' : props.truck?.processType },
   ]
-  // Only add these if they have values
-  if (props.truck?.driverPhone) fields.push({ label: 'Driver Phone', value: props.truck.driverPhone, highlight: true })
-  if (props.truck?.suratJalanNumber) fields.push({ label: 'Delivery Note (SJ)', value: props.truck.suratJalanNumber, highlight: true })
-  if (props.truck?.poNumber) fields.push({ label: 'Logistics PO', value: props.truck.poNumber, highlight: true })
-  const permitCardVal = props.truck?.permitCard || props.truck?.permitCardNumber
-  const guestIdVal = props.truck?.guestId || props.truck?.guestIdNumber
-  if (permitCardVal) fields.push({ label: 'Permit Card / VMS', value: permitCardVal })
-  if (guestIdVal) fields.push({ label: `${props.truck?.idType || 'ID'} Number`, value: guestIdVal })
+  if (props.truck?.driverPhone || true) fields.push({ label: 'Driver Phone', value: props.truck?.driverPhone, highlight: true })
+  if (props.truck?.suratJalanNumber || true) fields.push({ label: 'Delivery Note (SJ)', value: props.truck?.suratJalanNumber, highlight: true })
+  if (props.truck?.poNumber || true) fields.push({ label: 'Logistics PO', value: props.truck?.poNumber, highlight: true })
+  if (permitCardVal || true) fields.push({ label: 'Permit Card / VMS', value: permitCardVal })
+  if (guestIdVal || true) fields.push({ label: `${props.truck?.idType || 'ID'} Number`, value: guestIdVal })
+
   if (props.truck?.guestCount && props.truck.guestCount > 1) fields.push({ label: 'Guest Count', value: `${props.truck.guestCount} persons` })
   if (props.truck?.securityName) fields.push({ label: 'Security Officer', value: props.truck.securityName })
   if (props.truck?.remarks) {

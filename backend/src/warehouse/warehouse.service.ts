@@ -199,7 +199,7 @@ export class WarehouseService {
       });
     }
 
-    if (tx.status === 'WAREHOUSE_IN_PROGRESS' || tx.warehouseStartAt) {
+    if (tx.status === 'WAREHOUSE_IN_PROGRESS') {
       await this.activityLogsService
         .logAction({
           userId: user.id,
@@ -242,11 +242,10 @@ export class WarehouseService {
         where: {
           id: transactionId,
           status: 'QC_VEHICLE_PASSED',
-          warehouseStartAt: null,
         },
         data: {
           status: 'WAREHOUSE_IN_PROGRESS',
-          warehouseStartAt: new Date(),
+          warehouseStartAt: tx.warehouseStartAt || new Date(),
           warehouseStartById: user.id,
           ...(dto.suratJalanNumber && {
             suratJalanNumber: dto.suratJalanNumber,
