@@ -49,7 +49,7 @@ export class QcController {
     @Body() dto: StartQcDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.qcService.startQc(id, dto, user.id);
+    return this.qcService.startQc(id, dto, user.id, user);
   }
 
   @Post('vehicle-result/:transactionId')
@@ -60,7 +60,7 @@ export class QcController {
     @Body() dto: VehicleCheckResultDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.qcService.submitVehicleCheck(id, dto, user.id);
+    return this.qcService.submitVehicleCheck(id, dto, user.id, user);
   }
 
   @Post('incoming-result/:transactionId')
@@ -71,14 +71,17 @@ export class QcController {
     @Body() dto: IncomingCheckResultDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.qcService.submitIncomingCheck(id, dto, user.id);
+    return this.qcService.submitIncomingCheck(id, dto, user.id, user);
   }
 
   @Get('detail/:transactionId')
   @Roles('QC')
   @ApiOperation({ summary: 'Get QC detail by transaction ID' })
-  getDetail(@Param('transactionId') id: string) {
-    return this.qcService.getDetail(id);
+  getDetail(
+    @Param('transactionId') id: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.qcService.getDetail(id, user);
   }
 
   @Get('history')
@@ -143,7 +146,7 @@ export class QcController {
     @Body() dto: QcAttachmentDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.qcService.uploadAttachment(id, file, dto, user.id);
+    return this.qcService.uploadAttachment(id, file, dto, user.id, user);
   }
 
   @Post('analysis/complete/:transactionId')

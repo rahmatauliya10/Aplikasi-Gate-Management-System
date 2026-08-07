@@ -76,11 +76,12 @@ export class QcService {
     };
   }
 
-  async startQc(transactionId: string, dto: StartQcDto, userId: string) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
+  async startQc(transactionId: string, dto: StartQcDto, userId: string, user?: JwtPayloadUser) {
+    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, ...scope },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
+    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
 
     let nextStatus: TransactionStatus;
     if (tx.status === 'QC_VEHICLE_PENDING') {
@@ -96,6 +97,7 @@ export class QcService {
     const updated = await this.prisma.transaction.update({
       where: { id: transactionId },
       data: {
+        revision: { increment: 1 },
         status: nextStatus,
         qcStartAt: tx.qcStartAt || new Date(),
         statusHistory: {
@@ -127,12 +129,14 @@ export class QcService {
     transactionId: string,
     dto: VehicleCheckResultDto,
     userId: string,
+    user?: JwtPayloadUser,
   ) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-      include: { qcVehicleChecks: true },
+    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, ...scope },
+      include: { qcVehicleChecks: { where: { isCurrent: true } } },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
+    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
     if (!['GBJ', 'GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
         'Invalid process type for preliminary QC sampling & vehicle inspection',
@@ -155,7 +159,7 @@ export class QcService {
 
     const updated = await this.prisma.$transaction(async (prisma) => {
       const existingCount = await prisma.qcVehicleCheck.count({
-        where: { transactionId },
+        where: { transactionId, isCurrent: true },
       });
       if (existingCount > 0) {
         throw new BadRequestException(
@@ -186,6 +190,7 @@ export class QcService {
       return prisma.transaction.update({
         where: { id: transactionId },
         data: {
+          revision: { increment: 1 },
           status: nextStatus,
           qcStartAt: tx.qcStartAt || new Date(),
           qcEndAt: new Date(),
@@ -224,12 +229,14 @@ export class QcService {
     transactionId: string,
     dto: IncomingCheckResultDto,
     userId: string,
+    user?: JwtPayloadUser,
   ) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-      include: { incomingMaterialChecks: true },
+    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, ...scope },
+      include: { incomingMaterialChecks: { where: { isCurrent: true } } },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
+    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
     if (!['GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
         'Incoming check is only for GBB or GSP process types',
@@ -252,7 +259,7 @@ export class QcService {
 
     const updated = await this.prisma.$transaction(async (prisma) => {
       const existingCount = await prisma.incomingMaterialCheck.count({
-        where: { transactionId },
+        where: { transactionId, isCurrent: true },
       });
       if (existingCount > 0) {
         throw new BadRequestException(
@@ -286,6 +293,7 @@ export class QcService {
       return prisma.transaction.update({
         where: { id: transactionId },
         data: {
+          revision: { increment: 1 },
           status: nextStatus,
           qcStartAt: tx.qcStartAt || new Date(),
           qcEndAt: new Date(),
@@ -317,17 +325,18 @@ export class QcService {
     };
   }
 
-  async getDetail(transactionId: string) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
+  async getDetail(transactionId: string, user?: JwtPayloadUser) {
+    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, ...scope },
       include: {
-        qcVehicleChecks: true,
-        incomingMaterialChecks: true,
+        qcVehicleChecks: { where: { isCurrent: true } },
+        incomingMaterialChecks: { where: { isCurrent: true } },
         attachments: { where: { module: 'QC' } },
       },
     });
 
-    if (!tx) throw new NotFoundException('Transaction not found');
+    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
 
     return {
       success: true,
@@ -372,12 +381,14 @@ export class QcService {
     file: any,
     dto: QcAttachmentDto,
     userId: string,
+    user?: JwtPayloadUser,
   ) {
     if (!file) throw new BadRequestException('File is required');
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
+    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, ...scope },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
+    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
 
     const attachment = await this.prisma.attachment.create({
       data: {
@@ -410,8 +421,9 @@ export class QcService {
       `Marking QC analysis as completed for transaction ${transactionId} by ${user.email}`,
     );
 
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
+    const scope = this.authorizationScopeService.getTransactionScope(user);
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, ...scope },
     });
 
     if (!tx) {
