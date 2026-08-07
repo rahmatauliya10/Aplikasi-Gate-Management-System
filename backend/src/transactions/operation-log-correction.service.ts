@@ -168,7 +168,10 @@ export class OperationLogCorrectionService {
       );
     }
 
-    if ((!dto.items || dto.items.length === 0) && dto.action !== CorrectionAction.REOPEN_WORKFLOW) {
+    if (
+      (!dto.items || dto.items.length === 0) &&
+      dto.action !== CorrectionAction.REOPEN_WORKFLOW
+    ) {
       throw new BadRequestException(
         'Daftar item koreksi (items) tidak boleh kosong kecuali untuk REOPEN_WORKFLOW.',
       );
@@ -231,10 +234,7 @@ export class OperationLogCorrectionService {
         validateDomain(item.fieldName, item.newValue, item.targetModule);
 
         let valueToUpdate = item.newValue;
-        if (
-          item.fieldName === 'result' &&
-          typeof item.newValue === 'string'
-        ) {
+        if (item.fieldName === 'result' && typeof item.newValue === 'string') {
           const upperVal = item.newValue.toUpperCase();
           if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperVal)) {
             valueToUpdate = 'PASS';
@@ -524,15 +524,27 @@ export class OperationLogCorrectionService {
         // Supersede downstream workflow records instead of deleting them.
         await prismaTx.qcVehicleCheck.updateMany({
           where: { transactionId: id, isCurrent: true },
-          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
+          data: {
+            isCurrent: false,
+            supersededAt: new Date(),
+            supersededByCorrectionId: correctionNumber,
+          },
         });
         await prismaTx.incomingMaterialCheck.updateMany({
           where: { transactionId: id, isCurrent: true },
-          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
+          data: {
+            isCurrent: false,
+            supersededAt: new Date(),
+            supersededByCorrectionId: correctionNumber,
+          },
         });
         await prismaTx.warehouseProcess.updateMany({
           where: { transactionId: id, isCurrent: true },
-          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
+          data: {
+            isCurrent: false,
+            supersededAt: new Date(),
+            supersededByCorrectionId: correctionNumber,
+          },
         });
 
         // Also supersede OUT weighbridge record so they can weigh out again
@@ -540,9 +552,13 @@ export class OperationLogCorrectionService {
           where: {
             transactionId: id,
             type: 'OUT',
-            isCurrent: true
+            isCurrent: true,
           },
-          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
+          data: {
+            isCurrent: false,
+            supersededAt: new Date(),
+            supersededByCorrectionId: correctionNumber,
+          },
         });
       }
 

@@ -150,13 +150,15 @@ export class DatabaseBackupController {
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    
+
     const readStream = fs.createReadStream(filePath);
     readStream.pipe(res);
     readStream.on('end', () => {
       try {
         fs.unlinkSync(filePath);
-      } catch (e) {}
+      } catch (e) {
+        // Abaikan error jika file sudah terhapus
+      }
     });
   }
 

@@ -1103,7 +1103,10 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
   }
 
   async exportPortableBackupBundle(backupId?: string): Promise<string> {
-    if (backupId && !/^BKP-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z$/.test(backupId)) {
+    if (
+      backupId &&
+      !/^BKP-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z$/.test(backupId)
+    ) {
       throw new BadRequestException('Invalid backupId format');
     }
     const history = await this.getBackupHistory();
@@ -1177,7 +1180,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
 
     const secret = process.env.BACKUP_SIGNATURE_SECRET;
     if (!secret) {
-      throw new Error('Critical: BACKUP_SIGNATURE_SECRET must be configured in environment');
+      throw new Error(
+        'Critical: BACKUP_SIGNATURE_SECRET must be configured in environment',
+      );
     }
     const signature = createHmac('sha256', secret)
       .update(payloadStr)
@@ -1200,7 +1205,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
 
     const tempPath = path.join(
       os.tmpdir(),
-      `gms_dr_bundle_${manifest.backupId}_${Date.now()}.gmsbackup`
+      `gms_dr_bundle_${manifest.backupId}_${Date.now()}.gmsbackup`,
     );
     fs.writeFileSync(tempPath, JSON.stringify(bundleObj));
     return tempPath;
@@ -1234,7 +1239,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       const payloadStr = JSON.stringify(clone);
       const secret = process.env.BACKUP_SIGNATURE_SECRET;
       if (!secret) {
-        throw new Error('Critical: BACKUP_SIGNATURE_SECRET must be configured in environment');
+        throw new Error(
+          'Critical: BACKUP_SIGNATURE_SECRET must be configured in environment',
+        );
       }
       const expectedSignature = createHmac('sha256', secret)
         .update(payloadStr)

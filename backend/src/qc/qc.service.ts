@@ -76,12 +76,20 @@ export class QcService {
     };
   }
 
-  async startQc(transactionId: string, dto: StartQcDto, userId: string, user?: JwtPayloadUser) {
-    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+  async startQc(
+    transactionId: string,
+    dto: StartQcDto,
+    userId: string,
+    user?: JwtPayloadUser,
+  ) {
+    const scope = user
+      ? this.authorizationScopeService.getTransactionScope(user)
+      : {};
     const tx = await this.prisma.transaction.findFirst({
       where: { id: transactionId, ...scope },
     });
-    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
+    if (!tx)
+      throw new NotFoundException('Transaction not found or unauthorized');
 
     let nextStatus: TransactionStatus;
     if (tx.status === 'QC_VEHICLE_PENDING') {
@@ -131,12 +139,15 @@ export class QcService {
     userId: string,
     user?: JwtPayloadUser,
   ) {
-    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const scope = user
+      ? this.authorizationScopeService.getTransactionScope(user)
+      : {};
     const tx = await this.prisma.transaction.findFirst({
       where: { id: transactionId, ...scope },
       include: { qcVehicleChecks: { where: { isCurrent: true } } },
     });
-    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
+    if (!tx)
+      throw new NotFoundException('Transaction not found or unauthorized');
     if (!['GBJ', 'GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
         'Invalid process type for preliminary QC sampling & vehicle inspection',
@@ -231,12 +242,15 @@ export class QcService {
     userId: string,
     user?: JwtPayloadUser,
   ) {
-    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const scope = user
+      ? this.authorizationScopeService.getTransactionScope(user)
+      : {};
     const tx = await this.prisma.transaction.findFirst({
       where: { id: transactionId, ...scope },
       include: { incomingMaterialChecks: { where: { isCurrent: true } } },
     });
-    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
+    if (!tx)
+      throw new NotFoundException('Transaction not found or unauthorized');
     if (!['GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
         'Incoming check is only for GBB or GSP process types',
@@ -326,7 +340,9 @@ export class QcService {
   }
 
   async getDetail(transactionId: string, user?: JwtPayloadUser) {
-    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const scope = user
+      ? this.authorizationScopeService.getTransactionScope(user)
+      : {};
     const tx = await this.prisma.transaction.findFirst({
       where: { id: transactionId, ...scope },
       include: {
@@ -336,7 +352,8 @@ export class QcService {
       },
     });
 
-    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
+    if (!tx)
+      throw new NotFoundException('Transaction not found or unauthorized');
 
     return {
       success: true,
@@ -384,11 +401,14 @@ export class QcService {
     user?: JwtPayloadUser,
   ) {
     if (!file) throw new BadRequestException('File is required');
-    const scope = user ? this.authorizationScopeService.getTransactionScope(user) : {};
+    const scope = user
+      ? this.authorizationScopeService.getTransactionScope(user)
+      : {};
     const tx = await this.prisma.transaction.findFirst({
       where: { id: transactionId, ...scope },
     });
-    if (!tx) throw new NotFoundException('Transaction not found or unauthorized');
+    if (!tx)
+      throw new NotFoundException('Transaction not found or unauthorized');
 
     const attachment = await this.prisma.attachment.create({
       data: {

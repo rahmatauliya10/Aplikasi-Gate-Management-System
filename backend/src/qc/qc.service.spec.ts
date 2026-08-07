@@ -12,6 +12,7 @@ describe('QcService - Segregation of Duties (SoD)', () => {
 
   const mockPrismaService = {
     transaction: {
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
     },
@@ -57,7 +58,7 @@ describe('QcService - Segregation of Duties (SoD)', () => {
   });
 
   it('should THROW ForbiddenException (403) when WAREHOUSE role calls completeQcAnalysis on GBB transaction', async () => {
-    mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+    mockPrismaService.transaction.findFirst.mockResolvedValueOnce({
       id: 'tx-124',
       processType: 'GBB',
       status: 'INCOMING_CHECK_PENDING',
@@ -87,7 +88,7 @@ describe('QcService - Segregation of Duties (SoD)', () => {
       status: 'WAREHOUSE_IN_PROGRESS',
     };
 
-    mockPrismaService.transaction.findUnique.mockResolvedValue(mockTx);
+    mockPrismaService.transaction.findFirst.mockResolvedValue(mockTx);
     mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
       cb({
         transaction: {

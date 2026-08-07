@@ -293,7 +293,7 @@ export class WeighbridgeService {
       if (nextStatus === 'QC_VEHICLE_PENDING' && !tx.qcStartAt) {
         updateData.qcStartAt = new Date();
       }
-      
+
       updateData.revision = { increment: 1 };
 
       return prismaTx.transaction.update({

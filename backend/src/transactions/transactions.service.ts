@@ -34,7 +34,7 @@ export class TransactionsService {
     const scope = this.authorizationScopeService.getTransactionScope(user);
 
     const where: Prisma.TransactionWhereInput = {
-      AND: [scope]
+      AND: [scope],
     };
 
     if (status) {
@@ -52,7 +52,7 @@ export class TransactionsService {
           { plateNumber: { contains: search, mode: 'insensitive' } },
           { vendorName: { contains: search, mode: 'insensitive' } },
           { driverName: { contains: search, mode: 'insensitive' } },
-        ]
+        ],
       });
     }
 
