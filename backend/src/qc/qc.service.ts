@@ -13,6 +13,7 @@ import { VehicleCheckResultDto } from './dto/vehicle-check-result.dto';
 import { IncomingCheckResultDto } from './dto/incoming-check-result.dto';
 import { QcAttachmentDto } from './dto/qc-attachment.dto';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 @Injectable()
 export class QcService {
@@ -21,6 +22,7 @@ export class QcService {
   constructor(
     private prisma: PrismaService,
     private activityLogsService: ActivityLogsService,
+    private authorizationScopeService: AuthorizationScopeService,
   ) {}
 
   private mapToCheckResult(val?: string): CheckResult | null {
@@ -50,7 +52,8 @@ export class QcService {
     return val ? CheckResult.PASS : CheckResult.REJECT;
   }
 
-  async getQueue() {
+  async getQueue(user: JwtPayloadUser) {
+    const scope = this.authorizationScopeService.getTransactionScope(user);
     const queue = await this.prisma.transaction.findMany({
       where: {
         status: {
@@ -61,6 +64,7 @@ export class QcService {
             'INCOMING_CHECK_IN_PROGRESS',
           ],
         },
+        ...scope,
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -332,7 +336,8 @@ export class QcService {
     };
   }
 
-  async getHistory() {
+  async getHistory(user: JwtPayloadUser) {
+    const scope = this.authorizationScopeService.getTransactionScope(user);
     const history = await this.prisma.transaction.findMany({
       where: {
         status: {
@@ -345,6 +350,7 @@ export class QcService {
             'COMPLETED',
           ],
         },
+        ...scope,
       },
       include: {
         qcVehicleChecks: true,

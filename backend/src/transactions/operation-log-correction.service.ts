@@ -494,7 +494,7 @@ export class OperationLogCorrectionService {
         txUpdateData.netWeight = proposedGross - proposedTare;
       }
 
-      // P1-04 Fix: REOPEN_WORKFLOW explicitly resets downstream completion timestamps
+      // P1-04 Fix: REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records
       if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
         txUpdateData.status = 'QC_VEHICLE_PENDING';
         txUpdateData.completedAt = null;
@@ -502,7 +502,24 @@ export class OperationLogCorrectionService {
         txUpdateData.weighOutAt = null;
         txUpdateData.weighOutById = null;
         txUpdateData.qcEndAt = null;
+        txUpdateData.warehouseStartAt = null;
         txUpdateData.warehouseEndAt = null;
+        txUpdateData.qcAnalysisCompleted = false;
+        txUpdateData.qcAnalysisCompletedAt = null;
+        
+        // Explicitly delete downstream workflow records to prevent "Result already submitted" blockages
+        // The historical values are preserved in the `oldValues` audit log of the TransactionCorrection.
+        await prismaTx.qcVehicleCheck.deleteMany({ where: { transactionId: id } });
+        await prismaTx.incomingMaterialCheck.deleteMany({ where: { transactionId: id } });
+        await prismaTx.warehouseProcess.deleteMany({ where: { transactionId: id } });
+        
+        // Also remove OUT weighbridge record so they can weigh out again
+        await prismaTx.weighbridgeRecord.deleteMany({ 
+          where: { 
+            transactionId: id,
+            type: 'OUT' 
+          } 
+        });
       }
 
       // Step 12: Atomic OCC Update on Transaction

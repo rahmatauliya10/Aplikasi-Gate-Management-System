@@ -37,8 +37,8 @@ export class QcController {
   @Get('queue')
   @Roles('QC')
   @ApiOperation({ summary: 'Get QC queue (Vehicle and Incoming)' })
-  getQueue() {
-    return this.qcService.getQueue();
+  getQueue(@CurrentUser() user: JwtPayloadUser) {
+    return this.qcService.getQueue(user);
   }
 
   @Post('start/:transactionId')
@@ -84,8 +84,8 @@ export class QcController {
   @Get('history')
   @Roles('QC')
   @ApiOperation({ summary: 'Get QC history' })
-  getHistory() {
-    return this.qcService.getHistory();
+  getHistory(@CurrentUser() user: JwtPayloadUser) {
+    return this.qcService.getHistory(user);
   }
 
   @Post('attachments/:transactionId')

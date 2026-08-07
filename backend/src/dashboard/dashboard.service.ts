@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+
 @Injectable()
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
@@ -10,6 +12,7 @@ export class DashboardService {
   constructor(
     private prisma: PrismaService,
     private activityLogsService: ActivityLogsService,
+    private authorizationScopeService: AuthorizationScopeService,
   ) {}
 
   async getStats(user: JwtPayloadUser) {
@@ -19,6 +22,8 @@ export class DashboardService {
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const scope = this.authorizationScopeService.getTransactionScope(user);
 
     const [
       totalActive,
@@ -32,21 +37,21 @@ export class DashboardService {
       fraudChecks,
     ] = await Promise.all([
       this.prisma.transaction.count({
-        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
       }),
-      this.prisma.transaction.count({ where: { status: 'COMPLETED' } }),
-      this.prisma.transaction.count({ where: { status: 'CANCELLED' } }),
+      this.prisma.transaction.count({ where: { status: 'COMPLETED', ...scope } }),
+      this.prisma.transaction.count({ where: { status: 'CANCELLED', ...scope } }),
       this.prisma.transaction.count({
-        where: { createdAt: { gte: today, lt: tomorrow } },
+        where: { createdAt: { gte: today, lt: tomorrow }, ...scope },
       }),
-      this.prisma.transaction.groupBy({ by: ['status'], _count: { id: true } }),
+      this.prisma.transaction.groupBy({ by: ['status'], _count: { id: true }, where: scope }),
       this.prisma.transaction.groupBy({
         by: ['processType'],
         _count: { id: true },
-        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
       }),
       this.prisma.transaction.findMany({
-        where: { createdAt: { gte: today, lt: tomorrow } },
+        where: { createdAt: { gte: today, lt: tomorrow }, ...scope },
         orderBy: { createdAt: 'desc' },
         take: 10,
         select: {
@@ -61,7 +66,7 @@ export class DashboardService {
         },
       }),
       this.prisma.transaction.findMany({
-        where: { status: 'COMPLETED' },
+        where: { status: 'COMPLETED', ...scope },
         select: {
           id: true,
           processType: true,
@@ -78,7 +83,10 @@ export class DashboardService {
         },
       }),
       this.prisma.fraudCheck.findMany({
-        where: { riskLevel: { in: ['WARNING', 'CRITICAL'] as any } },
+        where: { 
+          riskLevel: { in: ['WARNING', 'CRITICAL'] as any },
+          transaction: { ...scope }
+        },
         include: {
           transaction: {
             select: {

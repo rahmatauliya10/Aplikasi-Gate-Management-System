@@ -12,6 +12,7 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { TransactionQueryDto } from './dto/transaction-query.dto';
 import { Prisma } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 @Injectable()
 export class TransactionsService {
@@ -20,6 +21,7 @@ export class TransactionsService {
   constructor(
     private prisma: PrismaService,
     private activityLogsService: ActivityLogsService,
+    private authorizationScopeService: AuthorizationScopeService,
   ) {}
 
   async findAll(query: TransactionQueryDto, user: JwtPayloadUser) {
@@ -29,7 +31,7 @@ export class TransactionsService {
       `Find all transactions by user ${user.email} | page=${page} limit=${limit}`,
     );
 
-    const where: Prisma.TransactionWhereInput = {};
+    const where: Prisma.TransactionWhereInput = this.authorizationScopeService.getTransactionScope(user);
 
     if (status) {
       where.status = status;
@@ -114,8 +116,9 @@ export class TransactionsService {
     this.logger.log(`Find active transactions by user ${user.email}`);
 
     try {
+      const scope = this.authorizationScopeService.getTransactionScope(user);
       const data = await this.prisma.transaction.findMany({
-        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
         include: {
           statusHistory: { orderBy: { changedAt: 'desc' } },
           weighbridgeRecords: true,
@@ -165,8 +168,9 @@ export class TransactionsService {
       `Find transaction details for ID: ${id} by user ${user.email}`,
     );
 
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id },
+    const scope = this.authorizationScopeService.getTransactionScope(user);
+    const tx = await this.prisma.transaction.findFirst({
+      where: { id, ...scope },
       include: {
         statusHistory: { orderBy: { changedAt: 'desc' } },
         weighbridgeRecords: true,

@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import * as argon2 from 'argon2';
-import { createHash } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -1157,6 +1157,23 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       }
     }
 
+    const payloadStr = JSON.stringify({
+      metadata: {
+        system: 'GMS_GATE_MANAGEMENT_SYSTEM',
+        version: '1.0.0',
+        bundleType: 'PORTABLE_DISASTER_RECOVERY',
+        createdAt: manifest.createdAt,
+        backupId: manifest.backupId,
+        checksums: manifest.checksums,
+      },
+      manifest,
+      dumpBase64,
+      attachmentsContent,
+    });
+    
+    const secret = process.env.BACKUP_SIGNATURE_SECRET || 'default-gms-backup-secret-key-2026';
+    const signature = createHmac('sha256', secret).update(payloadStr).digest('hex');
+
     return {
       metadata: {
         system: 'GMS_GATE_MANAGEMENT_SYSTEM',
@@ -1169,6 +1186,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       manifest,
       dumpBase64,
       attachmentsContent,
+      signature,
     };
   }
 
@@ -1189,6 +1207,24 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         message:
           'Format berkas .gmsbackup portabel tidak valid atau tidak dikenali.',
       });
+    }
+
+    // Validate Signature if present (backward compatibility if we want to allow unsigned, but let's enforce if passed)
+    if (bundlePayload.signature) {
+      const signature = bundlePayload.signature;
+      const clone = { ...bundlePayload };
+      delete clone.signature;
+      
+      const payloadStr = JSON.stringify(clone);
+      const secret = process.env.BACKUP_SIGNATURE_SECRET || 'default-gms-backup-secret-key-2026';
+      const expectedSignature = createHmac('sha256', secret).update(payloadStr).digest('hex');
+      
+      if (signature !== expectedSignature) {
+        throw new BadRequestException({
+          success: false,
+          message: 'Integritas berkas backup gagal diverifikasi (Signature mismatch). Berkas mungkin telah dimanipulasi.',
+        });
+      }
     }
 
     // 1. Re-authenticate Admin
@@ -1298,8 +1334,14 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
 
         for (const file of bundlePayload.attachmentsContent.files) {
           if (file.fileName && file.base64Content) {
+            const targetPath = path.resolve(uploadDir, file.fileName);
+            // Path traversal protection
+            if (!targetPath.startsWith(path.resolve(uploadDir))) {
+              this.logger.warn(`Path traversal attempt blocked for file: ${file.fileName}`);
+              continue;
+            }
+            
             const fileBuffer = Buffer.from(file.base64Content, 'base64');
-            const targetPath = path.join(uploadDir, file.fileName);
             fs.writeFileSync(targetPath, fileBuffer);
             restoredAttachmentsCount++;
           }

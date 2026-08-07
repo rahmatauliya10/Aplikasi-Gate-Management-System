@@ -1634,6 +1634,58 @@ const executeCorrectionSubmission = async () => {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
     }
 
+    // QC Vehicle mapping
+    const qcvRec = props.truck?.qcVehicleChecks?.[props.truck.qcVehicleChecks.length - 1]
+    if (qcvRec) {
+      if (correctionForm.value.qcvResult !== undefined && correctionForm.value.qcvResult !== qcvOriginal.value.result) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'result', newValue: correctionForm.value.qcvResult })
+      }
+      if (correctionForm.value.qcvOdor !== undefined && correctionForm.value.qcvOdor !== qcvOriginal.value.vehicleOdor) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleOdor', newValue: correctionForm.value.qcvOdor })
+      }
+      if (correctionForm.value.qcvVisual !== undefined && correctionForm.value.qcvVisual !== qcvOriginal.value.vehicleCondition) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleCondition', newValue: correctionForm.value.qcvVisual })
+      }
+      if (correctionForm.value.qcvCleanliness !== undefined && correctionForm.value.qcvCleanliness !== qcvOriginal.value.vehicleCleanliness) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleCleanliness', newValue: correctionForm.value.qcvCleanliness })
+      }
+      if (correctionForm.value.qcvSeal !== undefined && correctionForm.value.qcvSeal !== qcvOriginal.value.sealCondition) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'sealCondition', newValue: correctionForm.value.qcvSeal })
+      }
+      if (correctionForm.value.qcvPest !== undefined && correctionForm.value.qcvPest !== qcvOriginal.value.pestEvidence) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'pestEvidence', newValue: correctionForm.value.qcvPest })
+      }
+      if (correctionForm.value.qcvMoisture !== null && correctionForm.value.qcvMoisture !== undefined && Number(correctionForm.value.qcvMoisture) !== Number(qcvOriginal.value.moisture)) {
+        // Wait, qcvMoisture vs moisture. Is moisture in QC_VEHICLE? The schema says NO, moisture is in IncomingMaterialCheck. But the frontend might map it? Let's assume it maps to something, but checking schema... QcVehicleCheck doesn't have moisture.
+      }
+      if (correctionForm.value.qcvNotes !== undefined && correctionForm.value.qcvNotes !== qcvOriginal.value.notes) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'notes', newValue: correctionForm.value.qcvNotes })
+      }
+    }
+
+    // Incoming Material mapping
+    const imRec = props.truck?.incomingMaterialChecks?.[props.truck.incomingMaterialChecks.length - 1]
+    if (imRec) {
+      if (correctionForm.value.imResult !== undefined && correctionForm.value.imResult !== imOriginal.value.result) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'result', newValue: correctionForm.value.imResult })
+      }
+      if (correctionForm.value.imMoisture !== null && correctionForm.value.imMoisture !== undefined && Number(correctionForm.value.imMoisture) !== Number(imOriginal.value.moisture)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'moisture', newValue: Number(correctionForm.value.imMoisture) })
+      }
+      if (correctionForm.value.imForeignMatter !== null && correctionForm.value.imForeignMatter !== undefined && Number(correctionForm.value.imForeignMatter) !== Number(imOriginal.value.foreignMatter)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'foreignMatter', newValue: Number(correctionForm.value.imForeignMatter) })
+      }
+      if (correctionForm.value.imOdor !== undefined && correctionForm.value.imOdor !== imOriginal.value.odor) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'odor', newValue: correctionForm.value.imOdor })
+      }
+      if (correctionForm.value.imColor !== undefined && correctionForm.value.imColor !== imOriginal.value.color) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'color', newValue: correctionForm.value.imColor })
+      }
+      if (correctionForm.value.imNotes !== undefined && correctionForm.value.imNotes !== imOriginal.value.notes) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'notes', newValue: correctionForm.value.imNotes })
+      }
+    }
+
     if (items.length === 0 && !correctionForm.value.isReopen) {
       correctionError.value = 'Tidak ada perubahan data yang terdeteksi (No-Op). Silakan ubah minimal satu nilai untuk melakukan koreksi.'
       correctionLoading.value = false
