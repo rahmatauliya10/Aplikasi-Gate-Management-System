@@ -138,4 +138,22 @@ export class QcController {
   ) {
     return this.qcService.uploadAttachment(id, file, dto, user.id);
   }
+
+  @Post('analysis/complete/:transactionId')
+  @Roles('QC', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark QC analysis as completed for GBB process' })
+  @ApiResponse({ status: 200, description: 'QC analysis marked as completed' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
+  completeQcAnalysis(
+    @Param('transactionId') transactionId: string,
+    @Body() body: { remarks?: string },
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.qcService.completeQcAnalysis(
+      transactionId,
+      user,
+      body?.remarks,
+    );
+  }
 }

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -11,6 +12,7 @@ import { StartQcDto } from './dto/start-qc.dto';
 import { VehicleCheckResultDto } from './dto/vehicle-check-result.dto';
 import { IncomingCheckResultDto } from './dto/incoming-check-result.dto';
 import { QcAttachmentDto } from './dto/qc-attachment.dto';
+import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 @Injectable()
 export class QcService {
@@ -387,6 +389,108 @@ export class QcService {
       success: true,
       message: 'Attachment uploaded successfully',
       data: attachment,
+    };
+  }
+
+  async completeQcAnalysis(
+    transactionId: string,
+    user: JwtPayloadUser,
+    remarks?: string,
+  ) {
+    this.logger.log(
+      `Marking QC analysis as completed for transaction ${transactionId} by ${user.email}`,
+    );
+
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+    });
+
+    if (!tx) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Transaction not found',
+        errors: [],
+      });
+    }
+
+    if (tx.processType === 'GBB' && user.role === 'WAREHOUSE') {
+      this.logger.warn(
+        `SoD violation: Warehouse role attempted QC analysis completion on GBB transaction ${transactionId}`,
+      );
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'SOD_VIOLATION_BLOCKED',
+          module: 'QC',
+          referenceId: transactionId,
+          description: `Blocked Warehouse role from completing GBB QC analysis`,
+          status: 'FAILED',
+        })
+        .catch(() => {});
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Segregation of Duties (SoD) violation: Akses ditolak! Penutupan analisa QC pada transaksi GBB wajib dieksekusi oleh tim QC atau Admin.',
+        errors: [],
+      });
+    }
+
+    if (tx.status !== 'WAREHOUSE_IN_PROGRESS' || tx.processType !== 'GBB') {
+      throw new BadRequestException({
+        success: false,
+        message: 'Transaction is not in GBB WAREHOUSE_IN_PROGRESS status',
+        errors: [],
+      });
+    }
+
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      if (remarks) {
+        const activeProcess = await prismaTx.warehouseProcess.findFirst({
+          where: { transactionId, endAt: null },
+        });
+        if (activeProcess) {
+          await prismaTx.warehouseProcess.update({
+            where: { id: activeProcess.id },
+            data: { remarks },
+          });
+        }
+      }
+
+      return prismaTx.transaction.update({
+        where: { id: transactionId },
+        data: {
+          qcAnalysisCompleted: true,
+          qcAnalysisCompletedAt: new Date(),
+          ...(remarks && { remarks }),
+        },
+        include: {
+          warehouseProcesses: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
+      });
+    });
+
+    await this.activityLogsService
+      .logAction({
+        userId: user.id,
+        action: 'QC_ANALYSIS_COMPLETED',
+        module: 'QC',
+        referenceId: transactionId,
+        description: `QC analysis marked as completed for ${tx.plateNumber} by ${user.email}${remarks ? ` | ${remarks}` : ''}`,
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
+
+    return {
+      success: true,
+      message: 'QC analysis marked as completed',
+      data: {
+        ...updated,
+        remarks:
+          remarks ||
+          updated.warehouseProcesses?.[0]?.remarks ||
+          updated.remarks ||
+          null,
+      },
     };
   }
 }

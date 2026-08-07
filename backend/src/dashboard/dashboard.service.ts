@@ -82,6 +82,7 @@ export class DashboardService {
         include: {
           transaction: {
             select: {
+              id: true,
               plateNumber: true,
               processType: true,
               netWeight: true,
@@ -144,26 +145,36 @@ export class DashboardService {
       }
     });
 
-    const activeFraudAlerts = fraudChecks.map((f: any) => ({
-      id: f.id,
-      plate: f.transaction.plateNumber,
-      type: f.transaction.processType,
-      net: f.transaction.netWeight,
-      processed: f.transaction.actualWeight,
-      diffPercent: f.deviationPercent
-        ? f.deviationPercent.toFixed(2)
-        : f.deviationKg
-          ? (
-              (f.deviationKg /
-                Math.max(
-                  f.transaction.netWeight || 1,
-                  f.transaction.actualWeight || 1,
-                )) *
-              100
-            ).toFixed(2)
-          : '0.00',
-      riskLevel: f.riskLevel,
-    }));
+    // Deduplicate active fraud alerts per transaction (keep only the latest check per transaction/plate)
+    const seenTx = new Set<string>();
+    const activeFraudAlerts: any[] = [];
+
+    for (const f of fraudChecks) {
+      const txKey = f.transactionId || f.transaction?.id || f.transaction?.plateNumber;
+      if (txKey && !seenTx.has(txKey)) {
+        seenTx.add(txKey);
+        activeFraudAlerts.push({
+          id: f.id,
+          plate: f.transaction?.plateNumber || '-',
+          type: f.transaction?.processType || '-',
+          net: f.transaction?.netWeight || 0,
+          processed: f.transaction?.actualWeight || 0,
+          diffPercent: f.deviationPercent
+            ? f.deviationPercent.toFixed(2)
+            : f.deviationKg
+              ? (
+                  (f.deviationKg /
+                    Math.max(
+                      f.transaction?.netWeight || 1,
+                      f.transaction?.actualWeight || 1,
+                    )) *
+                  100
+                ).toFixed(2)
+              : '0.00',
+          riskLevel: f.riskLevel,
+        });
+      }
+    }
 
     await this.activityLogsService
       .logAction({

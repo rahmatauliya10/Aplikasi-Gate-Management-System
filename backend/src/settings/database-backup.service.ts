@@ -905,199 +905,123 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       });
     }
 
-    // Preserve performing admin credentials to prevent lockout
-    const currentUserInDb = await this.prisma.user.findUnique({
-      where: { id: user.id },
-    });
+    // 4. Locate pg_dump file corresponding to backupPayload metadata
+    const history = await this.getBackupHistory();
+    const matchedManifest = history.find(
+      (m) =>
+        (backupPayload.metadata.backupId &&
+          m.backupId === backupPayload.metadata.backupId) ||
+        m.checksums?.dump === backupPayload.metadata.checksum ||
+        m.createdAt === backupPayload.metadata.createdAt,
+    );
 
-    // 4. Perform atomic transaction restore
+    if (!matchedManifest || !matchedManifest.artifacts?.dump) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Berkas pg_dump asli tidak ditemukan di server. Pemulihan DR menggunakan pg_restore tidak dapat dilanjutkan hanya dengan JSON.',
+      });
+    }
+
+    const dumpFilePath = path.join(this.localBackupDir, matchedManifest.artifacts.dump);
+    if (!fs.existsSync(dumpFilePath)) {
+      throw new InternalServerErrorException({
+        success: false,
+        message: 'Berkas dump fisik hilang dari media penyimpanan lokal. Pemulihan dibatalkan.',
+      });
+    }
+
+    // 5. Perform pg_restore execution and Atomic Attachments restore
     try {
-      await this.prisma.$transaction(
-        async (tx) => {
-          await tx.transactionCorrectionItem.deleteMany();
-          await tx.transactionCorrection.deleteMany();
-          await tx.fraudCheck.deleteMany();
-          await tx.attachment.deleteMany();
-          await tx.incomingMaterialCheck.deleteMany();
-          await tx.qcVehicleCheck.deleteMany();
-          await tx.warehouseProcess.deleteMany();
-          await tx.weighbridgeRecord.deleteMany();
-          await tx.transactionStatusHistory.deleteMany();
-          await tx.transaction.deleteMany();
-          await tx.userWarehouseAccess.deleteMany();
-          await tx.systemIssue.deleteMany();
-          await tx.announcement.deleteMany();
-          await tx.appSetting.deleteMany();
-          await tx.activityLog.deleteMany();
-          await tx.user.deleteMany();
+      this.logger.log(`Starting pg_restore for ${dumpFilePath}...`);
+      const dbUrl =
+        process.env.DATABASE_URL ||
+        'postgresql://postgres:postgres@postgres:5432/gms';
+      const parsedUrl = new URL(dbUrl);
+      const host = parsedUrl.hostname || 'postgres';
+      const port = parsedUrl.port || '5432';
+      const dbName = parsedUrl.pathname.replace(/^\//, '') || 'gms';
+      const username = parsedUrl.username || 'postgres';
+      const password = parsedUrl.password || 'postgres';
 
-          const d = backupPayload.data;
-          const validUsersToInsert = (d.users || []).map((u: any) => {
-            if (
-              u.id === user.id &&
-              currentUserInDb &&
-              (u.passwordHash === '[REDACTED_FOR_SECURITY]' || !u.passwordHash)
-            ) {
-              return {
-                ...u,
-                passwordHash: currentUserInDb.passwordHash,
-                refreshTokenHash: currentUserInDb.refreshTokenHash,
-              };
-            }
-            return u;
-          });
+      // Terminate existing connections before restore
+      try {
+        await this.prisma.$executeRawUnsafe(`
+          SELECT pg_terminate_backend(pid)
+          FROM pg_stat_activity
+          WHERE datname = '${dbName}' AND pid <> pg_backend_pid();
+        `);
+      } catch (e) {
+        this.logger.warn(`Could not terminate connections prior to restore: ${e}`);
+      }
 
-          const safeUsers = validUsersToInsert.filter(
-            (u: any) =>
-              u.passwordHash && u.passwordHash !== '[REDACTED_FOR_SECURITY]',
-          );
-
-          if (
-            currentUserInDb &&
-            !safeUsers.some((u: any) => u.id === currentUserInDb.id)
-          ) {
-            safeUsers.push(currentUserInDb);
-          }
-
-          if (safeUsers.length)
-            await tx.user.createMany({
-              data: safeUsers,
-              skipDuplicates: true,
-            });
-          if (d.userWarehouseAccess?.length)
-            await tx.userWarehouseAccess.createMany({
-              data: d.userWarehouseAccess,
-              skipDuplicates: true,
-            });
-          if (d.transactions?.length)
-            await tx.transaction.createMany({
-              data: d.transactions,
-              skipDuplicates: true,
-            });
-          if (d.transactionStatusHistory?.length)
-            await tx.transactionStatusHistory.createMany({
-              data: d.transactionStatusHistory,
-              skipDuplicates: true,
-            });
-          if (d.weighbridgeRecords?.length)
-            await tx.weighbridgeRecord.createMany({
-              data: d.weighbridgeRecords,
-              skipDuplicates: true,
-            });
-          if (d.warehouseProcesses?.length)
-            await tx.warehouseProcess.createMany({
-              data: d.warehouseProcesses,
-              skipDuplicates: true,
-            });
-          if (d.qcVehicleChecks?.length)
-            await tx.qcVehicleCheck.createMany({
-              data: d.qcVehicleChecks,
-              skipDuplicates: true,
-            });
-          if (d.incomingMaterialChecks?.length)
-            await tx.incomingMaterialCheck.createMany({
-              data: d.incomingMaterialChecks,
-              skipDuplicates: true,
-            });
-          if (d.attachments?.length)
-            await tx.attachment.createMany({
-              data: d.attachments,
-              skipDuplicates: true,
-            });
-          if (d.fraudChecks?.length)
-            await tx.fraudCheck.createMany({
-              data: d.fraudChecks,
-              skipDuplicates: true,
-            });
-          if (d.transactionCorrections?.length)
-            await tx.transactionCorrection.createMany({
-              data: d.transactionCorrections,
-              skipDuplicates: true,
-            });
-          if (d.transactionCorrectionItems?.length)
-            await tx.transactionCorrectionItem.createMany({
-              data: d.transactionCorrectionItems,
-              skipDuplicates: true,
-            });
-          if (d.activityLogs?.length)
-            await tx.activityLog.createMany({
-              data: d.activityLogs,
-              skipDuplicates: true,
-            });
-          if (d.appSettings?.length)
-            await tx.appSetting.createMany({
-              data: d.appSettings,
-              skipDuplicates: true,
-            });
-          if (d.announcements?.length)
-            await tx.announcement.createMany({
-              data: d.announcements,
-              skipDuplicates: true,
-            });
-          if (d.systemIssues?.length)
-            await tx.systemIssue.createMany({
-              data: d.systemIssues,
-              skipDuplicates: true,
-            });
-        },
+      await execFileAsync(
+        'pg_restore',
+        [
+          '--clean',
+          '--if-exists',
+          '--no-owner',
+          '--no-acl',
+          '--host=' + host,
+          '--port=' + port,
+          '--username=' + username,
+          '--dbname=' + dbName,
+          dumpFilePath,
+        ],
         {
-          timeout: 60000,
+          shell: false,
+          env: { ...process.env, PGPASSWORD: password },
+          timeout: 10 * 60 * 1000,
         },
       );
+      this.logger.log(`pg_restore completed successfully.`);
 
-      // Restore physical upload attachment files to disk matching specific backup payload
+      // 6. Restore physical upload attachment files atomically
       let restoredAttachmentsCount = 0;
-      try {
+      if (matchedManifest.artifacts.attachmentsArchive) {
         const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
-        if (!fs.existsSync(uploadDir))
-          fs.mkdirSync(uploadDir, { recursive: true });
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-        // Search for attachment archive file corresponding to backup history or checksum
-        const history = await this.getBackupHistory();
-        const matchedManifest = history.find(
-          (m) =>
-            (backupPayload.metadata.backupId &&
-              m.backupId === backupPayload.metadata.backupId) ||
-            m.checksums?.dump === backupPayload.metadata.checksum ||
-            m.createdAt === backupPayload.metadata.createdAt,
+        const archivePath = path.join(
+          this.localBackupDir,
+          matchedManifest.artifacts.attachmentsArchive,
         );
+        if (fs.existsSync(archivePath)) {
+          const archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+          if (archiveContent.files && Array.isArray(archiveContent.files)) {
+            // Atomic staging -> verify -> swap
+            const stagingDir = path.join(uploadDir, '_staging_restore');
+            if (fs.existsSync(stagingDir)) fs.rmSync(stagingDir, { recursive: true, force: true });
+            fs.mkdirSync(stagingDir, { recursive: true });
 
-        if (matchedManifest && matchedManifest.artifacts?.attachmentsArchive) {
-          const archivePath = path.join(
-            this.localBackupDir,
-            matchedManifest.artifacts.attachmentsArchive,
-          );
-          if (fs.existsSync(archivePath)) {
-            const archiveContent = JSON.parse(
-              fs.readFileSync(archivePath, 'utf8'),
-            );
-            if (archiveContent.files && Array.isArray(archiveContent.files)) {
+            try {
               for (const file of archiveContent.files) {
                 if (file.fileName && file.base64Content) {
-                  const targetPath = path.join(uploadDir, file.fileName);
+                  const targetPath = path.join(stagingDir, file.fileName);
                   const buffer = Buffer.from(file.base64Content, 'base64');
                   fs.writeFileSync(targetPath, buffer);
-                  const restoredChecksum =
-                    this.calculateChecksumForBuffer(buffer);
+                  const restoredChecksum = this.calculateChecksumForBuffer(buffer);
                   if (file.checksum && restoredChecksum !== file.checksum) {
-                    throw new Error(
-                      `Checksum mismatch during attachment file restore: ${file.fileName}`,
-                    );
+                    throw new Error(`Checksum mismatch during attachment file restore: ${file.fileName}`);
                   }
                   restoredAttachmentsCount++;
                 }
               }
+
+              // Swap phase
+              for (const file of archiveContent.files) {
+                if (file.fileName) {
+                  const stagingPath = path.join(stagingDir, file.fileName);
+                  const finalPath = path.join(uploadDir, file.fileName);
+                  if (fs.existsSync(stagingPath)) {
+                     fs.renameSync(stagingPath, finalPath);
+                  }
+                }
+              }
+            } finally {
+              if (fs.existsSync(stagingDir)) fs.rmSync(stagingDir, { recursive: true, force: true });
             }
           }
         }
-      } catch (fileErr: any) {
-        this.logger.error(
-          `Attachment file restoration error: ${fileErr.message}`,
-        );
-        throw new BadRequestException({
-          success: false,
-          message: `Gagal memulihkan berkas fisik attachment: ${fileErr.message}`,
-        });
       }
 
       this.logger.log(
@@ -1148,19 +1072,29 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       if (history.length > 30) {
         const toDelete = history.slice(30);
         for (const item of toDelete) {
-          const dumpPath = path.join(this.localBackupDir, item.artifacts.dump);
+          const dumpPath = path.join(this.localBackupDir, item.artifacts.dump || '');
           const globalsPath = path.join(
             this.localBackupDir,
-            item.artifacts.globals,
+            item.artifacts.globals || '',
           );
           const manifestPath = path.join(
             this.localBackupDir,
-            item.artifacts.manifest,
+            item.artifacts.manifest || '',
+          );
+          const snapshotPath = path.join(
+            this.localBackupDir,
+            item.artifacts.snapshot || '',
+          );
+          const attachmentsArchivePath = path.join(
+            this.localBackupDir,
+            item.artifacts.attachmentsArchive || '',
           );
 
-          if (fs.existsSync(dumpPath)) fs.unlinkSync(dumpPath);
-          if (fs.existsSync(globalsPath)) fs.unlinkSync(globalsPath);
-          if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
+          if (item.artifacts.dump && fs.existsSync(dumpPath)) fs.unlinkSync(dumpPath);
+          if (item.artifacts.globals && fs.existsSync(globalsPath)) fs.unlinkSync(globalsPath);
+          if (item.artifacts.manifest && fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
+          if (item.artifacts.snapshot && fs.existsSync(snapshotPath)) fs.unlinkSync(snapshotPath);
+          if (item.artifacts.attachmentsArchive && fs.existsSync(attachmentsArchivePath)) fs.unlinkSync(attachmentsArchivePath);
         }
       }
     } catch (e: any) {

@@ -79,7 +79,7 @@ services:
     volumes:
       - uploads:/app/uploads
       - backups_local:/app/backups/local
-      - backups_nas:/app/backups/nas
+      - ${NAS_MOUNT_PATH:-./deploy/nas}:/app/backups/nas
     deploy:
       resources:
         limits:
@@ -135,4 +135,3 @@ volumes:
   pgdata:
   uploads:
   backups_local:
-  backups_nas:

@@ -101,6 +101,24 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   REMARK: ['remarks', 'cancellationReason', 'notes', 'description'],
 };
 
+const validateDomain = (fieldName: string, newValue: any, targetModule: CorrectionTargetModule) => {
+  if (['grossWeight', 'tareWeight', 'actualWeight', 'sampleWeight', 'weight'].includes(fieldName)) {
+    const num = Number(newValue);
+    if (isNaN(num) || num < 0) throw new BadRequestException(`Field ${fieldName} harus berupa angka positif.`);
+  }
+  if (['startAt', 'endAt'].includes(fieldName)) {
+    const d = new Date(newValue);
+    if (isNaN(d.getTime())) throw new BadRequestException(`Field ${fieldName} harus berupa tanggal yang valid.`);
+  }
+  if (['actualQuantity', 'palletCount', 'bagCount', 'rollCount'].includes(fieldName)) {
+    const num = Number(newValue);
+    if (isNaN(num) || num < 0 || !Number.isInteger(num)) throw new BadRequestException(`Field ${fieldName} harus berupa angka bulat positif.`);
+  }
+  if (fieldName === 'status') {
+     throw new BadRequestException('Status tidak boleh diubah secara langsung melalui koreksi field. Gunakan action REOPEN_WORKFLOW.');
+  }
+};
+
 @Injectable()
 export class OperationLogCorrectionService {
   private readonly logger = new Logger(OperationLogCorrectionService.name);
@@ -183,6 +201,8 @@ export class OperationLogCorrectionService {
           );
         }
 
+        validateDomain(item.fieldName, item.newValue, item.targetModule);
+
         let extractedOldValue: any = null;
         let targetIdToUse = item.targetRecordId || null;
 
@@ -228,28 +248,22 @@ export class OperationLogCorrectionService {
             }
           }
         } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
-          let rec = item.targetRecordId
+          const rec = item.targetRecordId
             ? tx.warehouseProcesses?.find((r) => r.id === item.targetRecordId)
             : tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null;
 
           if (!rec) {
-            rec = await prismaTx.warehouseProcess.create({
-              data: {
-                transactionId: tx.id,
-                processType: tx.processType || 'GBB',
-                [item.fieldName]: item.newValue,
-              },
-            });
-            targetIdToUse = rec.id;
-            extractedOldValue = null;
-          } else {
-            targetIdToUse = rec.id;
-            extractedOldValue = (rec as any)[item.fieldName];
-            await prismaTx.warehouseProcess.update({
-              where: { id: rec.id },
-              data: { [item.fieldName]: item.newValue },
-            });
+            throw new ConflictException(
+              'Original Warehouse record does not exist and cannot be corrected',
+            );
           }
+          
+          targetIdToUse = rec.id;
+          extractedOldValue = (rec as any)[item.fieldName];
+          await prismaTx.warehouseProcess.update({
+            where: { id: rec.id },
+            data: { [item.fieldName]: item.newValue },
+          });
 
           // Adapter auto-sync to Transaction root
           if (item.fieldName === 'actualWeight') {
@@ -258,35 +272,33 @@ export class OperationLogCorrectionService {
             txUpdateData.actualQuantity = Number(item.newValue);
           } else if (item.fieldName === 'unit') {
             txUpdateData.warehouseUnit = item.newValue;
+          } else if (item.fieldName === 'startAt') {
+            txUpdateData.warehouseStartAt = new Date(item.newValue);
+          } else if (item.fieldName === 'endAt') {
+            txUpdateData.warehouseEndAt = new Date(item.newValue);
           }
         } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE) {
-          let rec = item.targetRecordId
+          const rec = item.targetRecordId
             ? tx.qcVehicleChecks?.find((r) => r.id === item.targetRecordId)
             : tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null;
 
           if (!rec) {
-            rec = await prismaTx.qcVehicleCheck.create({
-              data: {
-                transactionId: tx.id,
-                result: 'PASS',
-                [item.fieldName]: item.newValue,
-              },
-            });
-            targetIdToUse = rec.id;
-            extractedOldValue = null;
-          } else {
-            targetIdToUse = rec.id;
-            extractedOldValue = (rec as any)[item.fieldName];
-            await prismaTx.qcVehicleCheck.update({
-              where: { id: rec.id },
-              data: { [item.fieldName]: item.newValue },
-            });
+            throw new ConflictException(
+              'Original QC Vehicle record does not exist and cannot be corrected',
+            );
           }
+          
+          targetIdToUse = rec.id;
+          extractedOldValue = (rec as any)[item.fieldName];
+          await prismaTx.qcVehicleCheck.update({
+            where: { id: rec.id },
+            data: { [item.fieldName]: item.newValue },
+          });
         } else if (
           item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
           item.targetModule === CorrectionTargetModule.QC_MATERIAL
         ) {
-          let rec = item.targetRecordId
+          const rec = item.targetRecordId
             ? tx.incomingMaterialChecks?.find(
                 (r) => r.id === item.targetRecordId,
               )
@@ -295,23 +307,17 @@ export class OperationLogCorrectionService {
               ] || null;
 
           if (!rec) {
-            rec = await prismaTx.incomingMaterialCheck.create({
-              data: {
-                transactionId: tx.id,
-                result: 'PASS',
-                [item.fieldName]: item.newValue,
-              },
-            });
-            targetIdToUse = rec.id;
-            extractedOldValue = null;
-          } else {
-            targetIdToUse = rec.id;
-            extractedOldValue = (rec as any)[item.fieldName];
-            await prismaTx.incomingMaterialCheck.update({
-              where: { id: rec.id },
-              data: { [item.fieldName]: item.newValue },
-            });
+            throw new ConflictException(
+              'Original QC/Incoming Material record does not exist and cannot be corrected',
+            );
           }
+          
+          targetIdToUse = rec.id;
+          extractedOldValue = (rec as any)[item.fieldName];
+          await prismaTx.incomingMaterialCheck.update({
+            where: { id: rec.id },
+            data: { [item.fieldName]: item.newValue },
+          });
         } else if (item.targetModule === CorrectionTargetModule.ATTACHMENT) {
           if (!tx.attachments || tx.attachments.length === 0) {
             throw new BadRequestException(

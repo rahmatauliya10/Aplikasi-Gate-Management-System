@@ -163,12 +163,12 @@ describe('WeighbridgeService Fraud Calculation', () => {
 
     jest
       .spyOn(prismaService.weighbridgeRecord, 'findFirst')
-      .mockImplementation((args: any) => {
+      .mockImplementation(((args: any) => {
         if (args?.where?.type === 'OUT') return Promise.resolve(null);
         if (args?.where?.type === 'IN')
           return Promise.resolve({ weight: 15000 } as any);
         return Promise.resolve(null);
-      });
+      }) as any);
 
     const result = await service.submitWeighOut('tx-gbb-1', { weight: 5000 }, {
       id: 'user-1',

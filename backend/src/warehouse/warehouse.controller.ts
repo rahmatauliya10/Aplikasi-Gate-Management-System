@@ -112,23 +112,6 @@ export class WarehouseController {
     return this.warehouseService.submitIncomingCheck(transactionId, dto, user);
   }
 
-  @Post('complete-qc-analysis/:transactionId')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark QC analysis as completed for GBB process' })
-  @ApiResponse({ status: 200, description: 'QC analysis marked as completed' })
-  @ApiResponse({ status: 404, description: 'Transaction not found' })
-  completeQcAnalysis(
-    @Param('transactionId') transactionId: string,
-    @Body() body: { remarks?: string },
-    @CurrentUser() user: JwtPayloadUser,
-  ) {
-    return this.warehouseService.completeQcAnalysis(
-      transactionId,
-      user,
-      body?.remarks,
-    );
-  }
-
   @Get('process/:transactionId')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get warehouse process details for a transaction' })
