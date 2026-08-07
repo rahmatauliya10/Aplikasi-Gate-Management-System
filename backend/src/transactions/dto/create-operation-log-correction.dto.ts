@@ -113,7 +113,6 @@ export class CreateOperationLogCorrectionDto {
     type: [CorrectionItemDto],
   })
   @IsArray()
-  @ArrayMinSize(1, { message: 'Daftar item koreksi tidak boleh kosong.' })
   @ArrayMaxSize(25, { message: 'Maksimal 25 item koreksi per transaksi.' })
   @ValidateNested({ each: true })
   @Type(() => CorrectionItemDto)

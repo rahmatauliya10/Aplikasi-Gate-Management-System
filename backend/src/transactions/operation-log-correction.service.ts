@@ -35,7 +35,7 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
     'permitCardNumber',
     'guestIdNumber',
   ],
-  WEIGHBRIDGE: ['weight', 'ticketNumber', 'remarks', 'operatorId'],
+  WEIGHBRIDGE: ['weight', 'ticketNumber', 'remarks'],
   QC_VEHICLE: [
     'result',
     'vehicleCleanliness',
@@ -97,7 +97,7 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
     'checklistItems',
   ],
   STATUS: ['status'],
-  ATTACHMENT: ['originalName', 'fileName', 'filePath', 'description'],
+  ATTACHMENT: ['originalName', 'description'],
   REMARK: ['remarks', 'cancellationReason', 'notes', 'description'],
 };
 
@@ -168,9 +168,9 @@ export class OperationLogCorrectionService {
       );
     }
 
-    if (!dto.items || dto.items.length === 0) {
+    if ((!dto.items || dto.items.length === 0) && dto.action !== CorrectionAction.REOPEN_WORKFLOW) {
       throw new BadRequestException(
-        'Daftar item koreksi (items) tidak boleh kosong.',
+        'Daftar item koreksi (items) tidak boleh kosong kecuali untuk REOPEN_WORKFLOW.',
       );
     }
 
@@ -229,6 +229,20 @@ export class OperationLogCorrectionService {
         }
 
         validateDomain(item.fieldName, item.newValue, item.targetModule);
+
+        let valueToUpdate = item.newValue;
+        if (
+          item.fieldName === 'result' &&
+          typeof item.newValue === 'string'
+        ) {
+          const upperVal = item.newValue.toUpperCase();
+          if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperVal)) {
+            valueToUpdate = 'PASS';
+          } else if (['REJECTED', 'REJECT'].includes(upperVal)) {
+            valueToUpdate = 'REJECT';
+          }
+        }
+        item.newValue = valueToUpdate;
 
         let extractedOldValue: any = null;
         let targetIdToUse = item.targetRecordId || null;
@@ -317,7 +331,6 @@ export class OperationLogCorrectionService {
 
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
-          let valueToUpdate = item.newValue;
           if (
             item.fieldName === 'result' &&
             typeof item.newValue === 'string'
@@ -328,6 +341,7 @@ export class OperationLogCorrectionService {
             } else if (['REJECTED', 'REJECT'].includes(upperVal)) {
               valueToUpdate = 'REJECT';
             }
+            item.newValue = valueToUpdate;
           }
           await prismaTx.qcVehicleCheck.update({
             where: { id: rec.id },
@@ -353,7 +367,6 @@ export class OperationLogCorrectionService {
 
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
-          let valueToUpdate = item.newValue;
           if (
             item.fieldName === 'result' &&
             typeof item.newValue === 'string'
@@ -364,6 +377,7 @@ export class OperationLogCorrectionService {
             } else if (['REJECTED', 'REJECT'].includes(upperVal)) {
               valueToUpdate = 'REJECT';
             }
+            item.newValue = valueToUpdate;
           }
           await prismaTx.incomingMaterialCheck.update({
             where: { id: rec.id },
@@ -507,24 +521,28 @@ export class OperationLogCorrectionService {
         txUpdateData.qcAnalysisCompleted = false;
         txUpdateData.qcAnalysisCompletedAt = null;
 
-        // Explicitly delete downstream workflow records to prevent "Result already submitted" blockages
-        // The historical values are preserved in the `oldValues` audit log of the TransactionCorrection.
-        await prismaTx.qcVehicleCheck.deleteMany({
-          where: { transactionId: id },
+        // Supersede downstream workflow records instead of deleting them.
+        await prismaTx.qcVehicleCheck.updateMany({
+          where: { transactionId: id, isCurrent: true },
+          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
         });
-        await prismaTx.incomingMaterialCheck.deleteMany({
-          where: { transactionId: id },
+        await prismaTx.incomingMaterialCheck.updateMany({
+          where: { transactionId: id, isCurrent: true },
+          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
         });
-        await prismaTx.warehouseProcess.deleteMany({
-          where: { transactionId: id },
+        await prismaTx.warehouseProcess.updateMany({
+          where: { transactionId: id, isCurrent: true },
+          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
         });
 
-        // Also remove OUT weighbridge record so they can weigh out again
-        await prismaTx.weighbridgeRecord.deleteMany({
+        // Also supersede OUT weighbridge record so they can weigh out again
+        await prismaTx.weighbridgeRecord.updateMany({
           where: {
             transactionId: id,
             type: 'OUT',
+            isCurrent: true
           },
+          data: { isCurrent: false, supersededAt: new Date(), supersededByCorrectionId: correctionNumber },
         });
       }
 
