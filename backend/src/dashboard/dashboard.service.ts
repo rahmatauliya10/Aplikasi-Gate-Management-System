@@ -150,7 +150,8 @@ export class DashboardService {
     const activeFraudAlerts: any[] = [];
 
     for (const f of fraudChecks) {
-      const txKey = f.transactionId || f.transaction?.id || f.transaction?.plateNumber;
+      const txKey =
+        f.transactionId || f.transaction?.id || f.transaction?.plateNumber;
       if (txKey && !seenTx.has(txKey)) {
         seenTx.add(txKey);
         activeFraudAlerts.push({

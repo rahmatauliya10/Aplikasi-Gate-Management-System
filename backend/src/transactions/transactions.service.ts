@@ -348,5 +348,4 @@ export class TransactionsService {
       data: updated,
     };
   }
-
 }

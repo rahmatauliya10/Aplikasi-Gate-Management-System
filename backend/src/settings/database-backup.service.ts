@@ -918,15 +918,20 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     if (!matchedManifest || !matchedManifest.artifacts?.dump) {
       throw new BadRequestException({
         success: false,
-        message: 'Berkas pg_dump asli tidak ditemukan di server. Pemulihan DR menggunakan pg_restore tidak dapat dilanjutkan hanya dengan JSON.',
+        message:
+          'Berkas pg_dump asli tidak ditemukan di server. Pemulihan DR menggunakan pg_restore tidak dapat dilanjutkan hanya dengan JSON.',
       });
     }
 
-    const dumpFilePath = path.join(this.localBackupDir, matchedManifest.artifacts.dump);
+    const dumpFilePath = path.join(
+      this.localBackupDir,
+      matchedManifest.artifacts.dump,
+    );
     if (!fs.existsSync(dumpFilePath)) {
       throw new InternalServerErrorException({
         success: false,
-        message: 'Berkas dump fisik hilang dari media penyimpanan lokal. Pemulihan dibatalkan.',
+        message:
+          'Berkas dump fisik hilang dari media penyimpanan lokal. Pemulihan dibatalkan.',
       });
     }
 
@@ -951,7 +956,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           WHERE datname = '${dbName}' AND pid <> pg_backend_pid();
         `);
       } catch (e) {
-        this.logger.warn(`Could not terminate connections prior to restore: ${e}`);
+        this.logger.warn(
+          `Could not terminate connections prior to restore: ${e}`,
+        );
       }
 
       await execFileAsync(
@@ -979,18 +986,22 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       let restoredAttachmentsCount = 0;
       if (matchedManifest.artifacts.attachmentsArchive) {
         const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        if (!fs.existsSync(uploadDir))
+          fs.mkdirSync(uploadDir, { recursive: true });
 
         const archivePath = path.join(
           this.localBackupDir,
           matchedManifest.artifacts.attachmentsArchive,
         );
         if (fs.existsSync(archivePath)) {
-          const archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+          const archiveContent = JSON.parse(
+            fs.readFileSync(archivePath, 'utf8'),
+          );
           if (archiveContent.files && Array.isArray(archiveContent.files)) {
             // Atomic staging -> verify -> swap
             const stagingDir = path.join(uploadDir, '_staging_restore');
-            if (fs.existsSync(stagingDir)) fs.rmSync(stagingDir, { recursive: true, force: true });
+            if (fs.existsSync(stagingDir))
+              fs.rmSync(stagingDir, { recursive: true, force: true });
             fs.mkdirSync(stagingDir, { recursive: true });
 
             try {
@@ -999,9 +1010,12 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
                   const targetPath = path.join(stagingDir, file.fileName);
                   const buffer = Buffer.from(file.base64Content, 'base64');
                   fs.writeFileSync(targetPath, buffer);
-                  const restoredChecksum = this.calculateChecksumForBuffer(buffer);
+                  const restoredChecksum =
+                    this.calculateChecksumForBuffer(buffer);
                   if (file.checksum && restoredChecksum !== file.checksum) {
-                    throw new Error(`Checksum mismatch during attachment file restore: ${file.fileName}`);
+                    throw new Error(
+                      `Checksum mismatch during attachment file restore: ${file.fileName}`,
+                    );
                   }
                   restoredAttachmentsCount++;
                 }
@@ -1013,12 +1027,13 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
                   const stagingPath = path.join(stagingDir, file.fileName);
                   const finalPath = path.join(uploadDir, file.fileName);
                   if (fs.existsSync(stagingPath)) {
-                     fs.renameSync(stagingPath, finalPath);
+                    fs.renameSync(stagingPath, finalPath);
                   }
                 }
               }
             } finally {
-              if (fs.existsSync(stagingDir)) fs.rmSync(stagingDir, { recursive: true, force: true });
+              if (fs.existsSync(stagingDir))
+                fs.rmSync(stagingDir, { recursive: true, force: true });
             }
           }
         }
@@ -1072,7 +1087,10 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       if (history.length > 30) {
         const toDelete = history.slice(30);
         for (const item of toDelete) {
-          const dumpPath = path.join(this.localBackupDir, item.artifacts.dump || '');
+          const dumpPath = path.join(
+            this.localBackupDir,
+            item.artifacts.dump || '',
+          );
           const globalsPath = path.join(
             this.localBackupDir,
             item.artifacts.globals || '',
@@ -1090,11 +1108,19 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
             item.artifacts.attachmentsArchive || '',
           );
 
-          if (item.artifacts.dump && fs.existsSync(dumpPath)) fs.unlinkSync(dumpPath);
-          if (item.artifacts.globals && fs.existsSync(globalsPath)) fs.unlinkSync(globalsPath);
-          if (item.artifacts.manifest && fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
-          if (item.artifacts.snapshot && fs.existsSync(snapshotPath)) fs.unlinkSync(snapshotPath);
-          if (item.artifacts.attachmentsArchive && fs.existsSync(attachmentsArchivePath)) fs.unlinkSync(attachmentsArchivePath);
+          if (item.artifacts.dump && fs.existsSync(dumpPath))
+            fs.unlinkSync(dumpPath);
+          if (item.artifacts.globals && fs.existsSync(globalsPath))
+            fs.unlinkSync(globalsPath);
+          if (item.artifacts.manifest && fs.existsSync(manifestPath))
+            fs.unlinkSync(manifestPath);
+          if (item.artifacts.snapshot && fs.existsSync(snapshotPath))
+            fs.unlinkSync(snapshotPath);
+          if (
+            item.artifacts.attachmentsArchive &&
+            fs.existsSync(attachmentsArchivePath)
+          )
+            fs.unlinkSync(attachmentsArchivePath);
         }
       }
     } catch (e: any) {

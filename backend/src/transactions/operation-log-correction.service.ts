@@ -101,21 +101,48 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   REMARK: ['remarks', 'cancellationReason', 'notes', 'description'],
 };
 
-const validateDomain = (fieldName: string, newValue: any, targetModule: CorrectionTargetModule) => {
-  if (['grossWeight', 'tareWeight', 'actualWeight', 'sampleWeight', 'weight'].includes(fieldName)) {
+const validateDomain = (
+  fieldName: string,
+  newValue: any,
+  targetModule: CorrectionTargetModule,
+) => {
+  if (
+    [
+      'grossWeight',
+      'tareWeight',
+      'actualWeight',
+      'sampleWeight',
+      'weight',
+    ].includes(fieldName)
+  ) {
     const num = Number(newValue);
-    if (isNaN(num) || num < 0) throw new BadRequestException(`Field ${fieldName} harus berupa angka positif.`);
+    if (isNaN(num) || num < 0)
+      throw new BadRequestException(
+        `Field ${fieldName} harus berupa angka positif.`,
+      );
   }
   if (['startAt', 'endAt'].includes(fieldName)) {
     const d = new Date(newValue);
-    if (isNaN(d.getTime())) throw new BadRequestException(`Field ${fieldName} harus berupa tanggal yang valid.`);
+    if (isNaN(d.getTime()))
+      throw new BadRequestException(
+        `Field ${fieldName} harus berupa tanggal yang valid.`,
+      );
   }
-  if (['actualQuantity', 'palletCount', 'bagCount', 'rollCount'].includes(fieldName)) {
+  if (
+    ['actualQuantity', 'palletCount', 'bagCount', 'rollCount'].includes(
+      fieldName,
+    )
+  ) {
     const num = Number(newValue);
-    if (isNaN(num) || num < 0 || !Number.isInteger(num)) throw new BadRequestException(`Field ${fieldName} harus berupa angka bulat positif.`);
+    if (isNaN(num) || num < 0 || !Number.isInteger(num))
+      throw new BadRequestException(
+        `Field ${fieldName} harus berupa angka bulat positif.`,
+      );
   }
   if (fieldName === 'status') {
-     throw new BadRequestException('Status tidak boleh diubah secara langsung melalui koreksi field. Gunakan action REOPEN_WORKFLOW.');
+    throw new BadRequestException(
+      'Status tidak boleh diubah secara langsung melalui koreksi field. Gunakan action REOPEN_WORKFLOW.',
+    );
   }
 };
 
@@ -257,7 +284,7 @@ export class OperationLogCorrectionService {
               'Original Warehouse record does not exist and cannot be corrected',
             );
           }
-          
+
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.warehouseProcess.update({
@@ -287,7 +314,7 @@ export class OperationLogCorrectionService {
               'Original QC Vehicle record does not exist and cannot be corrected',
             );
           }
-          
+
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.qcVehicleCheck.update({
@@ -311,7 +338,7 @@ export class OperationLogCorrectionService {
               'Original QC/Incoming Material record does not exist and cannot be corrected',
             );
           }
-          
+
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.incomingMaterialCheck.update({
