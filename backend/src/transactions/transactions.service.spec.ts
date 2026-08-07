@@ -3,6 +3,7 @@ import { TransactionsService } from './transactions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 describe('TransactionsService State Machine & OCC', () => {
   let service: TransactionsService;
@@ -32,6 +33,10 @@ describe('TransactionsService State Machine & OCC', () => {
         {
           provide: ActivityLogsService,
           useValue: { logAction: jest.fn() },
+        },
+        {
+          provide: AuthorizationScopeService,
+          useValue: { getTransactionScope: jest.fn().mockReturnValue({}) },
         },
       ],
     }).compile();

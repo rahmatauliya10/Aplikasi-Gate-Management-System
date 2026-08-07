@@ -3,6 +3,7 @@ import { QcService } from './qc.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 describe('QcService - Segregation of Duties (SoD)', () => {
   let service: QcService;
@@ -39,6 +40,7 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         QcService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
+        { provide: AuthorizationScopeService, useValue: { getTransactionScope: jest.fn().mockReturnValue({}) } },
       ],
     }).compile();
 
