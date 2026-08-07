@@ -91,10 +91,7 @@ export class DatabaseBackupController {
   ) {
     const ipAddress =
       (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
-    const backupData = await this.backupService.generateBackup(
-      user,
-      ipAddress,
-    );
+    const backupData = await this.backupService.generateBackup(user, ipAddress);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `GMS_Backup_${timestamp}.json`;
