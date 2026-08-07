@@ -30,7 +30,6 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     backupService = app.get<DatabaseBackupService>(DatabaseBackupService);
   });
 
-
   afterAll(async () => {
     if (prisma) {
       await prisma.$disconnect().catch(() => {});
@@ -53,17 +52,19 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         history[0].backupId,
       );
       expect(typeof bundlePath).toBe('string');
-      
+
       const bundleContent = fs.readFileSync(bundlePath, 'utf8');
       const bundle = JSON.parse(bundleContent);
-      
+
       expect(bundle).toBeDefined();
       expect(bundle.metadata.system).toBe('GMS_GATE_MANAGEMENT_SYSTEM');
       expect(bundle.manifest).toBeDefined();
-      
+
       try {
         fs.unlinkSync(bundlePath);
-      } catch(e) {}
+      } catch (e) {
+        // Abaikan error hapus temporary file
+      }
     }
   });
 });
