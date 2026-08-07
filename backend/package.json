@@ -94,5 +94,8 @@
   },
   "prisma": {
     "seed": "node dist/prisma/seed.js"
+  },
+  "overrides": {
+    "js-yaml": "^5.2.1"
   }
 }
