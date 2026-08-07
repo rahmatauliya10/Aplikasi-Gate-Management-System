@@ -4,6 +4,8 @@ import {
   IsOptional,
   IsBoolean,
   IsNumber,
+  Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -25,11 +27,15 @@ export class IncomingCheckResultDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
+  @Min(0)
+  @Max(100)
   moisture?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
+  @Min(0)
+  @Max(100)
   foreignMatter?: number;
 
   @ApiPropertyOptional()
@@ -40,6 +46,7 @@ export class IncomingCheckResultDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
+  @Min(0)
   sampleWeight?: number;
 
   @ApiPropertyOptional()

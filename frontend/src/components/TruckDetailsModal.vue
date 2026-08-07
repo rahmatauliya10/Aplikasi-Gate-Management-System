@@ -1634,117 +1634,15 @@ const executeCorrectionSubmission = async () => {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
     }
 
-    if (correctionForm.value.status && correctionForm.value.status !== props.truck?.status) {
-      items.push({ targetModule: 'STATUS', fieldName: 'status', newValue: String(correctionForm.value.status) })
-    }
-
-    // QC Lab / Material corrections (Target: INCOMING_MATERIAL)
-    const im = imOriginal.value
-    if (correctionForm.value.imResult !== im.result) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'result', newValue: String(correctionForm.value.imResult) })
-    }
-    if (Number(correctionForm.value.imMoisture) !== Number(im.moisture)) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'moisture', newValue: Number(correctionForm.value.imMoisture) })
-    }
-    if (Number(correctionForm.value.imForeignMatter) !== Number(im.foreignMatter)) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'foreignMatter', newValue: Number(correctionForm.value.imForeignMatter) })
-    }
-    if (Number(correctionForm.value.imSampleWeight) !== Number(im.sampleWeight)) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'sampleWeight', newValue: Number(correctionForm.value.imSampleWeight) })
-    }
-    if (Number(correctionForm.value.imGoodBeanPercentage) !== Number(im.goodBeanPercentage)) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'goodBeanPercentage', newValue: Number(correctionForm.value.imGoodBeanPercentage) })
-    }
-    if (correctionForm.value.imOdor !== im.odor) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'odor', newValue: String(correctionForm.value.imOdor) })
-    }
-    if (correctionForm.value.imColor !== im.color) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'color', newValue: String(correctionForm.value.imColor) })
-    }
-    if (correctionForm.value.imNotes !== im.notes) {
-      items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: im.id, fieldName: 'notes', newValue: String(correctionForm.value.imNotes) })
-    }
-
-    // QC Vehicle / Initial Sampling & 10 Checklist Items (Target: QC_VEHICLE)
-    const qcv = qcvOriginal.value
-    if (correctionForm.value.qcvResult !== qcv.result) {
-      items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcv.id, fieldName: 'result', newValue: String(correctionForm.value.qcvResult) })
-    }
-    if (correctionForm.value.qcvOdor !== qcv.vehicleOdor) {
-      items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcv.id, fieldName: 'vehicleOdor', newValue: String(correctionForm.value.qcvOdor) })
-    }
-    if (correctionForm.value.qcvVisual !== qcv.vehicleCondition) {
-      items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcv.id, fieldName: 'vehicleCondition', newValue: String(correctionForm.value.qcvVisual) })
-    }
-    if (correctionForm.value.qcvCleanliness !== qcv.vehicleCleanliness) {
-      items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcv.id, fieldName: 'vehicleCleanliness', newValue: String(correctionForm.value.qcvCleanliness) })
-    }
-    if (correctionForm.value.qcvSeal !== qcv.sealCondition) {
-      items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcv.id, fieldName: 'sealCondition', newValue: String(correctionForm.value.qcvSeal) })
-    }
-    if (correctionForm.value.qcvPest !== qcv.pestEvidence) {
-      items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcv.id, fieldName: 'pestEvidence', newValue: String(correctionForm.value.qcvPest) })
-    }
-
-    // Only push checklistItems if checklist items or photos were ACTUALLY modified by user!
-    const vehicleChecklistLabels = [
-      { key: 'qcvCleanliness', photoKey: 'qcvCleanlinessPhoto', label: 'Vehicle Cleanliness' },
-      { key: 'qcvSeal', photoKey: 'qcvSealPhoto', label: 'Door Seal Intact' },
-      { key: 'qcvOdorCheck', photoKey: 'qcvOdorCheckPhoto', label: 'Odor/Smell Check' },
-      { key: 'qcvArrangement', photoKey: 'qcvArrangementPhoto', label: 'Arrangement' },
-      { key: 'qcvPest', photoKey: 'qcvPestPhoto', label: 'Pest/Animal Control' },
-      { key: 'qcvForeignObjects', photoKey: 'qcvForeignObjectsPhoto', label: 'Foreign Objects' },
-      { key: 'qcvPackaging', photoKey: 'qcvPackagingPhoto', label: 'Packaging Integrity' },
-      { key: 'qcvCoa', photoKey: 'qcvCoaPhoto', label: 'CoA Validation' },
-      { key: 'qcvQuantity', photoKey: 'qcvQuantityPhoto', label: 'Quantity Verification' },
-      { key: 'qcvLeakage', photoKey: 'qcvLeakagePhoto', label: 'Leakage & Condition' },
-    ]
-
-    const hasChecklistChanged = vehicleChecklistLabels.some(item => {
-      const valChanged = correctionForm.value[item.key] !== (qcv[item.key] || 'PASS')
-      const photoChanged = Boolean(correctionForm.value[item.photoKey]) !== Boolean(qcv[item.photoKey])
-      return valChanged || photoChanged
-    })
-
-    if (hasChecklistChanged) {
-      const updatedChecklistItems = vehicleChecklistLabels.map(item => ({
-        label: item.label,
-        ok: correctionForm.value[item.key] === 'PASS',
-        photo: correctionForm.value[item.photoKey] || null
-      }))
-
-      items.push({
-        targetModule: 'QC_VEHICLE',
-        targetRecordId: qcv.id,
-        fieldName: 'checklistItems',
-        newValue: updatedChecklistItems
-      })
-    }
-
-    if (correctionForm.value.qcvNotes !== qcv.notes) {
-      items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcv.id, fieldName: 'notes', newValue: String(correctionForm.value.qcvNotes) })
-    }
-
-    // Warehouse unloading corrections (Target: WAREHOUSE)
-    const wh = whOriginal.value
-    if (correctionForm.value.whCondition !== wh.condition) {
-      items.push({ targetModule: 'WAREHOUSE', targetRecordId: wh.id, fieldName: 'condition', newValue: String(correctionForm.value.whCondition) })
-    }
-    if (correctionForm.value.whRemarks !== wh.remarks) {
-      items.push({ targetModule: 'WAREHOUSE', targetRecordId: wh.id, fieldName: 'remarks', newValue: String(correctionForm.value.whRemarks) })
-    }
-
-    if (items.length === 0) {
+    if (items.length === 0 && !correctionForm.value.isReopen) {
       correctionError.value = 'Tidak ada perubahan data yang terdeteksi (No-Op). Silakan ubah minimal satu nilai untuk melakukan koreksi.'
       correctionLoading.value = false
       return
     }
 
     let action = 'CORRECT_DATA'
-    if (correctionForm.value.status === 'IN_PROGRESS' && props.truck?.status !== 'IN_PROGRESS') {
+    if (correctionForm.value.isReopen || correctionForm.value.status === 'REOPEN_WORKFLOW') {
       action = 'REOPEN_WORKFLOW'
-    } else if (correctionForm.value.status !== props.truck?.status) {
-      action = 'CORRECT_RECORDED_STATUS'
     }
 
     const payload = {

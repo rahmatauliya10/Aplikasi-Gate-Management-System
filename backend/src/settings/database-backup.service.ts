@@ -271,7 +271,11 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
   async getBackupHistory(): Promise<BackupManifest[]> {
     this.ensureBackupDirectories();
     const manifests: BackupManifest[] = [];
-    const dirsToScan = [this.localBackupDir, this.uploadBackupDir];
+    const dirsToScan = [
+      this.localBackupDir,
+      this.offsiteBackupDir,
+      this.uploadBackupDir,
+    ];
 
     for (const dir of dirsToScan) {
       try {
@@ -558,12 +562,13 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       );
     }
 
-    // Fallback JSON dump if native pg_dump binary is absent
-    if (!pgDumpSuccess) {
+    // P0-01 Fix: Strict DR Backup - DO NOT write JSON fallback to .dump path!
+    // A .dump file must be a true PostgreSQL Custom Dump binary.
+    if (!pgDumpSuccess && fs.existsSync(localDumpPath)) {
       try {
-        fs.writeFileSync(localDumpPath, this.safeJsonStringify(jsonPayload));
-      } catch (e: any) {
-        this.logger.warn(`Could not write fallback dump file: ${e.message}`);
+        fs.unlinkSync(localDumpPath);
+      } catch (e) {
+        // Ignore deletion error
       }
     }
 
@@ -577,7 +582,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       this.logger.warn(`Could not write globals sql file: ${e.message}`);
     }
 
-    // P0-02 & P0-05 Fix: Physical Attachments Byte Archive & Checksum Manifest
+    // Physical Attachments Byte Archive & Checksum Manifest
     const attachmentsArchiveName = `gms_${timestamp}_attachments.json`;
     const localAttachmentsPath = path.join(
       activeLocalDir,
@@ -626,8 +631,9 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       ? this.calculateChecksumForFile(localGlobalsPath)
       : '';
 
-    // P1-04 Fix: Status VERIFIED only if dump file exists, size > 0, and checksum non-empty
+    // P0-01 & P1-04 Fix: Status VERIFIED ONLY IF pgDumpSuccess === true AND valid custom dump
     const isDumpValid =
+      pgDumpSuccess &&
       fs.existsSync(localDumpPath) &&
       fs.statSync(localDumpPath).size > 0 &&
       dumpChecksum.length > 0;
@@ -905,7 +911,7 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       });
     }
 
-    // 4. Locate pg_dump file corresponding to backupPayload metadata
+    // 4. Locate pg_dump file corresponding to backupPayload metadata (checking Local, NAS, and Uploads)
     const history = await this.getBackupHistory();
     const matchedManifest = history.find(
       (m) =>
@@ -923,19 +929,32 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       });
     }
 
-    const dumpFilePath = path.join(
+    let dumpFilePath = path.join(
       this.localBackupDir,
       matchedManifest.artifacts.dump,
     );
     if (!fs.existsSync(dumpFilePath)) {
+      dumpFilePath = path.join(
+        this.offsiteBackupDir,
+        matchedManifest.artifacts.dump,
+      );
+    }
+    if (!fs.existsSync(dumpFilePath)) {
+      dumpFilePath = path.join(
+        this.uploadBackupDir,
+        matchedManifest.artifacts.dump,
+      );
+    }
+
+    if (!fs.existsSync(dumpFilePath)) {
       throw new InternalServerErrorException({
         success: false,
         message:
-          'Berkas dump fisik hilang dari media penyimpanan lokal. Pemulihan dibatalkan.',
+          'Berkas dump fisik hilang dari media penyimpanan server (Lokal & NAS). Pemulihan dibatalkan.',
       });
     }
 
-    // 5. Perform pg_restore execution and Atomic Attachments restore
+    // 5. Perform pg_restore execution with --single-transaction and --exit-on-error
     try {
       this.logger.log(`Starting pg_restore for ${dumpFilePath}...`);
       const dbUrl =
@@ -966,6 +985,8 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         [
           '--clean',
           '--if-exists',
+          '--single-transaction',
+          '--exit-on-error',
           '--no-owner',
           '--no-acl',
           '--host=' + host,
@@ -1077,6 +1098,235 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         success: false,
         message: `Gagal memulihkan database: ${error.message}`,
       });
+    }
+  }
+
+  async exportPortableBackupBundle(backupId?: string): Promise<any> {
+    const history = await this.getBackupHistory();
+    const manifest = backupId
+      ? history.find((h) => h.backupId === backupId)
+      : history.find((h) => h.localStatus === 'VERIFIED') || history[0];
+
+    if (!manifest) {
+      throw new BadRequestException('Manifest backup tidak ditemukan.');
+    }
+
+    const dirsToSearch = [
+      this.localBackupDir,
+      this.offsiteBackupDir,
+      this.uploadBackupDir,
+    ];
+
+    let dumpPath = '';
+    let attachmentsPath = '';
+
+    for (const dir of dirsToSearch) {
+      const candidateDump = path.join(dir, manifest.artifacts.dump);
+      if (fs.existsSync(candidateDump)) {
+        dumpPath = candidateDump;
+        break;
+      }
+    }
+
+    if (manifest.artifacts.attachmentsArchive) {
+      for (const dir of dirsToSearch) {
+        const candidateAttachments = path.join(
+          dir,
+          manifest.artifacts.attachmentsArchive,
+        );
+        if (fs.existsSync(candidateAttachments)) {
+          attachmentsPath = candidateAttachments;
+          break;
+        }
+      }
+    }
+
+    let dumpBase64 = '';
+    if (dumpPath && fs.existsSync(dumpPath)) {
+      dumpBase64 = fs.readFileSync(dumpPath).toString('base64');
+    }
+
+    let attachmentsContent: any = null;
+    if (attachmentsPath && fs.existsSync(attachmentsPath)) {
+      try {
+        attachmentsContent = JSON.parse(
+          fs.readFileSync(attachmentsPath, 'utf8'),
+        );
+      } catch (e) {
+        // ignore parse error
+      }
+    }
+
+    return {
+      metadata: {
+        system: 'GMS_GATE_MANAGEMENT_SYSTEM',
+        version: '1.0.0',
+        bundleType: 'PORTABLE_DISASTER_RECOVERY',
+        createdAt: manifest.createdAt,
+        backupId: manifest.backupId,
+        checksums: manifest.checksums,
+      },
+      manifest,
+      dumpBase64,
+      attachmentsContent,
+    };
+  }
+
+  async restoreFromPortableBundle(
+    user: JwtPayloadUser,
+    bundlePayload: any,
+    adminPasswordConfirm: string,
+    ipAddress?: string,
+  ) {
+    if (
+      !bundlePayload ||
+      !bundlePayload.metadata ||
+      bundlePayload.metadata.system !== 'GMS_GATE_MANAGEMENT_SYSTEM' ||
+      !bundlePayload.dumpBase64
+    ) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Format berkas .gmsbackup portabel tidak valid atau tidak dikenali.',
+      });
+    }
+
+    // 1. Re-authenticate Admin
+    const adminUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
+    });
+    if (!adminUser || !adminUser.passwordHash) {
+      throw new UnauthorizedException({
+        success: false,
+        message: 'Pengguna admin tidak ditemukan.',
+      });
+    }
+    const isPasswordValid = await argon2.verify(
+      adminUser.passwordHash,
+      adminPasswordConfirm,
+    );
+    if (!isPasswordValid) {
+      throw new UnauthorizedException({
+        success: false,
+        message: 'Konfirmasi password admin tidak valid.',
+      });
+    }
+
+    // 2. Extract dump & attachments to staging
+    const stagingDir = path.join(
+      this.localBackupDir,
+      `_staging_bundle_${Date.now()}`,
+    );
+    if (fs.existsSync(stagingDir)) {
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(stagingDir, { recursive: true });
+
+    try {
+      const dumpBuffer = Buffer.from(bundlePayload.dumpBase64, 'base64');
+      const stagingDumpPath = path.join(stagingDir, 'restored_portable.dump');
+      fs.writeFileSync(stagingDumpPath, dumpBuffer);
+
+      const calculatedDumpChecksum =
+        this.calculateChecksumForBuffer(dumpBuffer);
+      if (
+        bundlePayload.metadata.checksums?.dump &&
+        calculatedDumpChecksum !== bundlePayload.metadata.checksums.dump
+      ) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Integritas data berkas dump portabel gagal! (Checksum mismatch).',
+        });
+      }
+
+      // Create Pre-Restore backup snapshot
+      await this.runAutomatedScheduledBackup('AUTO_PRE_RESTORE', user);
+
+      // Perform pg_restore
+      const dbUrl =
+        process.env.DATABASE_URL ||
+        'postgresql://postgres:postgres@postgres:5432/gms';
+      const parsedUrl = new URL(dbUrl);
+      const host = parsedUrl.hostname || 'postgres';
+      const port = parsedUrl.port || '5432';
+      const dbName = parsedUrl.pathname.replace(/^\//, '') || 'gms';
+      const username = parsedUrl.username || 'postgres';
+      const password = parsedUrl.password || 'postgres';
+
+      try {
+        await this.prisma.$executeRawUnsafe(`
+          SELECT pg_terminate_backend(pid)
+          FROM pg_stat_activity
+          WHERE datname = '${dbName}' AND pid <> pg_backend_pid();
+        `);
+      } catch (e) {
+        // ignore
+      }
+
+      await execFileAsync(
+        'pg_restore',
+        [
+          '--clean',
+          '--if-exists',
+          '--single-transaction',
+          '--exit-on-error',
+          '--no-owner',
+          '--no-acl',
+          '--host=' + host,
+          '--port=' + port,
+          '--username=' + username,
+          '--dbname=' + dbName,
+          stagingDumpPath,
+        ],
+        {
+          shell: false,
+          env: { ...process.env, PGPASSWORD: password },
+          timeout: 10 * 60 * 1000,
+        },
+      );
+
+      // Restore attachments
+      let restoredAttachmentsCount = 0;
+      if (
+        bundlePayload.attachmentsContent &&
+        Array.isArray(bundlePayload.attachmentsContent.files)
+      ) {
+        const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
+        if (!fs.existsSync(uploadDir))
+          fs.mkdirSync(uploadDir, { recursive: true });
+
+        for (const file of bundlePayload.attachmentsContent.files) {
+          if (file.fileName && file.base64Content) {
+            const fileBuffer = Buffer.from(file.base64Content, 'base64');
+            const targetPath = path.join(uploadDir, file.fileName);
+            fs.writeFileSync(targetPath, fileBuffer);
+            restoredAttachmentsCount++;
+          }
+        }
+      }
+
+      await this.activityLogsService.logAction({
+        userId: user.id,
+        action: 'DATABASE_RESTORE',
+        module: 'SETTINGS',
+        description: `Successfully restored database from portable bundle (${bundlePayload.metadata.backupId})`,
+        status: 'SUCCESS',
+        ipAddress,
+      });
+
+      return {
+        success: true,
+        message: 'Pemulihan disaster recovery dari berkas portabel berhasil.',
+        data: {
+          backupId: bundlePayload.metadata.backupId,
+          restoredAttachmentsCount,
+        },
+      };
+    } finally {
+      if (fs.existsSync(stagingDir)) {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      }
     }
   }
 

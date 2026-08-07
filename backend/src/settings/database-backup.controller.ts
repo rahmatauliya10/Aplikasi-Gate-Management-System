@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Body,
+  Param,
   UseGuards,
   Req,
   Res,
@@ -129,6 +130,58 @@ export class DatabaseBackupController {
       ipAddress,
     );
 
-    return result;
+  @Get('download-bundle/:backupId')
+  @ApiOperation({
+    summary: 'Download complete portable DR backup bundle (.gmsbackup)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Portable DR backup bundle downloaded',
+  })
+  async downloadBundle(
+    @Param('backupId') backupId: string,
+    @Res() res: Response,
+  ) {
+    const bundle = await this.backupService.exportPortableBackupBundle(backupId);
+    const filename = `GMS_DR_Bundle_${backupId}.gmsbackup`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(JSON.stringify(bundle, null, 2));
+  }
+
+  @Post('restore-bundle')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Restore database and attachments from portable DR bundle (.gmsbackup)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Database restored from portable DR bundle',
+  })
+  async restoreBundle(
+    @CurrentUser() user: JwtPayloadUser,
+    @Body('bundleData') bundleData: any,
+    @Body('adminPassword') adminPasswordConfirm: string,
+    @Req() req: Request,
+  ) {
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+
+    let payload = bundleData;
+    if (typeof bundleData === 'string') {
+      try {
+        payload = JSON.parse(bundleData);
+      } catch (e) {
+        throw new Error('Format JSON bundleData tidak valid');
+      }
+    }
+
+    return await this.backupService.restoreFromPortableBundle(
+      user,
+      payload,
+      adminPasswordConfirm,
+      ipAddress,
+    );
   }
 }

@@ -317,9 +317,18 @@ export class OperationLogCorrectionService {
 
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
+          let valueToUpdate = item.newValue;
+          if (item.fieldName === 'result' && typeof item.newValue === 'string') {
+            const upperVal = item.newValue.toUpperCase();
+            if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperVal)) {
+              valueToUpdate = 'PASS';
+            } else if (['REJECTED', 'REJECT'].includes(upperVal)) {
+              valueToUpdate = 'REJECT';
+            }
+          }
           await prismaTx.qcVehicleCheck.update({
             where: { id: rec.id },
-            data: { [item.fieldName]: item.newValue },
+            data: { [item.fieldName]: valueToUpdate },
           });
         } else if (
           item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
@@ -341,9 +350,18 @@ export class OperationLogCorrectionService {
 
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
+          let valueToUpdate = item.newValue;
+          if (item.fieldName === 'result' && typeof item.newValue === 'string') {
+            const upperVal = item.newValue.toUpperCase();
+            if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperVal)) {
+              valueToUpdate = 'PASS';
+            } else if (['REJECTED', 'REJECT'].includes(upperVal)) {
+              valueToUpdate = 'REJECT';
+            }
+          }
           await prismaTx.incomingMaterialCheck.update({
             where: { id: rec.id },
-            data: { [item.fieldName]: item.newValue },
+            data: { [item.fieldName]: valueToUpdate },
           });
         } else if (item.targetModule === CorrectionTargetModule.ATTACHMENT) {
           if (!tx.attachments || tx.attachments.length === 0) {
@@ -470,8 +488,15 @@ export class OperationLogCorrectionService {
         txUpdateData.netWeight = proposedGross - proposedTare;
       }
 
+      // P1-04 Fix: REOPEN_WORKFLOW explicitly resets downstream completion timestamps
       if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
         txUpdateData.status = 'QC_VEHICLE_PENDING';
+        txUpdateData.completedAt = null;
+        txUpdateData.gateOutAt = null;
+        txUpdateData.weighOutAt = null;
+        txUpdateData.weighOutById = null;
+        txUpdateData.qcEndAt = null;
+        txUpdateData.warehouseEndAt = null;
       }
 
       // Step 12: Atomic OCC Update on Transaction

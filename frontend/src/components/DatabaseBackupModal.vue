@@ -158,18 +158,44 @@
 
               <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
                 <div class="text-[11px] font-bold text-slate-400 uppercase">Status Local (Drive D)</div>
-                <div class="text-sm font-black text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
-                  <span class="material-icons text-base">check_circle</span> Verified
+                <div
+                  :class="[
+                    'text-sm font-black mt-1 flex items-center gap-1',
+                    systemStatus.localBackupStatus === 'VERIFIED'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-rose-600 dark:text-rose-400'
+                  ]"
+                >
+                  <span class="material-icons text-base">
+                    {{ systemStatus.localBackupStatus === 'VERIFIED' ? 'check_circle' : 'error' }}
+                  </span>
+                  {{ systemStatus.localBackupStatus || 'NONE' }}
                 </div>
-                <div class="text-[10px] text-slate-500 mt-0.5">SHA-256 Valid</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">
+                  {{ systemStatus.localBackupStatus === 'VERIFIED' ? 'Checksum & Dump Valid' : 'Pemeriksaan Lokal Gagal' }}
+                </div>
               </div>
 
               <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800">
                 <div class="text-[11px] font-bold text-slate-400 uppercase">Status NAS Offsite</div>
-                <div class="text-sm font-black text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
-                  <span class="material-icons text-base">cloud_done</span> Verified
+                <div
+                  :class="[
+                    'text-sm font-black mt-1 flex items-center gap-1',
+                    systemStatus.offsiteBackupStatus === 'VERIFIED'
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : systemStatus.offsiteBackupStatus === 'PENDING'
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-rose-600 dark:text-rose-400'
+                  ]"
+                >
+                  <span class="material-icons text-base">
+                    {{ systemStatus.offsiteBackupStatus === 'VERIFIED' ? 'cloud_done' : 'cloud_off' }}
+                  </span>
+                  {{ systemStatus.offsiteBackupStatus || 'NONE' }}
                 </div>
-                <div class="text-[10px] text-slate-500 mt-0.5">NAS-SJA3 Sync</div>
+                <div class="text-[10px] text-slate-500 mt-0.5">
+                  {{ systemStatus.offsiteBackupStatus === 'VERIFIED' ? 'NAS Storage Sync' : 'Belum Terverifikasi' }}
+                </div>
               </div>
             </div>
 

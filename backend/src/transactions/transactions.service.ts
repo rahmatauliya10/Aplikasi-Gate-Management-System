@@ -241,22 +241,39 @@ export class TransactionsService {
       });
     }
 
-    const updated = await this.prisma.transaction.update({
-      where: { id },
+    const updateRes = await this.prisma.transaction.updateMany({
+      where: {
+        id,
+        status: { notIn: ['CANCELLED', 'COMPLETED'] },
+      },
       data: {
         status: 'CANCELLED',
         cancelledAt: new Date(),
         cancellationReason: reason,
         cancelledById: user.id,
-        statusHistory: {
-          create: {
-            oldStatus: tx.status,
-            newStatus: 'CANCELLED',
-            changedById: user.id,
-            notes: `Cancelled: ${reason}`,
-          },
-        },
+        revision: { increment: 1 },
       },
+    });
+
+    if (updateRes.count === 0) {
+      throw new ConflictException({
+        success: false,
+        message: 'Transaksi gagal dibatalkan karena telah diperbarui oleh proses lain atau sudah dalam status terminal.',
+      });
+    }
+
+    await this.prisma.transactionStatusHistory.create({
+      data: {
+        transactionId: id,
+        oldStatus: tx.status,
+        newStatus: 'CANCELLED',
+        changedById: user.id,
+        notes: `Cancelled: ${reason}`,
+      },
+    });
+
+    const updated = await this.prisma.transaction.findUnique({
+      where: { id },
       include: { statusHistory: true },
     });
 
