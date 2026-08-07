@@ -143,13 +143,21 @@ export class DatabaseBackupController {
     @Param('backupId') backupId: string,
     @Res() res: Response,
   ) {
-    const bundle =
+    const filePath =
       await this.backupService.exportPortableBackupBundle(backupId);
     const filename = `GMS_DR_Bundle_${backupId}.gmsbackup`;
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.status(200).send(JSON.stringify(bundle, null, 2));
+    
+    const fs = require('fs');
+    const readStream = fs.createReadStream(filePath);
+    readStream.pipe(res);
+    readStream.on('end', () => {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e) {}
+    });
   }
 
   @Post('restore-bundle')

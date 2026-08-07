@@ -1101,7 +1101,10 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     }
   }
 
-  async exportPortableBackupBundle(backupId?: string): Promise<any> {
+  async exportPortableBackupBundle(backupId?: string): Promise<string> {
+    if (backupId && !/^BKP-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z$/.test(backupId)) {
+      throw new BadRequestException('Invalid backupId format');
+    }
     const history = await this.getBackupHistory();
     const manifest = backupId
       ? history.find((h) => h.backupId === backupId)
@@ -1171,14 +1174,15 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       attachmentsContent,
     });
 
-    const secret =
-      process.env.BACKUP_SIGNATURE_SECRET ||
-      'default-gms-backup-secret-key-2026';
+    const secret = process.env.BACKUP_SIGNATURE_SECRET;
+    if (!secret) {
+      throw new Error('Critical: BACKUP_SIGNATURE_SECRET must be configured in environment');
+    }
     const signature = createHmac('sha256', secret)
       .update(payloadStr)
       .digest('hex');
 
-    return {
+    const bundleObj = {
       metadata: {
         system: 'GMS_GATE_MANAGEMENT_SYSTEM',
         version: '1.0.0',
@@ -1192,6 +1196,13 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       attachmentsContent,
       signature,
     };
+
+    const tempPath = require('path').join(
+      require('os').tmpdir(),
+      `gms_dr_bundle_${manifest.backupId}_${Date.now()}.gmsbackup`
+    );
+    require('fs').writeFileSync(tempPath, JSON.stringify(bundleObj));
+    return tempPath;
   }
 
   async restoreFromPortableBundle(
@@ -1220,9 +1231,10 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       delete clone.signature;
 
       const payloadStr = JSON.stringify(clone);
-      const secret =
-        process.env.BACKUP_SIGNATURE_SECRET ||
-        'default-gms-backup-secret-key-2026';
+      const secret = process.env.BACKUP_SIGNATURE_SECRET;
+      if (!secret) {
+        throw new Error('Critical: BACKUP_SIGNATURE_SECRET must be configured in environment');
+      }
       const expectedSignature = createHmac('sha256', secret)
         .update(payloadStr)
         .digest('hex');
