@@ -1170,9 +1170,13 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       dumpBase64,
       attachmentsContent,
     });
-    
-    const secret = process.env.BACKUP_SIGNATURE_SECRET || 'default-gms-backup-secret-key-2026';
-    const signature = createHmac('sha256', secret).update(payloadStr).digest('hex');
+
+    const secret =
+      process.env.BACKUP_SIGNATURE_SECRET ||
+      'default-gms-backup-secret-key-2026';
+    const signature = createHmac('sha256', secret)
+      .update(payloadStr)
+      .digest('hex');
 
     return {
       metadata: {
@@ -1214,15 +1218,20 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       const signature = bundlePayload.signature;
       const clone = { ...bundlePayload };
       delete clone.signature;
-      
+
       const payloadStr = JSON.stringify(clone);
-      const secret = process.env.BACKUP_SIGNATURE_SECRET || 'default-gms-backup-secret-key-2026';
-      const expectedSignature = createHmac('sha256', secret).update(payloadStr).digest('hex');
-      
+      const secret =
+        process.env.BACKUP_SIGNATURE_SECRET ||
+        'default-gms-backup-secret-key-2026';
+      const expectedSignature = createHmac('sha256', secret)
+        .update(payloadStr)
+        .digest('hex');
+
       if (signature !== expectedSignature) {
         throw new BadRequestException({
           success: false,
-          message: 'Integritas berkas backup gagal diverifikasi (Signature mismatch). Berkas mungkin telah dimanipulasi.',
+          message:
+            'Integritas berkas backup gagal diverifikasi (Signature mismatch). Berkas mungkin telah dimanipulasi.',
         });
       }
     }
@@ -1337,10 +1346,12 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
             const targetPath = path.resolve(uploadDir, file.fileName);
             // Path traversal protection
             if (!targetPath.startsWith(path.resolve(uploadDir))) {
-              this.logger.warn(`Path traversal attempt blocked for file: ${file.fileName}`);
+              this.logger.warn(
+                `Path traversal attempt blocked for file: ${file.fileName}`,
+              );
               continue;
             }
-            
+
             const fileBuffer = Buffer.from(file.base64Content, 'base64');
             fs.writeFileSync(targetPath, fileBuffer);
             restoredAttachmentsCount++;

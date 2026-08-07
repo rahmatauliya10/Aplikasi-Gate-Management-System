@@ -31,7 +31,8 @@ export class TransactionsService {
       `Find all transactions by user ${user.email} | page=${page} limit=${limit}`,
     );
 
-    const where: Prisma.TransactionWhereInput = this.authorizationScopeService.getTransactionScope(user);
+    const where: Prisma.TransactionWhereInput =
+      this.authorizationScopeService.getTransactionScope(user);
 
     if (status) {
       where.status = status;

@@ -39,12 +39,20 @@ export class DashboardService {
       this.prisma.transaction.count({
         where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
       }),
-      this.prisma.transaction.count({ where: { status: 'COMPLETED', ...scope } }),
-      this.prisma.transaction.count({ where: { status: 'CANCELLED', ...scope } }),
+      this.prisma.transaction.count({
+        where: { status: 'COMPLETED', ...scope },
+      }),
+      this.prisma.transaction.count({
+        where: { status: 'CANCELLED', ...scope },
+      }),
       this.prisma.transaction.count({
         where: { createdAt: { gte: today, lt: tomorrow }, ...scope },
       }),
-      this.prisma.transaction.groupBy({ by: ['status'], _count: { id: true }, where: scope }),
+      this.prisma.transaction.groupBy({
+        by: ['status'],
+        _count: { id: true },
+        where: scope,
+      }),
       this.prisma.transaction.groupBy({
         by: ['processType'],
         _count: { id: true },
@@ -83,9 +91,9 @@ export class DashboardService {
         },
       }),
       this.prisma.fraudCheck.findMany({
-        where: { 
+        where: {
           riskLevel: { in: ['WARNING', 'CRITICAL'] as any },
-          transaction: { ...scope }
+          transaction: { ...scope },
         },
         include: {
           transaction: {

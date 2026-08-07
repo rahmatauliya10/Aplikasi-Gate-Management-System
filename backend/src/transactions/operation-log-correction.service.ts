@@ -506,19 +506,25 @@ export class OperationLogCorrectionService {
         txUpdateData.warehouseEndAt = null;
         txUpdateData.qcAnalysisCompleted = false;
         txUpdateData.qcAnalysisCompletedAt = null;
-        
+
         // Explicitly delete downstream workflow records to prevent "Result already submitted" blockages
         // The historical values are preserved in the `oldValues` audit log of the TransactionCorrection.
-        await prismaTx.qcVehicleCheck.deleteMany({ where: { transactionId: id } });
-        await prismaTx.incomingMaterialCheck.deleteMany({ where: { transactionId: id } });
-        await prismaTx.warehouseProcess.deleteMany({ where: { transactionId: id } });
-        
+        await prismaTx.qcVehicleCheck.deleteMany({
+          where: { transactionId: id },
+        });
+        await prismaTx.incomingMaterialCheck.deleteMany({
+          where: { transactionId: id },
+        });
+        await prismaTx.warehouseProcess.deleteMany({
+          where: { transactionId: id },
+        });
+
         // Also remove OUT weighbridge record so they can weigh out again
-        await prismaTx.weighbridgeRecord.deleteMany({ 
-          where: { 
+        await prismaTx.weighbridgeRecord.deleteMany({
+          where: {
             transactionId: id,
-            type: 'OUT' 
-          } 
+            type: 'OUT',
+          },
         });
       }
 
