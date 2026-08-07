@@ -16,18 +16,18 @@ EXCEPTION
 END $$;
 
 -- 3. Add action column with default 'CORRECT_DATA'
-ALTER TABLE "TransactionCorrection" 
+ALTER TABLE "TransactionCorrection"
     ADD COLUMN IF NOT EXISTS "action" "CorrectionAction" NOT NULL DEFAULT 'CORRECT_DATA';
 
 -- 4. Backfill any NULL correctionNumber values with UUID
-UPDATE "TransactionCorrection" 
-    SET "correctionNumber" = gen_random_uuid()::text 
+UPDATE "TransactionCorrection"
+    SET "correctionNumber" = gen_random_uuid()::text
     WHERE "correctionNumber" IS NULL;
 
 -- 5. Set correctionNumber NOT NULL
-ALTER TABLE "TransactionCorrection" 
+ALTER TABLE "TransactionCorrection"
     ALTER COLUMN "correctionNumber" SET NOT NULL;
 
 -- 6. Create Unique Index on correctionNumber
-CREATE UNIQUE INDEX IF NOT EXISTS "TransactionCorrection_correctionNumber_key" 
+CREATE UNIQUE INDEX IF NOT EXISTS "TransactionCorrection_correctionNumber_key"
     ON "TransactionCorrection"("correctionNumber");

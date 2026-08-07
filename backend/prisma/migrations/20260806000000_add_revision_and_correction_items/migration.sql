@@ -21,11 +21,7 @@ END $$;
 -- AlterTable Transaction
 ALTER TABLE "Transaction" ADD COLUMN IF NOT EXISTS "revision" INTEGER NOT NULL DEFAULT 1;
 
--- AlterTable WarehouseProcess
-ALTER TABLE "WarehouseProcess" ADD COLUMN IF NOT EXISTS "checklistItems" JSONB;
 
--- AlterTable IncomingMaterialCheck
-ALTER TABLE "IncomingMaterialCheck" ADD COLUMN IF NOT EXISTS "goodBeanPercentage" DOUBLE PRECISION;
 
 -- AlterTable TransactionCorrection
 ALTER TABLE "TransactionCorrection" ADD COLUMN IF NOT EXISTS "correctionNumber" TEXT;

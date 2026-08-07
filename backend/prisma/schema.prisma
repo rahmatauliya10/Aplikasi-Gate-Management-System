@@ -280,6 +280,7 @@ model WarehouseProcess {
   rollCount      Int?
   condition      WarehouseCondition?
   remarks        String?
+  checklistItems Json?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -325,6 +326,7 @@ model IncomingMaterialCheck {
   foreignMatter      Float?
   beanCondition      CheckResult?
   sampleWeight       Float?
+  goodBeanPercentage Float?
   itemCondition      CheckResult?
   packagingCondition CheckResult?
   quantityCheck      CheckResult?
@@ -485,7 +487,7 @@ model TransactionCorrection {
   id               String           @id @default(uuid())
   transactionId    String
   correctedById    String
-  correctionNumber String?          @unique @default(uuid())
+  correctionNumber String           @unique @default(uuid())
   action           CorrectionAction @default(CORRECT_DATA)
   reasonCode       String           @default("OTHER")
   reason           String
