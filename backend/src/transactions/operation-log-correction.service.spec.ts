@@ -19,6 +19,7 @@ describe('OperationLogCorrectionService', () => {
     transaction: {
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     transactionCorrection: {
       findMany: jest.fn(),
@@ -147,7 +148,48 @@ describe('OperationLogCorrectionService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
-  it('should successfully execute 12-step atomic correction with optional evidenceUrl (undefined)', async () => {
+  it('should throw BadRequestException if all items are identical (No-Op guard)', async () => {
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      revision: 1,
+      grossWeight: 10000,
+    };
+
+    const mockTxClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+      },
+    };
+
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    const dto = {
+      action: CorrectionAction.CORRECT_DATA,
+      reasonCode: 'TYPO',
+      remark: 'Mencoba submit nilai yang sama persis',
+      expectedRevision: 1,
+      items: [
+        {
+          targetModule: CorrectionTargetModule.TRANSACTION,
+          fieldName: 'grossWeight',
+          newValue: 10000, // IDENTICAL VALUE!
+        },
+      ],
+    };
+
+    await expect(
+      service.correctOperationLog('tx-1', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should successfully execute atomic correction with updateMany OCC check', async () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',
@@ -172,8 +214,11 @@ describe('OperationLogCorrectionService', () => {
 
     const mockTxClient = {
       transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-        update: jest.fn().mockResolvedValue(mockUpdatedTx),
+        findUnique: jest
+          .fn()
+          .mockResolvedValueOnce(mockTx)
+          .mockResolvedValueOnce(mockUpdatedTx),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       transactionCorrection: {
         create: jest.fn().mockResolvedValue(mockCorrection),
@@ -194,7 +239,7 @@ describe('OperationLogCorrectionService', () => {
       action: CorrectionAction.CORRECT_DATA,
       reasonCode: 'SALAH_INPUT_ANGKA',
       remark: 'Koreksi penimbangan gross dari tiket timbang fisik nomor #9981',
-      evidenceUrl: undefined, // OPTIONAL ATTACHMENT ASSURANCE
+      evidenceUrl: undefined,
       expectedRevision: 1,
       items: [
         {
@@ -205,7 +250,7 @@ describe('OperationLogCorrectionService', () => {
       ],
     };
 
-    const res = await service.correctOperationLog('tx-1', dto, {
+    const res = await service.correctOperationLog('tx-1', dto as any, {
       id: 'adm-1',
       role: 'ADMIN',
       email: 'admin@gms.local',
@@ -221,7 +266,7 @@ describe('OperationLogCorrectionService', () => {
               data: expect.arrayContaining([
                 expect.objectContaining({
                   fieldName: 'grossWeight',
-                  oldValue: 10000, // AUTO EXTRACTED OLD VALUE
+                  oldValue: 10000,
                   newValue: 11000,
                 }),
               ]),
@@ -230,12 +275,12 @@ describe('OperationLogCorrectionService', () => {
         }),
       }),
     );
-    expect(mockTxClient.transaction.update).toHaveBeenCalledWith({
-      where: { id: 'tx-1' },
+    expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith({
+      where: { id: 'tx-1', revision: 1 },
       data: expect.objectContaining({
         grossWeight: 11000,
         netWeight: 8000, // RECALCULATED NET WEIGHT
-        revision: 2, // INCREMENTED REVISION
+        revision: { increment: 1 }, // ATOMIC OCC INCREMENT
       }),
     });
     expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(

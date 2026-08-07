@@ -1,10 +1,14 @@
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
+  IsDefined,
   IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
   ValidateNested,
@@ -28,21 +32,23 @@ export class CorrectionItemDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   targetRecordId?: string;
 
   @ApiProperty({
     description: 'Field name to correct (must pass server allowlist)',
-    example: 'grossWeight',
+    example: 'weight',
   })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   fieldName: string;
 
   @ApiProperty({
     description:
       'New proposed value for the field (old value is auto-extracted by server)',
   })
-  @IsNotEmpty()
+  @IsDefined()
   newValue: any;
 
   @ApiPropertyOptional({
@@ -50,6 +56,7 @@ export class CorrectionItemDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   itemRemark?: string;
 }
 
@@ -69,24 +76,27 @@ export class CreateOperationLogCorrectionDto {
   })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   reasonCode: string;
 
   @ApiProperty({
     description:
       'Detailed explanation for the correction (mandatory, min 10 chars)',
     example:
-      'Koreksi kesalahan catat berat gross dari nota timbang manual lapangan #992',
+      'Koreksi kesalahan catat berat dari nota timbang manual lapangan #992',
   })
   @IsString()
   @IsNotEmpty()
   @MinLength(10)
+  @MaxLength(1000)
   remark: string;
 
   @ApiPropertyOptional({
-    description: 'Supporting evidence document URL (optional)',
+    description: 'Supporting evidence document URL or ID (optional)',
   })
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   evidenceUrl?: string;
 
   @ApiProperty({
@@ -103,7 +113,10 @@ export class CreateOperationLogCorrectionDto {
     type: [CorrectionItemDto],
   })
   @IsArray()
+  @ArrayMinSize(1, { message: 'Daftar item koreksi tidak boleh kosong.' })
+  @ArrayMaxSize(25, { message: 'Maksimal 25 item koreksi per transaksi.' })
   @ValidateNested({ each: true })
   @Type(() => CorrectionItemDto)
   items: CorrectionItemDto[];
 }
+

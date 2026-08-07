@@ -15,6 +15,7 @@ import {
   CorrectionTargetModule,
   TransactionStatus,
 } from '@prisma/client';
+import * as crypto from 'crypto';
 
 const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   TRANSACTION: [
@@ -34,28 +35,70 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
     'permitCardNumber',
     'guestIdNumber',
   ],
-  WEIGHBRIDGE: ['grossWeight', 'tareWeight', 'weighbridgeTicket', 'remarks'],
-  QC_VEHICLE: ['result', 'remarks', 'vehicleCondition', 'cleanliness'],
-  QC_MATERIAL: [
-    'moistureContent',
-    'dirtContent',
-    'brokenRatio',
-    'foreignMaterial',
-    'remarks',
+  WEIGHBRIDGE: ['weight', 'ticketNumber', 'remarks', 'operatorId'],
+  QC_VEHICLE: [
     'result',
+    'vehicleCleanliness',
+    'vehicleOdor',
+    'pestEvidence',
+    'vehicleCondition',
+    'documentCompleteness',
+    'sealCondition',
+    'notes',
+    'checklistItems',
   ],
-  INCOMING_MATERIAL: ['remarks', 'actualQuantity', 'result'],
+  QC_MATERIAL: [
+    'result',
+    'odor',
+    'color',
+    'moisture',
+    'foreignMatter',
+    'beanCondition',
+    'sampleWeight',
+    'goodBeanPercentage',
+    'itemCondition',
+    'packagingCondition',
+    'quantityCheck',
+    'documentCheck',
+    'visualInspection',
+    'defectNotes',
+    'notes',
+    'checklistItems',
+  ],
+  INCOMING_MATERIAL: [
+    'result',
+    'odor',
+    'color',
+    'moisture',
+    'foreignMatter',
+    'beanCondition',
+    'sampleWeight',
+    'goodBeanPercentage',
+    'itemCondition',
+    'packagingCondition',
+    'quantityCheck',
+    'documentCheck',
+    'visualInspection',
+    'defectNotes',
+    'notes',
+    'checklistItems',
+  ],
   WAREHOUSE: [
-    'warehouseUnit',
-    'warehouseStartAt',
-    'warehouseEndAt',
-    'remarks',
-    'actualQuantity',
+    'startAt',
+    'endAt',
     'actualWeight',
+    'actualQuantity',
+    'unit',
+    'palletCount',
+    'bagCount',
+    'rollCount',
+    'condition',
+    'remarks',
+    'checklistItems',
   ],
   STATUS: ['status'],
-  ATTACHMENT: ['evidenceUrl', 'fileUrl', 'remarks'],
-  REMARK: ['remarks', 'description', 'cancellationReason'],
+  ATTACHMENT: ['originalName', 'fileName', 'filePath', 'description'],
+  REMARK: ['remarks', 'cancellationReason', 'notes', 'description'],
 };
 
 @Injectable()
@@ -87,9 +130,10 @@ export class OperationLogCorrectionService {
     }
 
     const cleanIp = ipAddress ? ipAddress.replace(/^.*:/, '') : null;
-    const correctionNumber = `COR-${new Date().getFullYear()}-${Math.floor(
-      10000 + Math.random() * 90000,
-    )}`;
+    const correctionNumber = `COR-${new Date().getFullYear()}-${crypto
+      .randomBytes(4)
+      .toString('hex')
+      .toUpperCase()}`;
 
     const result = await this.prisma.$transaction(async (prismaTx) => {
       // Step 2 & 3: Validate Terminal Status and OCC Revision
@@ -100,6 +144,7 @@ export class OperationLogCorrectionService {
           warehouseProcesses: true,
           qcVehicleChecks: true,
           incomingMaterialChecks: true,
+          attachments: true,
         },
       });
 
@@ -122,12 +167,13 @@ export class OperationLogCorrectionService {
         );
       }
 
-      // Step 4: Validate Allowlist and Collect Old/New Diffs
+      // Step 4: Validate Allowlist, Ownership, and Collect Collision-Proof Diffs
       const oldValuesSummary: Record<string, any> = {};
       const newValuesSummary: Record<string, any> = {};
       const itemInsertPayloads: any[] = [];
       const txUpdateData: Record<string, any> = {};
       let statusUpdatedTo: string | null = null;
+      let hasActualChanges = false;
 
       for (const item of dto.items) {
         const allowedFields = FIELD_ALLOWLIST[item.targetModule] || [];
@@ -138,6 +184,8 @@ export class OperationLogCorrectionService {
         }
 
         let extractedOldValue: any = null;
+        let targetIdToUse = item.targetRecordId || null;
+
         if (
           item.targetModule === CorrectionTargetModule.TRANSACTION ||
           item.targetModule === CorrectionTargetModule.STATUS ||
@@ -145,63 +193,176 @@ export class OperationLogCorrectionService {
         ) {
           extractedOldValue = (tx as any)[item.fieldName];
           txUpdateData[item.fieldName] = item.newValue;
+          targetIdToUse = tx.id;
           if (item.fieldName === 'status') {
             statusUpdatedTo = item.newValue as string;
           }
-        } else if (
-          item.targetModule === CorrectionTargetModule.WEIGHBRIDGE &&
-          tx.weighbridgeRecords?.length > 0
-        ) {
-          const rec = tx.weighbridgeRecords[tx.weighbridgeRecords.length - 1];
+        } else if (item.targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
+          if (!tx.weighbridgeRecords || tx.weighbridgeRecords.length === 0) {
+            throw new BadRequestException(
+              'Tidak ada data timbangan (WeighbridgeRecord) pada transaksi ini.',
+            );
+          }
+          let rec = item.targetRecordId
+            ? tx.weighbridgeRecords.find((r) => r.id === item.targetRecordId)
+            : tx.weighbridgeRecords[tx.weighbridgeRecords.length - 1];
+
+          if (!rec) {
+            throw new BadRequestException(
+              `Record timbangan ID ${item.targetRecordId} tidak ditemukan pada transaksi ini (Ownership Verification Gagal).`,
+            );
+          }
+          targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
           await prismaTx.weighbridgeRecord.update({
-            where: { id: item.targetRecordId || rec.id },
+            where: { id: rec.id },
             data: { [item.fieldName]: item.newValue },
           });
+
+          // Adapter auto-sync to Transaction root
+          if (item.fieldName === 'weight') {
+            if (rec.type === 'IN') {
+              txUpdateData.grossWeight = Number(item.newValue);
+            } else if (rec.type === 'OUT') {
+              txUpdateData.tareWeight = Number(item.newValue);
+            }
+          }
+        } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
+          let rec = item.targetRecordId
+            ? tx.warehouseProcesses?.find((r) => r.id === item.targetRecordId)
+            : (tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null);
+
+          if (!rec) {
+            rec = await prismaTx.warehouseProcess.create({
+              data: {
+                transactionId: tx.id,
+                processType: tx.processType || 'GBB',
+                [item.fieldName]: item.newValue,
+              },
+            });
+            targetIdToUse = rec.id;
+            extractedOldValue = null;
+          } else {
+            targetIdToUse = rec.id;
+            extractedOldValue = (rec as any)[item.fieldName];
+            await prismaTx.warehouseProcess.update({
+              where: { id: rec.id },
+              data: { [item.fieldName]: item.newValue },
+            });
+          }
+
+          // Adapter auto-sync to Transaction root
+          if (item.fieldName === 'actualWeight') {
+            txUpdateData.actualWeight = Number(item.newValue);
+          } else if (item.fieldName === 'actualQuantity') {
+            txUpdateData.actualQuantity = Number(item.newValue);
+          } else if (item.fieldName === 'unit') {
+            txUpdateData.warehouseUnit = item.newValue as any;
+          }
+        } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE) {
+          let rec = item.targetRecordId
+            ? tx.qcVehicleChecks?.find((r) => r.id === item.targetRecordId)
+            : (tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null);
+
+          if (!rec) {
+            rec = await prismaTx.qcVehicleCheck.create({
+              data: {
+                transactionId: tx.id,
+                result: 'PASS',
+                [item.fieldName]: item.newValue,
+              },
+            });
+            targetIdToUse = rec.id;
+            extractedOldValue = null;
+          } else {
+            targetIdToUse = rec.id;
+            extractedOldValue = (rec as any)[item.fieldName];
+            await prismaTx.qcVehicleCheck.update({
+              where: { id: rec.id },
+              data: { [item.fieldName]: item.newValue },
+            });
+          }
         } else if (
-          item.targetModule === CorrectionTargetModule.WAREHOUSE &&
-          tx.warehouseProcesses?.length > 0
+          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
+          item.targetModule === CorrectionTargetModule.QC_MATERIAL
         ) {
-          const rec = tx.warehouseProcesses[tx.warehouseProcesses.length - 1];
+          let rec = item.targetRecordId
+            ? tx.incomingMaterialChecks?.find(
+                (r) => r.id === item.targetRecordId,
+              )
+            : (tx.incomingMaterialChecks?.[tx.incomingMaterialChecks.length - 1] || null);
+
+          if (!rec) {
+            rec = await prismaTx.incomingMaterialCheck.create({
+              data: {
+                transactionId: tx.id,
+                result: 'PASS',
+                [item.fieldName]: item.newValue,
+              },
+            });
+            targetIdToUse = rec.id;
+            extractedOldValue = null;
+          } else {
+            targetIdToUse = rec.id;
+            extractedOldValue = (rec as any)[item.fieldName];
+            await prismaTx.incomingMaterialCheck.update({
+              where: { id: rec.id },
+              data: { [item.fieldName]: item.newValue },
+            });
+          }
+        } else if (item.targetModule === CorrectionTargetModule.ATTACHMENT) {
+          if (!tx.attachments || tx.attachments.length === 0) {
+            throw new BadRequestException(
+              'Tidak ada lampiran pada transaksi ini.',
+            );
+          }
+          let rec = item.targetRecordId
+            ? tx.attachments.find((r) => r.id === item.targetRecordId)
+            : tx.attachments[tx.attachments.length - 1];
+
+          if (!rec) {
+            throw new BadRequestException(
+              `Record lampiran ID ${item.targetRecordId} tidak ditemukan pada transaksi ini (Ownership Verification Gagal).`,
+            );
+          }
+          targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
-          await prismaTx.warehouseProcess.update({
-            where: { id: item.targetRecordId || rec.id },
-            data: { [item.fieldName]: item.newValue },
-          });
-        } else if (
-          item.targetModule === CorrectionTargetModule.QC_VEHICLE &&
-          tx.qcVehicleChecks?.length > 0
-        ) {
-          const rec = tx.qcVehicleChecks[tx.qcVehicleChecks.length - 1];
-          extractedOldValue = (rec as any)[item.fieldName];
-          await prismaTx.qcVehicleCheck.update({
-            where: { id: item.targetRecordId || rec.id },
-            data: { [item.fieldName]: item.newValue },
-          });
-        } else if (
-          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL &&
-          tx.incomingMaterialChecks?.length > 0
-        ) {
-          const rec =
-            tx.incomingMaterialChecks[tx.incomingMaterialChecks.length - 1];
-          extractedOldValue = (rec as any)[item.fieldName];
-          await prismaTx.incomingMaterialCheck.update({
-            where: { id: item.targetRecordId || rec.id },
+          await prismaTx.attachment.update({
+            where: { id: rec.id },
             data: { [item.fieldName]: item.newValue },
           });
         }
 
-        oldValuesSummary[item.fieldName] = extractedOldValue;
-        newValuesSummary[item.fieldName] = item.newValue;
+        if (
+          JSON.stringify(extractedOldValue) !== JSON.stringify(item.newValue)
+        ) {
+          hasActualChanges = true;
+        }
+
+        const summaryKey = `${item.targetModule}.${
+          targetIdToUse || 'root'
+        }.${item.fieldName}`;
+        oldValuesSummary[summaryKey] = extractedOldValue;
+        newValuesSummary[summaryKey] = item.newValue;
 
         itemInsertPayloads.push({
           targetModule: item.targetModule,
-          targetRecordId: item.targetRecordId || null,
+          targetRecordId: targetIdToUse || null,
           fieldName: item.fieldName,
           oldValue: extractedOldValue !== undefined ? extractedOldValue : null,
           newValue: item.newValue !== undefined ? item.newValue : null,
           itemRemark: item.itemRemark || null,
         });
+      }
+
+      if (
+        !hasActualChanges &&
+        !statusUpdatedTo &&
+        dto.action === CorrectionAction.CORRECT_DATA
+      ) {
+        throw new BadRequestException(
+          'Tidak ada perubahan nilai (No-Op). Seluruh nilai baru identik dengan nilai di database.',
+        );
       }
 
       // Step 5: Validate Business Rules (Gross >= Tare, warehouse start <= end)
@@ -269,19 +430,39 @@ export class OperationLogCorrectionService {
         } as any,
       });
 
-      // Step 8: Update Active Records in Transaction
+      // Step 8 & 10: Auto-recalculate Net Weight if Gross/Tare changed
       if (proposedGross !== null && proposedTare !== null) {
         txUpdateData.netWeight = proposedGross - proposedTare;
       }
 
-      // Step 12: Increment Revision & Apply Updates
-      txUpdateData.revision = (tx as any).revision
-        ? (tx as any).revision + 1
-        : 2;
+      if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
+        txUpdateData.status = 'QC_VEHICLE_PENDING';
+      }
 
-      const updatedTx = await prismaTx.transaction.update({
+      // Step 12: Atomic OCC Update on Transaction
+      txUpdateData.revision = { increment: 1 };
+      const updateRes = await prismaTx.transaction.updateMany({
+        where: {
+          id,
+          revision: dto.expectedRevision,
+        },
+        data: txUpdateData as any,
+      });
+
+      if (updateRes.count === 0) {
+        throw new ConflictException(
+          'Data transaksi gagal dikoreksi karena telah diperbarui proses lain (Stale Revision) atau status tidak sesuai.',
+        );
+      }
+
+      const updatedTx = await prismaTx.transaction.findUnique({
         where: { id },
-        data: txUpdateData,
+        include: {
+          weighbridgeRecords: true,
+          incomingMaterialChecks: true,
+          qcVehicleChecks: true,
+          warehouseProcesses: true,
+        },
       });
 
       // Step 9: Append Status History if Status Changed or Reopened
@@ -306,9 +487,9 @@ export class OperationLogCorrectionService {
         });
       }
 
-      // Step 10: Recalculate Derived Weights and generate FraudCheck
-      const finalNet = updatedTx.netWeight;
-      const finalActual = updatedTx.actualWeight;
+      // Recalculate Derived Weights and generate FraudCheck if weights present
+      const finalNet = updatedTx?.netWeight ?? null;
+      const finalActual = updatedTx?.actualWeight ?? null;
       if (finalNet !== null && finalActual !== null && finalNet > 0) {
         const deviation = Math.abs(finalNet - finalActual);
         const deviationPercent = (deviation / finalNet) * 100;
@@ -359,6 +540,16 @@ export class OperationLogCorrectionService {
         weighInBy: {
           select: { id: true, name: true, role: true },
         },
+        warehouseStartBy: {
+          select: { id: true, name: true, role: true },
+        },
+        qcVehicleChecks: {
+          include: {
+            checkedBy: {
+              select: { id: true, name: true, role: true },
+            },
+          },
+        },
       },
     });
 
@@ -388,12 +579,19 @@ export class OperationLogCorrectionService {
         orderBy: { createdAt: 'desc' },
       });
 
+      let origCreator = 'Operator Awal / QC Lapangan';
+      if (tx.weighInBy) {
+        origCreator = `${tx.weighInBy.role} — ${tx.weighInBy.name}`;
+      } else if (tx.warehouseStartBy) {
+        origCreator = `${tx.warehouseStartBy.role} — ${tx.warehouseStartBy.name}`;
+      } else if (tx.qcVehicleChecks?.[0]?.checkedBy) {
+        origCreator = `${tx.qcVehicleChecks[0].checkedBy.role} — ${tx.qcVehicleChecks[0].checkedBy.name}`;
+      }
+
       return {
         success: true,
         attribution: {
-          originalCreatedBy: tx.weighInBy
-            ? `${tx.weighInBy.role} — ${tx.weighInBy.name}`
-            : 'Operator Awal / QC Lapangan',
+          originalCreatedBy: origCreator,
           lastCorrectedBy:
             corrections.length > 0 && corrections[0]?.correctedBy
               ? `ADMIN — ${corrections[0].correctedBy.name}`
