@@ -290,7 +290,9 @@ export class WarehouseService {
     });
 
     if (!updated) {
-      throw new NotFoundException('Transaction not found after starting warehouse process');
+      throw new NotFoundException(
+        'Transaction not found after starting warehouse process',
+      );
     }
 
     this.logger.log(

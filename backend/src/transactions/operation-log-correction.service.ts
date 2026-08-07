@@ -203,7 +203,7 @@ export class OperationLogCorrectionService {
               'Tidak ada data timbangan (WeighbridgeRecord) pada transaksi ini.',
             );
           }
-          let rec = item.targetRecordId
+          const rec = item.targetRecordId
             ? tx.weighbridgeRecords.find((r) => r.id === item.targetRecordId)
             : tx.weighbridgeRecords[tx.weighbridgeRecords.length - 1];
 
@@ -230,7 +230,7 @@ export class OperationLogCorrectionService {
         } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
           let rec = item.targetRecordId
             ? tx.warehouseProcesses?.find((r) => r.id === item.targetRecordId)
-            : (tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null);
+            : tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null;
 
           if (!rec) {
             rec = await prismaTx.warehouseProcess.create({
@@ -257,12 +257,12 @@ export class OperationLogCorrectionService {
           } else if (item.fieldName === 'actualQuantity') {
             txUpdateData.actualQuantity = Number(item.newValue);
           } else if (item.fieldName === 'unit') {
-            txUpdateData.warehouseUnit = item.newValue as any;
+            txUpdateData.warehouseUnit = item.newValue;
           }
         } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE) {
           let rec = item.targetRecordId
             ? tx.qcVehicleChecks?.find((r) => r.id === item.targetRecordId)
-            : (tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null);
+            : tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null;
 
           if (!rec) {
             rec = await prismaTx.qcVehicleCheck.create({
@@ -290,7 +290,9 @@ export class OperationLogCorrectionService {
             ? tx.incomingMaterialChecks?.find(
                 (r) => r.id === item.targetRecordId,
               )
-            : (tx.incomingMaterialChecks?.[tx.incomingMaterialChecks.length - 1] || null);
+            : tx.incomingMaterialChecks?.[
+                tx.incomingMaterialChecks.length - 1
+              ] || null;
 
           if (!rec) {
             rec = await prismaTx.incomingMaterialCheck.create({
@@ -316,7 +318,7 @@ export class OperationLogCorrectionService {
               'Tidak ada lampiran pada transaksi ini.',
             );
           }
-          let rec = item.targetRecordId
+          const rec = item.targetRecordId
             ? tx.attachments.find((r) => r.id === item.targetRecordId)
             : tx.attachments[tx.attachments.length - 1];
 

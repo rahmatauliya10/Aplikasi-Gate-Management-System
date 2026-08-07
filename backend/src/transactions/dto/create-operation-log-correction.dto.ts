@@ -119,4 +119,3 @@ export class CreateOperationLogCorrectionDto {
   @Type(() => CorrectionItemDto)
   items: CorrectionItemDto[];
 }
-

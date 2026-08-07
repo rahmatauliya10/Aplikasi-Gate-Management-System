@@ -250,7 +250,7 @@ describe('OperationLogCorrectionService', () => {
       ],
     };
 
-    const res = await service.correctOperationLog('tx-1', dto as any, {
+    const res = await service.correctOperationLog('tx-1', dto, {
       id: 'adm-1',
       role: 'ADMIN',
       email: 'admin@gms.local',
