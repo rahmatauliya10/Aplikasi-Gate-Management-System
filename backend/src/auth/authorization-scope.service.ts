@@ -21,8 +21,7 @@ export class AuthorizationScopeService {
 
     // WAREHOUSE and QC are strictly bound to their assigned process types (GBB, GBJ, GSP)
     if (user.role === 'WAREHOUSE' || user.role === 'QC') {
-      const allowedProcesses =
-        user.warehouseAccess?.map((wa) => wa.processType) || [];
+      const allowedProcesses = (user.warehouseAccess || []) as any[];
       return {
         processType: {
           in: allowedProcesses,
