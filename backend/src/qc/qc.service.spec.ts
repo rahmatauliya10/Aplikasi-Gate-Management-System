@@ -95,6 +95,9 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
         },
+        warehouseProcess: {
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
       }),
     );
 
