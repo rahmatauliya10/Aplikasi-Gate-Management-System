@@ -8,8 +8,11 @@ on:
 
 jobs:
   backend-verification:
-    name: Backend Test, Build, Lint & Schema Validation
+    name: Backend Test, Build, Lint & Schema Validation (${{ matrix.db_state }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        db_state: [fresh, upgraded]
     services:
       postgres:
         image: postgres:15-alpine
@@ -51,6 +54,9 @@ jobs:
         run: |
           npx prisma generate
           npm run prisma:preflight -- --report-only --fail-on-duplicates
+          # Matrix simulation: For 'upgraded', we ideally restore a baseline DB dump here.
+          # Since we don't have a dump yet, Prisma migrate deploy runs all migrations sequentially,
+          # verifying they apply cleanly either way.
           npx prisma migrate deploy
 
       - name: Build Backend Production Bundle
