@@ -79,7 +79,7 @@ describe('QcService - Segregation of Duties (SoD)', () => {
     const mockTx = {
       id: 'tx-124',
       processType: 'GBB',
-      status: 'INCOMING_CHECK_PENDING',
+      status: 'WAREHOUSE_IN_PROGRESS',
     };
 
     mockPrismaService.transaction.findUnique.mockResolvedValue(mockTx);
@@ -90,6 +90,10 @@ describe('QcService - Segregation of Duties (SoD)', () => {
             ...mockTx,
             status: 'COMPLETED',
           }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
         },
       }),
     );

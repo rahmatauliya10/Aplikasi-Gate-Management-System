@@ -96,6 +96,7 @@ describe('OperationLogCorrectionService PostgreSQL OCC & Audit Integration', () 
     const mockTxScope = {
       transaction: {
         findUnique: jest.fn().mockResolvedValue(initialTx),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest
           .fn()
           .mockResolvedValue({ ...initialTx, grossWeight: 15500, revision: 2 }),
