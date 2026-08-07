@@ -31,24 +31,29 @@ export class TransactionsService {
       `Find all transactions by user ${user.email} | page=${page} limit=${limit}`,
     );
 
-    const where: Prisma.TransactionWhereInput =
-      this.authorizationScopeService.getTransactionScope(user);
+    const scope = this.authorizationScopeService.getTransactionScope(user);
+
+    const where: Prisma.TransactionWhereInput = {
+      AND: [scope]
+    };
 
     if (status) {
-      where.status = status;
+      (where.AND as any[]).push({ status });
     }
 
     if (processType) {
-      where.processType = processType;
+      (where.AND as any[]).push({ processType });
     }
 
     if (search) {
-      where.OR = [
-        { transactionNumber: { contains: search, mode: 'insensitive' } },
-        { plateNumber: { contains: search, mode: 'insensitive' } },
-        { vendorName: { contains: search, mode: 'insensitive' } },
-        { driverName: { contains: search, mode: 'insensitive' } },
-      ];
+      (where.AND as any[]).push({
+        OR: [
+          { transactionNumber: { contains: search, mode: 'insensitive' } },
+          { plateNumber: { contains: search, mode: 'insensitive' } },
+          { vendorName: { contains: search, mode: 'insensitive' } },
+          { driverName: { contains: search, mode: 'insensitive' } },
+        ]
+      });
     }
 
     try {
