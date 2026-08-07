@@ -40,7 +40,10 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         QcService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
-        { provide: AuthorizationScopeService, useValue: { getTransactionScope: jest.fn().mockReturnValue({}) } },
+        {
+          provide: AuthorizationScopeService,
+          useValue: { getTransactionScope: jest.fn().mockReturnValue({}) },
+        },
       ],
     }).compile();
 
