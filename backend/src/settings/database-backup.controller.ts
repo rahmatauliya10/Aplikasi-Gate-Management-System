@@ -91,7 +91,10 @@ export class DatabaseBackupController {
   ) {
     const ipAddress =
       (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
-    const backupData = await this.backupService.generateBackup(user, ipAddress);
+    const backupData = await this.backupService.generateBackup(
+      user,
+      ipAddress,
+    );
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `GMS_Backup_${timestamp}.json`;
@@ -143,7 +146,8 @@ export class DatabaseBackupController {
     @Param('backupId') backupId: string,
     @Res() res: Response,
   ) {
-    const bundle = await this.backupService.exportPortableBackupBundle(backupId);
+    const bundle =
+      await this.backupService.exportPortableBackupBundle(backupId);
     const filename = `GMS_DR_Bundle_${backupId}.gmsbackup`;
 
     res.setHeader('Content-Type', 'application/json');
@@ -154,7 +158,8 @@ export class DatabaseBackupController {
   @Post('restore-bundle')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Restore database and attachments from portable DR bundle (.gmsbackup)',
+    summary:
+      'Restore database and attachments from portable DR bundle (.gmsbackup)',
   })
   @ApiResponse({
     status: 200,
