@@ -508,6 +508,7 @@ export class WarehouseService {
       return prismaTx.transaction.update({
         where: { id: transactionId },
         data: {
+          revision: { increment: 1 },
           status: nextStatus,
           warehouseStartAt: tx.warehouseStartAt || new Date(),
           warehouseStartById: tx.warehouseStartById || user.id,
@@ -674,6 +675,7 @@ export class WarehouseService {
       return prismaTx.transaction.update({
         where: { id: transactionId },
         data: {
+          revision: { increment: 1 },
           status: nextStatus,
           qcEndAt: new Date(),
           remarks: dto.remarks

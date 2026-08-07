@@ -293,6 +293,8 @@ export class WeighbridgeService {
       if (nextStatus === 'QC_VEHICLE_PENDING' && !tx.qcStartAt) {
         updateData.qcStartAt = new Date();
       }
+      
+      updateData.revision = { increment: 1 };
 
       return prismaTx.transaction.update({
         where: { id: transactionId },
@@ -546,6 +548,7 @@ export class WeighbridgeService {
       const txUpdate = await prismaTx.transaction.update({
         where: { id: transactionId },
         data: {
+          revision: { increment: 1 },
           status: 'WEIGH_OUT_DONE',
           weighOutAt: new Date(),
           weighOutBy: { connect: { id: user.id } },

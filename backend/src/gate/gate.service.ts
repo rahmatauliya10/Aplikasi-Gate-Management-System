@@ -325,6 +325,7 @@ export class GateService {
     const updated = await this.prisma.transaction.update({
       where: { id },
       data: {
+        revision: { increment: 1 },
         status: 'COMPLETED',
         gateOutAt: new Date(),
         completedAt: new Date(),
@@ -394,6 +395,7 @@ export class GateService {
     const updated = await this.prisma.transaction.update({
       where: { id },
       data: {
+        revision: { increment: 1 },
         status: 'CANCELLED',
         cancelledAt: new Date(),
         cancellationReason: reason,
