@@ -244,42 +244,42 @@
       <!-- Glossy grid overlay -->
       <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-white/30 pointer-events-none"></div>
 
-      <div class="overflow-x-auto hide-scrollbar p-4 relative z-10 w-full custom-scrollbar">
-        <table class="w-full border-separate relative z-10 min-w-[950px]" style="border-spacing: 0 10px;">
+      <div class="overflow-x-auto p-4 relative z-10 w-full custom-scrollbar">
+        <table class="w-full border-separate relative z-10 min-w-[1180px]" style="border-spacing: 0 8px;">
           <thead>
-            <tr>
-              <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[40px]">
+            <tr class="text-[9.5px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/70 border-b border-slate-200/80 rounded-xl">
+              <th class="px-4 py-3 text-center w-[44px] min-w-[44px]">
                 <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" class="accent-[#4A8BDF] rounded cursor-pointer w-4 h-4" />
               </th>
-              <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Vehicle ID</th>
+              <th class="px-4 py-3 text-left w-[260px] min-w-[260px]">Vehicle ID</th>
               <template v-if="currentMode === 'time'">
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-[#4A8BDF] uppercase tracking-widest w-[140px]">
+                <th class="px-4 py-3 text-left text-[#4A8BDF] w-[130px] min-w-[130px]">
                   <div class="flex items-center space-x-1">
                     <span class="material-icons text-xs">event</span>
-                    <span>Kedatangan (Date &amp; Time)</span>
+                    <span>Kedatangan</span>
                   </div>
                 </th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[110px]">Timb. In</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Warehouse</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">QC Check</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[110px]">Timb. Out</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[140px]">Process Timeline &amp; Health</th>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[90px]">Total TAT</th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">Timb. In</th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">Warehouse</th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">QC Check</th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">Timb. Out</th>
+                <th class="px-4 py-3 text-left w-[140px] min-w-[140px]">Process Timeline</th>
+                <th class="px-4 py-3 text-right w-[95px] min-w-[95px]">Total TAT</th>
               </template>
               <template v-else>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[140px]">Weighbridge Net</th>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[140px]">Warehouse Scale</th>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Reconciled Deviation</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Scale Audit Verdict</th>
-                <th class="px-5 py-2 text-center text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Cargo Safety</th>
+                <th class="px-4 py-3 text-right w-[130px] min-w-[130px]">Weighbridge Net</th>
+                <th class="px-4 py-3 text-right w-[130px] min-w-[130px]">Warehouse Scale</th>
+                <th class="px-4 py-3 text-right w-[160px] min-w-[160px]">Reconciled Deviation</th>
+                <th class="px-4 py-3 text-left w-[170px] min-w-[170px]">Scale Audit Verdict</th>
+                <th class="px-4 py-3 text-center w-[100px] min-w-[100px]">Cargo Safety</th>
               </template>
-              <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[110px]">Actions</th>
+              <th class="px-4 py-3 text-right w-[110px] min-w-[110px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             <template v-for="truck in paginatedFilteredTrucks" :key="truck.id">
               <!-- Regular Row -->
-              <tr class="group bg-white hover:bg-slate-50 transition-all duration-300 shadow-sm border border-slate-100 cursor-pointer"
+              <tr class="group bg-white hover:bg-slate-50 transition-all duration-300 shadow-xs hover:shadow-md border border-slate-100 cursor-pointer"
                 :class="[
                   isRowExpanded(truck.id) ? 'shadow-md border-b-0 ring-1 ring-[#4A8BDF]/20' : '',
                   currentMode==='fraud'&&truck.fraud.status==='CRITICAL' ? 'shadow-[0_4px_15px_rgba(239,68,68,0.12)] border-red-200' : ''
@@ -287,29 +287,29 @@
                 @click="toggleRow(truck.id)">
                 
                 <!-- Checkbox -->
-                <td class="px-5 py-3 rounded-l-xl border-y border-l border-slate-100" @click.stop>
+                <td class="px-4 py-3 rounded-l-xl border-y border-l border-slate-100 text-center w-[44px] min-w-[44px]" @click.stop>
                   <input type="checkbox" :value="truck.id" v-model="selectedTruckIds" class="accent-[#4A8BDF] rounded cursor-pointer w-4 h-4" />
                 </td>
 
-                <!-- Plate Number & Cargo Type -->
-                <td class="px-5 py-3 border-y border-slate-100 min-w-[220px]">
-                  <div class="flex items-center space-x-3">
+                <!-- Plate Number & Badges -->
+                <td class="px-4 py-3 border-y border-slate-100 w-[260px] min-w-[260px]">
+                  <div class="flex items-center space-x-2.5">
                     <!-- License Plate Dark Card -->
-                    <div class="flex flex-col items-center justify-center bg-slate-900 px-3 py-2 rounded-xl border border-slate-700 shadow-inner shrink-0">
+                    <div class="flex flex-col items-center justify-center bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-inner shrink-0 min-w-[82px]">
                       <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-wider leading-none">{{ getPlateNumber(truck) }}</span>
-                      <span v-if="getVendor(truck) !== '-'" class="text-[8.5px] font-bold text-slate-400 mt-1 max-w-[75px] truncate leading-none" :title="getVendor(truck)">{{ getVendor(truck) }}</span>
+                      <span v-if="getVendor(truck) !== '-'" class="text-[8px] font-bold text-slate-400 mt-0.5 max-w-[75px] truncate leading-none" :title="getVendor(truck)">{{ getVendor(truck) }}</span>
                     </div>
 
-                    <!-- Badges Row -->
-                    <div class="flex flex-col space-y-1 min-w-0">
-                      <div class="flex items-center space-x-1.5">
-                        <span class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border shrink-0" :style="getProcessBadgeStyle(truck)">
+                    <!-- Badges Column -->
+                    <div class="flex flex-col space-y-1 min-w-0 flex-1">
+                      <div class="flex items-center space-x-1 flex-wrap gap-y-1">
+                        <span class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider border shrink-0" :style="getProcessBadgeStyle(truck)">
                           {{ getProcessType(truck) }}
                         </span>
                         
-                        <span v-if="truck.status === 'CANCELLED'" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-rose-50 border border-rose-200 text-rose-600 shrink-0">CANCELLED</span>
-                        <span v-else-if="truck.status === 'COMPLETED'" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 shrink-0">COMPLETED</span>
-                        <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ truck.status || 'ACTIVE' }}</span>
+                        <span v-if="truck.status === 'CANCELLED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-rose-50 border border-rose-200 text-rose-600 shrink-0">CANCELLED</span>
+                        <span v-else-if="truck.status === 'COMPLETED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 shrink-0">COMPLETED</span>
+                        <span v-else class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ truck.status || 'ACTIVE' }}</span>
                       </div>
 
                       <div v-if="truck.revision && truck.revision > 1">
@@ -324,7 +324,7 @@
                 <!-- MODE 1: TIME TIMELINE ANALYTICS -->
                 <template v-if="currentMode === 'time'">
                   <!-- Kedatangan (Tanggal & Waktu) -->
-                  <td class="px-5 py-3 border-y border-slate-100 whitespace-nowrap">
+                  <td class="px-4 py-3 border-y border-slate-100 whitespace-nowrap w-[130px] min-w-[130px]">
                     <div class="flex flex-col">
                       <div class="flex items-center space-x-1 text-slate-800 font-bold text-[11px]">
                         <span class="material-icons text-slate-400 text-xs">calendar_today</span>
@@ -337,7 +337,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'waitingIn')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'waitingIn')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.weighInAt || truck.weighInAt) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.waitingIn > 15 ? 'text-red-500' : 'text-slate-400'">
@@ -346,7 +346,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'warehouse')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'warehouse')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.warehouseEndAt || truck.warehouseEndAt) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.warehouse > 15 ? 'text-red-500 animate-pulse' : 'text-slate-400'">
@@ -355,7 +355,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'qc')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'qc')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(getQCEndTime(truck)) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.qc > 15 ? 'text-red-500 animate-pulse' : 'text-slate-400'">
@@ -364,7 +364,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'waitingOut')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'waitingOut')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.weighOutAt || truck.weighOutAt) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.waitingOut > 15 ? 'text-red-500' : 'text-slate-400'">
@@ -374,8 +374,8 @@
                   </td>
 
                   <!-- Horizontal Flow Graphic Segment -->
-                  <td class="px-5 py-3 border-y border-slate-100">
-                    <div class="flex items-center space-x-0.5 w-[140px] h-3 bg-slate-100 rounded-full overflow-hidden p-0.5">
+                  <td class="px-4 py-3 border-y border-slate-100 w-[140px] min-w-[140px]">
+                    <div class="flex items-center space-x-0.5 w-[120px] h-3 bg-slate-100 rounded-full overflow-hidden p-0.5">
                       <div class="h-full rounded-l-full" :class="truck.durations.waitingIn > 15 ? 'bg-red-500' : 'bg-blue-400'" :style="{ width: getPercentageWidth(truck.durations.waitingIn, truck.durations.total) + '%' }" title="Waiting In"></div>
                       <div class="h-full" :class="truck.durations.warehouse > 15 ? 'bg-red-500' : 'bg-indigo-400'" :style="{ width: getPercentageWidth(truck.durations.warehouse, truck.durations.total) + '%' }" title="Warehouse"></div>
                       <div class="h-full" :class="truck.durations.qc > 15 ? 'bg-red-500' : 'bg-emerald-400'" :style="{ width: getPercentageWidth(truck.durations.qc, truck.durations.total) + '%' }" title="QC Check"></div>
@@ -383,7 +383,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-right">
+                  <td class="px-4 py-3 border-y border-slate-100 text-right w-[95px] min-w-[95px]">
                     <ProcessTimerBadge 
                       :start-time="truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt" 
                       :end-time="truck.completedAt || truck.cancelledAt || (truck.durations?.total ? new Date((new Date(truck.gateInAt || truck.createdAt)).getTime() + truck.durations.total * 60000) : null)"
@@ -395,19 +395,19 @@
 
                 <!-- MODE 2: WEIGHBRIDGE & DISCREPANCY RECONCILIATION -->
                 <template v-else>
-                  <td class="px-5 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100">
+                  <td class="px-4 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100 w-[130px] min-w-[130px]">
                     <template v-if="formatWeight(truck.fraud.net) !== '-'">
                       {{ formatWeight(truck.fraud.net) }} <span class="text-[9px] text-slate-400">kg</span>
                     </template>
                     <template v-else>-</template>
                   </td>
-                  <td class="px-5 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100">
+                  <td class="px-4 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100 w-[130px] min-w-[130px]">
                     <template v-if="formatWeight(truck.fraud.roll) !== '-'">
                       {{ formatWeight(truck.fraud.roll) }} <span class="text-[9px] text-slate-400">kg</span>
                     </template>
                     <template v-else>-</template>
                   </td>
-                  <td class="px-5 py-3 border-y border-slate-100 text-right">
+                  <td class="px-4 py-3 border-y border-slate-100 text-right w-[160px] min-w-[160px]">
                     <div class="flex flex-col items-end">
                       <span class="font-mono text-xs font-black tracking-tight" :class="truck.fraud.status==='CRITICAL'?'text-red-600':truck.fraud.status==='WARNING'?'text-orange-600':'text-[#3A6ABF]'">
                         {{ formatPercentage(truck.fraud.deviationPercent) }}
@@ -419,25 +419,25 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100">
-                    <span v-if="truck.fraud.status==='CRITICAL'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black text-white animate-pulse" style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 3px 10px rgba(220,38,38,0.25)">
-                      <span class="material-icons text-sm mr-1">warning</span> CRITICAL ANOMALY
+                  <td class="px-4 py-3 border-y border-slate-100 w-[170px] min-w-[170px]">
+                    <span v-if="truck.fraud.status==='CRITICAL'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black text-white animate-pulse" style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 3px 10px rgba(220,38,38,0.25)">
+                      <span class="material-icons text-xs mr-1">warning</span> CRITICAL ANOMALY
                     </span>
-                    <span v-else-if="truck.fraud.status==='WARNING'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black text-white" style="background:linear-gradient(135deg,#D97706,#F59E0B);box-shadow:0 3px 10px rgba(217,119,6,0.2)">
-                      <span class="material-icons text-sm mr-1">error_outline</span> SHRINKAGE
+                    <span v-else-if="truck.fraud.status==='WARNING'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black text-white" style="background:linear-gradient(135deg,#D97706,#F59E0B);box-shadow:0 3px 10px rgba(217,119,6,0.2)">
+                      <span class="material-icons text-xs mr-1">error_outline</span> SHRINKAGE
                     </span>
-                    <span v-else-if="truck.fraud.status==='PENDING'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black border border-slate-200 bg-slate-50 text-slate-600">
-                      <span class="material-icons text-sm mr-1">hourglass_empty</span> PENDING
+                    <span v-else-if="truck.fraud.status==='PENDING'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black border border-slate-200 bg-slate-50 text-slate-600">
+                      <span class="material-icons text-xs mr-1">hourglass_empty</span> PENDING
                     </span>
-                    <span v-else-if="truck.fraud.status==='ERROR DATA'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black border border-red-200 bg-red-50 text-red-700">
-                      <span class="material-icons text-sm mr-1">error</span> ERROR DATA
+                    <span v-else-if="truck.fraud.status==='ERROR DATA'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black border border-red-200 bg-red-50 text-red-700">
+                      <span class="material-icons text-xs mr-1">error</span> ERROR DATA
                     </span>
                     <span v-else class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black border border-emerald-100 bg-emerald-50 text-emerald-700">
                       <span class="material-icons text-sm mr-1">verified</span> SAFE (MATCHED)
                     </span>
                   </td>
 
-                  <td class="px-5 py-3 border-y border-slate-100 text-center">
+                  <td class="px-4 py-3 border-y border-slate-100 text-center w-[100px] min-w-[100px]">
                     <!-- Progress meter -->
                     <div class="w-16 h-2 bg-slate-100 rounded-full mx-auto overflow-hidden p-[1px]">
                       <div class="h-full rounded-full" 
@@ -449,15 +449,15 @@
                 </template>
 
                 <!-- Actions -->
-                <td class="px-5 py-3 rounded-r-xl border-y border-r border-slate-100 text-right">
-                  <div class="flex items-center justify-end space-x-1.5">
-                    <button @click.stop="downloadSinglePDF(truck)" class="w-8 h-8 rounded-lg flex items-center justify-center text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-600 hover:text-white transition-all duration-300" title="Download PDF Report">
-                      <span class="material-icons text-[15px]">picture_as_pdf</span>
+                <td class="px-4 py-3 rounded-r-xl border-y border-r border-slate-100 text-right w-[110px] min-w-[110px]">
+                  <div class="flex items-center justify-end space-x-1">
+                    <button @click.stop="downloadSinglePDF(truck)" class="w-7 h-7 rounded-lg flex items-center justify-center text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-600 hover:text-white transition-all duration-300 active:scale-95" title="Download PDF Report">
+                      <span class="material-icons text-[14px]">picture_as_pdf</span>
                     </button>
-                    <button @click.stop="viewDetails(truck)" class="w-8 h-8 rounded-lg flex items-center justify-center text-[#4A8BDF] bg-blue-50 border border-blue-100 hover:bg-[#4A8BDF] hover:text-white transition-all" title="View Details">
-                      <span class="material-icons text-[15px]">travel_explore</span>
+                    <button @click.stop="viewDetails(truck)" class="w-7 h-7 rounded-lg flex items-center justify-center text-[#4A8BDF] bg-blue-50 border border-blue-100 hover:bg-[#4A8BDF] hover:text-white transition-all active:scale-95" title="View Details">
+                      <span class="material-icons text-[14px]">travel_explore</span>
                     </button>
-                    <button @click.stop="toggleRow(truck.id)" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+                    <button @click.stop="toggleRow(truck.id)" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
                       <span class="material-icons text-base transition-transform duration-300" :class="isRowExpanded(truck.id) ? 'rotate-180' : ''">expand_more</span>
                     </button>
                   </div>

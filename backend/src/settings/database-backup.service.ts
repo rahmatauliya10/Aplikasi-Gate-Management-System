@@ -406,8 +406,16 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       transactionCorrectionItems: transactionCorrectionItems.length,
     };
 
+    const sanitizedUsers = users.map(
+      ({ passwordHash, refreshTokenHash, ...rest }) => ({
+        ...rest,
+        passwordHash: '[REDACTED_FOR_SECURITY]',
+        refreshTokenHash: '[REDACTED_FOR_SECURITY]',
+      }),
+    );
+
     const data = {
-      users,
+      users: sanitizedUsers,
       userWarehouseAccess,
       transactions,
       transactionStatusHistory,
@@ -897,6 +905,11 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       });
     }
 
+    // Preserve performing admin credentials to prevent lockout
+    const currentUserInDb = await this.prisma.user.findUnique({
+      where: { id: user.id },
+    });
+
     // 4. Perform atomic transaction restore
     try {
       await this.prisma.$transaction(
@@ -919,8 +932,38 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
           await tx.user.deleteMany();
 
           const d = backupPayload.data;
-          if (d.users?.length)
-            await tx.user.createMany({ data: d.users, skipDuplicates: true });
+          const validUsersToInsert = (d.users || []).map((u: any) => {
+            if (
+              u.id === user.id &&
+              currentUserInDb &&
+              (u.passwordHash === '[REDACTED_FOR_SECURITY]' || !u.passwordHash)
+            ) {
+              return {
+                ...u,
+                passwordHash: currentUserInDb.passwordHash,
+                refreshTokenHash: currentUserInDb.refreshTokenHash,
+              };
+            }
+            return u;
+          });
+
+          const safeUsers = validUsersToInsert.filter(
+            (u: any) =>
+              u.passwordHash && u.passwordHash !== '[REDACTED_FOR_SECURITY]',
+          );
+
+          if (
+            currentUserInDb &&
+            !safeUsers.some((u: any) => u.id === currentUserInDb.id)
+          ) {
+            safeUsers.push(currentUserInDb);
+          }
+
+          if (safeUsers.length)
+            await tx.user.createMany({
+              data: safeUsers,
+              skipDuplicates: true,
+            });
           if (d.userWarehouseAccess?.length)
             await tx.userWarehouseAccess.createMany({
               data: d.userWarehouseAccess,

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -209,7 +210,7 @@ export class WarehouseService {
           status: 'SUCCESS',
         })
         .catch(() => {});
-      throw new BadRequestException({
+      throw new ConflictException({
         success: false,
         message:
           'Warehouse process has already been started for this transaction',
@@ -237,40 +238,60 @@ export class WarehouseService {
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      await prismaTx.warehouseProcess.create({
-        data: {
-          transactionId,
-          processType: tx.processType,
-          startAt: tx.warehouseStartAt || new Date(),
-          startById: tx.warehouseStartById || user.id,
-          remarks: dto.remarks || null,
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: 'QC_VEHICLE_PASSED',
+          warehouseStartAt: null,
         },
-      });
-
-      return prismaTx.transaction.update({
-        where: { id: transactionId },
         data: {
           status: 'WAREHOUSE_IN_PROGRESS',
-          warehouseStartAt: tx.warehouseStartAt || new Date(),
-          warehouseStartById: tx.warehouseStartById || user.id,
+          warehouseStartAt: new Date(),
+          warehouseStartById: user.id,
           ...(dto.suratJalanNumber && {
             suratJalanNumber: dto.suratJalanNumber,
           }),
           ...(dto.poNumber && { poNumber: dto.poNumber }),
-          statusHistory: {
-            create: {
-              oldStatus: tx.status,
-              newStatus: 'WAREHOUSE_IN_PROGRESS',
-              changedById: user.id,
-              notes: dto.remarks || 'Warehouse process started',
-            },
-          },
         },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException(
+          'Warehouse process has already been started or status changed concurrently',
+        );
+      }
+
+      await prismaTx.warehouseProcess.create({
+        data: {
+          transactionId,
+          processType: tx.processType,
+          startAt: new Date(),
+          startById: user.id,
+          remarks: dto.remarks || null,
+        },
+      });
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: 'WAREHOUSE_IN_PROGRESS',
+          changedById: user.id,
+          notes: dto.remarks || 'Warehouse process started',
+        },
+      });
+
+      return prismaTx.transaction.findUnique({
+        where: { id: transactionId },
         include: {
           warehouseStartBy: { select: { id: true, name: true, role: true } },
         },
       });
     });
+
+    if (!updated) {
+      throw new NotFoundException('Transaction not found after starting warehouse process');
+    }
 
     this.logger.log(
       `Warehouse started successfully: ${updated.transactionNumber}`,
