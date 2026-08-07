@@ -258,7 +258,8 @@ export class TransactionsService {
     if (updateRes.count === 0) {
       throw new ConflictException({
         success: false,
-        message: 'Transaksi gagal dibatalkan karena telah diperbarui oleh proses lain atau sudah dalam status terminal.',
+        message:
+          'Transaksi gagal dibatalkan karena telah diperbarui oleh proses lain atau sudah dalam status terminal.',
       });
     }
 

@@ -123,12 +123,13 @@ export class DatabaseBackupController {
       }
     }
 
-    const result = await this.backupService.restoreDatabase(
+    return await this.backupService.restoreDatabase(
       user,
       payload,
       adminPasswordConfirm,
       ipAddress,
     );
+  }
 
   @Get('download-bundle/:backupId')
   @ApiOperation({

@@ -318,7 +318,10 @@ export class OperationLogCorrectionService {
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
           let valueToUpdate = item.newValue;
-          if (item.fieldName === 'result' && typeof item.newValue === 'string') {
+          if (
+            item.fieldName === 'result' &&
+            typeof item.newValue === 'string'
+          ) {
             const upperVal = item.newValue.toUpperCase();
             if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperVal)) {
               valueToUpdate = 'PASS';
@@ -351,7 +354,10 @@ export class OperationLogCorrectionService {
           targetIdToUse = rec.id;
           extractedOldValue = (rec as any)[item.fieldName];
           let valueToUpdate = item.newValue;
-          if (item.fieldName === 'result' && typeof item.newValue === 'string') {
+          if (
+            item.fieldName === 'result' &&
+            typeof item.newValue === 'string'
+          ) {
             const upperVal = item.newValue.toUpperCase();
             if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperVal)) {
               valueToUpdate = 'PASS';

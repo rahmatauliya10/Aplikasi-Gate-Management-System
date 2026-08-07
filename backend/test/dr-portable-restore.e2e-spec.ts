@@ -12,7 +12,8 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
   beforeAll(async () => {
     if (!process.env.DATABASE_URL_TEST) {
-      process.env.DATABASE_URL_TEST = 'postgresql://postgres:postgres@127.0.0.1:5432/gms_test';
+      process.env.DATABASE_URL_TEST =
+        'postgresql://postgres:postgres@127.0.0.1:5432/gms_test';
     }
     process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
 
@@ -46,7 +47,9 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     expect(Array.isArray(history)).toBe(true);
 
     if (history.length > 0) {
-      const bundle = await backupService.exportPortableBackupBundle(history[0].backupId);
+      const bundle = await backupService.exportPortableBackupBundle(
+        history[0].backupId,
+      );
       expect(bundle).toBeDefined();
       expect(bundle.metadata.system).toBe('GMS_GATE_MANAGEMENT_SYSTEM');
       expect(bundle.manifest).toBeDefined();
