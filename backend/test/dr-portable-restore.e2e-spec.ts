@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import * as fs from 'fs';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { DatabaseBackupService } from './../src/settings/database-backup.service';
@@ -29,6 +30,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     backupService = app.get<DatabaseBackupService>(DatabaseBackupService);
   });
 
+
   afterAll(async () => {
     if (prisma) {
       await prisma.$disconnect().catch(() => {});
@@ -47,12 +49,21 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     expect(Array.isArray(history)).toBe(true);
 
     if (history.length > 0) {
-      const bundle = await backupService.exportPortableBackupBundle(
+      const bundlePath = await backupService.exportPortableBackupBundle(
         history[0].backupId,
       );
+      expect(typeof bundlePath).toBe('string');
+      
+      const bundleContent = fs.readFileSync(bundlePath, 'utf8');
+      const bundle = JSON.parse(bundleContent);
+      
       expect(bundle).toBeDefined();
       expect(bundle.metadata.system).toBe('GMS_GATE_MANAGEMENT_SYSTEM');
       expect(bundle.manifest).toBeDefined();
+      
+      try {
+        fs.unlinkSync(bundlePath);
+      } catch(e) {}
     }
   });
 });
