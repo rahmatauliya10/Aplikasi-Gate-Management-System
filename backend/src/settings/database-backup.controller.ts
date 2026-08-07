@@ -17,6 +17,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import * as fs from 'fs';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -150,7 +151,6 @@ export class DatabaseBackupController {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     
-    const fs = require('fs');
     const readStream = fs.createReadStream(filePath);
     readStream.pipe(res);
     readStream.on('end', () => {

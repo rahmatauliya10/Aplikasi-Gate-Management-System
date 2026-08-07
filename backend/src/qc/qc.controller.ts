@@ -16,6 +16,12 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { BadRequestException, ParseFilePipe, MaxFileSizeValidator, FileTypeValidator } from '@nestjs/common';
+import * as multer from 'multer';
+import * as crypto from 'crypto';
+import * as path from 'path';
+
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -95,10 +101,9 @@ export class QcController {
   @Roles('QC')
   @ApiOperation({ summary: 'Upload QC attachment' })
   @UseInterceptors(
-    require('@nestjs/platform-express').FileInterceptor('file', {
+    FileInterceptor('file', {
       fileFilter: (req: any, file: any, cb: any) => {
         const allowedMimeTypes = ['image/jpeg', 'image/png', 'application/pdf'];
-        const path = require('path');
         const ext = path.extname(file.originalname).toLowerCase();
         const allowedExts = ['.jpg', '.jpeg', '.png', '.pdf'];
         if (
@@ -108,21 +113,20 @@ export class QcController {
           cb(null, true);
         } else {
           cb(
-            new (require('@nestjs/common').BadRequestException)(
-              'Invalid upload: only JPG, PNG, and PDF files are allowed.',
+            new BadRequestException(
+              'File tidak valid. Hanya JPG, PNG, dan PDF yang diizinkan (Maks 5MB).',
             ),
             false,
           );
         }
       },
-      storage: require('multer').diskStorage({
-        destination: process.env.UPLOAD_DIR || './uploads',
+      storage: multer.diskStorage({
+        destination: './uploads/qc',
         filename: (req: any, file: any, cb: any) => {
-          const crypto = require('crypto');
-          const path = require('path');
-          const randomName = crypto.randomUUID();
+          const uniqueSuffix =
+            Date.now() + '-' + crypto.randomBytes(4).toString('hex');
           const ext = path.extname(file.originalname);
-          cb(null, `${randomName}${ext}`);
+          cb(null, `${uniqueSuffix}${ext}`);
         },
       }),
     }),
@@ -130,14 +134,14 @@ export class QcController {
   uploadAttachment(
     @Param('transactionId') id: string,
     @UploadedFile(
-      new (require('@nestjs/common').ParseFilePipe)({
+      new ParseFilePipe({
         validators: [
-          new (require('@nestjs/common').MaxFileSizeValidator)({
-            maxSize:
-              parseInt(process.env.MAX_FILE_SIZE_MB || '10') * 1024 * 1024,
+          new MaxFileSizeValidator({
+            maxSize: 5 * 1024 * 1024,
+            message: 'Ukuran file terlalu besar (Maks 5MB)',
           }),
-          new (require('@nestjs/common').FileTypeValidator)({
-            fileType: /(jpg|jpeg|png|pdf)$/,
+          new FileTypeValidator({
+            fileType: '.(jpeg|jpg|png|pdf)',
           }),
         ],
       }),

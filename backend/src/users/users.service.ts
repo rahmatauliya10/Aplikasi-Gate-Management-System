@@ -12,6 +12,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class UsersService {

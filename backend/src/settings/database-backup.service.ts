@@ -14,6 +14,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 const execFileAsync = promisify(execFile);
@@ -1197,11 +1198,11 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       signature,
     };
 
-    const tempPath = require('path').join(
-      require('os').tmpdir(),
+    const tempPath = path.join(
+      os.tmpdir(),
       `gms_dr_bundle_${manifest.backupId}_${Date.now()}.gmsbackup`
     );
-    require('fs').writeFileSync(tempPath, JSON.stringify(bundleObj));
+    fs.writeFileSync(tempPath, JSON.stringify(bundleObj));
     return tempPath;
   }
 
