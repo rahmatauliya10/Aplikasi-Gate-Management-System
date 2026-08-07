@@ -256,12 +256,16 @@ model WeighbridgeRecord {
   ticketNumber  String?
   operatorId    String?
   remarks       String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  isCurrent                Boolean         @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int             @default(1)
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 
-  @@unique([transactionId, type])
+  @@unique([transactionId, type, revision])
 }
 
 model WarehouseProcess {
@@ -281,20 +285,24 @@ model WarehouseProcess {
   condition      WarehouseCondition?
   remarks        String?
   checklistItems Json?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  isCurrent                Boolean             @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int                 @default(1)
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   startBy     User?       @relation("WarehouseStartBy", fields: [startById], references: [id], onDelete: SetNull)
   endBy       User?       @relation("WarehouseEndBy", fields: [endById], references: [id], onDelete: SetNull)
 
-  @@unique([transactionId, processType])
+  @@unique([transactionId, processType, revision])
   @@index([transactionId])
 }
 
 model QcVehicleCheck {
   id                   String       @id @default(uuid())
-  transactionId        String       @unique
+  transactionId        String
   result               QcResult?
   vehicleCleanliness   CheckResult?
   vehicleOdor          CheckResult?
@@ -307,18 +315,23 @@ model QcVehicleCheck {
   checkedById          String?
   startedAt            DateTime?
   completedAt          DateTime?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  isCurrent                Boolean      @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int          @default(1)
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   checkedBy   User?       @relation("QCVehicleCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
+  @@unique([transactionId, revision])
 }
 
 model IncomingMaterialCheck {
   id                 String       @id @default(uuid())
-  transactionId      String       @unique
+  transactionId      String
   result             QcResult?
   odor               CheckResult?
   color              CheckResult?
@@ -338,13 +351,18 @@ model IncomingMaterialCheck {
   checkedById        String?
   startedAt          DateTime?
   completedAt        DateTime?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  isCurrent                Boolean      @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int          @default(1)
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   checkedBy   User?       @relation("IncomingCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
+  @@unique([transactionId, revision])
 }
 
 model Attachment {
