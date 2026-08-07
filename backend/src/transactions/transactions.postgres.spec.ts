@@ -1,8 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TransactionsService } from './transactions.service';
+import { OperationLogCorrectionService } from './operation-log-correction.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { CargoProcessType, ProcessType } from '@prisma/client';
+import {
+  CargoProcessType,
+  CorrectionTargetModule,
+  ProcessType,
+} from '@prisma/client';
 import { execSync } from 'child_process';
 
 // Ensure test database isolation before Prisma or Nest services are instantiated
@@ -47,8 +51,8 @@ const isPgTestAvailable = Boolean(
 
 const describePgTest = isPgTestAvailable ? describe : describe.skip;
 
-describePgTest('TransactionsService PG Rollback Integration', () => {
-  let service: TransactionsService;
+describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
+  let service: OperationLogCorrectionService;
   let prisma: PrismaService;
   let activityLogsService: ActivityLogsService;
 
@@ -67,10 +71,16 @@ describePgTest('TransactionsService PG Rollback Integration', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [TransactionsService, PrismaService, ActivityLogsService],
+      providers: [
+        OperationLogCorrectionService,
+        PrismaService,
+        ActivityLogsService,
+      ],
     }).compile();
 
-    service = module.get<TransactionsService>(TransactionsService);
+    service = module.get<OperationLogCorrectionService>(
+      OperationLogCorrectionService,
+    );
     prisma = module.get<PrismaService>(PrismaService);
     activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
   });
@@ -121,8 +131,6 @@ describePgTest('TransactionsService PG Rollback Integration', () => {
       });
       testTxId = testTx.id;
 
-      const initialUpdatedAtIso = testTx.updatedAt.toISOString();
-
       // Mock activity log to throw error inside transaction scope
       jest
         .spyOn(activityLogsService, 'logAction')
@@ -131,15 +139,21 @@ describePgTest('TransactionsService PG Rollback Integration', () => {
         );
 
       const dto = {
-        reason: 'Physical PG rollback test after audit error',
-        evidenceUrl: 'https://storage.gms.local/evidence/ticket-pg.pdf',
-        expectedUpdatedAt: initialUpdatedAtIso,
-        grossWeight: 21000,
+        reasonCode: 'SALAH_INPUT_ANGKA',
+        remark: 'Physical PG rollback test after audit error',
+        expectedRevision: testTx.revision,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.TRANSACTION,
+            fieldName: 'grossWeight',
+            newValue: 21000,
+          },
+        ],
       };
 
       // Attempt correction, expecting audit log error to fail the atomic transaction
       await expect(
-        service.correctCompletedTransaction(testTx.id, dto, adminUser as any),
+        service.correctOperationLog(testTx.id, dto as any, adminUser as any),
       ).rejects.toThrow('Audit Log Failure - DB I/O Rollback Trigger');
 
       // Query physical DB: transaction record must NOT have grossWeight updated to 21000

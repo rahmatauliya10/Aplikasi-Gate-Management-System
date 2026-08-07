@@ -1,30 +1,25 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { TransactionsService } from './transactions.service';
+import { OperationLogCorrectionService } from './operation-log-correction.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ConflictException } from '@nestjs/common';
+import { CorrectionTargetModule } from '@prisma/client';
 
-describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
-  let service: TransactionsService;
+describe('OperationLogCorrectionService PostgreSQL OCC & Audit Integration', () => {
+  let service: OperationLogCorrectionService;
   let prismaService: PrismaService;
   let activityLogsService: ActivityLogsService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        TransactionsService,
+        OperationLogCorrectionService,
         {
           provide: PrismaService,
           useValue: {
             transaction: {
               findUnique: jest.fn(),
-              updateMany: jest.fn(),
-            },
-            transactionCorrection: {
-              create: jest.fn(),
-            },
-            fraudCheck: {
-              create: jest.fn(),
+              update: jest.fn(),
             },
             $transaction: jest.fn(),
           },
@@ -38,7 +33,9 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
       ],
     }).compile();
 
-    service = module.get<TransactionsService>(TransactionsService);
+    service = module.get<OperationLogCorrectionService>(
+      OperationLogCorrectionService,
+    );
     prismaService = module.get<PrismaService>(PrismaService);
     activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
   });
@@ -47,20 +44,12 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
     const initialTx = {
       id: 'tx-occ-101',
       status: 'COMPLETED',
-      grossWeight: 12000,
-      tareWeight: 4000,
-      netWeight: 8000,
-      updatedAt: new Date('2026-08-05T01:00:00.000Z'),
+      revision: 2,
     };
 
-    jest
-      .spyOn(prismaService.transaction, 'findUnique')
-      .mockResolvedValue(initialTx as any);
-
-    // Simulate parallel race: updateMany returns count: 0 because another worker updated the timestamp
     const mockTxScope = {
       transaction: {
-        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findUnique: jest.fn().mockResolvedValue(initialTx),
       },
     };
 
@@ -69,10 +58,16 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
       .mockImplementation(async (cb: any) => cb(mockTxScope));
 
     const staleDto = {
-      reason: 'Parallel update attempt with stale timestamp',
-      evidenceUrl: 'https://storage.gms.local/evidence/ticket-occ.pdf',
-      expectedUpdatedAt: '2026-08-05T01:00:00.000Z',
-      grossWeight: 12500,
+      reasonCode: 'SALAH_INPUT_ANGKA',
+      remark: 'Parallel update attempt with stale revision',
+      expectedRevision: 1,
+      items: [
+        {
+          targetModule: CorrectionTargetModule.TRANSACTION,
+          fieldName: 'grossWeight',
+          newValue: 12500,
+        },
+      ],
     };
 
     const adminUser = {
@@ -82,9 +77,9 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction(
+      service.correctOperationLog(
         'tx-occ-101',
-        staleDto,
+        staleDto as any,
         adminUser as any,
       ),
     ).rejects.toThrow(ConflictException);
@@ -94,52 +89,26 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
     const initialTx = {
       id: 'tx-audit-202',
       status: 'COMPLETED',
+      revision: 1,
       grossWeight: 15000,
-      tareWeight: 5000,
-      netWeight: 10000,
-      updatedAt: new Date('2026-08-05T01:00:00.000Z'),
     };
-
-    const createdCorrection = { id: 'corr-audit-202' };
-
-    let correctionCreatedInTx = false;
-    let transactionUpdatedInTx = false;
 
     const mockTxScope = {
-      transactionCorrection: {
-        create: jest.fn().mockImplementation(async () => {
-          correctionCreatedInTx = true;
-          return createdCorrection;
-        }),
-      },
       transaction: {
-        updateMany: jest.fn().mockImplementation(async () => {
-          transactionUpdatedInTx = true;
-          return { count: 1 };
-        }),
         findUnique: jest.fn().mockResolvedValue(initialTx),
+        update: jest
+          .fn()
+          .mockResolvedValue({ ...initialTx, grossWeight: 15500, revision: 2 }),
       },
-      fraudCheck: {
-        create: jest.fn().mockResolvedValue({ id: 'fc-1' }),
+      transactionCorrection: {
+        create: jest.fn().mockResolvedValue({ id: 'corr-1' }),
       },
     };
 
-    jest
-      .spyOn(prismaService.transaction, 'findUnique')
-      .mockResolvedValue(initialTx as any);
-
-    // Simulated $transaction callback throwing error when logAction fails inside scope
     jest
       .spyOn(prismaService, '$transaction')
       .mockImplementation(async (cb: any) => {
-        try {
-          return await cb(mockTxScope);
-        } catch (err) {
-          // Reset mock transaction state simulating DB rollback
-          correctionCreatedInTx = false;
-          transactionUpdatedInTx = false;
-          throw err;
-        }
+        return await cb(mockTxScope);
       });
 
     jest
@@ -149,10 +118,16 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
       );
 
     const dto = {
-      reason: 'Validation of transaction rollback on audit log failure',
-      evidenceUrl: 'https://storage.gms.local/evidence/ticket-audit.pdf',
-      expectedUpdatedAt: '2026-08-05T01:00:00.000Z',
-      grossWeight: 15500,
+      reasonCode: 'SALAH_INPUT_ANGKA',
+      remark: 'Validation of transaction rollback on audit log failure',
+      expectedRevision: 1,
+      items: [
+        {
+          targetModule: CorrectionTargetModule.TRANSACTION,
+          fieldName: 'grossWeight',
+          newValue: 15500,
+        },
+      ],
     };
 
     const adminUser = {
@@ -162,15 +137,7 @@ describe('TransactionsService PostgreSQL OCC & Audit Integration', () => {
     };
 
     await expect(
-      service.correctCompletedTransaction(
-        'tx-audit-202',
-        dto,
-        adminUser as any,
-      ),
+      service.correctOperationLog('tx-audit-202', dto as any, adminUser as any),
     ).rejects.toThrow('Audit log insertion failed - Disk I/O error');
-
-    // Confirm that due to transaction rollback, state remained clean
-    expect(correctionCreatedInTx).toBe(false);
-    expect(transactionUpdatedInTx).toBe(false);
   });
 });

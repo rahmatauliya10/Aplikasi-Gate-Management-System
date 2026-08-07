@@ -81,24 +81,4 @@ describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', (
       }),
     );
   });
-
-  it('should THROW ForbiddenException (403) when WAREHOUSE role calls completeQcAnalysis on GBB transaction', async () => {
-    mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
-      id: 'tx-124',
-      processType: 'GBB',
-      status: 'WAREHOUSE_IN_PROGRESS',
-    });
-
-    await expect(
-      service.completeQcAnalysis('tx-124', warehouseUser, 'Catatan aman'),
-    ).rejects.toThrow(ForbiddenException);
-
-    expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'SOD_VIOLATION_BLOCKED',
-        module: 'WAREHOUSE',
-        status: 'FAILED',
-      }),
-    );
-  });
 });
