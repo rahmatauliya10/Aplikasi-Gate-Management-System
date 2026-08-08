@@ -121,7 +121,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
   it('should compute revision = max(revision) + 1 when warehouse submits incoming material check', async () => {
     const mockTx = {
       id: 'tx-wh-2',
-      status: 'INCOMING_CHECK_IN_PROGRESS',
+      status: 'INCOMING_CHECK_PENDING',
       processType: 'GBJ',
     };
 
