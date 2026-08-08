@@ -200,12 +200,9 @@ export class OperationLogCorrectionService {
         throw new NotFoundException('Transaksi tidak ditemukan.');
       }
 
-      if (
-        !['COMPLETED', 'CANCELLED'].includes(tx.status) &&
-        dto.action !== CorrectionAction.REOPEN_WORKFLOW
-      ) {
+      if (!['COMPLETED', 'CANCELLED'].includes(tx.status)) {
         throw new BadRequestException(
-          'Koreksi Operation Log hanya berlaku untuk transaksi berstatus terminal (COMPLETED atau CANCELLED).',
+          'Koreksi Operation Log dan REOPEN hanya diizinkan untuk transaksi berstatus terminal (COMPLETED atau CANCELLED).',
         );
       }
 

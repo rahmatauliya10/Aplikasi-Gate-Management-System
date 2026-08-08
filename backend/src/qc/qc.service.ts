@@ -168,19 +168,16 @@ export class QcService {
     const nextStatus =
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
-    const updated = await this.prisma.$transaction(async (prisma) => {
-      const existingCount = await prisma.qcVehicleCheck.count({
-        where: { transactionId, isCurrent: true },
+      const maxRev = await prisma.qcVehicleCheck.aggregate({
+        where: { transactionId },
+        _max: { revision: true },
       });
-      if (existingCount > 0) {
-        throw new BadRequestException(
-          'Result has already been submitted for this transaction',
-        );
-      }
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
       await prisma.qcVehicleCheck.create({
         data: {
           transactionId,
+          revision: nextRevision,
           result: result,
           vehicleCleanliness: this.booleanToCheckResult(dto.vehicleCleanliness),
           vehicleOdor: this.booleanToCheckResult(dto.vehicleOdor),
@@ -281,9 +278,16 @@ export class QcService {
         );
       }
 
+      const maxRev = await prisma.incomingMaterialCheck.aggregate({
+        where: { transactionId },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
       await prisma.incomingMaterialCheck.create({
         data: {
           transactionId,
+          revision: nextRevision,
           result: result,
           odor: this.mapToCheckResult(dto.odor),
           color: this.mapToCheckResult(dto.color),

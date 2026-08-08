@@ -112,9 +112,7 @@ export class TransactionsService {
         `Error retrieving transactions list: ${error.message}`,
         error.stack,
       );
-      throw new InternalServerErrorException(
-        `Gagal mengambil data transaksi: ${error.message || 'Database query error'}`,
-      );
+      throw new InternalServerErrorException('Gagal mengambil data transaksi.');
     }
   }
 
@@ -164,7 +162,7 @@ export class TransactionsService {
         error.stack,
       );
       throw new InternalServerErrorException(
-        `Gagal mengambil data transaksi aktif: ${error.message || 'Database query error'}`,
+        'Gagal mengambil data transaksi aktif.',
       );
     }
   }

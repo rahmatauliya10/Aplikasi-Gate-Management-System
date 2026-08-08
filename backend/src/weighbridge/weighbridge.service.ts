@@ -203,7 +203,7 @@ export class WeighbridgeService {
 
     // 2. Duplicate prevention
     const duplicateRecord = await this.prisma.weighbridgeRecord.findFirst({
-      where: { transactionId, type: 'IN' },
+      where: { transactionId, type: 'IN', isCurrent: true },
     });
 
     if (duplicateRecord) {
@@ -252,7 +252,7 @@ export class WeighbridgeService {
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       const existingIn = await prismaTx.weighbridgeRecord.findFirst({
-        where: { transactionId, type: 'IN' },
+        where: { transactionId, type: 'IN', isCurrent: true },
       });
       if (existingIn) {
         throw new BadRequestException({
@@ -263,9 +263,16 @@ export class WeighbridgeService {
         });
       }
 
+      const maxRev = await prismaTx.weighbridgeRecord.aggregate({
+        where: { transactionId, type: 'IN' },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
       await prismaTx.weighbridgeRecord.create({
         data: {
           transactionId,
+          revision: nextRevision,
           type: 'IN',
           weight: dto.weight,
           ticketNumber: dto.ticketNumber || null,
@@ -433,7 +440,7 @@ export class WeighbridgeService {
 
     // 2. Duplicate prevention
     const duplicateRecord = await this.prisma.weighbridgeRecord.findFirst({
-      where: { transactionId, type: 'OUT' },
+      where: { transactionId, type: 'OUT', isCurrent: true },
     });
 
     if (duplicateRecord) {
@@ -468,7 +475,7 @@ export class WeighbridgeService {
       let gross = tx.grossWeight;
       if (gross === null || gross === undefined) {
         const inRecord = await this.prisma.weighbridgeRecord.findFirst({
-          where: { transactionId, type: 'IN' },
+          where: { transactionId, type: 'IN', isCurrent: true },
         });
         if (inRecord) {
           gross = inRecord.weight;
@@ -523,7 +530,7 @@ export class WeighbridgeService {
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       const existingOut = await prismaTx.weighbridgeRecord.findFirst({
-        where: { transactionId, type: 'OUT' },
+        where: { transactionId, type: 'OUT', isCurrent: true },
       });
       if (existingOut) {
         throw new BadRequestException({
@@ -534,9 +541,16 @@ export class WeighbridgeService {
         });
       }
 
+      const maxRev = await prismaTx.weighbridgeRecord.aggregate({
+        where: { transactionId, type: 'OUT' },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
       await prismaTx.weighbridgeRecord.create({
         data: {
           transactionId,
+          revision: nextRevision,
           type: 'OUT',
           weight: dto.weight,
           ticketNumber: dto.ticketNumber || null,

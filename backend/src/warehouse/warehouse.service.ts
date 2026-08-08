@@ -238,12 +238,19 @@ export class WarehouseService {
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const maxRev = await prismaTx.warehouseProcess.aggregate({
+        where: { transactionId },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
       const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: 'QC_VEHICLE_PASSED',
         },
         data: {
+          revision: { increment: 1 },
           status: 'WAREHOUSE_IN_PROGRESS',
           warehouseStartAt: tx.warehouseStartAt || new Date(),
           warehouseStartById: user.id,
@@ -263,6 +270,7 @@ export class WarehouseService {
       await prismaTx.warehouseProcess.create({
         data: {
           transactionId,
+          revision: nextRevision,
           processType: tx.processType,
           startAt: new Date(),
           startById: user.id,
