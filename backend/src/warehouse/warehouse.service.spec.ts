@@ -122,12 +122,12 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     const mockTx = {
       id: 'tx-wh-2',
       status: 'INCOMING_CHECK_IN_PROGRESS',
-      processType: 'GBB',
+      processType: 'GBJ',
     };
 
     mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockTx);
     mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
-      { processType: 'GBB' },
+      { processType: 'GBJ' },
     ]);
 
     const mockTxClient = {

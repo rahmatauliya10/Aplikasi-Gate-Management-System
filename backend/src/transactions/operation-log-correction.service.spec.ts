@@ -392,6 +392,9 @@ describe('OperationLogCorrectionService', () => {
       transaction: {
         findUnique: jest.fn().mockResolvedValue(mockTx),
       },
+      warehouseProcess: {
+        update: jest.fn().mockResolvedValue({}),
+      },
     };
 
     jest
