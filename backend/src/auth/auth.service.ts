@@ -311,7 +311,9 @@ export class AuthService {
     });
 
     if (updateRes.count === 0) {
-      this.logger.warn(`Refresh token race condition detected for ${user.email}`);
+      this.logger.warn(
+        `Refresh token race condition detected for ${user.email}`,
+      );
       throw new UnauthorizedException({
         success: false,
         message: 'Refresh token session collision or invalidated',

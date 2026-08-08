@@ -168,6 +168,7 @@ export class QcService {
     const nextStatus =
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
+    const updated = await this.prisma.$transaction(async (prisma) => {
       const maxRev = await prisma.qcVehicleCheck.aggregate({
         where: { transactionId },
         _max: { revision: true },

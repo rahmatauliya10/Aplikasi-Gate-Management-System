@@ -51,7 +51,9 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
 
     qcService = module.get<QcService>(QcService);
     jest.clearAllMocks();
-    mockPrismaService.$transaction.mockImplementation((cb) => cb(mockPrismaService));
+    mockPrismaService.$transaction.mockImplementation((cb) =>
+      cb(mockPrismaService),
+    );
   });
 
   it('should calculate revision = max(revision) + 1 when submitting vehicle check after REOPEN', async () => {
@@ -134,7 +136,9 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
       adminUser as any,
     );
 
-    expect(mockPrismaService.incomingMaterialCheck.aggregate).toHaveBeenCalledWith({
+    expect(
+      mockPrismaService.incomingMaterialCheck.aggregate,
+    ).toHaveBeenCalledWith({
       where: { transactionId: 'tx-101' },
       _max: { revision: true },
     });
