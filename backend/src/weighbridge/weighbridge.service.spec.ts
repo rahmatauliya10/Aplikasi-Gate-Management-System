@@ -19,7 +19,9 @@ describe('WeighbridgeService Fraud Calculation', () => {
                 transaction: { findUnique: jest.fn(), update: jest.fn() },
                 weighbridgeRecord: {
                   create: jest.fn(),
-                  aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+                  aggregate: jest
+                    .fn()
+                    .mockResolvedValue({ _max: { revision: 0 } }),
                 },
                 transactionStatusHistory: { create: jest.fn() },
                 fraudCheck: { create: jest.fn() },
@@ -28,7 +30,9 @@ describe('WeighbridgeService Fraud Calculation', () => {
             transaction: { findUnique: jest.fn() },
             weighbridgeRecord: {
               findFirst: jest.fn(),
-              aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+              aggregate: jest
+                .fn()
+                .mockResolvedValue({ _max: { revision: 0 } }),
             },
           },
         },
@@ -61,7 +65,9 @@ describe('WeighbridgeService Fraud Calculation', () => {
       weighbridgeRecord: {
         create: jest.fn(),
         findFirst: jest.fn().mockResolvedValue(null),
-        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _max: { revision: 0 } }),
       },
       transactionStatusHistory: { create: jest.fn() },
       fraudCheck: { create: jest.fn() },
@@ -155,7 +161,9 @@ describe('WeighbridgeService Fraud Calculation', () => {
           .fn()
           .mockResolvedValueOnce(null) // OUT duplicate check
           .mockResolvedValueOnce({ weight: 15000 }), // IN record fallback search
-        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+        aggregate: jest
+          .fn()
+          .mockResolvedValue({ _max: { revision: 0 } }),
       },
       transactionStatusHistory: { create: jest.fn() },
       fraudCheck: { create: jest.fn() },
