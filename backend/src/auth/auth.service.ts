@@ -303,12 +303,21 @@ export class AuthService {
       expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d'),
     });
 
-    // Store new refresh token hash
+    // Store new refresh token hash atomically via CAS check
     const newRefreshTokenHash = await argon2.hash(newRefreshToken);
-    await this.prisma.user.update({
-      where: { id: user.id },
+    const updateRes = await this.prisma.user.updateMany({
+      where: { id: user.id, refreshTokenHash: user.refreshTokenHash },
       data: { refreshTokenHash: newRefreshTokenHash },
     });
+
+    if (updateRes.count === 0) {
+      this.logger.warn(`Refresh token race condition detected for ${user.email}`);
+      throw new UnauthorizedException({
+        success: false,
+        message: 'Refresh token session collision or invalidated',
+        errors: [],
+      });
+    }
 
     this.logger.log(`Refresh token success for ${user.email}`);
     await this.auditLog(user.id, 'REFRESH_TOKEN', {});

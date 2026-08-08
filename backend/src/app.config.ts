@@ -24,8 +24,9 @@ export function configureApp(app: INestApplication) {
   app.use(json({ limit: '10mb' }));
   app.use(urlencoded({ extended: true, limit: '10mb' }));
 
-  // CORS Configuration - Permissive & resilient for Nginx reverse proxy
-  const corsOrigin = process.env.CORS_ORIGIN || '*';
+  // CORS Configuration - Strict in production, flexible in development
+  const isProduction = process.env.NODE_ENV === 'production';
+  const corsOrigin = process.env.CORS_ORIGIN || (isProduction ? '' : '*');
   const allowedOrigins = corsOrigin.split(',').map((o) => o.trim());
 
   app.enableCors({
@@ -33,15 +34,19 @@ export function configureApp(app: INestApplication) {
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      if (
-        !origin ||
-        allowedOrigins.includes('*') ||
-        allowedOrigins.includes(origin)
-      ) {
+      if (!origin) {
         return callback(null, true);
       }
-      if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      if (allowedOrigins.includes(origin)) {
         return callback(null, true);
+      }
+      if (!isProduction) {
+        if (allowedOrigins.includes('*')) {
+          return callback(null, true);
+        }
+        if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          return callback(null, true);
+        }
       }
       return callback(new Error('Not allowed by CORS'), false);
     },

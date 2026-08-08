@@ -16,7 +16,12 @@ async function bootstrap() {
       : ['log', 'error', 'warn', 'debug', 'verbose'],
   });
 
-  const requiredEnvs = ['DATABASE_URL', 'JWT_REFRESH_SECRET', 'CORS_ORIGIN'];
+  const requiredEnvs = [
+    'DATABASE_URL',
+    'JWT_REFRESH_SECRET',
+    'CORS_ORIGIN',
+    'BACKUP_SIGNATURE_SECRET',
+  ];
   for (const env of requiredEnvs) {
     if (!process.env[env]) {
       throw new Error(`CRITICAL: Environment variable ${env} is missing.`);

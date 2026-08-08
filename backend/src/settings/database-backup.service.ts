@@ -1230,30 +1230,36 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
       });
     }
 
-    // Validate Signature if present (backward compatibility if we want to allow unsigned, but let's enforce if passed)
-    if (bundlePayload.signature) {
-      const signature = bundlePayload.signature;
-      const clone = { ...bundlePayload };
-      delete clone.signature;
+    // Validate Signature (Mandatory P0-04 Fix)
+    if (!bundlePayload.signature) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Unsigned backup is prohibited. Portable DR bundle must contain a valid HMAC signature.',
+      });
+    }
 
-      const payloadStr = JSON.stringify(clone);
-      const secret = process.env.BACKUP_SIGNATURE_SECRET;
-      if (!secret) {
-        throw new Error(
-          'Critical: BACKUP_SIGNATURE_SECRET must be configured in environment',
-        );
-      }
-      const expectedSignature = createHmac('sha256', secret)
-        .update(payloadStr)
-        .digest('hex');
+    const signature = bundlePayload.signature;
+    const clone = { ...bundlePayload };
+    delete clone.signature;
 
-      if (signature !== expectedSignature) {
-        throw new BadRequestException({
-          success: false,
-          message:
-            'Integritas berkas backup gagal diverifikasi (Signature mismatch). Berkas mungkin telah dimanipulasi.',
-        });
-      }
+    const payloadStr = JSON.stringify(clone);
+    const secret = process.env.BACKUP_SIGNATURE_SECRET;
+    if (!secret) {
+      throw new Error(
+        'Critical: BACKUP_SIGNATURE_SECRET must be configured in environment',
+      );
+    }
+    const expectedSignature = createHmac('sha256', secret)
+      .update(payloadStr)
+      .digest('hex');
+
+    if (signature !== expectedSignature) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Integritas berkas backup gagal diverifikasi (Signature mismatch). Berkas mungkin telah dimanipulasi.',
+      });
     }
 
     // 1. Re-authenticate Admin
@@ -1361,11 +1367,12 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
         if (!fs.existsSync(uploadDir))
           fs.mkdirSync(uploadDir, { recursive: true });
 
+        const root = path.resolve(uploadDir);
         for (const file of bundlePayload.attachmentsContent.files) {
           if (file.fileName && file.base64Content) {
-            const targetPath = path.resolve(uploadDir, file.fileName);
-            // Path traversal protection
-            if (!targetPath.startsWith(path.resolve(uploadDir))) {
+            const targetPath = path.resolve(root, file.fileName);
+            const relative = path.relative(root, targetPath);
+            if (relative.startsWith('..') || path.isAbsolute(relative)) {
               this.logger.warn(
                 `Path traversal attempt blocked for file: ${file.fileName}`,
               );
