@@ -86,7 +86,11 @@ describe('WarehouseService Revisioning (P1-01)', () => {
         unit: WarehouseUnit.KG,
         condition: WarehouseCondition.GOOD,
       },
-      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as unknown as JwtPayloadUser,
+      {
+        id: 'usr-1',
+        role: 'WAREHOUSE',
+        email: 'wh@gms.local',
+      } as unknown as JwtPayloadUser,
     );
 
     expect(mockTxClient.warehouseProcess.aggregate).toHaveBeenCalledWith({
@@ -133,7 +137,11 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     const result = await service.submitIncomingCheck(
       'tx-wh-2',
       { decision: 'passed' },
-      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as unknown as JwtPayloadUser,
+      {
+        id: 'usr-1',
+        role: 'WAREHOUSE',
+        email: 'wh@gms.local',
+      } as unknown as JwtPayloadUser,
     );
 
     expect(mockTxClient.incomingMaterialCheck.aggregate).toHaveBeenCalledWith({

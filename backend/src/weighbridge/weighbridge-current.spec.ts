@@ -79,7 +79,7 @@ describe('Weighbridge isCurrent Filter (P1-07)', () => {
 
   it('getQueue should filter weighbridgeRecords by isCurrent:true', async () => {
     await service.getQueue(
-      { page: 1, limit: 10 } as any,
+      { page: 1, limit: 10 },
       mockUser as unknown as JwtPayloadUser,
     );
 

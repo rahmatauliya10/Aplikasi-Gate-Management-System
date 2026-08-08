@@ -68,7 +68,7 @@ describe('Current Read Model (P0-02)', () => {
 
   it('findAll should include isCurrent:true on all relation queries', async () => {
     await service.findAll(
-      { page: 1, limit: 10 } as any,
+      { page: 1, limit: 10 },
       mockUser as unknown as JwtPayloadUser,
     );
 

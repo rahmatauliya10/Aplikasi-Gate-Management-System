@@ -507,4 +507,3 @@ describe('OperationLogCorrectionService', () => {
     );
   });
 });
-
