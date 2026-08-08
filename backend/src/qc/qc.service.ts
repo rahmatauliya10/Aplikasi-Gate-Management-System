@@ -15,6 +15,8 @@ import { QcAttachmentDto } from './dto/qc-attachment.dto';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
+import { QC_HISTORY_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
+
 @Injectable()
 export class QcService {
   private readonly logger = new Logger(QcService.name);
@@ -383,10 +385,7 @@ export class QcService {
         },
         ...scope,
       },
-      include: {
-        qcVehicleChecks: { where: { isCurrent: true } },
-        incomingMaterialChecks: { where: { isCurrent: true } },
-      },
+      include: QC_HISTORY_CURRENT_RELATIONS_INCLUDE,
       orderBy: { qcEndAt: 'desc' },
       take: 100,
     });

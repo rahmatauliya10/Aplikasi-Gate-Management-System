@@ -13,7 +13,7 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CorrectionAction, CorrectionTargetModule } from '@prisma/client';
 
@@ -39,6 +39,7 @@ export class CorrectionItemDto {
     description: 'Field name to correct (must pass server allowlist)',
     example: 'weight',
   })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
@@ -55,6 +56,7 @@ export class CorrectionItemDto {
     description: 'Optional specific remark for this field correction',
   })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(500)
   itemRemark?: string;
@@ -74,6 +76,7 @@ export class CreateOperationLogCorrectionDto {
     description: 'Standardized reason code selected from dropdown (mandatory)',
     example: 'SALAH_INPUT_ANGKA',
   })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
@@ -85,6 +88,7 @@ export class CreateOperationLogCorrectionDto {
     example:
       'Koreksi kesalahan catat berat dari nota timbang manual lapangan #992',
   })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @IsNotEmpty()
   @MinLength(10)
@@ -95,6 +99,7 @@ export class CreateOperationLogCorrectionDto {
     description: 'Supporting evidence document URL or ID (optional)',
   })
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(2048)
   evidenceUrl?: string;

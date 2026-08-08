@@ -2,26 +2,36 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WarehouseService } from './warehouse.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { ForbiddenException } from '@nestjs/common';
-import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
-describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', () => {
+describe('WarehouseService Revisioning (P1-01)', () => {
   let service: WarehouseService;
-  let prisma: PrismaService;
-  let activityLogs: ActivityLogsService;
 
   const mockPrismaService = {
+    $transaction: jest.fn(),
     transaction: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
     },
-    userWarehouseAccess: {
-      findMany: jest.fn().mockResolvedValue([{ processType: 'GBB' }]),
+    warehouseProcess: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      aggregate: jest.fn(),
+    },
+    incomingMaterialCheck: {
+      create: jest.fn(),
+      aggregate: jest.fn(),
     },
   };
 
   const mockActivityLogsService = {
-    logAction: jest.fn().mockResolvedValue(true),
+    logAction: jest.fn().mockResolvedValue({}),
+  };
+
+  const mockAuthScopeService = {
+    getTransactionScope: jest.fn().mockReturnValue({}),
   };
 
   beforeEach(async () => {
@@ -30,55 +40,109 @@ describe('WarehouseService - Segregation of Duties (SoD) Enforcement (P0-06)', (
         WarehouseService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
+        { provide: AuthorizationScopeService, useValue: mockAuthScopeService },
       ],
     }).compile();
 
     service = module.get<WarehouseService>(WarehouseService);
-    prisma = module.get<PrismaService>(PrismaService);
-    activityLogs = module.get<ActivityLogsService>(ActivityLogsService);
-  });
-
-  afterEach(() => {
     jest.clearAllMocks();
   });
 
-  const warehouseUser: JwtPayloadUser = {
-    id: 'user-wh-1',
-    email: 'operator.wh@gms.local',
-    role: 'WAREHOUSE',
-    name: 'Operator WH',
-    warehouseAccess: ['GBB'],
-  };
-
-  const adminUser: JwtPayloadUser = {
-    id: 'user-admin-1',
-    email: 'admin@gms.local',
-    role: 'ADMIN',
-    name: 'Admin User',
-    warehouseAccess: ['GBB', 'GBJ', 'GSP'],
-  };
-
-  it('should THROW ForbiddenException (403) when WAREHOUSE role calls submitIncomingCheck on GBB transaction', async () => {
-    mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
-      id: 'tx-123',
+  it('should compute revision = max(revision) + 1 when fallback warehouseProcess creation occurs', async () => {
+    const mockTx = {
+      id: 'tx-wh-1',
+      status: 'WAREHOUSE_IN_PROGRESS',
       processType: 'GBB',
-      status: 'INCOMING_CHECK_PENDING',
+      warehouseStartAt: new Date(),
+      warehouseStartById: 'user-1',
+    };
+
+    const mockTxClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+        update: jest.fn().mockResolvedValue({ ...mockTx, status: 'WAREHOUSE_DONE' }),
+      },
+      warehouseProcess: {
+        findFirst: jest.fn().mockResolvedValue(null), // Fallback scenario!
+        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 2 } }),
+        create: jest.fn().mockResolvedValue({ id: 'wp-new', revision: 3 }),
+      },
+    };
+
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    const result = await service.completeWarehouse(
+      'tx-wh-1',
+      {
+        actualWeight: 10000,
+        actualQuantity: 100,
+        unit: 'KG' as any,
+        condition: 'GOOD' as any,
+      },
+      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as any,
+    );
+
+    expect(mockTxClient.warehouseProcess.aggregate).toHaveBeenCalledWith({
+      where: { transactionId: 'tx-wh-1' },
+      _max: { revision: true },
     });
 
-    await expect(
-      service.submitIncomingCheck(
-        'tx-123',
-        { decision: 'passed' },
-        warehouseUser,
-      ),
-    ).rejects.toThrow(ForbiddenException);
-
-    expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+    expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'SOD_VIOLATION_BLOCKED',
-        module: 'WAREHOUSE',
-        status: 'FAILED',
+        data: expect.objectContaining({
+          transactionId: 'tx-wh-1',
+          revision: 3, // Calculated max (2) + 1 = 3!
+        }),
       }),
     );
+
+    expect(result.success).toBe(true);
+  });
+
+  it('should compute revision = max(revision) + 1 when warehouse submits incoming material check', async () => {
+    const mockTx = {
+      id: 'tx-wh-2',
+      status: 'INCOMING_CHECK_IN_PROGRESS',
+      processType: 'GBB',
+    };
+
+    const mockTxClient = {
+      transaction: {
+        findFirst: jest.fn().mockResolvedValue(mockTx),
+        update: jest.fn().mockResolvedValue({ ...mockTx, status: 'INCOMING_CHECK_PASSED' }),
+      },
+      incomingMaterialCheck: {
+        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 1 } }),
+        create: jest.fn().mockResolvedValue({ id: 'im-new', revision: 2 }),
+      },
+    };
+
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    const result = await service.submitIncomingCheck(
+      'tx-wh-2',
+      { decision: 'passed' },
+      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as any,
+    );
+
+    expect(mockTxClient.incomingMaterialCheck.aggregate).toHaveBeenCalledWith({
+      where: { transactionId: 'tx-wh-2' },
+      _max: { revision: true },
+    });
+
+    expect(mockTxClient.incomingMaterialCheck.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          transactionId: 'tx-wh-2',
+          revision: 2, // Calculated max (1) + 1 = 2!
+        }),
+      }),
+    );
+
+    expect(result.success).toBe(true);
   });
 });

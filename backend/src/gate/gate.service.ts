@@ -11,8 +11,11 @@ import { GateQueryDto } from './dto/gate-query.dto';
 import { TransactionStatus, Prisma } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { GATE_DETAIL_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
+
 @Injectable()
 export class GateService {
+
   private readonly logger = new Logger(GateService.name);
 
   constructor(
@@ -238,13 +241,7 @@ export class GateService {
   async getDetail(id: string, user: JwtPayloadUser) {
     const transaction = await this.prisma.transaction.findUnique({
       where: { id },
-      include: {
-        statusHistory: { orderBy: { changedAt: 'asc' } },
-        weighbridgeRecords: { where: { isCurrent: true } },
-        warehouseProcesses: { where: { isCurrent: true } },
-        qcVehicleChecks: { where: { isCurrent: true } },
-        incomingMaterialChecks: { where: { isCurrent: true } },
-      },
+      include: GATE_DETAIL_CURRENT_RELATIONS_INCLUDE,
     });
 
     if (!transaction) {

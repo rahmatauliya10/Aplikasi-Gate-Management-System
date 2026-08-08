@@ -13,6 +13,7 @@ import { TransactionQueryDto } from './dto/transaction-query.dto';
 import { Prisma } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+import { TRANSACTION_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
 
 @Injectable()
 export class TransactionsService {
@@ -67,23 +68,7 @@ export class TransactionsService {
           where,
           skip,
           take: parsedLimit,
-          include: {
-            statusHistory: { orderBy: { changedAt: 'desc' } },
-            weighbridgeRecords: { where: { isCurrent: true } },
-            warehouseProcesses: { where: { isCurrent: true } },
-            qcVehicleChecks: {
-              where: { isCurrent: true },
-              include: { checkedBy: { select: { id: true, name: true } } },
-            },
-            incomingMaterialChecks: {
-              where: { isCurrent: true },
-              include: { checkedBy: { select: { id: true, name: true } } },
-            },
-            weighInBy: { select: { id: true, name: true } },
-            weighOutBy: { select: { id: true, name: true } },
-            warehouseStartBy: { select: { id: true, name: true } },
-            warehouseEndBy: { select: { id: true, name: true } },
-          },
+          include: TRANSACTION_CURRENT_RELATIONS_INCLUDE,
           orderBy: { createdAt: 'desc' },
         }),
       ]);
@@ -125,23 +110,7 @@ export class TransactionsService {
       const scope = this.authorizationScopeService.getTransactionScope(user);
       const data = await this.prisma.transaction.findMany({
         where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
-        include: {
-          statusHistory: { orderBy: { changedAt: 'desc' } },
-          weighbridgeRecords: { where: { isCurrent: true } },
-          warehouseProcesses: { where: { isCurrent: true } },
-          qcVehicleChecks: {
-            where: { isCurrent: true },
-            include: { checkedBy: { select: { id: true, name: true } } },
-          },
-          incomingMaterialChecks: {
-            where: { isCurrent: true },
-            include: { checkedBy: { select: { id: true, name: true } } },
-          },
-          weighInBy: { select: { id: true, name: true } },
-          weighOutBy: { select: { id: true, name: true } },
-          warehouseStartBy: { select: { id: true, name: true } },
-          warehouseEndBy: { select: { id: true, name: true } },
-        },
+        include: TRANSACTION_CURRENT_RELATIONS_INCLUDE,
         orderBy: { createdAt: 'desc' },
       });
 
@@ -180,22 +149,8 @@ export class TransactionsService {
     const tx = await this.prisma.transaction.findFirst({
       where: { id, ...scope },
       include: {
-        statusHistory: { orderBy: { changedAt: 'desc' } },
-        weighbridgeRecords: { where: { isCurrent: true } },
-        warehouseProcesses: { where: { isCurrent: true } },
-        qcVehicleChecks: {
-          where: { isCurrent: true },
-          include: { checkedBy: { select: { id: true, name: true } } },
-        },
-        incomingMaterialChecks: {
-          where: { isCurrent: true },
-          include: { checkedBy: { select: { id: true, name: true } } },
-        },
+        ...TRANSACTION_CURRENT_RELATIONS_INCLUDE,
         fraudChecks: true,
-        weighInBy: { select: { id: true, name: true } },
-        weighOutBy: { select: { id: true, name: true } },
-        warehouseStartBy: { select: { id: true, name: true } },
-        warehouseEndBy: { select: { id: true, name: true } },
       },
     });
 

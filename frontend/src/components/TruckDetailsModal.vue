@@ -1519,7 +1519,7 @@ const openCorrectionModal = () => {
     guestIdNumber: props.truck?.guestIdNumber || props.truck?.guestId || '',
     grossWeight: props.truck?.grossWeight || null,
     tareWeight: props.truck?.tareWeight || null,
-    actualWeight: props.truck?.actualWeight !== undefined && props.truck?.actualWeight !== null ? props.truck.actualWeight : (props.truck?.warehouseProcesses?.[0]?.actualWeight || null),
+    actualWeight: props.truck?.actualWeight !== undefined && props.truck?.actualWeight !== null ? props.truck.actualWeight : ((props.truck?.warehouseProcesses || []).find(p => p.isCurrent !== false)?.actualWeight || null),
     status: props.truck?.status || 'COMPLETED',
     reasonCategory: '',
     remark: '',

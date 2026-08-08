@@ -291,4 +291,208 @@ describe('OperationLogCorrectionService', () => {
       mockTxClient,
     );
   });
+
+  it('should throw BadRequestException if transaction status is non-terminal (e.g. REGISTERED)', async () => {
+    const mockTx = {
+      id: 'tx-active',
+      status: 'REGISTERED',
+      revision: 1,
+    };
+
+    const mockTxClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+      },
+    };
+
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    const dto = {
+      reasonCode: 'TYPO',
+      remark: 'Koreksi transaksi aktif',
+      expectedRevision: 1,
+      items: [
+        {
+          targetModule: CorrectionTargetModule.TRANSACTION,
+          fieldName: 'driverName',
+          newValue: 'John Doe',
+        },
+      ],
+    };
+
+    await expect(
+      service.correctOperationLog('tx-active', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should throw BadRequestException if proposed grossWeight < tareWeight', async () => {
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      revision: 1,
+      grossWeight: 10000,
+      tareWeight: 12000,
+    };
+
+    const mockTxClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+      },
+    };
+
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    const dto = {
+      reasonCode: 'SALAH_INPUT',
+      remark: 'Koreksi berat gross lebih kecil dari tare',
+      expectedRevision: 1,
+      items: [
+        {
+          targetModule: CorrectionTargetModule.TRANSACTION,
+          fieldName: 'grossWeight',
+          newValue: 5000, // Proposed Gross 5000 < Tare 12000!
+        },
+      ],
+    };
+
+    await expect(
+      service.correctOperationLog('tx-1', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should throw BadRequestException if proposed warehouseStartAt > warehouseEndAt', async () => {
+    const mockTx = {
+      id: 'tx-1',
+      status: 'COMPLETED',
+      revision: 1,
+      warehouseStartAt: new Date('2026-08-08T10:00:00Z'),
+      warehouseEndAt: new Date('2026-08-08T09:00:00Z'), // Start > End!
+    };
+
+    const mockTxClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue(mockTx),
+      },
+    };
+
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    const dto = {
+      reasonCode: 'SALAH_INPUT',
+      remark: 'Koreksi waktu gudang invalid',
+      expectedRevision: 1,
+      items: [
+        {
+          targetModule: CorrectionTargetModule.WAREHOUSE,
+          targetRecordId: 'wh-1',
+          fieldName: 'startAt',
+          newValue: '2026-08-08T12:00:00Z',
+        },
+      ],
+    };
+
+    await expect(
+      service.correctOperationLog('tx-1', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should execute REOPEN_WORKFLOW and supersede downstream current records', async () => {
+    const mockTx = {
+      id: 'tx-reopen',
+      status: 'COMPLETED',
+      revision: 3,
+    };
+
+    const mockCorrection = {
+      id: 'cor-reopen',
+      correctionNumber: 'COR-2026-REOPEN01',
+      items: [],
+    };
+
+    const mockTxClient = {
+      transaction: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValueOnce(mockTx)
+          .mockResolvedValueOnce({ ...mockTx, status: 'QC_VEHICLE_PENDING', revision: 4 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      transactionCorrection: {
+        create: jest.fn().mockResolvedValue(mockCorrection),
+      },
+      transactionStatusHistory: {
+        create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
+      },
+      qcVehicleCheck: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      incomingMaterialCheck: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      warehouseProcess: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      weighbridgeRecord: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+    jest
+      .spyOn(mockActivityLogsService, 'logAction')
+      .mockResolvedValue(true as any);
+
+    const dto = {
+      action: CorrectionAction.REOPEN_WORKFLOW,
+      reasonCode: 'REOPEN_REQUESTED',
+      remark: 'Membalikkan status transaksi untuk pemeriksaan ulang QC',
+      expectedRevision: 3,
+      items: [],
+    };
+
+    const res = await service.correctOperationLog('tx-reopen', dto, {
+      id: 'adm-1',
+      role: 'ADMIN',
+      email: 'admin@gms.local',
+    });
+
+    expect(res.success).toBe(true);
+    expect(mockTxClient.qcVehicleCheck.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { transactionId: 'tx-reopen', isCurrent: true },
+        data: expect.objectContaining({ isCurrent: false }),
+      }),
+    );
+    expect(mockTxClient.incomingMaterialCheck.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { transactionId: 'tx-reopen', isCurrent: true },
+        data: expect.objectContaining({ isCurrent: false }),
+      }),
+    );
+    expect(mockTxClient.warehouseProcess.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { transactionId: 'tx-reopen', isCurrent: true },
+        data: expect.objectContaining({ isCurrent: false }),
+      }),
+    );
+    expect(mockTxClient.weighbridgeRecord.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { transactionId: 'tx-reopen', type: 'OUT', isCurrent: true },
+        data: expect.objectContaining({ isCurrent: false }),
+      }),
+    );
+  });
 });
+
