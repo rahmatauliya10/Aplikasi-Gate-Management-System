@@ -56,6 +56,7 @@ jobs:
           npm run prisma:preflight -- --report-only --fail-on-duplicates
           if [ "${{ matrix.db_state }}" = "upgraded" ]; then
             echo "Executing baseline upgrade simulation..."
+            npx prisma db execute --file prisma/migrations/20260714030729_init/migration.sql --schema prisma/schema.prisma
             npx prisma migrate resolve --applied 20260714030729_init || true
           fi
           npx prisma migrate deploy
