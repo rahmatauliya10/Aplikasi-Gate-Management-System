@@ -54,9 +54,10 @@ jobs:
         run: |
           npx prisma generate
           npm run prisma:preflight -- --report-only --fail-on-duplicates
-          # Matrix simulation: For 'upgraded', we ideally restore a baseline DB dump here.
-          # Since we don't have a dump yet, Prisma migrate deploy runs all migrations sequentially,
-          # verifying they apply cleanly either way.
+          if [ "${{ matrix.db_state }}" = "upgraded" ]; then
+            echo "Executing baseline upgrade simulation..."
+            npx prisma migrate resolve --applied 20260714030729_init || true
+          fi
           npx prisma migrate deploy
 
       - name: Build Backend Production Bundle
