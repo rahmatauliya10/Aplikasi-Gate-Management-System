@@ -377,6 +377,13 @@ describe('OperationLogCorrectionService', () => {
       id: 'tx-1',
       status: 'COMPLETED',
       revision: 1,
+      warehouseProcesses: [
+        {
+          id: 'wh-1',
+          startAt: new Date('2026-08-08T10:00:00Z'),
+          endAt: new Date('2026-08-08T09:00:00Z'),
+        },
+      ],
       warehouseStartAt: new Date('2026-08-08T10:00:00Z'),
       warehouseEndAt: new Date('2026-08-08T09:00:00Z'), // Start > End!
     };

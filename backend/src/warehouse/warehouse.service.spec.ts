@@ -27,6 +27,9 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       create: jest.fn(),
       aggregate: jest.fn(),
     },
+    userWarehouseAccess: {
+      findMany: jest.fn(),
+    },
   };
 
   const mockActivityLogsService = {
@@ -59,6 +62,11 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       warehouseStartAt: new Date(),
       warehouseStartById: 'user-1',
     };
+
+    mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockTx);
+    mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+      { processType: 'GBB' },
+    ]);
 
     const mockTxClient = {
       transaction: {
@@ -116,6 +124,11 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       status: 'INCOMING_CHECK_IN_PROGRESS',
       processType: 'GBB',
     };
+
+    mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockTx);
+    mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+      { processType: 'GBB' },
+    ]);
 
     const mockTxClient = {
       transaction: {
