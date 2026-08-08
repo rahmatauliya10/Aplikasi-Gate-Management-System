@@ -15,7 +15,6 @@ import { GATE_DETAIL_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.
 
 @Injectable()
 export class GateService {
-
   private readonly logger = new Logger(GateService.name);
 
   constructor(

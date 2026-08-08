@@ -3,6 +3,8 @@ import { WeighbridgeService } from './weighbridge.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 
+import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+
 /**
  * P1-07 Regression: Verifies that WeighbridgeService getRecordDetail
  * and getQueue use isCurrent:true filter so historical records
@@ -62,7 +64,10 @@ describe('Weighbridge isCurrent Filter (P1-07)', () => {
       weighOutBy: { id: 'u2', name: 'Op2', role: 'SECURITY' },
     });
 
-    const result = await service.getRecordDetail('tx-1', mockUser as any);
+    const result = await service.getRecordDetail(
+      'tx-1',
+      mockUser as unknown as JwtPayloadUser,
+    );
 
     // Verify the query included isCurrent filter
     const queryArg = findUniqueSpy.mock.calls[0][0];
@@ -73,7 +78,10 @@ describe('Weighbridge isCurrent Filter (P1-07)', () => {
   });
 
   it('getQueue should filter weighbridgeRecords by isCurrent:true', async () => {
-    await service.getQueue({ page: 1, limit: 10 } as any, mockUser as any);
+    await service.getQueue(
+      { page: 1, limit: 10 } as any,
+      mockUser as unknown as JwtPayloadUser,
+    );
 
     const findManyCall = findManySpy.mock.calls[0][0];
     expect(findManyCall.include.weighbridgeRecords.where).toBeDefined();
@@ -93,14 +101,31 @@ describe('Weighbridge isCurrent Filter (P1-07)', () => {
       weighOutAt: new Date(),
       remarks: null,
       weighbridgeRecords: [
-        { id: 'wb-in-2', type: 'IN', isCurrent: true, weight: 15000, ticketNumber: 'T002', remarks: null },
-        { id: 'wb-out-2', type: 'OUT', isCurrent: true, weight: 5000, ticketNumber: 'T003', remarks: null },
+        {
+          id: 'wb-in-2',
+          type: 'IN',
+          isCurrent: true,
+          weight: 15000,
+          ticketNumber: 'T002',
+          remarks: null,
+        },
+        {
+          id: 'wb-out-2',
+          type: 'OUT',
+          isCurrent: true,
+          weight: 5000,
+          ticketNumber: 'T003',
+          remarks: null,
+        },
       ],
       weighInBy: { id: 'u1', name: 'Op1', role: 'SECURITY' },
       weighOutBy: { id: 'u2', name: 'Op2', role: 'SECURITY' },
     });
 
-    const result = await service.getRecordDetail('tx-1', mockUser as any);
+    const result = await service.getRecordDetail(
+      'tx-1',
+      mockUser as unknown as JwtPayloadUser,
+    );
 
     // The result should use the current revision records
     expect(result.data.weighInTicketNumber).toBe('T002');

@@ -510,7 +510,11 @@ export class QcService {
           ...(remarks && { remarks }),
         },
         include: {
-          warehouseProcesses: { where: { isCurrent: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+          warehouseProcesses: {
+            where: { isCurrent: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
       });
     });

@@ -4,6 +4,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
+import { WarehouseCondition, WarehouseUnit } from '@prisma/client';
+import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+
 describe('WarehouseService Revisioning (P1-01)', () => {
   let service: WarehouseService;
 
@@ -60,7 +63,9 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     const mockTxClient = {
       transaction: {
         findUnique: jest.fn().mockResolvedValue(mockTx),
-        update: jest.fn().mockResolvedValue({ ...mockTx, status: 'WAREHOUSE_DONE' }),
+        update: jest
+          .fn()
+          .mockResolvedValue({ ...mockTx, status: 'WAREHOUSE_DONE' }),
       },
       warehouseProcess: {
         findFirst: jest.fn().mockResolvedValue(null), // Fallback scenario!
@@ -78,10 +83,10 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       {
         actualWeight: 10000,
         actualQuantity: 100,
-        unit: 'KG' as any,
-        condition: 'GOOD' as any,
+        unit: WarehouseUnit.KG,
+        condition: WarehouseCondition.GOOD,
       },
-      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as any,
+      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as unknown as JwtPayloadUser,
     );
 
     expect(mockTxClient.warehouseProcess.aggregate).toHaveBeenCalledWith({
@@ -111,7 +116,9 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     const mockTxClient = {
       transaction: {
         findFirst: jest.fn().mockResolvedValue(mockTx),
-        update: jest.fn().mockResolvedValue({ ...mockTx, status: 'INCOMING_CHECK_PASSED' }),
+        update: jest
+          .fn()
+          .mockResolvedValue({ ...mockTx, status: 'INCOMING_CHECK_PASSED' }),
       },
       incomingMaterialCheck: {
         aggregate: jest.fn().mockResolvedValue({ _max: { revision: 1 } }),
@@ -126,7 +133,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     const result = await service.submitIncomingCheck(
       'tx-wh-2',
       { decision: 'passed' },
-      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as any,
+      { id: 'usr-1', role: 'WAREHOUSE', email: 'wh@gms.local' } as unknown as JwtPayloadUser,
     );
 
     expect(mockTxClient.incomingMaterialCheck.aggregate).toHaveBeenCalledWith({

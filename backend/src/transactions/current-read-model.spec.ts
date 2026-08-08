@@ -3,6 +3,7 @@ import { TransactionsService } from './transactions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 /**
  * P0-02 Regression: Verifies that all TransactionsService query methods
@@ -66,7 +67,10 @@ describe('Current Read Model (P0-02)', () => {
   };
 
   it('findAll should include isCurrent:true on all relation queries', async () => {
-    await service.findAll({ page: 1, limit: 10 } as any, mockUser as any);
+    await service.findAll(
+      { page: 1, limit: 10 } as any,
+      mockUser as unknown as JwtPayloadUser,
+    );
 
     const findManyCall = findManySpy.mock.calls[0][0];
     expect(findManyCall.include).toBeDefined();
@@ -77,7 +81,7 @@ describe('Current Read Model (P0-02)', () => {
   });
 
   it('findActive should include isCurrent:true on all relation queries', async () => {
-    await service.findActive(mockUser as any);
+    await service.findActive(mockUser as unknown as JwtPayloadUser);
 
     const findManyCall = findManySpy.mock.calls[0][0];
     expect(findManyCall.include).toBeDefined();
@@ -94,7 +98,7 @@ describe('Current Read Model (P0-02)', () => {
       status: 'COMPLETED',
     });
 
-    await service.findOne('tx-1', mockUser as any);
+    await service.findOne('tx-1', mockUser as unknown as JwtPayloadUser);
 
     const findFirstCall = findFirstSpy.mock.calls[0][0];
     expect(findFirstCall.include).toBeDefined();

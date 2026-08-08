@@ -432,7 +432,11 @@ describe('OperationLogCorrectionService', () => {
         findUnique: jest
           .fn()
           .mockResolvedValueOnce(mockTx)
-          .mockResolvedValueOnce({ ...mockTx, status: 'QC_VEHICLE_PENDING', revision: 4 }),
+          .mockResolvedValueOnce({
+            ...mockTx,
+            status: 'QC_VEHICLE_PENDING',
+            revision: 4,
+          }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       transactionCorrection: {
@@ -441,10 +445,18 @@ describe('OperationLogCorrectionService', () => {
       transactionStatusHistory: {
         create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
       },
-      qcVehicleCheck: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      incomingMaterialCheck: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      warehouseProcess: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      weighbridgeRecord: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      qcVehicleCheck: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      incomingMaterialCheck: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      warehouseProcess: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      weighbridgeRecord: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
     };
 
     jest
