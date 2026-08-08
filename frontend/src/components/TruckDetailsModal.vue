@@ -1675,6 +1675,12 @@ const executeCorrectionSubmission = async () => {
       if (correctionForm.value.imForeignMatter !== null && correctionForm.value.imForeignMatter !== undefined && Number(correctionForm.value.imForeignMatter) !== Number(imOriginal.value.foreignMatter)) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'foreignMatter', newValue: Number(correctionForm.value.imForeignMatter) })
       }
+      if (correctionForm.value.imSampleWeight !== null && correctionForm.value.imSampleWeight !== undefined && Number(correctionForm.value.imSampleWeight) !== Number(imOriginal.value.sampleWeight)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'sampleWeight', newValue: Number(correctionForm.value.imSampleWeight) })
+      }
+      if (correctionForm.value.imGoodBeanPercentage !== null && correctionForm.value.imGoodBeanPercentage !== undefined && Number(correctionForm.value.imGoodBeanPercentage) !== Number(imOriginal.value.goodBeanPercentage)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'goodBeanPercentage', newValue: Number(correctionForm.value.imGoodBeanPercentage) })
+      }
       if (correctionForm.value.imOdor !== undefined && correctionForm.value.imOdor !== imOriginal.value.odor) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'odor', newValue: correctionForm.value.imOdor })
       }
@@ -1683,6 +1689,17 @@ const executeCorrectionSubmission = async () => {
       }
       if (correctionForm.value.imNotes !== undefined && correctionForm.value.imNotes !== imOriginal.value.notes) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'notes', newValue: correctionForm.value.imNotes })
+      }
+    }
+
+    // Warehouse Process mapping
+    const whProcRec = props.truck?.warehouseProcesses?.[props.truck.warehouseProcesses.length - 1]
+    if (whProcRec) {
+      if (correctionForm.value.whCondition !== undefined && correctionForm.value.whCondition !== whOriginal.value.condition) {
+        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'condition', newValue: correctionForm.value.whCondition })
+      }
+      if (correctionForm.value.whRemarks !== undefined && correctionForm.value.whRemarks !== whOriginal.value.remarks) {
+        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'remarks', newValue: correctionForm.value.whRemarks })
       }
     }
 
