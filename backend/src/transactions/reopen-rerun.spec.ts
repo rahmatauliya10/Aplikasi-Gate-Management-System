@@ -155,4 +155,56 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
 
     expect(result.success).toBe(true);
   });
+
+  it('completeQcAnalysis should increment transaction revision (P1-02 OCC fix)', async () => {
+    mockPrismaService.transaction.findFirst.mockResolvedValueOnce({
+      id: 'tx-200',
+      status: 'WAREHOUSE_IN_PROGRESS',
+      processType: 'GBB',
+      plateNumber: 'AB1234CD',
+    });
+
+    const mockWarehouseProcess = {
+      id: 'wp-1',
+      transactionId: 'tx-200',
+      remarks: null,
+    };
+
+    // Mock for the remarks update query
+    const mockFindFirst = jest.fn().mockResolvedValue(mockWarehouseProcess);
+    mockPrismaService.warehouseProcess = {
+      findFirst: mockFindFirst,
+      update: jest.fn().mockResolvedValue({}),
+    };
+
+    mockPrismaService.transaction.update = jest.fn().mockResolvedValue({
+      id: 'tx-200',
+      revision: 11,
+      qcAnalysisCompleted: true,
+      warehouseProcesses: [{ remarks: 'test' }],
+    });
+
+    const qcUser = {
+      id: 'qc-1',
+      role: 'QC',
+      email: 'qc@gms.local',
+    };
+
+    const result = await qcService.completeQcAnalysis(
+      'tx-200',
+      qcUser as any,
+      'Analysis complete',
+    );
+
+    expect(mockPrismaService.transaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          revision: { increment: 1 },
+          qcAnalysisCompleted: true,
+        }),
+      }),
+    );
+
+    expect(result.success).toBe(true);
+  });
 });

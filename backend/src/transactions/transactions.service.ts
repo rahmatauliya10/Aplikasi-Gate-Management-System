@@ -69,12 +69,14 @@ export class TransactionsService {
           take: parsedLimit,
           include: {
             statusHistory: { orderBy: { changedAt: 'desc' } },
-            weighbridgeRecords: true,
-            warehouseProcesses: true,
+            weighbridgeRecords: { where: { isCurrent: true } },
+            warehouseProcesses: { where: { isCurrent: true } },
             qcVehicleChecks: {
+              where: { isCurrent: true },
               include: { checkedBy: { select: { id: true, name: true } } },
             },
             incomingMaterialChecks: {
+              where: { isCurrent: true },
               include: { checkedBy: { select: { id: true, name: true } } },
             },
             weighInBy: { select: { id: true, name: true } },
@@ -125,12 +127,14 @@ export class TransactionsService {
         where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
         include: {
           statusHistory: { orderBy: { changedAt: 'desc' } },
-          weighbridgeRecords: true,
-          warehouseProcesses: true,
+          weighbridgeRecords: { where: { isCurrent: true } },
+          warehouseProcesses: { where: { isCurrent: true } },
           qcVehicleChecks: {
+            where: { isCurrent: true },
             include: { checkedBy: { select: { id: true, name: true } } },
           },
           incomingMaterialChecks: {
+            where: { isCurrent: true },
             include: { checkedBy: { select: { id: true, name: true } } },
           },
           weighInBy: { select: { id: true, name: true } },
@@ -177,12 +181,14 @@ export class TransactionsService {
       where: { id, ...scope },
       include: {
         statusHistory: { orderBy: { changedAt: 'desc' } },
-        weighbridgeRecords: true,
-        warehouseProcesses: true,
+        weighbridgeRecords: { where: { isCurrent: true } },
+        warehouseProcesses: { where: { isCurrent: true } },
         qcVehicleChecks: {
+          where: { isCurrent: true },
           include: { checkedBy: { select: { id: true, name: true } } },
         },
         incomingMaterialChecks: {
+          where: { isCurrent: true },
           include: { checkedBy: { select: { id: true, name: true } } },
         },
         fraudChecks: true,

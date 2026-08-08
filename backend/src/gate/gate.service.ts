@@ -240,10 +240,10 @@ export class GateService {
       where: { id },
       include: {
         statusHistory: { orderBy: { changedAt: 'asc' } },
-        weighbridgeRecords: true,
-        warehouseProcesses: true,
-        qcVehicleChecks: true,
-        incomingMaterialChecks: true,
+        weighbridgeRecords: { where: { isCurrent: true } },
+        warehouseProcesses: { where: { isCurrent: true } },
+        qcVehicleChecks: { where: { isCurrent: true } },
+        incomingMaterialChecks: { where: { isCurrent: true } },
       },
     });
 

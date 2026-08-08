@@ -188,10 +188,10 @@ export class OperationLogCorrectionService {
       const tx = await prismaTx.transaction.findUnique({
         where: { id },
         include: {
-          weighbridgeRecords: true,
-          warehouseProcesses: true,
-          qcVehicleChecks: true,
-          incomingMaterialChecks: true,
+          weighbridgeRecords: { where: { isCurrent: true } },
+          warehouseProcesses: { where: { isCurrent: true } },
+          qcVehicleChecks: { where: { isCurrent: true } },
+          incomingMaterialChecks: { where: { isCurrent: true } },
           attachments: true,
         },
       });
@@ -664,6 +664,7 @@ export class OperationLogCorrectionService {
           select: { id: true, name: true, role: true },
         },
         qcVehicleChecks: {
+          where: { isCurrent: true },
           include: {
             checkedBy: {
               select: { id: true, name: true, role: true },

@@ -384,8 +384,8 @@ export class QcService {
         ...scope,
       },
       include: {
-        qcVehicleChecks: true,
-        incomingMaterialChecks: true,
+        qcVehicleChecks: { where: { isCurrent: true } },
+        incomingMaterialChecks: { where: { isCurrent: true } },
       },
       orderBy: { qcEndAt: 'desc' },
       take: 100,
@@ -505,12 +505,13 @@ export class QcService {
       return prismaTx.transaction.update({
         where: { id: transactionId },
         data: {
+          revision: { increment: 1 },
           qcAnalysisCompleted: true,
           qcAnalysisCompletedAt: new Date(),
           ...(remarks && { remarks }),
         },
         include: {
-          warehouseProcesses: { orderBy: { createdAt: 'desc' }, take: 1 },
+          warehouseProcesses: { where: { isCurrent: true }, orderBy: { createdAt: 'desc' }, take: 1 },
         },
       });
     });

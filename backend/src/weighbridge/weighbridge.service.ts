@@ -110,7 +110,7 @@ export class WeighbridgeService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          weighbridgeRecords: true,
+          weighbridgeRecords: { where: { isCurrent: true } },
         },
       }),
     ]);
@@ -690,7 +690,10 @@ export class WeighbridgeService {
       include: {
         weighInBy: { select: { id: true, name: true, role: true } },
         weighOutBy: { select: { id: true, name: true, role: true } },
-        weighbridgeRecords: { orderBy: { createdAt: 'asc' } },
+        weighbridgeRecords: {
+          where: { isCurrent: true },
+          orderBy: { createdAt: 'asc' },
+        },
       },
     });
 

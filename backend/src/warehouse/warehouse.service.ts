@@ -475,6 +475,13 @@ export class WarehouseService {
         where: { transactionId, endAt: null },
       });
 
+      // Calculate next revision before checking for active process
+      const maxRev = await prismaTx.warehouseProcess.aggregate({
+        where: { transactionId },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
       if (activeProcess) {
         await prismaTx.warehouseProcess.update({
           where: { id: activeProcess.id },
@@ -496,6 +503,7 @@ export class WarehouseService {
         await prismaTx.warehouseProcess.create({
           data: {
             transactionId,
+            revision: nextRevision,
             processType: tx.processType,
             startAt: tx.warehouseStartAt || new Date(),
             startById: tx.warehouseStartById || user.id,
@@ -670,9 +678,16 @@ export class WarehouseService {
       'Incoming check completed via Warehouse';
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const maxRev = await prismaTx.incomingMaterialCheck.aggregate({
+        where: { transactionId },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
       await prismaTx.incomingMaterialCheck.create({
         data: {
           transactionId,
+          revision: nextRevision,
           result: dto.decision === 'passed' ? 'PASS' : 'REJECT',
           notes: notesContent,
           checkedById: user.id,

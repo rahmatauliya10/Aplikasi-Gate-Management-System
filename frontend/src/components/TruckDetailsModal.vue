@@ -1273,7 +1273,8 @@ const normalizeQcResult = (val) => {
 }
 
 const imOriginal = computed(() => {
-  const imCheck = (props.truck?.incomingMaterialChecks || [])[0] || {}
+  const checks = props.truck?.incomingMaterialChecks || []
+  const imCheck = checks.find(c => c.isCurrent !== false) || checks[0] || {}
   const fallback = props.truck?.qcDetails || {}
   const rawRes = imCheck.result || fallback.status || 'APPROVED'
   return {
@@ -1291,7 +1292,8 @@ const imOriginal = computed(() => {
 })
 
 const qcvOriginal = computed(() => {
-  const qcvCheck = (props.truck?.qcVehicleChecks || [])[0] || {}
+  const checks = props.truck?.qcVehicleChecks || []
+  const qcvCheck = checks.find(c => c.isCurrent !== false) || checks[0] || {}
   const fallback = props.truck?.qcDetails || {}
   const rawRes = qcvCheck.result || 'APPROVED'
   const items = (typeof qcvCheck.checklistItems === 'object' && qcvCheck.checklistItems) ? qcvCheck.checklistItems : {}
@@ -1354,12 +1356,25 @@ const qcvOriginal = computed(() => {
     quantityPhoto: quantity.photo,
     leakage: leakage.ok,
     leakagePhoto: leakage.photo,
-    notes: qcvCheck.notes || fallback.samplingNotes || ''
+    notes: qcvCheck.notes || fallback.samplingNotes || '',
+    _checklistEntries: [
+      { label: 'Vehicle Cleanliness', ok: cleanliness.ok === 'PASS', photo: cleanliness.photo },
+      { label: 'Door Seal Intact', ok: seal.ok === 'PASS', photo: seal.photo },
+      { label: 'Odor/Smell Check', ok: odor.ok === 'PASS', photo: odor.photo },
+      { label: 'Arrangement', ok: arrangement.ok === 'PASS', photo: arrangement.photo },
+      { label: 'Pest/Animal Control', ok: pest.ok === 'PASS', photo: pest.photo },
+      { label: 'Foreign Objects', ok: foreignObjects.ok === 'PASS', photo: foreignObjects.photo },
+      { label: 'Packaging Integrity', ok: packaging.ok === 'PASS', photo: packaging.photo },
+      { label: 'CoA Validation', ok: coa.ok === 'PASS', photo: coa.photo },
+      { label: 'Quantity Verification', ok: quantity.ok === 'PASS', photo: quantity.photo },
+      { label: 'Leakage & Condition', ok: leakage.ok === 'PASS', photo: leakage.photo },
+    ]
   }
 })
 
 const whOriginal = computed(() => {
-  const whProcess = (props.truck?.warehouseProcesses || [])[0] || {}
+  const procs = props.truck?.warehouseProcesses || []
+  const whProcess = procs.find(p => p.isCurrent !== false) || procs[0] || {}
   const rawCond = whProcess.condition || 'GOOD'
   let normalizedCond = 'GOOD'
   if (rawCond === 'DAMAGED') normalizedCond = 'DAMAGED'
@@ -1608,7 +1623,7 @@ const executeCorrectionSubmission = async () => {
 
     if (correctionForm.value.grossWeight !== null && Number(correctionForm.value.grossWeight) !== Number(props.truck?.grossWeight)) {
       const wbRecs = props.truck?.weighbridgeRecords || []
-      const inRec = wbRecs.find(r => r.type === 'IN') || wbRecs[0]
+      const inRec = wbRecs.find(r => r.type === 'IN' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'IN') || wbRecs[0]
       if (inRec) {
         items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: inRec.id, fieldName: 'weight', newValue: Number(correctionForm.value.grossWeight) })
       } else {
@@ -1618,8 +1633,9 @@ const executeCorrectionSubmission = async () => {
 
     if (correctionForm.value.tareWeight !== null && Number(correctionForm.value.tareWeight) !== Number(props.truck?.tareWeight)) {
       const wbRecs = props.truck?.weighbridgeRecords || []
-      const outRec = wbRecs.find(r => r.type === 'OUT') || wbRecs[wbRecs.length - 1]
-      if (outRec && outRec.id !== wbRecs.find(r => r.type === 'IN')?.id) {
+      const outRec = wbRecs.find(r => r.type === 'OUT' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'OUT')
+      const inRec = wbRecs.find(r => r.type === 'IN' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'IN')
+      if (outRec && outRec.id !== inRec?.id) {
         items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: outRec.id, fieldName: 'weight', newValue: Number(correctionForm.value.tareWeight) })
       } else {
         items.push({ targetModule: 'TRANSACTION', fieldName: 'tareWeight', newValue: Number(correctionForm.value.tareWeight) })
@@ -1634,8 +1650,9 @@ const executeCorrectionSubmission = async () => {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
     }
 
-    // QC Vehicle mapping
-    const qcvRec = props.truck?.qcVehicleChecks?.[props.truck.qcVehicleChecks.length - 1]
+    // QC Vehicle mapping — use current revision record for both compare and targetRecordId
+    const qcvChecks = props.truck?.qcVehicleChecks || []
+    const qcvRec = qcvChecks.find(c => c.isCurrent !== false) || qcvChecks[0]
     if (qcvRec) {
       if (correctionForm.value.qcvResult !== undefined && correctionForm.value.qcvResult !== qcvOriginal.value.result) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'result', newValue: correctionForm.value.qcvResult })
@@ -1655,16 +1672,35 @@ const executeCorrectionSubmission = async () => {
       if (correctionForm.value.qcvPest !== undefined && correctionForm.value.qcvPest !== qcvOriginal.value.pestEvidence) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'pestEvidence', newValue: correctionForm.value.qcvPest })
       }
-      if (correctionForm.value.qcvMoisture !== null && correctionForm.value.qcvMoisture !== undefined && Number(correctionForm.value.qcvMoisture) !== Number(qcvOriginal.value.moisture)) {
-        // Wait, qcvMoisture vs moisture. Is moisture in QC_VEHICLE? The schema says NO, moisture is in IncomingMaterialCheck. But the frontend might map it? Let's assume it maps to something, but checking schema... QcVehicleCheck doesn't have moisture.
-      }
+      // NOTE: qcvMoisture is handled by the checklistItems JSON above.
+      // Moisture field belongs to IncomingMaterialCheck, not QcVehicleCheck.
       if (correctionForm.value.qcvNotes !== undefined && correctionForm.value.qcvNotes !== qcvOriginal.value.notes) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'notes', newValue: correctionForm.value.qcvNotes })
       }
+
+      // Build canonical checklistItems JSON from all checklist form fields (P0-03 fix)
+      const checklistEntries = [
+        { label: 'Vehicle Cleanliness', ok: correctionForm.value.qcvCleanliness === 'PASS', photo: correctionForm.value.qcvCleanlinessPhoto || null },
+        { label: 'Door Seal Intact', ok: correctionForm.value.qcvSeal === 'PASS', photo: correctionForm.value.qcvSealPhoto || null },
+        { label: 'Odor/Smell Check', ok: correctionForm.value.qcvOdorCheck === 'PASS', photo: correctionForm.value.qcvOdorCheckPhoto || null },
+        { label: 'Arrangement', ok: correctionForm.value.qcvArrangement === 'PASS', photo: correctionForm.value.qcvArrangementPhoto || null },
+        { label: 'Pest/Animal Control', ok: correctionForm.value.qcvPest === 'PASS', photo: correctionForm.value.qcvPestPhoto || null },
+        { label: 'Foreign Objects', ok: correctionForm.value.qcvForeignObjects === 'PASS', photo: correctionForm.value.qcvForeignObjectsPhoto || null },
+        { label: 'Packaging Integrity', ok: correctionForm.value.qcvPackaging === 'PASS', photo: correctionForm.value.qcvPackagingPhoto || null },
+        { label: 'CoA Validation', ok: correctionForm.value.qcvCoa === 'PASS', photo: correctionForm.value.qcvCoaPhoto || null },
+        { label: 'Quantity Verification', ok: correctionForm.value.qcvQuantity === 'PASS', photo: correctionForm.value.qcvQuantityPhoto || null },
+        { label: 'Leakage & Condition', ok: correctionForm.value.qcvLeakage === 'PASS', photo: correctionForm.value.qcvLeakagePhoto || null },
+      ]
+      const origChecklist = JSON.stringify(qcvOriginal.value._checklistEntries || [])
+      const newChecklist = JSON.stringify(checklistEntries)
+      if (origChecklist !== newChecklist) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: checklistEntries })
+      }
     }
 
-    // Incoming Material mapping
-    const imRec = props.truck?.incomingMaterialChecks?.[props.truck.incomingMaterialChecks.length - 1]
+    // Incoming Material mapping — use current revision record
+    const imChecks = props.truck?.incomingMaterialChecks || []
+    const imRec = imChecks.find(c => c.isCurrent !== false) || imChecks[0]
     if (imRec) {
       if (correctionForm.value.imResult !== undefined && correctionForm.value.imResult !== imOriginal.value.result) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'result', newValue: correctionForm.value.imResult })
@@ -1692,8 +1728,9 @@ const executeCorrectionSubmission = async () => {
       }
     }
 
-    // Warehouse Process mapping
-    const whProcRec = props.truck?.warehouseProcesses?.[props.truck.warehouseProcesses.length - 1]
+    // Warehouse Process mapping — use current revision record
+    const whProcs = props.truck?.warehouseProcesses || []
+    const whProcRec = whProcs.find(p => p.isCurrent !== false) || whProcs[0]
     if (whProcRec) {
       if (correctionForm.value.whCondition !== undefined && correctionForm.value.whCondition !== whOriginal.value.condition) {
         items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'condition', newValue: correctionForm.value.whCondition })
