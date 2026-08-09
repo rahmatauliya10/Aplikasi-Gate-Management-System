@@ -50,7 +50,10 @@ async function main() {
   console.log(`Found ${dbMigrations.length} migration(s) in database.\n`);
 
   // 2. Compare with local files
-  const migrationsDir = path.resolve(__dirname, '..', 'backend', 'prisma', 'migrations');
+  const baseDir = path.resolve(__dirname, '..');
+  const migrationsDir = fs.existsSync(path.join(baseDir, 'backend', 'prisma', 'migrations'))
+    ? path.join(baseDir, 'backend', 'prisma', 'migrations')
+    : path.join(baseDir, 'prisma', 'migrations');
   let hasFailure = false;
   let mismatchCount = 0;
 
