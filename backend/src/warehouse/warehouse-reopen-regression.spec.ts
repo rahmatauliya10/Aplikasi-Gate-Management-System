@@ -258,4 +258,3 @@ describe('Warehouse CANCELLED→REOPEN Regression (P0-02)', () => {
     expect(result.success).toBe(true);
   });
 });
-
