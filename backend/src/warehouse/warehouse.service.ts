@@ -470,9 +470,9 @@ export class WarehouseService {
           : `Checklist: ${checklistStr}`;
       }
 
-      // Find the existing active warehouse process
+      // Find the existing active warehouse process (must be current revision)
       const activeProcess = await prismaTx.warehouseProcess.findFirst({
-        where: { transactionId, endAt: null },
+        where: { transactionId, isCurrent: true, endAt: null },
       });
 
       // Calculate next revision before checking for active process
@@ -730,6 +730,7 @@ export class WarehouseService {
         warehouseStartBy: { select: { id: true, name: true } },
         warehouseEndBy: { select: { id: true, name: true } },
         warehouseProcesses: {
+          where: { isCurrent: true },
           orderBy: { createdAt: 'desc' },
           take: 1,
         },

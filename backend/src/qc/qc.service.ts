@@ -491,7 +491,7 @@ export class QcService {
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       if (remarks) {
         const activeProcess = await prismaTx.warehouseProcess.findFirst({
-          where: { transactionId, endAt: null },
+          where: { transactionId, isCurrent: true, endAt: null },
         });
         if (activeProcess) {
           await prismaTx.warehouseProcess.update({

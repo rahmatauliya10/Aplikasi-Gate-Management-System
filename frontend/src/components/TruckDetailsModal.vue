@@ -1672,13 +1672,12 @@ const executeCorrectionSubmission = async () => {
       if (correctionForm.value.qcvPest !== undefined && correctionForm.value.qcvPest !== qcvOriginal.value.pestEvidence) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'pestEvidence', newValue: correctionForm.value.qcvPest })
       }
-      // NOTE: qcvMoisture is handled by the checklistItems JSON above.
-      // Moisture field belongs to IncomingMaterialCheck, not QcVehicleCheck.
+      // qcvMoisture is preserved inside checklistItems.initialMoisture (P0-03 fix)
       if (correctionForm.value.qcvNotes !== undefined && correctionForm.value.qcvNotes !== qcvOriginal.value.notes) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'notes', newValue: correctionForm.value.qcvNotes })
       }
 
-      // Build canonical checklistItems JSON from all checklist form fields (P0-03 fix)
+      // Build canonical checklistItems JSON preserving { initialMoisture, items } shape (P0-03 fix)
       const checklistEntries = [
         { label: 'Vehicle Cleanliness', ok: correctionForm.value.qcvCleanliness === 'PASS', photo: correctionForm.value.qcvCleanlinessPhoto || null },
         { label: 'Door Seal Intact', ok: correctionForm.value.qcvSeal === 'PASS', photo: correctionForm.value.qcvSealPhoto || null },
@@ -1691,10 +1690,16 @@ const executeCorrectionSubmission = async () => {
         { label: 'Quantity Verification', ok: correctionForm.value.qcvQuantity === 'PASS', photo: correctionForm.value.qcvQuantityPhoto || null },
         { label: 'Leakage & Condition', ok: correctionForm.value.qcvLeakage === 'PASS', photo: correctionForm.value.qcvLeakagePhoto || null },
       ]
+      // Canonical checklistItems contract: { initialMoisture: number, items: [...] }
+      // Never send a flat array — that destroys the moisture value.
+      const checklistPayload = {
+        initialMoisture: Number(correctionForm.value.qcvMoisture) || 0,
+        items: checklistEntries,
+      }
       const origChecklist = JSON.stringify(qcvOriginal.value._checklistEntries || [])
-      const newChecklist = JSON.stringify(checklistEntries)
+      const newChecklist = JSON.stringify(checklistPayload)
       if (origChecklist !== newChecklist) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: checklistEntries })
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: checklistPayload })
       }
     }
 

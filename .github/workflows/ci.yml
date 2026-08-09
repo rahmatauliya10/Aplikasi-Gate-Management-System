@@ -61,6 +61,13 @@ jobs:
           fi
           npx prisma migrate deploy
 
+      - name: Verify Migration Checksums (P0-01 Evidence)
+        if: matrix.db_state == 'upgraded'
+        working-directory: .
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+        run: npx ts-node scripts/check-migration-checksums.ts
+
       - name: Build Backend Production Bundle
         working-directory: ./backend
         env:
@@ -114,6 +121,10 @@ jobs:
         env:
           VITE_API_BASE_URL: /api
         run: npm run build
+
+      - name: Execute Frontend Unit Tests (Vitest)
+        working-directory: ./frontend
+        run: npm test --if-present
 
   security-vulnerability-audit:
     name: Dependency Security & Vulnerability Scan

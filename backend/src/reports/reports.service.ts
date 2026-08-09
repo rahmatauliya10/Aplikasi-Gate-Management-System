@@ -5,6 +5,8 @@ import { ReportQueryDto } from './dto/report-query.dto';
 import { Prisma } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { REPORTS_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
+
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
@@ -62,22 +64,7 @@ export class ReportsService {
         where,
         skip,
         take: limit,
-        include: {
-          statusHistory: { orderBy: { changedAt: 'desc' } },
-          weighbridgeRecords: true,
-          warehouseProcesses: true,
-          qcVehicleChecks: {
-            include: { checkedBy: { select: { id: true, name: true } } },
-          },
-          incomingMaterialChecks: {
-            include: { checkedBy: { select: { id: true, name: true } } },
-          },
-          fraudChecks: true,
-          weighInBy: { select: { id: true, name: true } },
-          weighOutBy: { select: { id: true, name: true } },
-          warehouseStartBy: { select: { id: true, name: true } },
-          warehouseEndBy: { select: { id: true, name: true } },
-        },
+        include: REPORTS_CURRENT_RELATIONS_INCLUDE,
         orderBy: { createdAt: 'desc' },
       }),
     ]);

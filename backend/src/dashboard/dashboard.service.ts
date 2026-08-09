@@ -74,7 +74,12 @@ export class DashboardService {
         },
       }),
       this.prisma.transaction.findMany({
-        where: { status: 'COMPLETED', ...scope },
+        where: {
+          status: 'COMPLETED',
+          // 90-day rolling window to prevent unbounded query as data grows
+          createdAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
+          ...scope,
+        },
         select: {
           id: true,
           processType: true,
