@@ -63,10 +63,10 @@ jobs:
 
       - name: Verify Migration Checksums (P0-01 Evidence)
         if: matrix.db_state == 'upgraded'
-        working-directory: .
+        working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
-        run: npx ts-node scripts/check-migration-checksums.ts
+        run: npx ts-node ../scripts/check-migration-checksums.ts
 
       - name: Build Backend Production Bundle
         working-directory: ./backend
