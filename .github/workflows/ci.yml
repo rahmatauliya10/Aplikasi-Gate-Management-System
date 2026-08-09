@@ -66,7 +66,7 @@ jobs:
         working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
-        run: node ../scripts/check-migration-checksums.js
+        run: node scripts/check-migration-checksums.js
 
       - name: Build Backend Production Bundle
         working-directory: ./backend

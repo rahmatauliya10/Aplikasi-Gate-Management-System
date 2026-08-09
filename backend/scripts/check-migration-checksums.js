@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+
 let PrismaClient;
 try {
   PrismaClient = require('@prisma/client').PrismaClient;
@@ -21,7 +22,7 @@ try {
     ).PrismaClient;
   } catch (e2) {
     PrismaClient = require(
-      path.resolve(__dirname, '..', 'backend', 'node_modules', '@prisma', 'client'),
+      path.resolve(__dirname, '..', 'node_modules', '@prisma', 'client'),
     ).PrismaClient;
   }
 }
@@ -55,11 +56,9 @@ async function main() {
 
   // 2. Compare with local files
   const baseDir = path.resolve(__dirname, '..');
-  const migrationsDir = fs.existsSync(
-    path.join(baseDir, 'backend', 'prisma', 'migrations'),
-  )
-    ? path.join(baseDir, 'backend', 'prisma', 'migrations')
-    : path.join(baseDir, 'prisma', 'migrations');
+  const migrationsDir = fs.existsSync(path.join(baseDir, 'prisma', 'migrations'))
+    ? path.join(baseDir, 'prisma', 'migrations')
+    : path.join(baseDir, 'backend', 'prisma', 'migrations');
   let hasFailure = false;
   let mismatchCount = 0;
 
