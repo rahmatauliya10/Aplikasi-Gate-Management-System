@@ -178,8 +178,9 @@ describe('Warehouse CANCELLED→REOPEN Regression (P0-02)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('completeWarehouse should throw ConflictException when no current process exists', async () => {
-    // Edge case: findFirst with isCurrent:true returns null → throws ConflictException
+  it('completeWarehouse fallback should NOT pick up historical rev when no current process exists', async () => {
+    // Edge case: both historical revisions are isCurrent:false, endAt:null
+    // findFirst with isCurrent:true returns null → triggers fallback create
     const mockTx = {
       id: 'tx-edge-1',
       status: 'WAREHOUSE_IN_PROGRESS',
@@ -198,9 +199,36 @@ describe('Warehouse CANCELLED→REOPEN Regression (P0-02)', () => {
     const mockTxClient = {
       warehouseProcess: {
         findFirst: jest.fn().mockResolvedValue(null), // No current process
+        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 2 } }),
+        create: jest.fn().mockResolvedValue({
+          id: 'wp-fallback',
+          revision: 3,
+          transactionId: 'tx-edge-1',
+        }),
       },
       transaction: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue({
+          ...mockTx,
+          status: 'WAREHOUSE_DONE',
+          warehouseEndBy: {
+            id: 'usr-wh-1',
+            name: 'WH User',
+            role: 'WAREHOUSE',
+          },
+        }),
+        update: jest.fn().mockResolvedValue({
+          ...mockTx,
+          status: 'WAREHOUSE_DONE',
+          warehouseEndBy: {
+            id: 'usr-wh-1',
+            name: 'WH User',
+            role: 'WAREHOUSE',
+          },
+        }),
+      },
+      transactionStatusHistory: {
+        create: jest.fn().mockResolvedValue({}),
       },
     };
 
@@ -208,17 +236,27 @@ describe('Warehouse CANCELLED→REOPEN Regression (P0-02)', () => {
       .spyOn(mockPrismaService, '$transaction')
       .mockImplementation(async (cb: any) => cb(mockTxClient));
 
-    await expect(
-      service.completeWarehouse(
-        'tx-edge-1',
-        {
-          actualWeight: 8000,
-          actualQuantity: 80,
-          unit: WarehouseUnit.KG,
-          condition: WarehouseCondition.GOOD,
-        },
-        warehouseUser,
-      ),
-    ).rejects.toThrow(ConflictException);
+    const result = await service.completeWarehouse(
+      'tx-edge-1',
+      {
+        actualWeight: 8000,
+        actualQuantity: 80,
+        unit: WarehouseUnit.KG,
+        condition: WarehouseCondition.GOOD,
+      },
+      warehouseUser,
+    );
+
+    // ASSERT: fallback create used revision = max(2) + 1 = 3
+    expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          transactionId: 'tx-edge-1',
+          revision: 3,
+        }),
+      }),
+    );
+
+    expect(result.success).toBe(true);
   });
 });
