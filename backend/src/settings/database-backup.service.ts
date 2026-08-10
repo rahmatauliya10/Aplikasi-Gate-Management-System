@@ -10,7 +10,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import * as argon2 from 'argon2';
-import { createHash, createHmac } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -981,9 +981,12 @@ export class DatabaseBackupService
     // 5. Perform pg_restore execution with --single-transaction and --exit-on-error
     try {
       this.logger.log(`Starting pg_restore for ${dumpFilePath}...`);
-      const dbUrl =
-        process.env.DATABASE_URL ||
-        'postgresql://postgres:postgres@postgres:5432/gms';
+      const dbUrl = process.env.DATABASE_URL;
+      if (!dbUrl) {
+        throw new InternalServerErrorException(
+          'DATABASE_URL environment variable must be set for database restore operations.',
+        );
+      }
       const parsedUrl = new URL(dbUrl);
       const host = parsedUrl.hostname || 'postgres';
       const port = parsedUrl.port || '5432';
@@ -1290,7 +1293,12 @@ export class DatabaseBackupService
       .update(payloadStr)
       .digest('hex');
 
-    if (signature !== expectedSignature) {
+    const sigBuf = Buffer.from(signature, 'hex');
+    const expBuf = Buffer.from(expectedSignature, 'hex');
+    if (
+      sigBuf.length !== expBuf.length ||
+      !timingSafeEqual(sigBuf, expBuf)
+    ) {
       throw new BadRequestException({
         success: false,
         message:
@@ -1351,9 +1359,12 @@ export class DatabaseBackupService
       await this.runAutomatedScheduledBackup('AUTO_PRE_RESTORE', user);
 
       // Perform pg_restore
-      const dbUrl =
-        process.env.DATABASE_URL ||
-        'postgresql://postgres:postgres@postgres:5432/gms';
+      const dbUrl = process.env.DATABASE_URL;
+      if (!dbUrl) {
+        throw new InternalServerErrorException(
+          'DATABASE_URL environment variable must be set for database restore operations.',
+        );
+      }
       const parsedUrl = new URL(dbUrl);
       const host = parsedUrl.hostname || 'postgres';
       const port = parsedUrl.port || '5432';
@@ -1435,6 +1446,15 @@ export class DatabaseBackupService
             }
 
             const fileBuffer = Buffer.from(file.base64Content, 'base64');
+            if (file.checksum) {
+              const actualChecksum = this.calculateChecksumForBuffer(fileBuffer);
+              if (actualChecksum !== file.checksum) {
+                this.logger.warn(
+                  `Attachment checksum mismatch blocked for file: ${file.fileName}`,
+                );
+                continue;
+              }
+            }
             fs.writeFileSync(targetPath, fileBuffer);
             restoredAttachmentsCount++;
           }
