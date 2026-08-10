@@ -81,6 +81,9 @@ describe('WarehouseService Revisioning (P1-01)', () => {
         aggregate: jest.fn().mockResolvedValue({ _max: { revision: 2 } }),
         create: jest.fn().mockResolvedValue({ id: 'wp-new', revision: 3 }),
       },
+      transactionStatusHistory: {
+        create: jest.fn().mockResolvedValue({}),
+      },
     };
 
     jest
