@@ -662,13 +662,13 @@ export class DatabaseBackupService
     let attachmentsChecksum = '';
     let attachmentsArchivedOk = true;
     let missingAttachmentCount = 0;
-    let orphanPhysicalFileCount = 0;
+    const orphanPhysicalFileCount = 0;
     const dbAttachmentCount = attachments.length;
 
     try {
       const uploadDir = process.env.UPLOAD_DIR || './uploads';
       const resolvedUploadDir = path.resolve(uploadDir);
-      let physicalFilesMap = new Set<string>();
+      const physicalFilesMap = new Set<string>();
 
       if (fs.existsSync(resolvedUploadDir)) {
         const uploadFiles = this.getAllFilesRecursively(resolvedUploadDir);
@@ -707,8 +707,14 @@ export class DatabaseBackupService
           const cleanRelPath = rawPath
             .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
             .replace(/^[/\\]+/, '');
-          const fullPhysicalPath = path.resolve(resolvedUploadDir, cleanRelPath);
-          const relFromUpload = path.relative(resolvedUploadDir, fullPhysicalPath);
+          const fullPhysicalPath = path.resolve(
+            resolvedUploadDir,
+            cleanRelPath,
+          );
+          const relFromUpload = path.relative(
+            resolvedUploadDir,
+            fullPhysicalPath,
+          );
           const isInsideUpload =
             !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
 
