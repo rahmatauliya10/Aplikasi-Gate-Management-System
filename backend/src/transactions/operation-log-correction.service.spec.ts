@@ -562,7 +562,7 @@ describe('OperationLogCorrectionService', () => {
         ],
       };
 
-      await service.correctOperationLog('tx-gbb', dto as any, {
+      await service.correctOperationLog('tx-gbb', dto, {
         id: 'adm-1',
         role: 'ADMIN',
         email: 'admin@gms.local',
@@ -622,7 +622,7 @@ describe('OperationLogCorrectionService', () => {
         ],
       };
 
-      await service.correctOperationLog('tx-gbj', dto as any, {
+      await service.correctOperationLog('tx-gbj', dto, {
         id: 'adm-1',
         role: 'ADMIN',
         email: 'admin@gms.local',
@@ -682,7 +682,7 @@ describe('OperationLogCorrectionService', () => {
         ],
       };
 
-      await service.correctOperationLog('tx-gbj-out', dto as any, {
+      await service.correctOperationLog('tx-gbj-out', dto, {
         id: 'adm-1',
         role: 'ADMIN',
         email: 'admin@gms.local',

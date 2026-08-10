@@ -474,7 +474,8 @@ export class WarehouseService {
       if (!activeProcess) {
         throw new BadRequestException({
           success: false,
-          message: 'No active in-progress warehouse process found for this transaction',
+          message:
+            'No active in-progress warehouse process found for this transaction',
           errors: [],
         });
       }

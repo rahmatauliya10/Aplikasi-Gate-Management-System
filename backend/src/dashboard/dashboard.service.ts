@@ -139,7 +139,7 @@ export class DashboardService {
     completedTx.forEach((t) => {
       sumWaitingIn += getDiffMins(t.gateInAt, t.weighInAt);
       sumWarehouse += getDiffMins(t.warehouseStartAt, t.warehouseEndAt);
-      
+
       let vehicleQcDur = 0;
       if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
         const v = t.qcVehicleChecks[0];
@@ -151,7 +151,8 @@ export class DashboardService {
         incomingQcDur = getDiffMins(inc.startedAt, inc.completedAt);
       }
       const actualQcDur = vehicleQcDur + incomingQcDur;
-      sumQc += actualQcDur > 0 ? actualQcDur : getDiffMins(t.qcStartAt, t.qcEndAt);
+      sumQc +=
+        actualQcDur > 0 ? actualQcDur : getDiffMins(t.qcStartAt, t.qcEndAt);
 
       sumWaitingOut += getDiffMins(t.warehouseEndAt, t.weighOutAt);
       sumTotalTat += getDiffMins(t.gateInAt, t.gateOutAt);

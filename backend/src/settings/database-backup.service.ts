@@ -760,7 +760,8 @@ export class DatabaseBackupService
 
         if (attachmentsChecksum) {
           isOffsiteValid =
-            isOffsiteValid && offsiteAttachmentsChecksum === attachmentsChecksum;
+            isOffsiteValid &&
+            offsiteAttachmentsChecksum === attachmentsChecksum;
         }
 
         if (isOffsiteValid) {
