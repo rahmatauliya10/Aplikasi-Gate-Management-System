@@ -550,6 +550,14 @@ export class WarehouseService {
       });
     });
 
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Transaction not found after completing warehouse process',
+        errors: [],
+      });
+    }
+
     this.logger.log(
       `Warehouse completed successfully: ${updated.transactionNumber}`,
     );
