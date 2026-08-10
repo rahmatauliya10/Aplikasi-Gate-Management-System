@@ -654,11 +654,9 @@ export class WarehouseService {
     }
 
     if (!['GBB', 'GSP'].includes(tx.processType)) {
-      throw new BadRequestException({
-        success: false,
-        message: 'Incoming check only applies to GBB/GSP process types',
-        errors: [],
-      });
+      throw new BadRequestException(
+        'Incoming check only applies to GBB/GSP process types',
+      );
     }
 
     if (['GBB', 'GSP'].includes(tx.processType) && user.role === 'WAREHOUSE') {
