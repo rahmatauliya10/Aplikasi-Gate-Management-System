@@ -880,11 +880,14 @@ const verifyTruck = async (truck, passed) => {
           vehicleOdor: checklistStates.value[3]?.status === 'ok',
           sealCondition: checklistStates.value[4]?.status === 'ok',
           vehicleCondition: true,
-          checklistItems: checklistStates.value.map((s, idx) => ({
-            label: vehicleChecklist[idx] || 'Checklist item',
-            ok: s.status === 'ok',
-            photo: s.photo || null
-          })),
+          checklistItems: {
+            initialMoisture: 0,
+            items: checklistStates.value.map((s, idx) => ({
+              label: vehicleChecklist[idx] || 'Checklist item',
+              ok: s.status === 'ok',
+              photo: s.photo || null
+            }))
+          },
           notes: passed ? 'Lolos sampling awal QC' : 'Ditolak pada sampling awal QC'
         };
         response = await qcStore.submitVehicleResult(truck.id, payload)

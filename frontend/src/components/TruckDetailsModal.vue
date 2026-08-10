@@ -1212,6 +1212,7 @@ import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useConfirm } from '../composables/useConfirm'
 import truckService from '../services/truckService'
+import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -1296,24 +1297,16 @@ const qcvOriginal = computed(() => {
   const qcvCheck = checks.find(c => c.isCurrent !== false) || checks[0] || {}
   const fallback = props.truck?.qcDetails || {}
   const rawRes = qcvCheck.result || 'APPROVED'
-  const items = (typeof qcvCheck.checklistItems === 'object' && qcvCheck.checklistItems) ? qcvCheck.checklistItems : {}
+  const normChecklist = normalizeChecklistItems(qcvCheck.checklistItems)
+  const checklistItemsList = normChecklist.items.length > 0 ? normChecklist.items : (parsedChecklist.value?.items || [])
 
-  const parsedItems = parsedChecklist.value?.items || []
   const getItemData = (label, defaultVal = 'PASS') => {
     let okStatus = defaultVal
     let photoUrl = null
-    if (Array.isArray(qcvCheck.checklistItems)) {
-      const found = qcvCheck.checklistItems.find(i => i.label?.toLowerCase() === label.toLowerCase())
-      if (found) {
-        okStatus = found.ok ? 'PASS' : 'REJECT'
-        photoUrl = found.photo || null
-      }
-    } else if (Array.isArray(parsedItems)) {
-      const found = parsedItems.find(i => i.label?.toLowerCase() === label.toLowerCase())
-      if (found) {
-        okStatus = found.ok ? 'PASS' : 'REJECT'
-        photoUrl = found.photo || null
-      }
+    const found = checklistItemsList.find(i => i.label?.toLowerCase() === label.toLowerCase())
+    if (found) {
+      okStatus = found.ok ? 'PASS' : 'REJECT'
+      photoUrl = found.photo || null
     }
     return { ok: okStatus, photo: photoUrl }
   }
@@ -1335,7 +1328,7 @@ const qcvOriginal = computed(() => {
     result: normalizeQcResult(rawRes),
     vehicleOdor: (qcvCheck.vehicleOdor === 'REJECT' || fallback.samplingBau === 'Abnormal' || fallback.bau === 'Abnormal') ? 'REJECT' : 'PASS',
     vehicleCondition: (qcvCheck.vehicleCondition === 'REJECT' || fallback.samplingVisual === 'Abnormal' || fallback.visual === 'Abnormal') ? 'REJECT' : 'PASS',
-    moisture: items.initialMoisture !== undefined ? items.initialMoisture : (fallback.initialMoisture !== undefined ? fallback.initialMoisture : (fallback.kadarAir !== undefined ? fallback.kadarAir : 0)),
+    moisture: normChecklist.initialMoisture !== null ? normChecklist.initialMoisture : (fallback.initialMoisture !== undefined ? fallback.initialMoisture : (fallback.kadarAir !== undefined ? fallback.kadarAir : 0)),
     vehicleCleanliness: cleanliness.ok,
     vehicleCleanlinessPhoto: cleanliness.photo,
     sealCondition: seal.ok,
@@ -1678,27 +1671,8 @@ const executeCorrectionSubmission = async () => {
       }
 
       // Build canonical checklistItems JSON preserving { initialMoisture, items } shape (P0-03 fix)
-      const checklistEntries = [
-        { label: 'Vehicle Cleanliness', ok: correctionForm.value.qcvCleanliness === 'PASS', photo: correctionForm.value.qcvCleanlinessPhoto || null },
-        { label: 'Door Seal Intact', ok: correctionForm.value.qcvSeal === 'PASS', photo: correctionForm.value.qcvSealPhoto || null },
-        { label: 'Odor/Smell Check', ok: correctionForm.value.qcvOdorCheck === 'PASS', photo: correctionForm.value.qcvOdorCheckPhoto || null },
-        { label: 'Arrangement', ok: correctionForm.value.qcvArrangement === 'PASS', photo: correctionForm.value.qcvArrangementPhoto || null },
-        { label: 'Pest/Animal Control', ok: correctionForm.value.qcvPest === 'PASS', photo: correctionForm.value.qcvPestPhoto || null },
-        { label: 'Foreign Objects', ok: correctionForm.value.qcvForeignObjects === 'PASS', photo: correctionForm.value.qcvForeignObjectsPhoto || null },
-        { label: 'Packaging Integrity', ok: correctionForm.value.qcvPackaging === 'PASS', photo: correctionForm.value.qcvPackagingPhoto || null },
-        { label: 'CoA Validation', ok: correctionForm.value.qcvCoa === 'PASS', photo: correctionForm.value.qcvCoaPhoto || null },
-        { label: 'Quantity Verification', ok: correctionForm.value.qcvQuantity === 'PASS', photo: correctionForm.value.qcvQuantityPhoto || null },
-        { label: 'Leakage & Condition', ok: correctionForm.value.qcvLeakage === 'PASS', photo: correctionForm.value.qcvLeakagePhoto || null },
-      ]
-      // Canonical checklistItems contract: { initialMoisture: number, items: [...] }
-      // Never send a flat array — that destroys the moisture value.
-      const checklistPayload = {
-        initialMoisture: Number(correctionForm.value.qcvMoisture) || 0,
-        items: checklistEntries,
-      }
-      const origChecklist = JSON.stringify(qcvOriginal.value._checklistEntries || [])
-      const newChecklist = JSON.stringify(checklistPayload)
-      if (origChecklist !== newChecklist) {
+      const checklistPayload = buildChecklistPayload(correctionForm.value)
+      if (hasChecklistChanged(qcvOriginal.value._checklistEntries, qcvOriginal.value.moisture, checklistPayload)) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: checklistPayload })
       }
     }
@@ -2102,12 +2076,11 @@ const parsedChecklist = computed(() => {
   // If GBJ, populate checklist from qcVehicleChecks
   if (props.truck.processType === 'GBJ' && props.truck.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
     const check = props.truck.qcVehicleChecks[0];
-    let items = []
+    const norm = normalizeChecklistItems(check.checklistItems);
+    let items = norm.items;
     
     // Use new checklistItems format if available (includes photos)
-    if (check.checklistItems && Array.isArray(check.checklistItems)) {
-      items = check.checklistItems;
-    } else {
+    if (items.length === 0) {
       // Fallback for old data
       if (check.vehicleCleanliness && check.vehicleCleanliness !== 'NA') {
         items.push({ label: 'Vehicle Cleanliness', ok: check.vehicleCleanliness === 'PASS' })

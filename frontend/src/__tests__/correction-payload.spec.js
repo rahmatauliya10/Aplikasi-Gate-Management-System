@@ -1,38 +1,59 @@
 import { describe, it, expect } from 'vitest'
+import {
+  normalizeChecklistItems,
+  buildChecklistPayload,
+  hasChecklistChanged
+} from '../utils/correctionPayload'
 
 /**
- * P0-03 Regression Test: Correction Payload Builder
+ * P0-03 Regression Test: Correction Payload Builder & Checklist Normalizer
  *
- * These tests validate the canonical checklistItems shape used by the
- * TruckDetailsModal correction flow. The contract is:
- *
- *   checklistItems = { initialMoisture: number, items: ChecklistEntry[] }
- *
- * A flat array should NEVER be sent — it would destroy the moisture value.
+ * Validates production code from src/utils/correctionPayload.js used by
+ * TruckDetailsModal and QCVerification.
  */
 
-// Extract the payload builder logic (pure function) for testability
-function buildChecklistPayload(formValues) {
-  const checklistEntries = [
-    { label: 'Vehicle Cleanliness', ok: formValues.qcvCleanliness === 'PASS', photo: formValues.qcvCleanlinessPhoto || null },
-    { label: 'Door Seal Intact', ok: formValues.qcvSeal === 'PASS', photo: formValues.qcvSealPhoto || null },
-    { label: 'Odor/Smell Check', ok: formValues.qcvOdorCheck === 'PASS', photo: formValues.qcvOdorCheckPhoto || null },
-    { label: 'Arrangement', ok: formValues.qcvArrangement === 'PASS', photo: formValues.qcvArrangementPhoto || null },
-    { label: 'Pest/Animal Control', ok: formValues.qcvPest === 'PASS', photo: formValues.qcvPestPhoto || null },
-    { label: 'Foreign Objects', ok: formValues.qcvForeignObjects === 'PASS', photo: formValues.qcvForeignObjectsPhoto || null },
-    { label: 'Packaging Integrity', ok: formValues.qcvPackaging === 'PASS', photo: formValues.qcvPackagingPhoto || null },
-    { label: 'CoA Validation', ok: formValues.qcvCoa === 'PASS', photo: formValues.qcvCoaPhoto || null },
-    { label: 'Quantity Verification', ok: formValues.qcvQuantity === 'PASS', photo: formValues.qcvQuantityPhoto || null },
-    { label: 'Leakage & Condition', ok: formValues.qcvLeakage === 'PASS', photo: formValues.qcvLeakagePhoto || null },
-  ]
+describe('Checklist Normalizer — normalizeChecklistItems', () => {
+  it('should parse legacy array format into normalized object', () => {
+    const legacyArray = [
+      { label: 'Arrangement', ok: true },
+      { label: 'Foreign Objects', ok: false }
+    ]
+    const normalized = normalizeChecklistItems(legacyArray)
+    expect(normalized.initialMoisture).toBeNull()
+    expect(normalized.items).toHaveLength(2)
+    expect(normalized.items[0].label).toBe('Arrangement')
+  })
 
-  return {
-    initialMoisture: Number(formValues.qcvMoisture) || 0,
-    items: checklistEntries,
-  }
-}
+  it('should parse canonical object format containing initialMoisture and items', () => {
+    const canonicalObj = {
+      initialMoisture: 12.5,
+      items: [
+        { label: 'Arrangement', ok: true },
+        { label: 'Foreign Objects', ok: true }
+      ]
+    }
+    const normalized = normalizeChecklistItems(canonicalObj)
+    expect(normalized.initialMoisture).toBe(12.5)
+    expect(normalized.items).toHaveLength(2)
+  })
 
-describe('Correction Payload Builder — checklistItems', () => {
+  it('should parse JSON string of canonical object', () => {
+    const jsonStr = JSON.stringify({
+      initialMoisture: 11.8,
+      items: [{ label: 'Door Seal Intact', ok: true }]
+    })
+    const normalized = normalizeChecklistItems(jsonStr)
+    expect(normalized.initialMoisture).toBe(11.8)
+    expect(normalized.items).toHaveLength(1)
+  })
+
+  it('should safely handle null or undefined input', () => {
+    expect(normalizeChecklistItems(null)).toEqual({ initialMoisture: null, items: [] })
+    expect(normalizeChecklistItems(undefined)).toEqual({ initialMoisture: null, items: [] })
+  })
+})
+
+describe('Correction Payload Builder — buildChecklistPayload', () => {
   const baseFormValues = {
     qcvMoisture: 12.5,
     qcvCleanliness: 'PASS',
@@ -50,15 +71,10 @@ describe('Correction Payload Builder — checklistItems', () => {
   it('should produce canonical { initialMoisture, items } shape — never a flat array', () => {
     const payload = buildChecklistPayload(baseFormValues)
 
-    // Must be an object, never an array
     expect(Array.isArray(payload)).toBe(false)
     expect(typeof payload).toBe('object')
-
-    // Must have initialMoisture at top level
     expect(payload).toHaveProperty('initialMoisture')
     expect(payload).toHaveProperty('items')
-
-    // items must be an array of 10 checklist entries
     expect(Array.isArray(payload.items)).toBe(true)
     expect(payload.items).toHaveLength(10)
   })
@@ -74,16 +90,9 @@ describe('Correction Payload Builder — checklistItems', () => {
     expect(payload.initialMoisture).toBe(13.2)
   })
 
-  it('should default moisture to 0 when undefined', () => {
-    const noMoistureForm = { ...baseFormValues, qcvMoisture: undefined }
-    const payload = buildChecklistPayload(noMoistureForm)
-    expect(payload.initialMoisture).toBe(0)
-  })
-
-  it('should default moisture to 0 when null', () => {
-    const nullMoistureForm = { ...baseFormValues, qcvMoisture: null }
-    const payload = buildChecklistPayload(nullMoistureForm)
-    expect(payload.initialMoisture).toBe(0)
+  it('should default moisture to 0 when undefined or null', () => {
+    expect(buildChecklistPayload({ ...baseFormValues, qcvMoisture: undefined }).initialMoisture).toBe(0)
+    expect(buildChecklistPayload({ ...baseFormValues, qcvMoisture: null }).initialMoisture).toBe(0)
   })
 
   it('should correctly map PASS/REJECT for all 10 checklist items', () => {
@@ -121,18 +130,46 @@ describe('Correction Payload Builder — checklistItems', () => {
       'Leakage & Condition',
     ])
   })
+})
 
-  it('should produce different JSON when moisture changes (change detection)', () => {
-    const original = buildChecklistPayload(baseFormValues)
-    const changed = buildChecklistPayload({ ...baseFormValues, qcvMoisture: 14.0 })
+describe('Checklist Change Detector — hasChecklistChanged', () => {
+  const baseFormValues = {
+    qcvMoisture: 12.5,
+    qcvCleanliness: 'PASS',
+    qcvSeal: 'PASS',
+    qcvOdorCheck: 'PASS',
+    qcvArrangement: 'PASS',
+    qcvPest: 'PASS',
+    qcvForeignObjects: 'PASS',
+    qcvPackaging: 'PASS',
+    qcvCoa: 'PASS',
+    qcvQuantity: 'PASS',
+    qcvLeakage: 'PASS',
+  }
 
-    expect(JSON.stringify(original)).not.toBe(JSON.stringify(changed))
+  it('should return false when original array entries match new payload', () => {
+    const payload = buildChecklistPayload(baseFormValues)
+    const origEntries = payload.items.map(i => ({ label: i.label, ok: i.ok }))
+
+    const changed = hasChecklistChanged(origEntries, 12.5, payload)
+    expect(changed).toBe(false)
   })
 
-  it('should produce identical JSON when nothing changes (no-op detection)', () => {
-    const first = buildChecklistPayload(baseFormValues)
-    const second = buildChecklistPayload(baseFormValues)
+  it('should return true when an item status changes', () => {
+    const payload = buildChecklistPayload(baseFormValues)
+    const origEntries = payload.items.map(i => ({ label: i.label, ok: i.ok }))
+    // Change one item in original
+    origEntries[3].ok = false
 
-    expect(JSON.stringify(first)).toBe(JSON.stringify(second))
+    const changed = hasChecklistChanged(origEntries, 12.5, payload)
+    expect(changed).toBe(true)
+  })
+
+  it('should return true when moisture value changes', () => {
+    const payload = buildChecklistPayload(baseFormValues)
+    const origEntries = payload.items.map(i => ({ label: i.label, ok: i.ok }))
+
+    const changed = hasChecklistChanged(origEntries, 10.0, payload)
+    expect(changed).toBe(true)
   })
 })

@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   Logger,
   OnApplicationBootstrap,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -87,7 +88,7 @@ export interface DatabaseBackupPayload {
 }
 
 @Injectable()
-export class DatabaseBackupService implements OnApplicationBootstrap {
+export class DatabaseBackupService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseBackupService.name);
   private isBackupRunning = false;
   private schedulerTimer: NodeJS.Timeout | null = null;
@@ -101,6 +102,13 @@ export class DatabaseBackupService implements OnApplicationBootstrap {
     this.ensureBackupDirectories();
     this.scheduleIntervalBackups();
     void this.performSlaCatchUpCheck();
+  }
+
+  onModuleDestroy() {
+    if (this.schedulerTimer) {
+      clearInterval(this.schedulerTimer);
+      this.schedulerTimer = null;
+    }
   }
 
   private get localBackupDir(): string {
