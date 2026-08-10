@@ -184,6 +184,9 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       processType: 'GBJ',
       status: 'WAREHOUSE_IN_PROGRESS',
     });
+    mockPrismaService.userWarehouseAccess.findMany.mockResolvedValue([
+      { processType: 'GBJ' },
+    ]);
 
     await expect(
       service.submitIncomingCheck('tx-gbj-1', { decision: 'rejected' }, {

@@ -425,9 +425,9 @@ describe('DatabaseBackupService', () => {
       fs.writeFileSync(path.join(whSubdir, 'wh_sample.pdf'), 'wh_data');
 
       try {
-        const manifest = await service.generateBackup(
+        const manifest = await service.runAutomatedScheduledBackup(
+          'MANUAL_EXPLICIT',
           mockAdminUser,
-          '127.0.0.1',
         );
 
         expect(manifest.localStatus).toBe('VERIFIED');
