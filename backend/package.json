@@ -90,8 +90,7 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node",
-    "forceExit": true
+    "testEnvironment": "node"
   },
   "prisma": {
     "seed": "node dist/prisma/seed.js"

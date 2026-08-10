@@ -66,19 +66,19 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     }
   });
 
-  it('should execute full destructive seed -> backup -> wipe -> restore -> verify cycle', async () => {
-    const adminPassword = 'DrTestAdminPassword123!';
+  it('should execute full multi-table destructive backup, wipe, and restore cycle (restoreDatabase & restoreFromPortableBundle)', async () => {
+    const adminPassword = 'DrFullTestPassword123!';
     const passwordHash = await argon2.hash(adminPassword);
 
-    // 1. Create temporary admin user for backup & restore authorization
+    // 1. Create temporary admin user
     const adminUser = await prisma.user.upsert({
-      where: { username: 'dr_e2e_admin' },
+      where: { username: 'dr_multi_admin' },
       update: { passwordHash, isActive: true },
       create: {
-        email: 'dr_e2e_admin@gms.local',
-        username: 'dr_e2e_admin',
+        email: 'dr_multi_admin@gms.local',
+        username: 'dr_multi_admin',
         passwordHash,
-        name: 'DR E2E Admin',
+        name: 'DR Multi Admin',
         role: 'ADMIN',
         isActive: true,
       },
@@ -91,53 +91,221 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       tokenVersion: adminUser.tokenVersion,
     };
 
-    // 2. Seed test fixture data
-    const testLog = await prisma.activityLog.create({
+    // 2. Seed multi-table transaction workflow fixture (Transaction, Weighbridge, QC, Warehouse, Correction)
+    const tx = await prisma.transaction.create({
       data: {
-        userId: adminUser.id,
-        action: 'DR_RESTORE_TEST_SEED',
-        module: 'SYSTEM',
-        description: 'Test seed record for DR E2E destructive restore test',
-        status: 'SUCCESS',
+        plateNumber: 'B9999DRTest',
+        driverName: 'Driver DR Test',
+        processType: 'GBB',
+        status: 'INCOMING_CHECK_IN_PROGRESS',
+        isCompleted: false,
+        vehicleType: 'TRUCK',
+        gateInAt: new Date(),
+        weighbridgeRecords: {
+          create: {
+            ticketNumber: 'WB-DR-TEST-001',
+            type: 'WEIGH_IN',
+            weight: 15400,
+            weighInAt: new Date(),
+            operatorName: 'WB Operator Test',
+            isCurrent: true,
+            revision: 1,
+          },
+        },
+        qcVehicleChecks: {
+          create: {
+            result: 'PASS',
+            vehicleCleanliness: 'PASS',
+            sealCondition: 'PASS',
+            vehicleOdor: 'PASS',
+            checklistItems: {
+              initialMoisture: 12.4,
+              items: [{ label: 'Vehicle Cleanliness', ok: true }],
+            },
+            isCurrent: true,
+            revision: 1,
+          },
+        },
+        incomingMaterialChecks: {
+          create: {
+            result: 'PASS',
+            moisture: 12.4,
+            foreignMatter: 0.5,
+            sampleWeight: 100,
+            isCurrent: true,
+            revision: 1,
+          },
+        },
+        warehouseProcesses: {
+          create: {
+            queueNumber: 'Q-DR-01',
+            status: 'UNLOADING_IN_PROGRESS',
+            assignedLine: 'LINE_A',
+            condition: 'GOOD',
+            isCurrent: true,
+            revision: 1,
+          },
+        },
       },
     });
 
-    // 3. Generate backup snapshot containing seeded record
-    const backupPayload = await backupService.generateBackup(
+    // Seed correction record linked to transaction
+    const correction = await prisma.transactionCorrection.create({
+      data: {
+        transactionId: tx.id,
+        correctedById: adminUser.id,
+        reason: 'DR E2E Test correction fixture',
+        items: {
+          create: {
+            targetModule: 'QC_VEHICLE',
+            targetRecordId: tx.id,
+            fieldName: 'checklistItems',
+            newValue: JSON.stringify({ initialMoisture: 12.4, items: [] }),
+          },
+        },
+      },
+    });
+
+    // 3. Generate snapshot & portable bundle
+    const backupSnapshot = await backupService.generateBackup(
       jwtUser,
       '127.0.0.1',
     );
-    expect(backupPayload.metadata).toBeDefined();
-    expect(backupPayload.data).toBeDefined();
+    expect(backupSnapshot.metadata).toBeDefined();
 
-    // 4. Simulate data loss / corruption (destructive wipe of test log)
-    await prisma.activityLog.delete({ where: { id: testLog.id } });
-    const wipedRecord = await prisma.activityLog.findUnique({
-      where: { id: testLog.id },
+    const history = await backupService.getBackupHistory();
+    expect(history.length).toBeGreaterThan(0);
+    const portableBundlePath = await backupService.exportPortableBackupBundle(
+      history[0].backupId,
+    );
+    const bundleContent = JSON.parse(
+      fs.readFileSync(portableBundlePath, 'utf8'),
+    );
+
+    // 4. DESTRUCTIVE WIPE (simulating catastrophic failure)
+    await prisma.transactionCorrectionItem.deleteMany({
+      where: { correctionId: correction.id },
     });
-    expect(wipedRecord).toBeNull();
+    await prisma.transactionCorrection.delete({
+      where: { id: correction.id },
+    });
+    await prisma.warehouseProcess.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.incomingMaterialCheck.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.qcVehicleCheck.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.weighbridgeRecord.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.transaction.delete({ where: { id: tx.id } });
 
-    // 5. Perform database restore from backup payload
-    const restoreResult = await backupService.restoreDatabase(
+    // Assert database is wiped clean of test records
+    expect(
+      await prisma.transaction.findUnique({ where: { id: tx.id } }),
+    ).toBeNull();
+
+    // 5. TEST RESTORE METHOD 1: restoreDatabase()
+    const restoreRes = await backupService.restoreDatabase(
       jwtUser,
-      backupPayload,
+      backupSnapshot,
       adminPassword,
       '127.0.0.1',
     );
+    expect(restoreRes.success).toBe(true);
 
-    expect(restoreResult.success).toBe(true);
-
-    // 6. Verify data is fully restored back in PostgreSQL DB
-    const restoredRecord = await prisma.activityLog.findUnique({
-      where: { id: testLog.id },
+    // Verify multi-table integrity restored
+    const restoredTx = await prisma.transaction.findUnique({
+      where: { id: tx.id },
+      include: {
+        weighbridgeRecords: true,
+        qcVehicleChecks: true,
+        incomingMaterialChecks: true,
+        warehouseProcesses: true,
+        corrections: { include: { items: true } },
+      },
     });
-    expect(restoredRecord).toBeDefined();
-    expect(restoredRecord?.action).toBe('DR_RESTORE_TEST_SEED');
 
-    // Clean up test records safely
-    await prisma.activityLog.deleteMany({
-      where: { action: 'DR_RESTORE_TEST_SEED' },
+    expect(restoredTx).not.toBeNull();
+    expect(restoredTx?.plateNumber).toBe('B9999DRTest');
+    expect(restoredTx?.weighbridgeRecords).toHaveLength(1);
+    expect(restoredTx?.qcVehicleChecks).toHaveLength(1);
+    expect(restoredTx?.incomingMaterialChecks).toHaveLength(1);
+    expect(restoredTx?.warehouseProcesses).toHaveLength(1);
+    expect(restoredTx?.corrections).toHaveLength(1);
+
+    // 6. DESTRUCTIVE WIPE AGAIN for Portable Bundle Restore test
+    await prisma.transactionCorrectionItem.deleteMany({
+      where: { correctionId: correction.id },
     });
+    await prisma.transactionCorrection.delete({
+      where: { id: correction.id },
+    });
+    await prisma.warehouseProcess.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.incomingMaterialCheck.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.qcVehicleCheck.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.weighbridgeRecord.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.transaction.delete({ where: { id: tx.id } });
+
+    // 7. TEST RESTORE METHOD 2: restoreFromPortableBundle() (.gmsbackup)
+    const bundleRestoreRes = await backupService.restoreFromPortableBundle(
+      jwtUser,
+      bundleContent,
+      adminPassword,
+      '127.0.0.1',
+    );
+    expect(bundleRestoreRes.success).toBe(true);
+
+    // Verify multi-table data restored from portable bundle
+    const bundleRestoredTx = await prisma.transaction.findUnique({
+      where: { id: tx.id },
+      include: {
+        weighbridgeRecords: true,
+        qcVehicleChecks: true,
+      },
+    });
+
+    expect(bundleRestoredTx).not.toBeNull();
+    expect(bundleRestoredTx?.plateNumber).toBe('B9999DRTest');
+    expect(bundleRestoredTx?.weighbridgeRecords[0].weight).toBe(15400);
+
+    // Clean up temporary test records
+    await prisma.transactionCorrectionItem.deleteMany({
+      where: { correctionId: correction.id },
+    });
+    await prisma.transactionCorrection.delete({
+      where: { id: correction.id },
+    });
+    await prisma.warehouseProcess.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.incomingMaterialCheck.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.qcVehicleCheck.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.weighbridgeRecord.deleteMany({
+      where: { transactionId: tx.id },
+    });
+    await prisma.transaction.delete({ where: { id: tx.id } });
     await prisma.user.delete({ where: { id: adminUser.id } });
+
+    try {
+      fs.unlinkSync(portableBundlePath);
+    } catch (e) {
+      // ignore
+    }
   });
 });
