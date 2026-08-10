@@ -55,13 +55,13 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     jest.clearAllMocks();
   });
 
-  it('should compute revision = max(revision) + 1 when fallback warehouseProcess creation occurs', async () => {
+  it('should throw ConflictException when no active warehouseProcess exists during completeWarehouse', async () => {
     const mockTx = {
       id: 'tx-wh-1',
       status: 'WAREHOUSE_IN_PROGRESS',
       processType: 'GBB',
       warehouseStartAt: new Date(),
-      warehouseStartById: 'user-1',
+      warehouseStartById: 'usr-1',
     };
 
     mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockTx);
@@ -72,18 +72,9 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     const mockTxClient = {
       transaction: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-        update: jest
-          .fn()
-          .mockResolvedValue({ ...mockTx, status: 'WAREHOUSE_DONE' }),
       },
       warehouseProcess: {
-        findFirst: jest.fn().mockResolvedValue(null), // Fallback scenario!
-        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 2 } }),
-        create: jest.fn().mockResolvedValue({ id: 'wp-new', revision: 3 }),
-      },
-      transactionStatusHistory: {
-        create: jest.fn().mockResolvedValue({}),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
     };
 
@@ -91,36 +82,22 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       .spyOn(mockPrismaService, '$transaction')
       .mockImplementation(async (cb: any) => cb(mockTxClient));
 
-    const result = await service.completeWarehouse(
-      'tx-wh-1',
-      {
-        actualWeight: 10000,
-        actualQuantity: 100,
-        unit: WarehouseUnit.KG,
-        condition: WarehouseCondition.GOOD,
-      },
-      {
-        id: 'usr-1',
-        role: 'WAREHOUSE',
-        email: 'wh@gms.local',
-      } as unknown as JwtPayloadUser,
-    );
-
-    expect(mockTxClient.warehouseProcess.aggregate).toHaveBeenCalledWith({
-      where: { transactionId: 'tx-wh-1' },
-      _max: { revision: true },
-    });
-
-    expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          transactionId: 'tx-wh-1',
-          revision: 3, // Calculated max (2) + 1 = 3!
-        }),
-      }),
-    );
-
-    expect(result.success).toBe(true);
+    await expect(
+      service.completeWarehouse(
+        'tx-wh-1',
+        {
+          actualWeight: 10000,
+          actualQuantity: 100,
+          unit: WarehouseUnit.KG,
+          condition: WarehouseCondition.GOOD,
+        },
+        {
+          id: 'usr-1',
+          role: 'WAREHOUSE',
+          email: 'wh@gms.local',
+        } as unknown as JwtPayloadUser,
+      ),
+    ).rejects.toThrow(ConflictException);
   });
 
   it('should compute revision = max(revision) + 1 when incoming material check is submitted', async () => {
