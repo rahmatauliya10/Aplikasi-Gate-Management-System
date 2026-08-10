@@ -1295,10 +1295,7 @@ export class DatabaseBackupService
 
     const sigBuf = Buffer.from(signature, 'hex');
     const expBuf = Buffer.from(expectedSignature, 'hex');
-    if (
-      sigBuf.length !== expBuf.length ||
-      !timingSafeEqual(sigBuf, expBuf)
-    ) {
+    if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
       throw new BadRequestException({
         success: false,
         message:
@@ -1447,7 +1444,8 @@ export class DatabaseBackupService
 
             const fileBuffer = Buffer.from(file.base64Content, 'base64');
             if (file.checksum) {
-              const actualChecksum = this.calculateChecksumForBuffer(fileBuffer);
+              const actualChecksum =
+                this.calculateChecksumForBuffer(fileBuffer);
               if (actualChecksum !== file.checksum) {
                 this.logger.warn(
                   `Attachment checksum mismatch blocked for file: ${file.fileName}`,
