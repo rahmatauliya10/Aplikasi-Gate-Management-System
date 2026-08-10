@@ -436,7 +436,7 @@ describe('DatabaseBackupService', () => {
 
         const archivePath = path.join(
           process.env.LOCAL_BACKUP_DIR || './backups/local',
-          manifest.artifacts.attachmentsArchive!,
+          manifest.artifacts.attachmentsArchive || '',
         );
         const archive = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
         const paths = archive.files.map((f: any) => f.relativePath);

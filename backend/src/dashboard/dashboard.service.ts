@@ -153,12 +153,14 @@ export class DashboardService {
       const hasIncomingQc = !!inc?.startedAt && !!inc?.completedAt;
 
       if (hasVehicleQc || hasIncomingQc) {
-        const vehicleQcDur = hasVehicleQc
-          ? getDiffMins(v!.startedAt, v!.completedAt)
-          : 0;
-        const incomingQcDur = hasIncomingQc
-          ? getDiffMins(inc!.startedAt, inc!.completedAt)
-          : 0;
+        const vehicleQcDur =
+          v && v.startedAt && v.completedAt
+            ? getDiffMins(v.startedAt, v.completedAt)
+            : 0;
+        const incomingQcDur =
+          inc && inc.startedAt && inc.completedAt
+            ? getDiffMins(inc.startedAt, inc.completedAt)
+            : 0;
         sumQc += vehicleQcDur + incomingQcDur;
       } else {
         sumQc += getDiffMins(t.qcStartAt, t.qcEndAt);
