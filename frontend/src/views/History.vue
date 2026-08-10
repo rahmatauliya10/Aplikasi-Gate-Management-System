@@ -312,9 +312,9 @@
                         <span v-else class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ truck.status || 'ACTIVE' }}</span>
                       </div>
 
-                      <div v-if="truck.revision && truck.revision > 1">
-                        <span class="inline-flex items-center px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-[#4A8BDF] text-[8px] font-mono font-black rounded uppercase tracking-wider shadow-xs" title="Modified via Operation Log Correction">
-                          REV #{{ truck.revision }}
+                      <div v-if="getCorrectionCount(truck) > 0">
+                        <span class="inline-flex items-center px-1.5 py-0.5 bg-amber-100 border border-amber-300 text-amber-900 text-[8.5px] font-mono font-black rounded uppercase tracking-wider shadow-xs" :title="`${getCorrectionCount(truck)} Koreksi Admin dicatat`">
+                          {{ getCorrectionCount(truck) }} KOREKSI
                         </span>
                       </div>
                     </div>
@@ -872,6 +872,14 @@ const getProcessBadgeStyle = (truck) => {
   if (type === 'GBB') return 'color:#93005A;background:#FFF0F8;border-color:#FBCFE8'
   if (type === 'GBJ') return 'color:#1E40AF;background:#EFF6FF;border-color:#BFDBFE'
   return 'color:#065F46;background:#ECFDF5;border-color:#A7F3D0'
+}
+
+const getCorrectionCount = (truck) => {
+  if (!truck) return 0
+  if (Array.isArray(truck.corrections)) return truck.corrections.length
+  if (typeof truck.correctionCount === 'number') return truck.correctionCount
+  if (typeof truck._count?.corrections === 'number') return truck._count.corrections
+  return 0
 }
 
 // Completed trucks sorted descending

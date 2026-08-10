@@ -495,6 +495,12 @@ import PageHeader from '../components/PageHeader.vue'
 import StepTimeline from '../components/StepTimeline.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import Pagination from '../components/Pagination.vue'
+import {
+  GBJ_VEHICLE_CHECKLIST,
+  getQcStage1Mode,
+  evaluateGbjChecklist,
+  buildGbjQcPayload
+} from '../utils/gbjQcFlow'
 
 // Safety Helpers at the top
 const getPlateNumber = (truck) => {
@@ -577,124 +583,28 @@ const isSamplingValid = computed(() => {
 
 const showChecklistModal = ref(false)
 const checklistStates = ref([])
-const vehicleChecklist = [
-  "Tidak ditemukan hama / No pest found",
-  "Bebas dari barang haram dan najis / Free of haram and najis material",
-  "Truk dalam kondisi bersih dan tidak berbau / Truck in clean condition and odour free",
-  "Tidak ditemukan bahan kimia atau kontaminan lain / No chemical or other contaminent found",
-  "Terdapat alas jika lantai truk kotor atau berlubang / There is a cover if the floor is holey or dirty"
-]
+const vehicleChecklist = GBJ_VEHICLE_CHECKLIST
 
-const qcTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PENDING' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS' || t.status === 'QC_VEHICLE_IN_PROGRESS') && (selectedWarehouse.value === 'ALL' || getProcessType(t) === selectedWarehouse.value)))
-const filteredQcTrucks = computed(() => {
-  const keyword = searchQuery.value.toLowerCase().trim()
-  return qcTrucks.value.filter(t => {
-    if (keyword && !getPlateNumber(t).toLowerCase().includes(keyword)) return false
-    return true
-  })
-})
-const totalPages = computed(() => Math.ceil(filteredQcTrucks.value.length / 10) || 1)
-const paginatedQcTrucks = computed(() => {
-  const start = (currentPage.value - 1) * 10
-  const end = start + 10
-  return filteredQcTrucks.value.slice(start, end)
+const gbjEvaluation = computed(() => {
+  return evaluateGbjChecklist(checklistStates.value, vehicleChecklist)
 })
 
-watch(filteredQcTrucks, () => {
-  if (currentPage.value > totalPages.value) {
-    currentPage.value = 1
-  }
-})
-watch([searchQuery, selectedWarehouse], () => { currentPage.value = 1 })
-
-const selectTruck = (truck) => {
-  selectedTruck.value = truck
-  checklistStates.value = vehicleChecklist.map(() => ({ status: null, photo: null }))
-  qcForm.value = { 
-    bau: truck.qcDetails?.bau || '', 
-    warna: truck.qcDetails?.warna || '', 
-    kadarAir: truck.qcDetails?.kadarAir || null, 
-    totalFM: truck.qcDetails?.totalFM || null, 
-    bijiOK: truck.qcDetails?.bijiOK || null, 
-    status: truck.qcDetails?.status || '', 
-    note: truck.qcDetails?.note || '',
-    pic: authStore.user?.name || 'QC Admin' 
-  }
-}
-
-const handlePhotoUpload = (event, index) => {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      let width = img.width;
-      let height = img.height;
-      
-      const MAX_SIZE = 800;
-      if (width > height && width > MAX_SIZE) {
-        height *= MAX_SIZE / width;
-        width = MAX_SIZE;
-      } else if (height > MAX_SIZE) {
-        width *= MAX_SIZE / height;
-        height = MAX_SIZE;
-      }
-      
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      checklistStates.value[index].photo = dataUrl;
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-const isChecklistComplete = computed(() => {
-  if (checklistStates.value.length === 0) return false
-  return checklistStates.value.every(state => {
-    if (state.status === 'ok') return true
-    if (state.status === 'not_ok' && state.photo) return true
-    return false
-  })
-})
-
-const checklistDoneCount = computed(() => {
-  return checklistStates.value.filter(s => s.status === 'ok' || (s.status === 'not_ok' && s.photo)).length
-})
-
-const checklistRemaining = computed(() => {
-  return vehicleChecklist.length - checklistDoneCount.value
-})
-
-const hasNotOkItem = computed(() => {
-  return checklistStates.value.some(s => s.status === 'not_ok')
-})
+const isChecklistComplete = computed(() => gbjEvaluation.value.isComplete)
+const checklistDoneCount = computed(() => gbjEvaluation.value.doneCount)
+const checklistRemaining = computed(() => gbjEvaluation.value.remainingCount)
+const hasNotOkItem = computed(() => gbjEvaluation.value.hasNotOk)
 
 const submitGbjChecklist = async () => {
   if (isProcessing.value || !selectedTruck.value) return;
 
-  if (!isChecklistComplete.value) {
+  const evalRes = evaluateGbjChecklist(checklistStates.value, vehicleChecklist);
+  if (!evalRes.isComplete) {
     toast.error('Lengkapi semua 5 item checklist terlebih dahulu!');
     return;
   }
 
-  const hasNotOk = hasNotOkItem.value;
-  const passed = !hasNotOk;
-
-  const notOkLabels = checklistStates.value
-    .map((s, idx) => s.status === 'not_ok' ? `${idx + 1}. ${vehicleChecklist[idx]}` : null)
-    .filter(Boolean);
-
-  const defaultNotes = passed
-    ? 'Lolos QC Vehicle Checklist GBJ'
-    : `[REJECT QC VEHICLE GBJ] Temuan NOT OK (${notOkLabels.length} item): ${notOkLabels.join('; ')}`;
+  const passed = evalRes.passed;
+  const notOkLabels = evalRes.notOkLabels;
 
   const actionText = passed ? 'Approve QC Vehicle' : 'Reject QC Vehicle';
   const ok = await confirm({
@@ -709,24 +619,7 @@ const submitGbjChecklist = async () => {
   if (ok) {
     isProcessing.value = true;
     try {
-      const payload = {
-        result: passed ? 'PASS' : 'REJECT',
-        pestEvidence: checklistStates.value[0]?.status === 'ok',
-        documentCompleteness: checklistStates.value[1]?.status === 'ok',
-        vehicleCleanliness: checklistStates.value[2]?.status === 'ok',
-        vehicleOdor: checklistStates.value[3]?.status === 'ok',
-        sealCondition: checklistStates.value[4]?.status === 'ok',
-        vehicleCondition: passed,
-        checklistItems: {
-          initialMoisture: 0,
-          items: checklistStates.value.map((s, idx) => ({
-            label: vehicleChecklist[idx] || 'Checklist item',
-            ok: s.status === 'ok',
-            photo: s.photo || null
-          }))
-        },
-        notes: defaultNotes
-      };
+      const payload = buildGbjQcPayload(checklistStates.value, vehicleChecklist);
 
       const response = await qcStore.submitVehicleResult(selectedTruck.value.id, payload);
       const updatedTruck = response?.data || response;
@@ -781,7 +674,8 @@ const triggerStartQc = async (truck) => {
 
 const openQcStage1Modal = (truck) => {
   if (!truck) return;
-  if (getProcessType(truck) === 'GBJ') {
+  const mode = getQcStage1Mode(truck);
+  if (mode === 'GBJ_VEHICLE_CHECK') {
     openGbjModal(truck);
   } else {
     openSamplingAwalModal(truck);

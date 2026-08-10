@@ -19,6 +19,7 @@ export const TRANSACTION_CURRENT_RELATIONS_INCLUDE = {
     include: { checkedBy: { select: { id: true, name: true } } },
   },
   statusHistory: { orderBy: { changedAt: 'desc' as const } },
+  corrections: { select: { id: true } },
   weighInBy: { select: { id: true, name: true } },
   weighOutBy: { select: { id: true, name: true } },
   warehouseStartBy: { select: { id: true, name: true } },

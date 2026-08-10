@@ -8,7 +8,7 @@ Before running `prisma migrate deploy` on any database that has **previously bee
 
 ```bash
 DATABASE_URL="postgresql://<user>:<pass>@<host>:<port>/<dbname>" \
-  npx ts-node scripts/check-migration-checksums.ts
+  node scripts/check-migration-checksums.js
 ```
 
 **Expected output (all green):**
@@ -45,7 +45,7 @@ DATABASE_URL="postgresql://<user>:<pass>@<host>:<port>/<dbname>" \
 Save the reconciliation output to a file:
 
 ```bash
-DATABASE_URL="..." npx ts-node scripts/check-migration-checksums.ts > migration-checksum-evidence-$(date +%Y%m%d).txt 2>&1
+DATABASE_URL="..." node scripts/check-migration-checksums.js > migration-checksum-evidence-$(date +%Y%m%d).txt 2>&1
 ```
 
 This file must be archived alongside the deployment record.

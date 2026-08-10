@@ -43,7 +43,7 @@
               class="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1.5 transition-all shadow-sm active:scale-95">
               <span class="material-icons text-sm text-amber-600">edit_note</span>
               <span>Koreksi Admin</span>
-              <span v-if="truck.revision" class="ml-1 px-1.5 py-0.5 bg-amber-200/80 text-amber-950 rounded text-[9px] font-mono font-black">Rev #{{ truck.revision }}</span>
+              <span v-if="correctionCount > 0" class="ml-1 px-1.5 py-0.5 bg-amber-200/80 text-amber-950 rounded text-[9px] font-mono font-black">{{ correctionCount }} Koreksi</span>
             </button>
             <button @click="close"
               class="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:bg-red-50 hover:text-red-500 text-slate-400">
@@ -451,12 +451,12 @@
           </div>
 
           <!-- Full-Width Audit Trail & Correction History (Admin Only / When Available) -->
-          <div v-if="isAdmin && (historyLoading || auditHistory.length > 0 || truck.revision > 1)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
+          <div v-if="isAdmin && (historyLoading || auditHistory.length > 0)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
             <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/80">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-amber-600 text-[16px]">history_edu</span>
                 <h3 class="text-[11px] font-black text-slate-700 uppercase tracking-[0.15em]">Audit Trail & Operation Log History</h3>
-                <span v-if="truck.revision" class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[9px] font-black font-mono">Rev #{{ truck.revision }}</span>
+                <span class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[9px] font-black font-mono">{{ correctionCount }} Koreksi</span>
               </div>
               <button @click="fetchCorrectionHistory" class="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 transition-colors">
                 <span class="material-icons text-[13px]">refresh</span> Reload
@@ -1479,6 +1479,22 @@ const fetchCorrectionHistory = async () => {
     historyLoading.value = false
   }
 }
+
+const correctionCount = computed(() => {
+  if (Array.isArray(auditHistory.value) && auditHistory.value.length > 0) {
+    return auditHistory.value.length
+  }
+  if (Array.isArray(props.truck?.corrections)) {
+    return props.truck.corrections.length
+  }
+  if (typeof props.truck?.correctionCount === 'number') {
+    return props.truck.correctionCount
+  }
+  if (typeof props.truck?._count?.corrections === 'number') {
+    return props.truck._count.corrections
+  }
+  return 0
+})
 
 watch(() => props.isOpen, (newVal) => {
   if (newVal) {

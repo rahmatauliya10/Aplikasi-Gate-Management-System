@@ -205,9 +205,6 @@ export class QcService {
           status: nextStatus,
           qcStartAt: tx.qcStartAt || new Date(),
           qcEndAt: new Date(),
-          ...(nextStatus === 'QC_VEHICLE_PASSED' && {
-            warehouseStartAt: tx.warehouseStartAt || new Date(),
-          }),
           statusHistory: {
             create: {
               newStatus: nextStatus,
