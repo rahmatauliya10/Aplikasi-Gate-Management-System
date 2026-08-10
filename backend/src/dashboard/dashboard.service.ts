@@ -93,6 +93,14 @@ export class DashboardService {
           gateOutAt: true,
           netWeight: true,
           actualWeight: true,
+          qcVehicleChecks: {
+            where: { isCurrent: true },
+            select: { startedAt: true, completedAt: true },
+          },
+          incomingMaterialChecks: {
+            where: { isCurrent: true },
+            select: { startedAt: true, completedAt: true },
+          },
         },
       }),
       this.prisma.fraudCheck.findMany({
@@ -131,7 +139,20 @@ export class DashboardService {
     completedTx.forEach((t) => {
       sumWaitingIn += getDiffMins(t.gateInAt, t.weighInAt);
       sumWarehouse += getDiffMins(t.warehouseStartAt, t.warehouseEndAt);
-      sumQc += getDiffMins(t.qcStartAt, t.qcEndAt); // This might be null if no QC, use fallback if needed
+      
+      let vehicleQcDur = 0;
+      if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
+        const v = t.qcVehicleChecks[0];
+        vehicleQcDur = getDiffMins(v.startedAt, v.completedAt);
+      }
+      let incomingQcDur = 0;
+      if (t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0) {
+        const inc = t.incomingMaterialChecks[0];
+        incomingQcDur = getDiffMins(inc.startedAt, inc.completedAt);
+      }
+      const actualQcDur = vehicleQcDur + incomingQcDur;
+      sumQc += actualQcDur > 0 ? actualQcDur : getDiffMins(t.qcStartAt, t.qcEndAt);
+
       sumWaitingOut += getDiffMins(t.warehouseEndAt, t.weighOutAt);
       sumTotalTat += getDiffMins(t.gateInAt, t.gateOutAt);
     });

@@ -279,10 +279,18 @@ export class OperationLogCorrectionService {
 
           // Adapter auto-sync to Transaction root
           if (item.fieldName === 'weight') {
-            if (rec.type === 'IN') {
-              txUpdateData.grossWeight = Number(item.newValue);
-            } else if (rec.type === 'OUT') {
-              txUpdateData.tareWeight = Number(item.newValue);
+            if (tx.processType === 'GBJ') {
+              if (rec.type === 'IN') {
+                txUpdateData.tareWeight = Number(item.newValue);
+              } else if (rec.type === 'OUT') {
+                txUpdateData.grossWeight = Number(item.newValue);
+              }
+            } else {
+              if (rec.type === 'IN') {
+                txUpdateData.grossWeight = Number(item.newValue);
+              } else if (rec.type === 'OUT') {
+                txUpdateData.tareWeight = Number(item.newValue);
+              }
             }
           }
         } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {

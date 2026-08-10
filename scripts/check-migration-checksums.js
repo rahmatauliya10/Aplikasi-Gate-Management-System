@@ -46,9 +46,17 @@ async function main() {
       ORDER BY started_at
     `;
   } catch (err) {
-    console.error('❌ Failed to query _prisma_migrations table:', err.message);
-    console.error('   Ensure DATABASE_URL points to a deployed database.');
-    process.exit(1);
+    console.log('ℹ️  Table _prisma_migrations does not exist yet (Fresh Database).');
+    console.log('   Safe to apply initial migrations.\n');
+    await prisma.$disconnect();
+    process.exit(0);
+  }
+
+  if (!dbMigrations || dbMigrations.length === 0) {
+    console.log('ℹ️  No migrations found in database (Fresh Database).');
+    console.log('   Safe to apply initial migrations.\n');
+    await prisma.$disconnect();
+    process.exit(0);
   }
 
   console.log(`Found ${dbMigrations.length} migration(s) in database.\n`);

@@ -410,23 +410,20 @@ export class WarehouseService {
       });
     }
 
-    if (
-      tx.status !== 'WAREHOUSE_IN_PROGRESS' &&
-      tx.status !== 'QC_VEHICLE_PASSED'
-    ) {
+    if (tx.status !== 'WAREHOUSE_IN_PROGRESS') {
       await this.activityLogsService
         .logAction({
           userId: user.id,
           action: 'WAREHOUSE_FLOW_REJECTED',
           module: 'WAREHOUSE',
           referenceId: transactionId,
-          description: `Warehouse complete rejected: Transaction is not in WAREHOUSE_IN_PROGRESS or QC_VEHICLE_PASSED status`,
+          description: `Warehouse complete rejected: Transaction is not in WAREHOUSE_IN_PROGRESS status (current: ${tx.status})`,
           status: 'SUCCESS',
         })
         .catch(() => {});
       throw new BadRequestException({
         success: false,
-        message: `Transaction must be in WAREHOUSE_IN_PROGRESS or QC_VEHICLE_PASSED status (current: ${tx.status})`,
+        message: `Warehouse process must be started before completion (current status: ${tx.status})`,
         errors: [],
       });
     }
@@ -470,61 +467,25 @@ export class WarehouseService {
           : `Checklist: ${checklistStr}`;
       }
 
-      // Find the existing active warehouse process (must be current revision)
       const activeProcess = await prismaTx.warehouseProcess.findFirst({
         where: { transactionId, isCurrent: true, endAt: null },
       });
 
-      // Calculate next revision before checking for active process
-      const maxRev = await prismaTx.warehouseProcess.aggregate({
-        where: { transactionId },
-        _max: { revision: true },
-      });
-      const nextRevision = (maxRev._max.revision ?? 0) + 1;
-
-      if (activeProcess) {
-        await prismaTx.warehouseProcess.update({
-          where: { id: activeProcess.id },
-          data: {
-            endAt: new Date(),
-            endById: user.id,
-            actualWeight: dto.actualWeight,
-            actualQuantity: dto.actualQuantity,
-            unit: dto.unit,
-            palletCount: dto.palletCount,
-            bagCount: dto.bagCount,
-            rollCount: dto.rollCount,
-            condition: dto.condition,
-            remarks: finalRemarks || null,
-          },
-        });
-      } else {
-        // Fallback if somehow missing process record
-        await prismaTx.warehouseProcess.create({
-          data: {
-            transactionId,
-            revision: nextRevision,
-            processType: tx.processType,
-            startAt: tx.warehouseStartAt || new Date(),
-            startById: tx.warehouseStartById || user.id,
-            endAt: new Date(),
-            endById: user.id,
-            actualWeight: dto.actualWeight,
-            actualQuantity: dto.actualQuantity,
-            unit: dto.unit,
-            palletCount: dto.palletCount,
-            bagCount: dto.bagCount,
-            rollCount: dto.rollCount,
-            condition: dto.condition,
-            remarks: finalRemarks || null,
-          },
+      if (!activeProcess) {
+        throw new BadRequestException({
+          success: false,
+          message: 'No active in-progress warehouse process found for this transaction',
+          errors: [],
         });
       }
 
-      return prismaTx.transaction.update({
-        where: { id: transactionId },
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: 'WAREHOUSE_IN_PROGRESS',
+          warehouseEndAt: null,
+        },
         data: {
-          revision: { increment: 1 },
           status: nextStatus,
           warehouseStartAt: tx.warehouseStartAt || new Date(),
           warehouseStartById: tx.warehouseStartById || user.id,
@@ -533,23 +494,55 @@ export class WarehouseService {
           actualWeight: dto.actualWeight,
           actualQuantity: dto.actualQuantity,
           warehouseUnit: dto.unit,
+          revision: { increment: 1 },
+          ...(dto.suratJalanNumber && {
+            suratJalanNumber: dto.suratJalanNumber,
+          }),
           remarks: tx.remarks
             ? finalRemarks
               ? `${tx.remarks} | ${finalRemarks}`
               : tx.remarks
             : finalRemarks || null,
-          ...(dto.suratJalanNumber && {
-            suratJalanNumber: dto.suratJalanNumber,
-          }),
-          statusHistory: {
-            create: {
-              oldStatus: tx.status,
-              newStatus: nextStatus,
-              changedById: user.id,
-              notes: finalRemarks || 'Warehouse process completed',
-            },
-          },
         },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Warehouse process already completed or changed concurrently by another user',
+          errors: [],
+        });
+      }
+
+      await prismaTx.warehouseProcess.update({
+        where: { id: activeProcess.id },
+        data: {
+          endAt: new Date(),
+          endById: user.id,
+          actualWeight: dto.actualWeight,
+          actualQuantity: dto.actualQuantity,
+          unit: dto.unit,
+          palletCount: dto.palletCount,
+          bagCount: dto.bagCount,
+          rollCount: dto.rollCount,
+          condition: dto.condition,
+          remarks: finalRemarks || null,
+        },
+      });
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: finalRemarks || 'Warehouse process completed',
+        },
+      });
+
+      return prismaTx.transaction.findUnique({
+        where: { id: transactionId },
         include: {
           warehouseEndBy: { select: { id: true, name: true, role: true } },
         },
@@ -632,9 +625,9 @@ export class WarehouseService {
       });
     }
 
-    if (tx.processType === 'GBB' && user.role === 'WAREHOUSE') {
+    if (['GBB', 'GSP'].includes(tx.processType) && user.role === 'WAREHOUSE') {
       this.logger.warn(
-        `SoD violation: Warehouse role attempted incoming check on GBB transaction ${transactionId}`,
+        `SoD violation: Warehouse role attempted incoming check on ${tx.processType} transaction ${transactionId}`,
       );
       await this.activityLogsService
         .logAction({
@@ -642,14 +635,14 @@ export class WarehouseService {
           action: 'SOD_VIOLATION_BLOCKED',
           module: 'WAREHOUSE',
           referenceId: transactionId,
-          description: `Blocked Warehouse role from executing GBB incoming check`,
+          description: `Blocked Warehouse role from executing ${tx.processType} incoming check`,
           status: 'FAILED',
         })
         .catch(() => {});
       throw new ForbiddenException({
         success: false,
         message:
-          'Segregation of Duties (SoD) violation: Akses ditolak! Proses pemeriksaan incoming GBB wajib dieksekusi oleh tim QC atau Admin.',
+          'Segregation of Duties (SoD) violation: Akses ditolak! Proses pemeriksaan incoming GBB atau GSP wajib dieksekusi oleh tim QC atau Admin.',
         errors: [],
       });
     }

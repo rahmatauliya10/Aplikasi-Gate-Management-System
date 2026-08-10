@@ -516,4 +516,186 @@ describe('OperationLogCorrectionService', () => {
       }),
     );
   });
+
+  describe('Weighbridge ProcessType-Aware Corrections', () => {
+    it('should map GBB IN correction to grossWeight and recalculate netWeight', async () => {
+      const mockTx = {
+        id: 'tx-gbb',
+        status: 'COMPLETED',
+        processType: 'GBB',
+        revision: 1,
+        grossWeight: 18000,
+        tareWeight: 8000,
+        netWeight: 10000,
+        weighbridgeRecords: [{ id: 'wb-in', type: 'IN', weight: 18000 }],
+      };
+
+      const mockTxClient = {
+        transaction: {
+          findUnique: jest.fn().mockResolvedValue(mockTx),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        weighbridgeRecord: {
+          update: jest.fn().mockResolvedValue({ id: 'wb-in' }),
+        },
+        transactionCorrection: {
+          create: jest.fn().mockResolvedValue({ id: 'cor-1' }),
+        },
+      };
+
+      jest
+        .spyOn(mockPrismaService, '$transaction')
+        .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT_ANGKA',
+        remark: 'Koreksi Gross GBB IN',
+        expectedRevision: 1,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WEIGHBRIDGE,
+            targetRecordId: 'wb-in',
+            fieldName: 'weight',
+            newValue: 19000,
+          },
+        ],
+      };
+
+      await service.correctOperationLog('tx-gbb', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            grossWeight: 19000,
+            netWeight: 11000, // 19000 - 8000
+          }),
+        }),
+      );
+    });
+
+    it('should map GBJ IN correction to tareWeight and recalculate netWeight', async () => {
+      const mockTx = {
+        id: 'tx-gbj',
+        status: 'COMPLETED',
+        processType: 'GBJ',
+        revision: 1,
+        grossWeight: 18000,
+        tareWeight: 8000,
+        netWeight: 10000,
+        weighbridgeRecords: [{ id: 'wb-in-gbj', type: 'IN', weight: 8000 }],
+      };
+
+      const mockTxClient = {
+        transaction: {
+          findUnique: jest.fn().mockResolvedValue(mockTx),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        weighbridgeRecord: {
+          update: jest.fn().mockResolvedValue({ id: 'wb-in-gbj' }),
+        },
+        transactionCorrection: {
+          create: jest.fn().mockResolvedValue({ id: 'cor-2' }),
+        },
+      };
+
+      jest
+        .spyOn(mockPrismaService, '$transaction')
+        .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT_ANGKA',
+        remark: 'Koreksi Tare GBJ IN',
+        expectedRevision: 1,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WEIGHBRIDGE,
+            targetRecordId: 'wb-in-gbj',
+            fieldName: 'weight',
+            newValue: 8200,
+          },
+        ],
+      };
+
+      await service.correctOperationLog('tx-gbj', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            tareWeight: 8200,
+            netWeight: 9800, // 18000 - 8200
+          }),
+        }),
+      );
+    });
+
+    it('should map GBJ OUT correction to grossWeight and recalculate netWeight', async () => {
+      const mockTx = {
+        id: 'tx-gbj-out',
+        status: 'COMPLETED',
+        processType: 'GBJ',
+        revision: 1,
+        grossWeight: 18000,
+        tareWeight: 8000,
+        netWeight: 10000,
+        weighbridgeRecords: [{ id: 'wb-out-gbj', type: 'OUT', weight: 18000 }],
+      };
+
+      const mockTxClient = {
+        transaction: {
+          findUnique: jest.fn().mockResolvedValue(mockTx),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        weighbridgeRecord: {
+          update: jest.fn().mockResolvedValue({ id: 'wb-out-gbj' }),
+        },
+        transactionCorrection: {
+          create: jest.fn().mockResolvedValue({ id: 'cor-3' }),
+        },
+      };
+
+      jest
+        .spyOn(mockPrismaService, '$transaction')
+        .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT_ANGKA',
+        remark: 'Koreksi Gross GBJ OUT',
+        expectedRevision: 1,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WEIGHBRIDGE,
+            targetRecordId: 'wb-out-gbj',
+            fieldName: 'weight',
+            newValue: 18500,
+          },
+        ],
+      };
+
+      await service.correctOperationLog('tx-gbj-out', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            grossWeight: 18500,
+            netWeight: 10500, // 18500 - 8000
+          }),
+        }),
+      );
+    });
+  });
 });

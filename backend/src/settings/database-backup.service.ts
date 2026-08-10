@@ -744,9 +744,26 @@ export class DatabaseBackupService
         if (fs.existsSync(localAttachmentsPath))
           fs.copyFileSync(localAttachmentsPath, offsiteAttachmentsPath);
 
-        const offsiteDumpChecksum =
-          this.calculateChecksumForFile(offsiteDumpPath);
-        if (offsiteDumpChecksum === dumpChecksum) {
+        const offsiteDumpChecksum = fs.existsSync(offsiteDumpPath)
+          ? this.calculateChecksumForFile(offsiteDumpPath)
+          : '';
+        const offsiteSnapshotChecksum = fs.existsSync(offsiteSnapshotPath)
+          ? this.calculateChecksumForFile(offsiteSnapshotPath)
+          : '';
+        const offsiteAttachmentsChecksum = fs.existsSync(offsiteAttachmentsPath)
+          ? this.calculateChecksumForFile(offsiteAttachmentsPath)
+          : '';
+
+        let isOffsiteValid =
+          offsiteDumpChecksum === dumpChecksum &&
+          offsiteSnapshotChecksum === snapshotChecksum;
+
+        if (attachmentsChecksum) {
+          isOffsiteValid =
+            isOffsiteValid && offsiteAttachmentsChecksum === attachmentsChecksum;
+        }
+
+        if (isOffsiteValid) {
           manifest.offsiteStatus = 'VERIFIED';
           try {
             fs.writeFileSync(
@@ -760,6 +777,8 @@ export class DatabaseBackupService
           } catch (e: any) {
             // Ignore offsite write error
           }
+        } else {
+          manifest.offsiteStatus = 'FAILED';
         }
       }
     } catch (e: any) {

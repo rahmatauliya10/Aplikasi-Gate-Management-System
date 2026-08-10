@@ -170,6 +170,10 @@ export const useAuthStore = defineStore('auth', {
       })
     },
     
+    setToken(token) {
+      this.token = token
+    },
+
     updateProfile(data) {
       if (this.user) {
         this.user = { ...this.user, ...data }
