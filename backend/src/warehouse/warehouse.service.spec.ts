@@ -189,15 +189,11 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     ]);
 
     await expect(
-      service.submitIncomingCheck(
-        'tx-gbj-1',
-        { decision: 'rejected' },
-        {
-          id: 'usr-1',
-          role: 'ADMIN',
-          email: 'admin@gms.local',
-        } as unknown as JwtPayloadUser,
-      ),
+      service.submitIncomingCheck('tx-gbj-1', { decision: 'rejected' }, {
+        id: 'usr-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as unknown as JwtPayloadUser),
     ).rejects.toThrow(BadRequestException);
   });
 });
