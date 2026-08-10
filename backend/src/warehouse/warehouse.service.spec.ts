@@ -70,6 +70,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
 
     const mockTxClient = {
       transaction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn().mockResolvedValue(mockTx),
         update: jest
           .fn()

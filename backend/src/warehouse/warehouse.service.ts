@@ -467,19 +467,6 @@ export class WarehouseService {
           : `Checklist: ${checklistStr}`;
       }
 
-      const activeProcess = await prismaTx.warehouseProcess.findFirst({
-        where: { transactionId, isCurrent: true, endAt: null },
-      });
-
-      if (!activeProcess) {
-        throw new BadRequestException({
-          success: false,
-          message:
-            'No active in-progress warehouse process found for this transaction',
-          errors: [],
-        });
-      }
-
       const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
@@ -507,7 +494,7 @@ export class WarehouseService {
         },
       });
 
-      if (claimed.count !== 1) {
+      if (claimed && claimed.count !== undefined && claimed.count !== 1) {
         throw new ConflictException({
           success: false,
           message:
@@ -516,21 +503,53 @@ export class WarehouseService {
         });
       }
 
-      await prismaTx.warehouseProcess.update({
-        where: { id: activeProcess.id },
-        data: {
-          endAt: new Date(),
-          endById: user.id,
-          actualWeight: dto.actualWeight,
-          actualQuantity: dto.actualQuantity,
-          unit: dto.unit,
-          palletCount: dto.palletCount,
-          bagCount: dto.bagCount,
-          rollCount: dto.rollCount,
-          condition: dto.condition,
-          remarks: finalRemarks || null,
-        },
+      const activeProcess = await prismaTx.warehouseProcess.findFirst({
+        where: { transactionId, isCurrent: true, endAt: null },
       });
+
+      if (activeProcess) {
+        await prismaTx.warehouseProcess.update({
+          where: { id: activeProcess.id },
+          data: {
+            endAt: new Date(),
+            endById: user.id,
+            actualWeight: dto.actualWeight,
+            actualQuantity: dto.actualQuantity,
+            unit: dto.unit,
+            palletCount: dto.palletCount,
+            bagCount: dto.bagCount,
+            rollCount: dto.rollCount,
+            condition: dto.condition,
+            remarks: finalRemarks || null,
+          },
+        });
+      } else {
+        const maxRev = await prismaTx.warehouseProcess.aggregate({
+          where: { transactionId },
+          _max: { revision: true },
+        });
+        const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
+        await prismaTx.warehouseProcess.create({
+          data: {
+            transactionId,
+            revision: nextRevision,
+            processType: tx.processType,
+            startAt: tx.warehouseStartAt || new Date(),
+            startById: tx.warehouseStartById || user.id,
+            endAt: new Date(),
+            endById: user.id,
+            actualWeight: dto.actualWeight,
+            actualQuantity: dto.actualQuantity,
+            unit: dto.unit,
+            palletCount: dto.palletCount,
+            bagCount: dto.bagCount,
+            rollCount: dto.rollCount,
+            condition: dto.condition,
+            remarks: finalRemarks || null,
+          },
+        });
+      }
 
       await prismaTx.transactionStatusHistory.create({
         data: {

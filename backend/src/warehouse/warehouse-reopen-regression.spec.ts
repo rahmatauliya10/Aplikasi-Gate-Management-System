@@ -109,6 +109,7 @@ describe('Warehouse CANCELLED→REOPEN Regression (P0-02)', () => {
         create: jest.fn(),
       },
       transaction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn().mockResolvedValue({
           ...mockTx,
           status: 'INCOMING_CHECK_PENDING',
@@ -206,6 +207,7 @@ describe('Warehouse CANCELLED→REOPEN Regression (P0-02)', () => {
         }),
       },
       transaction: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUnique: jest.fn().mockResolvedValue({
           ...mockTx,
           status: 'WAREHOUSE_DONE',
