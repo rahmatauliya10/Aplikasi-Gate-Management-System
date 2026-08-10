@@ -366,6 +366,14 @@ export class DatabaseBackupService
     const globalsFileName = `gms_${timestamp}_globals.sql`;
     const manifestFileName = `gms_${timestamp}_manifest.json`;
 
+    // Ensure active Prisma connection pool before reading snapshot data
+    try {
+      await this.prisma.$connect();
+    } catch {
+      await this.prisma.$disconnect().catch(() => {});
+      await this.prisma.$connect();
+    }
+
     const [
       users,
       userWarehouseAccess,
@@ -1014,6 +1022,14 @@ export class DatabaseBackupService
       );
       this.logger.log(`pg_restore completed successfully.`);
 
+      // Re-establish Prisma connection pool after database drop/restore
+      try {
+        await this.prisma.$disconnect().catch(() => {});
+        await this.prisma.$connect();
+      } catch (e: any) {
+        this.logger.warn(`Prisma reconnect after restore note: ${e.message}`);
+      }
+
       // 6. Restore physical upload attachment files atomically
       let restoredAttachmentsCount = 0;
       if (matchedManifest.artifacts.attachmentsArchive) {
@@ -1366,6 +1382,16 @@ export class DatabaseBackupService
           timeout: 10 * 60 * 1000,
         },
       );
+
+      this.logger.log(`pg_restore from portable bundle completed successfully.`);
+
+      // Re-establish Prisma connection pool after database drop/restore
+      try {
+        await this.prisma.$disconnect().catch(() => {});
+        await this.prisma.$connect();
+      } catch (e: any) {
+        this.logger.warn(`Prisma reconnect after portable restore note: ${e.message}`);
+      }
 
       // Restore attachments
       let restoredAttachmentsCount = 0;
