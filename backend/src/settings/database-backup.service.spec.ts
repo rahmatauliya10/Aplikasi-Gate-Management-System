@@ -15,6 +15,17 @@ import * as path from 'path';
 jest.mock('child_process', () => ({
   execFile: jest.fn((cmd: string, args: string[], opts: any, callback: any) => {
     const cb = typeof opts === 'function' ? opts : callback;
+    if (cmd === 'pg_dump' && Array.isArray(args)) {
+      const fileArg = args.find((a) => a.startsWith('--file='));
+      if (fileArg) {
+        const filePath = fileArg.replace('--file=', '');
+        try {
+          fs.writeFileSync(filePath, 'dummy_pg_dump_binary');
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
     if (cb) cb(null, { stdout: '', stderr: '' }, '');
   }),
 }));
