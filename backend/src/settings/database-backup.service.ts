@@ -88,7 +88,9 @@ export interface DatabaseBackupPayload {
 }
 
 @Injectable()
-export class DatabaseBackupService implements OnApplicationBootstrap, OnModuleDestroy {
+export class DatabaseBackupService
+  implements OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(DatabaseBackupService.name);
   private isBackupRunning = false;
   private schedulerTimer: NodeJS.Timeout | null = null;
