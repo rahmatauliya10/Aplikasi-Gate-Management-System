@@ -188,12 +188,16 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       { processType: 'GBJ' },
     ]);
 
-    await expect(
-      service.submitIncomingCheck('tx-gbj-1', { decision: 'rejected' }, {
+    try {
+      await service.submitIncomingCheck('tx-gbj-1', { decision: 'rejected' }, {
         id: 'usr-1',
         role: 'ADMIN',
         email: 'admin@gms.local',
-      } as unknown as JwtPayloadUser),
-    ).rejects.toThrow(BadRequestException);
+      } as unknown as JwtPayloadUser);
+      throw new Error('Expected submitIncomingCheck to throw BadRequestException');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect(err.message).toContain('GBB/GSP');
+    }
   });
 });
