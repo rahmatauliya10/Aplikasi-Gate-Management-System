@@ -487,7 +487,7 @@
             <div v-else-if="historyError" class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center justify-between m-3">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-rose-600 text-base">error_outline</span>
-                <span class="font-bold">Riwayat koreksi tersedia tetapi gagal dimuat. Silakan Reload.</span>
+                <span class="font-bold">{{ correctionCount > 0 ? 'Riwayat koreksi tersedia tetapi gagal dimuat. Silakan Reload.' : 'Riwayat koreksi gagal dimuat. Silakan Reload.' }}</span>
               </div>
               <button @click="fetchCorrectionHistory" type="button" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all">
                 <span class="material-icons text-xs">refresh</span> Reload

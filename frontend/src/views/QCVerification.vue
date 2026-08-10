@@ -686,11 +686,8 @@ const openQcStage1Modal = (truck) => {
 
 const openSamplingAwalModal = async (truck) => {
   const mode = getQcStage1Mode(truck);
-  if (mode === 'GBJ_VEHICLE_CHECK') {
-    return openGbjModal(truck);
-  }
   if (mode !== 'SAMPLING_AWAL') {
-    toast.error('Process Type transaksi tidak valid. QC tidak dapat dilanjutkan.');
+    toast.error('Process Type transaksi tidak valid untuk Sampling Awal.');
     return;
   }
   const success = await triggerStartQc(truck);
@@ -769,8 +766,10 @@ const openGbbModal = async (truck) => {
 }
 
 const openGbjModal = async (truck) => {
-  if (getProcessType(truck) !== 'GBJ') {
-    return openSamplingAwalModal(truck);
+  const mode = getQcStage1Mode(truck);
+  if (mode !== 'GBJ_VEHICLE_CHECK') {
+    toast.error('Transaksi bukan proses GBJ.');
+    return;
   }
   checklistStates.value = vehicleChecklist.map(() => ({ status: null, photo: null }));
   const success = await triggerStartQc(truck);
