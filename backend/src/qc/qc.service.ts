@@ -93,31 +93,36 @@ export class QcService {
     if (!tx)
       throw new NotFoundException('Transaction not found or unauthorized');
 
+    const now = new Date();
     let nextStatus: TransactionStatus;
+    const updateData: any = {
+      revision: { increment: 1 },
+      statusHistory: {
+        create: {
+          newStatus: '',
+          changedById: userId,
+          notes: 'QC started',
+        },
+      },
+    };
+
     if (tx.status === 'QC_VEHICLE_PENDING') {
       nextStatus = 'QC_VEHICLE_IN_PROGRESS';
+      updateData.qcStartAt = tx.qcStartAt || now;
     } else if (tx.status === 'INCOMING_CHECK_PENDING') {
       nextStatus = 'INCOMING_CHECK_IN_PROGRESS';
+      updateData.incomingQcStartAt = tx.incomingQcStartAt || now;
     } else {
       throw new BadRequestException(
         'Transaction is not in a valid pending state to start QC',
       );
     }
+    updateData.status = nextStatus;
+    updateData.statusHistory.create.newStatus = nextStatus;
 
     const updated = await this.prisma.transaction.update({
       where: { id: transactionId },
-      data: {
-        revision: { increment: 1 },
-        status: nextStatus,
-        qcStartAt: tx.qcStartAt || new Date(),
-        statusHistory: {
-          create: {
-            newStatus: nextStatus,
-            changedById: userId,
-            notes: 'QC started',
-          },
-        },
-      },
+      data: updateData,
     });
 
     await this.activityLogsService.logAction({
@@ -303,7 +308,7 @@ export class QcService {
           defectNotes: dto.defectNotes,
           notes: dto.notes,
           checkedById: userId,
-          startedAt: tx.qcStartAt || new Date(),
+          startedAt: tx.incomingQcStartAt || tx.qcStartAt || new Date(),
           completedAt: new Date(),
         },
       });
@@ -313,7 +318,7 @@ export class QcService {
         data: {
           revision: { increment: 1 },
           status: nextStatus,
-          qcStartAt: tx.qcStartAt || new Date(),
+          incomingQcStartAt: tx.incomingQcStartAt || new Date(),
           qcEndAt: new Date(),
           statusHistory: {
             create: {

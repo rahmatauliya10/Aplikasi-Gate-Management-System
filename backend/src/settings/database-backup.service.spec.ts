@@ -448,5 +448,41 @@ describe('DatabaseBackupService', () => {
         }
       }
     });
+
+    it('should fail local backup status if DB attachment record exists but physical file is missing', async () => {
+      prismaService.attachment.findMany.mockResolvedValueOnce([
+        {
+          id: 'att-missing-1',
+          transactionId: 'tx-1',
+          module: 'QC',
+          attachmentType: 'QC_PHOTO',
+          originalName: 'missing.jpg',
+          fileName: 'missing.jpg',
+          filePath: 'qc/missing.jpg',
+          mimeType: 'image/jpeg',
+          size: 1234,
+        },
+      ]);
+
+      const testUploadDir = path.resolve('./test_uploads_missing');
+      process.env.UPLOAD_DIR = testUploadDir;
+      if (!fs.existsSync(testUploadDir)) {
+        fs.mkdirSync(testUploadDir, { recursive: true });
+      }
+
+      try {
+        const manifest = await service.runAutomatedScheduledBackup(
+          'MANUAL_EXPLICIT',
+          mockAdminUser,
+        );
+
+        expect(manifest.localStatus).toBe('FAILED');
+        expect(manifest.reconciliation?.missingAttachmentCount).toBe(1);
+      } finally {
+        if (fs.existsSync(testUploadDir)) {
+          fs.rmSync(testUploadDir, { recursive: true, force: true });
+        }
+      }
+    });
   });
 });

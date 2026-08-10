@@ -28,6 +28,32 @@ try {
 
 const prisma = new PrismaClient();
 
+async function checkUnmanagedLegacyDb(prismaClient) {
+  try {
+    const existingTables = await prismaClient.$queryRaw`
+      SELECT tablename
+      FROM pg_tables
+      WHERE schemaname = 'public'
+    `;
+    const tableNames = (existingTables || []).map((t) => (t.tablename || '').toLowerCase());
+    const gmsBusinessTables = ['user', 'transaction', 'qcvehiclecheck', 'weighbridgerecord'];
+    const foundGmsTables = tableNames.filter((t) => gmsBusinessTables.includes(t));
+
+    if (foundGmsTables.length > 0) {
+      console.error('❌ UNMANAGED / LEGACY DATABASE DETECTED (FAIL CLOSED):');
+      console.error(
+        `   Table '_prisma_migrations' is missing/empty, but GMS business tables (${foundGmsTables.join(', ')}) already exist in the database!`,
+      );
+      console.error('   Applying initial migrations on an unmanaged existing database will crash or corrupt state.');
+      console.error('   Please reconcile migration history before proceeding.\n');
+      await prismaClient.$disconnect();
+      process.exit(1);
+    }
+  } catch (checkErr) {
+    console.error('⚠️ Could not verify table existence for fresh database check:', checkErr.message);
+  }
+}
+
 async function main() {
   console.log('\n=== GMS Migration Checksum Reconciliation ===\n');
 
@@ -49,15 +75,15 @@ async function main() {
     const errCode = err?.meta?.code || err?.code;
     const errMsg = String(err?.message || err);
 
-    // Check if error is PostgreSQL 42P01 / Prisma P2010 (relation "_prisma_migrations" does not exist)
+    // Check if error is PostgreSQL 42P01 (relation "_prisma_migrations" does not exist)
     const isRelationMissing =
       errCode === '42P01' ||
       (errMsg.includes('_prisma_migrations') &&
         (errMsg.includes('does not exist') ||
-          errMsg.includes('undefined_table') ||
-          errMsg.includes('P2010')));
+          errMsg.includes('undefined_table')));
 
     if (isRelationMissing) {
+      await checkUnmanagedLegacyDb(prisma);
       console.log('ℹ️  Table _prisma_migrations does not exist yet (Fresh Database).');
       console.log('   Safe to apply initial migrations.\n');
       await prisma.$disconnect();
@@ -71,6 +97,7 @@ async function main() {
   }
 
   if (!dbMigrations || dbMigrations.length === 0) {
+    await checkUnmanagedLegacyDb(prisma);
     console.log('ℹ️  No migrations found in database (Fresh Database).');
     console.log('   Safe to apply initial migrations.\n');
     await prisma.$disconnect();

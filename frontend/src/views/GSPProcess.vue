@@ -358,29 +358,11 @@ onMounted(async () => {
 
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
-const showChecklistModal = ref(false)
 const currentPage = ref(1)
 const searchQuery = ref('')
 const suratJalanInput = ref('')
 const poNumberInput = ref('')
-const rejectComment = ref('')
 const isProcessing = ref(false)
-
-// Checklists by Cargo Type
-const CHECKLISTS = {
-  Chemicals: ["Cek MSDS (Material Safety Data Sheet)", "Cek Kemasan Bocor"],
-  Fuel: ["Cek Segel Tangki", "Cek Tera Flowmeter"],
-  'Batu Bara': ["Cek Terpal Penutup", "Visual Kondisi Basah/Kering"],
-  default: ["Cek Kesesuaian PO", "Visual Kondisi Kemasan"]
-}
-const currentChecklist = computed(() => {
-  if (!selectedTruck.value) return CHECKLISTS.default
-  return CHECKLISTS[selectedTruck.value.cargoType] || CHECKLISTS.default
-})
-const checklistStates = ref([])
-
-const isChecklistComplete = computed(() => checklistStates.value.every(s => s !== null))
-const hasChecklistReject = computed(() => checklistStates.value.some(s => s === false))
 
 const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'WAREHOUSE_IN_PROGRESS' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(t) === 'GSP'))
 const filteredGspTrucks = computed(() => {
@@ -402,16 +384,9 @@ watch(filteredGspTrucks, () => {
 })
 watch(searchQuery, () => { currentPage.value = 1 })
 const selectTruck = (truck) => { 
-  const isSameTruck = selectedTruck.value && String(selectedTruck.value.id) === String(truck.id)
   selectedTruck.value = truck 
   suratJalanInput.value = truck.suratJalanNumber || ''
   poNumberInput.value = truck.poNumber || ''
-
-  if (!isSameTruck || truck.status === 'INCOMING_CHECK_PENDING') {
-    const listLen = currentChecklist.value ? currentChecklist.value.length : 0
-    checklistStates.value = Array(listLen).fill(null)
-    rejectComment.value = ''
-  }
 }
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
 

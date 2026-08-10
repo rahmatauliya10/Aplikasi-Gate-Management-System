@@ -80,7 +80,7 @@ services:
     volumes:
       - uploads:/app/uploads
       - backups_local:/app/backups/local
-      - ${NAS_MOUNT_PATH:-./deploy/nas}:/app/backups/nas
+      - ${NAS_MOUNT_PATH:?NAS_MOUNT_PATH must be set to a remote offsite/NAS mount directory}:/app/backups/nas
     deploy:
       resources:
         limits:

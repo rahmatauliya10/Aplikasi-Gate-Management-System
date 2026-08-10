@@ -47,6 +47,12 @@ export interface BackupManifest {
     attachmentsArchive?: string;
   };
   attachmentsCount?: number;
+  reconciliation?: {
+    dbAttachmentCount: number;
+    physicalAttachmentCount: number;
+    missingAttachmentCount: number;
+    orphanPhysicalFileCount: number;
+  };
   localStatus: 'VERIFIED' | 'FAILED';
   offsiteStatus: 'VERIFIED' | 'PENDING' | 'FAILED';
   checksums: {
@@ -646,7 +652,7 @@ export class DatabaseBackupService
       this.logger.warn(`Could not write globals sql file: ${e.message}`);
     }
 
-    // Physical Attachments Byte Archive & Checksum Manifest
+    // Physical Attachments Byte Archive, Checksum Manifest & DB Reconciliation
     const attachmentsArchiveName = `gms_${timestamp}_attachments.json`;
     const localAttachmentsPath = path.join(
       activeLocalDir,
@@ -655,13 +661,21 @@ export class DatabaseBackupService
     let attachmentsCount = 0;
     let attachmentsChecksum = '';
     let attachmentsArchivedOk = true;
+    let missingAttachmentCount = 0;
+    let orphanPhysicalFileCount = 0;
+    const dbAttachmentCount = attachments.length;
+
     try {
       const uploadDir = process.env.UPLOAD_DIR || './uploads';
       const resolvedUploadDir = path.resolve(uploadDir);
+      let physicalFilesMap = new Set<string>();
+
       if (fs.existsSync(resolvedUploadDir)) {
         const uploadFiles = this.getAllFilesRecursively(resolvedUploadDir);
         const attachmentManifest = uploadFiles.map((fileObj) => {
           const fileBuffer = fs.readFileSync(fileObj.absolutePath);
+          const normalizedRel = fileObj.relativePath.replace(/\\/g, '/');
+          physicalFilesMap.add(normalizedRel.toLowerCase());
           return {
             relativePath: fileObj.relativePath,
             fileName: path.basename(fileObj.relativePath),
@@ -681,6 +695,38 @@ export class DatabaseBackupService
         attachmentsChecksum =
           this.calculateChecksumForFile(localAttachmentsPath);
       }
+
+      // Reconcile DB Attachment records against Physical Evidence
+      if (attachments && attachments.length > 0) {
+        for (const att of attachments) {
+          const rawPath = att.filePath || att.fileName;
+          if (!rawPath) {
+            missingAttachmentCount++;
+            continue;
+          }
+          const cleanRelPath = rawPath
+            .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
+            .replace(/^[/\\]+/, '');
+          const fullPhysicalPath = path.resolve(resolvedUploadDir, cleanRelPath);
+          const relFromUpload = path.relative(resolvedUploadDir, fullPhysicalPath);
+          const isInsideUpload =
+            !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
+
+          if (!isInsideUpload || !fs.existsSync(fullPhysicalPath)) {
+            missingAttachmentCount++;
+            this.logger.error(
+              `[Backup Reconcile] Missing physical file for DB attachment ID ${att.id} (${rawPath}) at path ${fullPhysicalPath}`,
+            );
+          }
+        }
+      }
+
+      if (missingAttachmentCount > 0) {
+        attachmentsArchivedOk = false;
+        this.logger.error(
+          `[Backup Reconcile FAILED] Database contains ${dbAttachmentCount} attachment record(s) but ${missingAttachmentCount} physical file(s) are missing from disk!`,
+        );
+      }
     } catch (e: any) {
       attachmentsArchivedOk = false;
       this.logger.warn(`Could not archive physical attachments: ${e.message}`);
@@ -693,7 +739,7 @@ export class DatabaseBackupService
       ? this.calculateChecksumForFile(localGlobalsPath)
       : '';
 
-    // P0-01 & P1-04 Fix: Status VERIFIED ONLY IF pgDumpSuccess === true AND valid custom dump AND attachment archiving succeeded
+    // P0-01 & P1-04 Fix: Status VERIFIED ONLY IF pgDumpSuccess === true AND valid custom dump AND attachment archiving succeeded AND no missing attachments
     const isDumpValid =
       pgDumpSuccess &&
       fs.existsSync(localDumpPath) &&
@@ -730,6 +776,12 @@ export class DatabaseBackupService
           attachmentsCount > 0 ? attachmentsArchiveName : undefined,
       },
       attachmentsCount,
+      reconciliation: {
+        dbAttachmentCount,
+        physicalAttachmentCount: attachmentsCount,
+        missingAttachmentCount,
+        orphanPhysicalFileCount,
+      },
       localStatus,
       offsiteStatus: 'PENDING',
       checksums: {
@@ -818,8 +870,11 @@ export class DatabaseBackupService
         } else {
           manifest.offsiteStatus = 'FAILED';
         }
+      } else {
+        manifest.offsiteStatus = 'FAILED';
       }
     } catch (e: any) {
+      manifest.offsiteStatus = 'FAILED';
       this.logger.warn(`Copy to offsite NAS failed: ${e.message}`);
     }
 

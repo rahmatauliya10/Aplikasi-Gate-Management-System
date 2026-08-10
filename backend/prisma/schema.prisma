@@ -208,6 +208,7 @@ model Transaction {
   warehouseUnit         WarehouseUnit?
   qcStartAt             DateTime?
   qcEndAt               DateTime?
+  incomingQcStartAt     DateTime?
   qcAnalysisCompleted   Boolean           @default(false)
   qcAnalysisCompletedAt DateTime?
 
