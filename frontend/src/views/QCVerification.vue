@@ -53,13 +53,13 @@
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9"><StepTimeline :current-step="selectedTruck.status" :process-type="getProcessType(selectedTruck)" /></div>
 
             <div class="mt-6 space-y-5">
-              <!-- Stage 1: QC Sampling Awal (Pre-Unloading) for all process types -->
+              <!-- Stage 1: QC Vehicle / Sampling Awal based on Process Type -->
               <div v-if="selectedTruck.status === 'QC_VEHICLE_PENDING' || selectedTruck.status === 'QC_VEHICLE_IN_PROGRESS'" class="space-y-4">
-                <button @click="openSamplingAwalModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
-                  style="background:linear-gradient(135deg,#6366f1,#3730a3);">
+                <button @click="openQcStage1Modal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
+                  :style="getProcessType(selectedTruck) === 'GBJ' ? 'background:linear-gradient(135deg,#3B82F6,#1D4ED8);' : 'background:linear-gradient(135deg,#6366f1,#3730a3);'">
                   <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
-                  <span v-else class="material-icons text-xl">biotech</span>
-                  <span class="text-base tracking-wide">{{ isProcessing ? 'Starting Sampling...' : (getProcessType(selectedTruck) === 'GBJ' ? '📋 Input QC Vehicle Checklist (GBJ)' : '🧪 Enter Initial QC Sampling (Pre-Unloading)') }}</span>
+                  <span v-else class="material-icons text-xl">{{ getProcessType(selectedTruck) === 'GBJ' ? 'fact_check' : 'biotech' }}</span>
+                  <span class="text-base tracking-wide">{{ isProcessing ? 'Starting QC...' : (getProcessType(selectedTruck) === 'GBJ' ? '📋 Input QC Vehicle Checklist (GBJ)' : '🧪 Enter Initial QC Sampling (Pre-Unloading)') }}</span>
                 </button>
               </div>
 
@@ -463,10 +463,15 @@
                 <span class="text-[11px] font-black uppercase tracking-widest">Complete {{ checklistRemaining }} Checklist Items</span>
                 <p class="text-[9px] font-bold mt-1 text-center">All items must be answered OK or NOT OK + photo attachment to proceed.</p>
               </div>
-              <button v-else @click="acceptChecklistAndStart" :disabled="isProcessing" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;">
+              <button v-else-if="!hasNotOkItem" @click="submitGbjChecklist" :disabled="isProcessing" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(16,185,129,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#10B981,#059669);color:white;">
                 <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
                 <span class="text-sm font-black uppercase tracking-widest text-white">{{ isProcessing ? 'PROCESSING...' : 'Accept & Pass Verification' }}</span>
                 <span v-if="!isProcessing" class="material-icons text-lg animate-bounce-right">arrow_forward</span>
+              </button>
+              <button v-else @click="submitGbjChecklist" :disabled="isProcessing" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(239,68,68,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#EF4444,#B91C1C);color:white;">
+                <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
+                <span class="text-sm font-black uppercase tracking-widest text-white">{{ isProcessing ? 'PROCESSING...' : 'Submit QC Rejection (Item NOT OK Found)' }}</span>
+                <span v-if="!isProcessing" class="material-icons text-lg">cancel</span>
               </button>
             </div>
           </div>
@@ -668,10 +673,83 @@ const checklistRemaining = computed(() => {
   return vehicleChecklist.length - checklistDoneCount.value
 })
 
+const hasNotOkItem = computed(() => {
+  return checklistStates.value.some(s => s.status === 'not_ok')
+})
+
+const submitGbjChecklist = async () => {
+  if (isProcessing.value || !selectedTruck.value) return;
+
+  if (!isChecklistComplete.value) {
+    toast.error('Lengkapi semua 5 item checklist terlebih dahulu!');
+    return;
+  }
+
+  const hasNotOk = hasNotOkItem.value;
+  const passed = !hasNotOk;
+
+  const notOkLabels = checklistStates.value
+    .map((s, idx) => s.status === 'not_ok' ? `${idx + 1}. ${vehicleChecklist[idx]}` : null)
+    .filter(Boolean);
+
+  const defaultNotes = passed
+    ? 'Lolos QC Vehicle Checklist GBJ'
+    : `[REJECT QC VEHICLE GBJ] Temuan NOT OK (${notOkLabels.length} item): ${notOkLabels.join('; ')}`;
+
+  const actionText = passed ? 'Approve QC Vehicle' : 'Reject QC Vehicle';
+  const ok = await confirm({
+    title: `${actionText}?`,
+    message: passed
+      ? `Konfirmasi QC Vehicle Checklist PASS untuk armada ${getPlateNumber(selectedTruck.value)}? Truk akan dapat diproses ke Loading GBJ.`
+      : `Konfirmasi DITOLAK (REJECT) untuk armada ${getPlateNumber(selectedTruck.value)} karena terdapat ${notOkLabels.length} temuan item NOT OK?`,
+    type: passed ? 'success' : 'danger',
+    confirmText: passed ? 'Ya, Pass Verification' : 'Ya, Reject Truk'
+  });
+
+  if (ok) {
+    isProcessing.value = true;
+    try {
+      const payload = {
+        result: passed ? 'PASS' : 'REJECT',
+        pestEvidence: checklistStates.value[0]?.status === 'ok',
+        documentCompleteness: checklistStates.value[1]?.status === 'ok',
+        vehicleCleanliness: checklistStates.value[2]?.status === 'ok',
+        vehicleOdor: checklistStates.value[3]?.status === 'ok',
+        sealCondition: checklistStates.value[4]?.status === 'ok',
+        vehicleCondition: passed,
+        checklistItems: {
+          initialMoisture: 0,
+          items: checklistStates.value.map((s, idx) => ({
+            label: vehicleChecklist[idx] || 'Checklist item',
+            ok: s.status === 'ok',
+            photo: s.photo || null
+          }))
+        },
+        notes: defaultNotes
+      };
+
+      const response = await qcStore.submitVehicleResult(selectedTruck.value.id, payload);
+      const updatedTruck = response?.data || response;
+      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
+
+      if (passed) {
+        toast.success(`QC Vehicle Checklist ${getPlateNumber(selectedTruck.value)} DISATUJUI (PASS). Truk siap masuk ke Loading GBJ.`);
+      } else {
+        toast.error(`QC Vehicle Checklist ${getPlateNumber(selectedTruck.value)} DITOLAK (REJECT).`);
+      }
+
+      selectedTruck.value = null;
+      showChecklistModal.value = false;
+    } catch (e) {
+      toast.error('Gagal menyimpan hasil QC Vehicle Checklist GBJ');
+    } finally {
+      isProcessing.value = false;
+    }
+  }
+};
+
 const acceptChecklistAndStart = () => {
-  showChecklistModal.value = false
-  // When explicit accept button is clicked, pass the verification (items and photos are stored for audit)
-  verifyTruck(selectedTruck.value, true)
+  submitGbjChecklist()
 }
 
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
@@ -701,7 +779,19 @@ const triggerStartQc = async (truck) => {
   return true;
 }
 
+const openQcStage1Modal = (truck) => {
+  if (!truck) return;
+  if (getProcessType(truck) === 'GBJ') {
+    openGbjModal(truck);
+  } else {
+    openSamplingAwalModal(truck);
+  }
+};
+
 const openSamplingAwalModal = async (truck) => {
+  if (getProcessType(truck) === 'GBJ') {
+    return openGbjModal(truck);
+  }
   const success = await triggerStartQc(truck);
   if (success) {
     samplingForm.value = { visual: 'Normal', odor: 'Normal', moistureEst: null, note: '' };
@@ -778,6 +868,10 @@ const openGbbModal = async (truck) => {
 }
 
 const openGbjModal = async (truck) => {
+  if (getProcessType(truck) !== 'GBJ') {
+    return openSamplingAwalModal(truck);
+  }
+  checklistStates.value = vehicleChecklist.map(() => ({ status: null, photo: null }));
   const success = await triggerStartQc(truck);
   if (success) showChecklistModal.value = true;
 }
