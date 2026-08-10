@@ -503,6 +503,10 @@ export class WarehouseService {
         });
       }
 
+      const activeProcess = await prismaTx.warehouseProcess.findFirst({
+        where: { transactionId, isCurrent: true, endAt: null },
+      });
+
       if (!activeProcess) {
         throw new ConflictException({
           success: false,
