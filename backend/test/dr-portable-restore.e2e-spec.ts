@@ -94,20 +94,22 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     // 2. Seed multi-table transaction workflow fixture (Transaction, Weighbridge, QC, Warehouse, Correction)
     const tx = await prisma.transaction.create({
       data: {
+        transactionNumber: 'TRX-DR-TEST-001',
         plateNumber: 'B9999DRTest',
         driverName: 'Driver DR Test',
-        processType: 'GBB',
-        status: 'INCOMING_CHECK_IN_PROGRESS',
-        isCompleted: false,
+        driverPhone: '08123456789',
+        vendorName: 'Vendor DR Test',
         vehicleType: 'TRUCK',
+        processType: 'GBB',
+        cargoType: 'RAW_MATERIAL',
+        cargoProcessType: 'INBOUND',
+        status: 'INCOMING_CHECK_IN_PROGRESS',
         gateInAt: new Date(),
         weighbridgeRecords: {
           create: {
             ticketNumber: 'WB-DR-TEST-001',
-            type: 'WEIGH_IN',
+            type: 'IN',
             weight: 15400,
-            weighInAt: new Date(),
-            operatorName: 'WB Operator Test',
             isCurrent: true,
             revision: 1,
           },
@@ -138,9 +140,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         },
         warehouseProcesses: {
           create: {
-            queueNumber: 'Q-DR-01',
-            status: 'UNLOADING_IN_PROGRESS',
-            assignedLine: 'LINE_A',
+            processType: 'GBB',
             condition: 'GOOD',
             isCurrent: true,
             revision: 1,
