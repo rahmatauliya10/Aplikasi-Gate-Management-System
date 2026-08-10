@@ -13,12 +13,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 jest.mock('child_process', () => ({
-  execFile: jest.fn(
-    (cmd: string, args: string[], opts: any, callback: any) => {
-      const cb = typeof opts === 'function' ? opts : callback;
-      if (cb) cb(null, { stdout: '', stderr: '' }, '');
-    },
-  ),
+  execFile: jest.fn((cmd: string, args: string[], opts: any, callback: any) => {
+    const cb = typeof opts === 'function' ? opts : callback;
+    if (cb) cb(null, { stdout: '', stderr: '' }, '');
+  }),
 }));
 
 describe('DatabaseBackupService', () => {
