@@ -14,13 +14,14 @@ export const GBJ_VEHICLE_CHECKLIST = [
 /**
  * Determines the mode of Stage 1 QC modal for a given transaction.
  * - 'GBJ_VEHICLE_CHECK' if process type is GBJ
- * - 'SAMPLING_AWAL' for GBB, GSP, or other incoming materials
+ * - 'SAMPLING_AWAL' for GBB or GSP
+ * - 'UNKNOWN' for missing, corrupt, or unrecognized process types (fail-closed)
  */
 export function getQcStage1Mode(truck) {
-  if (!truck) return 'SAMPLING_AWAL'
-  const processType = truck.processType || truck.process_type || 
-    (truck.poNumber?.startsWith('PO-GBJ') || truck.po_number?.startsWith('PO-GBJ') ? 'GBJ' : null)
-  return processType === 'GBJ' ? 'GBJ_VEHICLE_CHECK' : 'SAMPLING_AWAL'
+  const type = truck?.processType || truck?.process_type
+  if (type === 'GBJ') return 'GBJ_VEHICLE_CHECK'
+  if (type === 'GBB' || type === 'GSP') return 'SAMPLING_AWAL'
+  return 'UNKNOWN'
 }
 
 /**

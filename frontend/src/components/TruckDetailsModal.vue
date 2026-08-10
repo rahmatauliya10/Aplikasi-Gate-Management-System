@@ -451,7 +451,7 @@
           </div>
 
           <!-- Full-Width Audit Trail & Correction History (Admin Only / When Available) -->
-          <div v-if="isAdmin && (historyLoading || auditHistory.length > 0)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
+          <div v-if="isAdmin && (historyLoading || correctionCount > 0 || historyError)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
             <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/80">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-amber-600 text-[16px]">history_edu</span>
@@ -481,6 +481,17 @@
             <div v-if="historyLoading" class="p-6 flex flex-col items-center justify-center text-slate-400 space-y-2">
               <span class="material-icons animate-spin text-2xl text-amber-600">sync</span>
               <span class="text-xs font-bold">Memuat riwayat koreksi dan audit trail...</span>
+            </div>
+
+            <!-- Error state -->
+            <div v-else-if="historyError" class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center justify-between m-3">
+              <div class="flex items-center space-x-2">
+                <span class="material-icons text-rose-600 text-base">error_outline</span>
+                <span class="font-bold">Riwayat koreksi tersedia tetapi gagal dimuat. Silakan Reload.</span>
+              </div>
+              <button @click="fetchCorrectionHistory" type="button" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all">
+                <span class="material-icons text-xs">refresh</span> Reload
+              </button>
             </div>
 
             <!-- Empty state -->
@@ -1261,6 +1272,7 @@ const occConflictError = ref(null)
 const showSensitiveConfirm = ref(false)
 const auditHistory = ref([])
 const historyLoading = ref(false)
+const historyError = ref(null)
 const activeCorrectionTab = ref('WEIGHBRIDGE')
 const attributionData = ref(null)
 
@@ -1468,11 +1480,13 @@ const handleEvidenceUpload = (event) => {
 const fetchCorrectionHistory = async () => {
   if (!props.truck?.id || !isAdmin.value) return
   historyLoading.value = true
+  historyError.value = null
   try {
     const res = await truckStore.fetchOperationLogCorrections(props.truck.id)
     auditHistory.value = res?.data || []
     attributionData.value = res?.attribution || null
   } catch (err) {
+    historyError.value = err?.message || 'Gagal memuat riwayat koreksi'
     auditHistory.value = []
     attributionData.value = null
   } finally {

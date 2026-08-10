@@ -51,13 +51,19 @@ describe('GBJ Process Status Flow Rules', () => {
 describe('GBJ Stage 1 QC Modal Mode Dispatcher', () => {
   it('should dispatch GBJ transactions to GBJ_VEHICLE_CHECK mode', () => {
     expect(getQcStage1Mode({ processType: 'GBJ' })).toBe('GBJ_VEHICLE_CHECK')
-    expect(getQcStage1Mode({ poNumber: 'PO-GBJ-2026-001' })).toBe('GBJ_VEHICLE_CHECK')
+    expect(getQcStage1Mode({ process_type: 'GBJ' })).toBe('GBJ_VEHICLE_CHECK')
   })
 
   it('should dispatch GBB and GSP transactions to SAMPLING_AWAL mode', () => {
     expect(getQcStage1Mode({ processType: 'GBB' })).toBe('SAMPLING_AWAL')
     expect(getQcStage1Mode({ processType: 'GSP' })).toBe('SAMPLING_AWAL')
-    expect(getQcStage1Mode(null)).toBe('SAMPLING_AWAL')
+  })
+
+  it('should return UNKNOWN for null, missing, or invalid processType (fail-closed)', () => {
+    expect(getQcStage1Mode(null)).toBe('UNKNOWN')
+    expect(getQcStage1Mode({})).toBe('UNKNOWN')
+    expect(getQcStage1Mode({ poNumber: 'PO-GBJ-2026-001' })).toBe('UNKNOWN')
+    expect(getQcStage1Mode({ processType: 'OTHER' })).toBe('UNKNOWN')
   })
 })
 
