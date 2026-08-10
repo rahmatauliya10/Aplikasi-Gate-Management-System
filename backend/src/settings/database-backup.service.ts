@@ -367,11 +367,16 @@ export class DatabaseBackupService
     const manifestFileName = `gms_${timestamp}_manifest.json`;
 
     // Ensure active Prisma connection pool before reading snapshot data
-    try {
-      await this.prisma.$connect();
-    } catch {
-      await this.prisma.$disconnect().catch(() => {});
-      await this.prisma.$connect();
+    if (
+      typeof (this.prisma as any)?.$connect === 'function' &&
+      typeof (this.prisma as any)?.$disconnect === 'function'
+    ) {
+      try {
+        await this.prisma.$connect();
+      } catch {
+        await this.prisma.$disconnect().catch(() => {});
+        await this.prisma.$connect();
+      }
     }
 
     const [
@@ -1023,11 +1028,16 @@ export class DatabaseBackupService
       this.logger.log(`pg_restore completed successfully.`);
 
       // Re-establish Prisma connection pool after database drop/restore
-      try {
-        await this.prisma.$disconnect().catch(() => {});
-        await this.prisma.$connect();
-      } catch (e: any) {
-        this.logger.warn(`Prisma reconnect after restore note: ${e.message}`);
+      if (
+        typeof (this.prisma as any)?.$connect === 'function' &&
+        typeof (this.prisma as any)?.$disconnect === 'function'
+      ) {
+        try {
+          await this.prisma.$disconnect().catch(() => {});
+          await this.prisma.$connect();
+        } catch (e: any) {
+          this.logger.warn(`Prisma reconnect after restore note: ${e.message}`);
+        }
       }
 
       // 6. Restore physical upload attachment files atomically
@@ -1388,13 +1398,18 @@ export class DatabaseBackupService
       );
 
       // Re-establish Prisma connection pool after database drop/restore
-      try {
-        await this.prisma.$disconnect().catch(() => {});
-        await this.prisma.$connect();
-      } catch (e: any) {
-        this.logger.warn(
-          `Prisma reconnect after portable restore note: ${e.message}`,
-        );
+      if (
+        typeof (this.prisma as any)?.$connect === 'function' &&
+        typeof (this.prisma as any)?.$disconnect === 'function'
+      ) {
+        try {
+          await this.prisma.$disconnect().catch(() => {});
+          await this.prisma.$connect();
+        } catch (e: any) {
+          this.logger.warn(
+            `Prisma reconnect after portable restore note: ${e.message}`,
+          );
+        }
       }
 
       // Restore attachments

@@ -20,6 +20,8 @@ describe('DatabaseBackupService', () => {
 
   beforeEach(async () => {
     prismaService = {
+      $connect: jest.fn().mockResolvedValue(undefined),
+      $disconnect: jest.fn().mockResolvedValue(undefined),
       user: {
         findMany: jest
           .fn()
