@@ -13,5 +13,5 @@ ON "WarehouseProcess" ("transactionId")
 WHERE "isCurrent" = true;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_weighbridge_record_current" 
-ON "WeighbridgeRecord" ("transactionId", "weightType") 
+ON "WeighbridgeRecord" ("transactionId", "type") 
 WHERE "isCurrent" = true;
