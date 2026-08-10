@@ -197,6 +197,42 @@ export class DatabaseBackupService
     return createHash('sha256').update(jsonString).digest('hex');
   }
 
+  private getAllFilesRecursively(
+    dir: string,
+    baseDir: string = dir,
+  ): Array<{ relativePath: string; absolutePath: string }> {
+    let results: Array<{ relativePath: string; absolutePath: string }> = [];
+    if (!fs.existsSync(dir)) return results;
+
+    const items = fs.readdirSync(dir);
+    const backupsDir = path.resolve(path.join(baseDir, 'backups'));
+
+    for (const item of items) {
+      const fullPath = path.join(dir, item);
+      const resolvedPath = path.resolve(fullPath);
+
+      if (
+        resolvedPath === backupsDir ||
+        resolvedPath.startsWith(backupsDir + path.sep)
+      ) {
+        continue;
+      }
+
+      const stat = fs.statSync(fullPath);
+      if (stat.isDirectory()) {
+        results = results.concat(
+          this.getAllFilesRecursively(fullPath, baseDir),
+        );
+      } else if (stat.isFile()) {
+        const relativePath = path
+          .relative(baseDir, fullPath)
+          .replace(/\\/g, '/');
+        results.push({ relativePath, absolutePath: fullPath });
+      }
+    }
+    return results;
+  }
+
   async getSystemStatus(): Promise<BackupSystemStatus> {
     this.ensureBackupDirectories();
     const history = await this.getBackupHistory();
@@ -618,20 +654,17 @@ export class DatabaseBackupService
     );
     let attachmentsCount = 0;
     let attachmentsChecksum = '';
+    let attachmentsArchivedOk = true;
     try {
       const uploadDir = process.env.UPLOAD_DIR || './uploads';
       const resolvedUploadDir = path.resolve(uploadDir);
       if (fs.existsSync(resolvedUploadDir)) {
-        const uploadFiles = fs
-          .readdirSync(resolvedUploadDir)
-          .filter(
-            (f) => !fs.statSync(path.join(resolvedUploadDir, f)).isDirectory(),
-          );
-        const attachmentManifest = uploadFiles.map((f) => {
-          const filePath = path.join(resolvedUploadDir, f);
-          const fileBuffer = fs.readFileSync(filePath);
+        const uploadFiles = this.getAllFilesRecursively(resolvedUploadDir);
+        const attachmentManifest = uploadFiles.map((fileObj) => {
+          const fileBuffer = fs.readFileSync(fileObj.absolutePath);
           return {
-            fileName: f,
+            relativePath: fileObj.relativePath,
+            fileName: path.basename(fileObj.relativePath),
             size: fileBuffer.length,
             checksum: this.calculateChecksumForBuffer(fileBuffer),
             base64Content: fileBuffer.toString('base64'),
@@ -649,6 +682,7 @@ export class DatabaseBackupService
           this.calculateChecksumForFile(localAttachmentsPath);
       }
     } catch (e: any) {
+      attachmentsArchivedOk = false;
       this.logger.warn(`Could not archive physical attachments: ${e.message}`);
     }
 
@@ -659,15 +693,14 @@ export class DatabaseBackupService
       ? this.calculateChecksumForFile(localGlobalsPath)
       : '';
 
-    // P0-01 & P1-04 Fix: Status VERIFIED ONLY IF pgDumpSuccess === true AND valid custom dump
+    // P0-01 & P1-04 Fix: Status VERIFIED ONLY IF pgDumpSuccess === true AND valid custom dump AND attachment archiving succeeded
     const isDumpValid =
       pgDumpSuccess &&
       fs.existsSync(localDumpPath) &&
       fs.statSync(localDumpPath).size > 0 &&
       dumpChecksum.length > 0;
-    const localStatus: 'VERIFIED' | 'FAILED' = isDumpValid
-      ? 'VERIFIED'
-      : 'FAILED';
+    const localStatus: 'VERIFIED' | 'FAILED' =
+      isDumpValid && attachmentsArchivedOk ? 'VERIFIED' : 'FAILED';
 
     const snapshotChecksum = fs.existsSync(localSnapshotPath)
       ? this.calculateChecksumForFile(localSnapshotPath)
@@ -747,6 +780,9 @@ export class DatabaseBackupService
         const offsiteDumpChecksum = fs.existsSync(offsiteDumpPath)
           ? this.calculateChecksumForFile(offsiteDumpPath)
           : '';
+        const offsiteGlobalsChecksum = fs.existsSync(offsiteGlobalsPath)
+          ? this.calculateChecksumForFile(offsiteGlobalsPath)
+          : '';
         const offsiteSnapshotChecksum = fs.existsSync(offsiteSnapshotPath)
           ? this.calculateChecksumForFile(offsiteSnapshotPath)
           : '';
@@ -756,6 +792,7 @@ export class DatabaseBackupService
 
         let isOffsiteValid =
           offsiteDumpChecksum === dumpChecksum &&
+          offsiteGlobalsChecksum === globalsChecksum &&
           offsiteSnapshotChecksum === snapshotChecksum;
 
         if (attachmentsChecksum) {
@@ -1091,15 +1128,20 @@ export class DatabaseBackupService
 
             try {
               for (const file of archiveContent.files) {
-                if (file.fileName && file.base64Content) {
+                const relPath = file.relativePath || file.fileName;
+                if (relPath && file.base64Content) {
                   const root = path.resolve(stagingDir);
-                  const targetPath = path.resolve(root, file.fileName);
+                  const targetPath = path.resolve(root, relPath);
                   const relative = path.relative(root, targetPath);
                   if (relative.startsWith('..') || path.isAbsolute(relative)) {
                     throw new BadRequestException({
                       success: false,
-                      message: `Deteksi jalur berkas tidak valid (${file.fileName}). Pemulihan dibatalkan.`,
+                      message: `Deteksi jalur berkas tidak valid (${relPath}). Pemulihan dibatalkan.`,
                     });
+                  }
+                  const targetDir = path.dirname(targetPath);
+                  if (!fs.existsSync(targetDir)) {
+                    fs.mkdirSync(targetDir, { recursive: true });
                   }
                   const buffer = Buffer.from(file.base64Content, 'base64');
                   fs.writeFileSync(targetPath, buffer);
@@ -1107,7 +1149,7 @@ export class DatabaseBackupService
                     this.calculateChecksumForBuffer(buffer);
                   if (file.checksum && restoredChecksum !== file.checksum) {
                     throw new Error(
-                      `Checksum mismatch during attachment file restore: ${file.fileName}`,
+                      `Checksum mismatch during attachment file restore: ${relPath}`,
                     );
                   }
                   restoredAttachmentsCount++;
@@ -1116,9 +1158,14 @@ export class DatabaseBackupService
 
               // Swap phase
               for (const file of archiveContent.files) {
-                if (file.fileName) {
-                  const stagingPath = path.join(stagingDir, file.fileName);
-                  const finalPath = path.join(uploadDir, file.fileName);
+                const relPath = file.relativePath || file.fileName;
+                if (relPath) {
+                  const stagingPath = path.join(stagingDir, relPath);
+                  const finalPath = path.join(uploadDir, relPath);
+                  const finalDir = path.dirname(finalPath);
+                  if (!fs.existsSync(finalDir)) {
+                    fs.mkdirSync(finalDir, { recursive: true });
+                  }
                   if (fs.existsSync(stagingPath)) {
                     fs.renameSync(stagingPath, finalPath);
                   }
@@ -1464,17 +1511,23 @@ export class DatabaseBackupService
 
         const root = path.resolve(uploadDir);
         for (const file of bundlePayload.attachmentsContent.files) {
-          if (file.fileName && file.base64Content) {
-            const targetPath = path.resolve(root, file.fileName);
+          const relPath = file.relativePath || file.fileName;
+          if (relPath && file.base64Content) {
+            const targetPath = path.resolve(root, relPath);
             const relative = path.relative(root, targetPath);
             if (relative.startsWith('..') || path.isAbsolute(relative)) {
               this.logger.error(
-                `Path traversal attempt blocked for file: ${file.fileName}`,
+                `Path traversal attempt blocked for file: ${relPath}`,
               );
               throw new BadRequestException({
                 success: false,
-                message: `Deteksi jalur berkas tidak valid (${file.fileName}). Pemulihan dibatalkan.`,
+                message: `Deteksi jalur berkas tidak valid (${relPath}). Pemulihan dibatalkan.`,
               });
+            }
+
+            const targetDir = path.dirname(targetPath);
+            if (!fs.existsSync(targetDir)) {
+              fs.mkdirSync(targetDir, { recursive: true });
             }
 
             const fileBuffer = Buffer.from(file.base64Content, 'base64');
@@ -1483,11 +1536,11 @@ export class DatabaseBackupService
                 this.calculateChecksumForBuffer(fileBuffer);
               if (actualChecksum !== file.checksum) {
                 this.logger.error(
-                  `Attachment checksum mismatch for file: ${file.fileName}`,
+                  `Attachment checksum mismatch for file: ${relPath}`,
                 );
                 throw new BadRequestException({
                   success: false,
-                  message: `Integritas berkas attachment ${file.fileName} gagal diverifikasi (Checksum mismatch). Pemulihan dibatalkan.`,
+                  message: `Integritas berkas attachment ${relPath} gagal diverifikasi (Checksum mismatch). Pemulihan dibatalkan.`,
                 });
               }
             }

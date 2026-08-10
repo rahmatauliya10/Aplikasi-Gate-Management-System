@@ -88,14 +88,13 @@
                 <WeightInput label="Input Actual Weight GSP (KG)" :is-submitting="isProcessing" @save="handleWeightSave" />
               </div>
 
-              <!-- Incoming Material Check -->
-              <div v-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="mt-6">
-                <button @click="openChecklist" class="w-full py-4 rounded-xl flex items-center justify-center space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;transform:translateZ(0)">
-                  <span class="material-icons text-xl">fact_check</span>
-                  <span class="font-black tracking-widest uppercase">
-                    {{ selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS' ? 'Lanjutkan Incoming Material Check' : 'Start Incoming Material Check' }}
-                  </span>
-                </button>
+              <!-- Incoming Material Check (Read Only for Warehouse) -->
+              <div v-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="mt-6 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2)">
+                <span class="material-icons text-blue-500 text-2xl animate-spin">sync</span>
+                <div>
+                  <p class="text-sm font-black text-blue-700">Pemeriksaan Incoming QC Berlangsung</p>
+                  <p class="text-[11px] text-blue-600">Menunggu pemeriksaan Incoming QC oleh QC Team.</p>
+                </div>
               </div>
 
               <!-- Sampling Result Badge -->

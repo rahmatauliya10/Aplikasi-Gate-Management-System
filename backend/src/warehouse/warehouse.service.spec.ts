@@ -177,4 +177,24 @@ describe('WarehouseService Revisioning (P1-01)', () => {
 
     expect(result.success).toBe(true);
   });
+
+  it('should throw BadRequestException if submitIncomingCheck is called on GBJ transaction', async () => {
+    mockPrismaService.transaction.findUnique.mockResolvedValue({
+      id: 'tx-gbj-1',
+      processType: 'GBJ',
+      status: 'WAREHOUSE_IN_PROGRESS',
+    });
+
+    await expect(
+      service.submitIncomingCheck(
+        'tx-gbj-1',
+        { decision: 'rejected' },
+        {
+          id: 'usr-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        } as unknown as JwtPayloadUser,
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
 });

@@ -653,6 +653,14 @@ export class WarehouseService {
       });
     }
 
+    if (!['GBB', 'GSP'].includes(tx.processType)) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Incoming check only applies to GBB/GSP process types',
+        errors: [],
+      });
+    }
+
     if (['GBB', 'GSP'].includes(tx.processType) && user.role === 'WAREHOUSE') {
       this.logger.warn(
         `SoD violation: Warehouse role attempted incoming check on ${tx.processType} transaction ${transactionId}`,

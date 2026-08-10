@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SubmitIncomingCheckDto {
@@ -7,7 +7,7 @@ export class SubmitIncomingCheckDto {
     example: 'passed',
     enum: ['passed', 'rejected'],
   })
-  @IsString()
+  @IsIn(['passed', 'rejected'])
   decision: 'passed' | 'rejected';
 
   @ApiPropertyOptional({

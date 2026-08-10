@@ -168,6 +168,18 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       },
     });
 
+    // Seed physical nested attachment files
+    const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
+    const qcSubdir = path.join(uploadDir, 'qc');
+    const whSubdir = path.join(uploadDir, 'warehouse');
+    fs.mkdirSync(qcSubdir, { recursive: true });
+    fs.mkdirSync(whSubdir, { recursive: true });
+
+    const qcFile = path.join(qcSubdir, 'dr-qc.jpg');
+    const whFile = path.join(whSubdir, 'dr-wh.pdf');
+    fs.writeFileSync(qcFile, 'DR_QC_FILE_CONTENT_12345');
+    fs.writeFileSync(whFile, 'DR_WH_FILE_CONTENT_67890');
+
     // 3. Generate snapshot & portable bundle
     const backupSnapshot = await backupService.generateBackup(
       jwtUser,
@@ -205,10 +217,16 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     });
     await prisma.transaction.delete({ where: { id: tx.id } });
 
-    // Assert database is wiped clean of test records
+    // Wipe physical files
+    if (fs.existsSync(qcFile)) fs.unlinkSync(qcFile);
+    if (fs.existsSync(whFile)) fs.unlinkSync(whFile);
+
+    // Assert database & physical files are wiped
     expect(
       await prisma.transaction.findUnique({ where: { id: tx.id } }),
     ).toBeNull();
+    expect(fs.existsSync(qcFile)).toBe(false);
+    expect(fs.existsSync(whFile)).toBe(false);
 
     // 5. TEST RESTORE METHOD 1: restoreDatabase()
     const restoreRes = await backupService.restoreDatabase(
@@ -218,6 +236,12 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       '127.0.0.1',
     );
     expect(restoreRes.success).toBe(true);
+
+    // Verify physical nested files restored
+    expect(fs.existsSync(qcFile)).toBe(true);
+    expect(fs.readFileSync(qcFile, 'utf8')).toBe('DR_QC_FILE_CONTENT_12345');
+    expect(fs.existsSync(whFile)).toBe(true);
+    expect(fs.readFileSync(whFile, 'utf8')).toBe('DR_WH_FILE_CONTENT_67890');
 
     // Verify multi-table integrity restored
     const restoredTx = await prisma.transaction.findUnique({
@@ -260,6 +284,9 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     });
     await prisma.transaction.delete({ where: { id: tx.id } });
 
+    if (fs.existsSync(qcFile)) fs.unlinkSync(qcFile);
+    if (fs.existsSync(whFile)) fs.unlinkSync(whFile);
+
     // 7. TEST RESTORE METHOD 2: restoreFromPortableBundle() (.gmsbackup)
     const bundleRestoreRes = await backupService.restoreFromPortableBundle(
       jwtUser,
@@ -268,6 +295,16 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       '127.0.0.1',
     );
     expect(bundleRestoreRes.success).toBe(true);
+
+    // Verify physical nested files restored from portable bundle
+    expect(fs.existsSync(qcFile)).toBe(true);
+    expect(fs.readFileSync(qcFile, 'utf8')).toBe('DR_QC_FILE_CONTENT_12345');
+    expect(fs.existsSync(whFile)).toBe(true);
+    expect(fs.readFileSync(whFile, 'utf8')).toBe('DR_WH_FILE_CONTENT_67890');
+
+    // Clean up physical test files
+    if (fs.existsSync(qcFile)) fs.unlinkSync(qcFile);
+    if (fs.existsSync(whFile)) fs.unlinkSync(whFile);
 
     // Verify multi-table data restored from portable bundle
     const bundleRestoredTx = await prisma.transaction.findUnique({

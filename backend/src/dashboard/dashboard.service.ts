@@ -140,19 +140,29 @@ export class DashboardService {
       sumWaitingIn += getDiffMins(t.gateInAt, t.weighInAt);
       sumWarehouse += getDiffMins(t.warehouseStartAt, t.warehouseEndAt);
 
-      let vehicleQcDur = 0;
-      if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
-        const v = t.qcVehicleChecks[0];
-        vehicleQcDur = getDiffMins(v.startedAt, v.completedAt);
+      const v =
+        t.qcVehicleChecks && t.qcVehicleChecks.length > 0
+          ? t.qcVehicleChecks[0]
+          : null;
+      const inc =
+        t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0
+          ? t.incomingMaterialChecks[0]
+          : null;
+
+      const hasVehicleQc = !!v?.startedAt && !!v?.completedAt;
+      const hasIncomingQc = !!inc?.startedAt && !!inc?.completedAt;
+
+      if (hasVehicleQc || hasIncomingQc) {
+        const vehicleQcDur = hasVehicleQc
+          ? getDiffMins(v!.startedAt, v!.completedAt)
+          : 0;
+        const incomingQcDur = hasIncomingQc
+          ? getDiffMins(inc!.startedAt, inc!.completedAt)
+          : 0;
+        sumQc += vehicleQcDur + incomingQcDur;
+      } else {
+        sumQc += getDiffMins(t.qcStartAt, t.qcEndAt);
       }
-      let incomingQcDur = 0;
-      if (t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0) {
-        const inc = t.incomingMaterialChecks[0];
-        incomingQcDur = getDiffMins(inc.startedAt, inc.completedAt);
-      }
-      const actualQcDur = vehicleQcDur + incomingQcDur;
-      sumQc +=
-        actualQcDur > 0 ? actualQcDur : getDiffMins(t.qcStartAt, t.qcEndAt);
 
       sumWaitingOut += getDiffMins(t.warehouseEndAt, t.weighOutAt);
       sumTotalTat += getDiffMins(t.gateInAt, t.gateOutAt);

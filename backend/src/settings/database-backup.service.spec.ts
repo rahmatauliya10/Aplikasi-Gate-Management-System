@@ -412,5 +412,42 @@ describe('DatabaseBackupService', () => {
         },
       });
     });
+
+    it('should recursively backup attachments and preserve relativePath in manifest', async () => {
+      const testUploadDir = path.resolve('./test_uploads_recursive');
+      process.env.UPLOAD_DIR = testUploadDir;
+      const qcSubdir = path.join(testUploadDir, 'qc');
+      const whSubdir = path.join(testUploadDir, 'warehouse');
+      fs.mkdirSync(qcSubdir, { recursive: true });
+      fs.mkdirSync(whSubdir, { recursive: true });
+
+      fs.writeFileSync(path.join(qcSubdir, 'qc_sample.jpg'), 'qc_data');
+      fs.writeFileSync(path.join(whSubdir, 'wh_sample.pdf'), 'wh_data');
+
+      try {
+        const manifest = await service.triggerManualBackup(
+          mockAdminUser,
+          'MANUAL_EXPLICIT',
+          '127.0.0.1',
+        );
+
+        expect(manifest.localStatus).toBe('VERIFIED');
+        expect(manifest.attachmentsCount).toBe(2);
+
+        const archivePath = path.join(
+          process.env.LOCAL_BACKUP_DIR || './backups/local',
+          manifest.artifacts.attachmentsArchive!,
+        );
+        const archive = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+        const paths = archive.files.map((f: any) => f.relativePath);
+
+        expect(paths).toContain('qc/qc_sample.jpg');
+        expect(paths).toContain('warehouse/wh_sample.pdf');
+      } finally {
+        if (fs.existsSync(testUploadDir)) {
+          fs.rmSync(testUploadDir, { recursive: true, force: true });
+        }
+      }
+    });
   });
 });

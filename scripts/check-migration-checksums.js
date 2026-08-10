@@ -46,10 +46,28 @@ async function main() {
       ORDER BY started_at
     `;
   } catch (err) {
-    console.log('ℹ️  Table _prisma_migrations does not exist yet (Fresh Database).');
-    console.log('   Safe to apply initial migrations.\n');
+    const errCode = err?.meta?.code || err?.code;
+    const errMsg = String(err?.message || err);
+
+    // Check if error is PostgreSQL 42P01 / Prisma P2010 (relation "_prisma_migrations" does not exist)
+    const isRelationMissing =
+      errCode === '42P01' ||
+      (errMsg.includes('_prisma_migrations') &&
+        (errMsg.includes('does not exist') ||
+          errMsg.includes('undefined_table') ||
+          errMsg.includes('P2010')));
+
+    if (isRelationMissing) {
+      console.log('ℹ️  Table _prisma_migrations does not exist yet (Fresh Database).');
+      console.log('   Safe to apply initial migrations.\n');
+      await prisma.$disconnect();
+      process.exit(0);
+    }
+
+    console.error('❌ Failed to verify migration history due to database error (FAIL CLOSED):');
+    console.error(`   ${errMsg}\n`);
     await prisma.$disconnect();
-    process.exit(0);
+    process.exit(1);
   }
 
   if (!dbMigrations || dbMigrations.length === 0) {
