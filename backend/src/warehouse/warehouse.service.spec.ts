@@ -122,16 +122,16 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should compute revision = max(revision) + 1 when warehouse submits incoming material check', async () => {
+  it('should compute revision = max(revision) + 1 when incoming material check is submitted', async () => {
     const mockTx = {
       id: 'tx-wh-2',
       status: 'INCOMING_CHECK_PENDING',
-      processType: 'GBJ',
+      processType: 'GSP',
     };
 
     mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockTx);
     mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
-      { processType: 'GBJ' },
+      { processType: 'GSP' },
     ]);
 
     const mockTxClient = {
@@ -156,8 +156,8 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       { decision: 'passed' },
       {
         id: 'usr-1',
-        role: 'WAREHOUSE',
-        email: 'wh@gms.local',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
       } as unknown as JwtPayloadUser,
     );
 

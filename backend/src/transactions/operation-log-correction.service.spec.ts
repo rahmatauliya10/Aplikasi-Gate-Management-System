@@ -701,6 +701,7 @@ describe('OperationLogCorrectionService', () => {
     it('should correctly map GBB/GSP OUT correction to tareWeight and recompute netWeight', async () => {
       const mockTx = {
         id: 'tx-gbb-out',
+        status: 'COMPLETED',
         processType: 'GBB',
         grossWeight: 20000,
         tareWeight: 8000,

@@ -425,9 +425,8 @@ describe('DatabaseBackupService', () => {
       fs.writeFileSync(path.join(whSubdir, 'wh_sample.pdf'), 'wh_data');
 
       try {
-        const manifest = await service.triggerManualBackup(
+        const manifest = await service.generateBackup(
           mockAdminUser,
-          'MANUAL_EXPLICIT',
           '127.0.0.1',
         );
 
