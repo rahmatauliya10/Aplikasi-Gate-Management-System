@@ -194,7 +194,9 @@ describe('WarehouseService Revisioning (P1-01)', () => {
         role: 'ADMIN',
         email: 'admin@gms.local',
       } as unknown as JwtPayloadUser);
-      throw new Error('Expected submitIncomingCheck to throw BadRequestException');
+      throw new Error(
+        'Expected submitIncomingCheck to throw BadRequestException',
+      );
     } catch (err: any) {
       expect(err).toBeInstanceOf(BadRequestException);
       expect(err.message).toContain('GBB/GSP');
