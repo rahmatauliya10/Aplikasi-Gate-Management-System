@@ -47,9 +47,6 @@ describe('Auth Security (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (prisma) {
-      await prisma.$disconnect().catch(() => {});
-    }
     if (app) {
       await app.close();
     }

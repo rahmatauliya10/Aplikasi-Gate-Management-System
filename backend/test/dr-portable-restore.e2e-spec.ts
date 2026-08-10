@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import * as fs from 'fs';
+import * as argon2 from 'argon2';
 import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { DatabaseBackupService } from './../src/settings/database-backup.service';
@@ -31,9 +32,6 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
   });
 
   afterAll(async () => {
-    if (prisma) {
-      await prisma.$disconnect().catch(() => {});
-    }
     if (app) {
       await app.close();
     }
@@ -66,5 +64,80 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         // Abaikan error hapus temporary file
       }
     }
+  });
+
+  it('should execute full destructive seed -> backup -> wipe -> restore -> verify cycle', async () => {
+    const adminPassword = 'DrTestAdminPassword123!';
+    const passwordHash = await argon2.hash(adminPassword);
+
+    // 1. Create temporary admin user for backup & restore authorization
+    const adminUser = await prisma.user.upsert({
+      where: { username: 'dr_e2e_admin' },
+      update: { passwordHash, isActive: true },
+      create: {
+        email: 'dr_e2e_admin@gms.local',
+        username: 'dr_e2e_admin',
+        passwordHash,
+        name: 'DR E2E Admin',
+        role: 'ADMIN',
+        isActive: true,
+      },
+    });
+
+    const jwtUser = {
+      id: adminUser.id,
+      email: adminUser.email,
+      role: adminUser.role,
+      tokenVersion: adminUser.tokenVersion,
+    };
+
+    // 2. Seed test fixture data
+    const testLog = await prisma.activityLog.create({
+      data: {
+        userId: adminUser.id,
+        action: 'DR_RESTORE_TEST_SEED',
+        module: 'SYSTEM',
+        description: 'Test seed record for DR E2E destructive restore test',
+        status: 'SUCCESS',
+      },
+    });
+
+    // 3. Generate backup snapshot containing seeded record
+    const backupPayload = await backupService.generateBackup(
+      jwtUser,
+      '127.0.0.1',
+    );
+    expect(backupPayload.metadata).toBeDefined();
+    expect(backupPayload.data).toBeDefined();
+
+    // 4. Simulate data loss / corruption (destructive wipe of test log)
+    await prisma.activityLog.delete({ where: { id: testLog.id } });
+    const wipedRecord = await prisma.activityLog.findUnique({
+      where: { id: testLog.id },
+    });
+    expect(wipedRecord).toBeNull();
+
+    // 5. Perform database restore from backup payload
+    const restoreResult = await backupService.restoreDatabase(
+      jwtUser,
+      backupPayload,
+      adminPassword,
+      '127.0.0.1',
+    );
+
+    expect(restoreResult.success).toBe(true);
+
+    // 6. Verify data is fully restored back in PostgreSQL DB
+    const restoredRecord = await prisma.activityLog.findUnique({
+      where: { id: testLog.id },
+    });
+    expect(restoredRecord).toBeDefined();
+    expect(restoredRecord?.action).toBe('DR_RESTORE_TEST_SEED');
+
+    // Clean up test records safely
+    await prisma.activityLog.deleteMany({
+      where: { action: 'DR_RESTORE_TEST_SEED' },
+    });
+    await prisma.user.delete({ where: { id: adminUser.id } });
   });
 });
