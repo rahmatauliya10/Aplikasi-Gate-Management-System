@@ -2,8 +2,24 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DatabaseBackupService } from './database-backup.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  BadRequestException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import * as argon2 from 'argon2';
+import { createHash, createHmac } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+
+jest.mock('child_process', () => ({
+  execFile: jest.fn(
+    (cmd: string, args: string[], opts: any, callback: any) => {
+      const cb = typeof opts === 'function' ? opts : callback;
+      if (cb) cb(null, { stdout: '', stderr: '' }, '');
+    },
+  ),
+}));
 
 describe('DatabaseBackupService', () => {
   let service: DatabaseBackupService;
@@ -19,6 +35,10 @@ describe('DatabaseBackupService', () => {
   };
 
   beforeEach(async () => {
+    process.env.DATABASE_URL =
+      'postgresql://postgres:postgres@localhost:5432/gms_test_db';
+    process.env.BACKUP_SIGNATURE_SECRET = 'test_secret_key';
+
     prismaService = {
       $connect: jest.fn().mockResolvedValue(undefined),
       $disconnect: jest.fn().mockResolvedValue(undefined),
@@ -161,9 +181,16 @@ describe('DatabaseBackupService', () => {
       expect(['PG_CUSTOM', 'JSON_SNAPSHOT']).toContain(manifest.dumpFormat);
       expect(manifest.createdBy.email).toBe(mockAdminUser.email);
     });
+
+    it('should throw InternalServerErrorException if DATABASE_URL is missing (fail-closed)', async () => {
+      delete process.env.DATABASE_URL;
+      await expect(
+        service.runAutomatedScheduledBackup('MANUAL_EXPLICIT', mockAdminUser),
+      ).rejects.toThrow(InternalServerErrorException);
+    });
   });
 
-  describe('restoreDatabase', () => {
+  describe('restoreDatabase & restoreFromPortableBundle', () => {
     it('should throw UnauthorizedException if admin password is wrong', async () => {
       const hashedPassword = await argon2.hash('SecretAdmin123');
       prismaService.user.findUnique.mockResolvedValue({
@@ -203,7 +230,7 @@ describe('DatabaseBackupService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should throw BadRequestException if portable bundle signature is tampered', async () => {
+    it('should throw BadRequestException if portable bundle signature is invalid / tampered', async () => {
       const tamperedBundle = {
         metadata: { system: 'GMS_GATE_MANAGEMENT_SYSTEM' },
         dumpBase64: 'dummy_dump',
@@ -220,44 +247,161 @@ describe('DatabaseBackupService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should throw BadRequestException when portable attachment checksum fails', async () => {
+    it('should throw BadRequestException with Signature mismatch if payload is tampered after signing', async () => {
+      const secret = 'test_secret_key';
+      process.env.BACKUP_SIGNATURE_SECRET = secret;
+
+      const payload: any = {
+        metadata: {
+          system: 'GMS_GATE_MANAGEMENT_SYSTEM',
+          backupId: 'BKP-TEST',
+          checksums: { dump: 'dummy_checksum' },
+        },
+        dumpBase64: Buffer.from('dummy_dump_data').toString('base64'),
+        attachmentsContent: null,
+      };
+
+      const payloadStr = JSON.stringify(payload);
+      const signature = createHmac('sha256', secret)
+        .update(payloadStr)
+        .digest('hex');
+
+      // Tamper payload after signing
+      payload.metadata.backupId = 'BKP-HACKED';
+      payload.signature = signature;
+
+      await expect(
+        service.restoreFromPortableBundle(
+          mockAdminUser,
+          payload,
+          'SecretAdmin123',
+          '127.0.0.1',
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          message: expect.stringContaining('Signature mismatch'),
+        },
+      });
+    });
+
+    it('should throw BadRequestException specifically on attachment checksum failure when restoring valid bundle', async () => {
       const hashedPassword = await argon2.hash('SecretAdmin123');
       prismaService.user.findUnique.mockResolvedValue({
         id: mockAdminUser.id,
         passwordHash: hashedPassword,
       });
 
-      const badAttachmentBundle = {
+      const secret = 'test_secret_key';
+      process.env.BACKUP_SIGNATURE_SECRET = secret;
+
+      const dumpBuffer = Buffer.from('dummy PostgreSQL dump content');
+      const dumpChecksum = createHash('sha256')
+        .update(dumpBuffer)
+        .digest('hex');
+
+      const attachmentBuffer = Buffer.from('corrupted_image_data');
+
+      const rawBundle: any = {
         metadata: {
           system: 'GMS_GATE_MANAGEMENT_SYSTEM',
-          backupId: 'BKP-TEST',
+          backupId: 'BKP-TEST-ATTACHMENT',
           checksums: {
-            dump: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+            dump: dumpChecksum,
           },
         },
-        dumpBase64: '',
-        signature: 'valid_sig',
+        dumpBase64: dumpBuffer.toString('base64'),
         attachmentsContent: {
           files: [
             {
-              fileName: 'photo.jpg',
-              base64Content: Buffer.from('test_data').toString('base64'),
-              checksum: 'wrong_checksum_value',
+              fileName: 'photo_test.jpg',
+              base64Content: attachmentBuffer.toString('base64'),
+              checksum: 'invalid_expected_checksum_value',
             },
           ],
         },
       };
 
-      process.env.BACKUP_SIGNATURE_SECRET = 'test_secret';
+      const payloadStr = JSON.stringify(rawBundle);
+      const signature = createHmac('sha256', secret)
+        .update(payloadStr)
+        .digest('hex');
+      rawBundle.signature = signature;
+
+      const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
+      const targetFilePath = path.join(uploadDir, 'photo_test.jpg');
+      if (fs.existsSync(targetFilePath)) {
+        fs.unlinkSync(targetFilePath);
+      }
 
       await expect(
         service.restoreFromPortableBundle(
           mockAdminUser,
-          badAttachmentBundle,
+          rawBundle,
           'SecretAdmin123',
           '127.0.0.1',
         ),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toMatchObject({
+        response: {
+          message: expect.stringContaining('photo_test.jpg'),
+        },
+      });
+
+      expect(fs.existsSync(targetFilePath)).toBe(false);
+    });
+
+    it('should throw BadRequestException on attachment path traversal attempt and abort restore', async () => {
+      const hashedPassword = await argon2.hash('SecretAdmin123');
+      prismaService.user.findUnique.mockResolvedValue({
+        id: mockAdminUser.id,
+        passwordHash: hashedPassword,
+      });
+
+      const secret = 'test_secret_key';
+      process.env.BACKUP_SIGNATURE_SECRET = secret;
+
+      const dumpBuffer = Buffer.from('dummy dump');
+      const dumpChecksum = createHash('sha256')
+        .update(dumpBuffer)
+        .digest('hex');
+
+      const rawBundle: any = {
+        metadata: {
+          system: 'GMS_GATE_MANAGEMENT_SYSTEM',
+          backupId: 'BKP-TEST-TRAVERSAL',
+          checksums: {
+            dump: dumpChecksum,
+          },
+        },
+        dumpBase64: dumpBuffer.toString('base64'),
+        attachmentsContent: {
+          files: [
+            {
+              fileName: '../malicious_script.sh',
+              base64Content: Buffer.from('echo hacked').toString('base64'),
+              checksum: '',
+            },
+          ],
+        },
+      };
+
+      const payloadStr = JSON.stringify(rawBundle);
+      const signature = createHmac('sha256', secret)
+        .update(payloadStr)
+        .digest('hex');
+      rawBundle.signature = signature;
+
+      await expect(
+        service.restoreFromPortableBundle(
+          mockAdminUser,
+          rawBundle,
+          'SecretAdmin123',
+          '127.0.0.1',
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          message: expect.stringContaining('tidak valid'),
+        },
+      });
     });
   });
 });

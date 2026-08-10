@@ -545,15 +545,16 @@ export class DatabaseBackupService
       }
     }
 
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) {
+      throw new InternalServerErrorException(
+        'DATABASE_URL environment variable must be set for backup operations.',
+      );
+    }
+
     // Attempt Native pg_dump using child_process execFile (shell: false)
     let pgDumpSuccess = false;
     try {
-      const dbUrl = process.env.DATABASE_URL;
-      if (!dbUrl) {
-        throw new InternalServerErrorException(
-          'DATABASE_URL environment variable must be set for backup operations.',
-        );
-      }
       const parsedUrl = new URL(dbUrl);
       const host = parsedUrl.hostname || 'postgres';
       const port = parsedUrl.port || '5432';
@@ -1071,7 +1072,15 @@ export class DatabaseBackupService
             try {
               for (const file of archiveContent.files) {
                 if (file.fileName && file.base64Content) {
-                  const targetPath = path.join(stagingDir, file.fileName);
+                  const root = path.resolve(stagingDir);
+                  const targetPath = path.resolve(root, file.fileName);
+                  const relative = path.relative(root, targetPath);
+                  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+                    throw new BadRequestException({
+                      success: false,
+                      message: `Deteksi jalur berkas tidak valid (${file.fileName}). Pemulihan dibatalkan.`,
+                    });
+                  }
                   const buffer = Buffer.from(file.base64Content, 'base64');
                   fs.writeFileSync(targetPath, buffer);
                   const restoredChecksum =
@@ -1439,10 +1448,13 @@ export class DatabaseBackupService
             const targetPath = path.resolve(root, file.fileName);
             const relative = path.relative(root, targetPath);
             if (relative.startsWith('..') || path.isAbsolute(relative)) {
-              this.logger.warn(
+              this.logger.error(
                 `Path traversal attempt blocked for file: ${file.fileName}`,
               );
-              continue;
+              throw new BadRequestException({
+                success: false,
+                message: `Deteksi jalur berkas tidak valid (${file.fileName}). Pemulihan dibatalkan.`,
+              });
             }
 
             const fileBuffer = Buffer.from(file.base64Content, 'base64');
