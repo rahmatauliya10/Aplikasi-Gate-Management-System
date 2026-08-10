@@ -155,6 +155,8 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         transactionId: tx.id,
         correctedById: adminUser.id,
         reason: 'DR E2E Test correction fixture',
+        oldValues: { initialMoisture: 10.0 },
+        newValues: { initialMoisture: 12.4 },
         items: {
           create: {
             targetModule: 'QC_VEHICLE',
