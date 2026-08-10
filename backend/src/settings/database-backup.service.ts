@@ -548,9 +548,12 @@ export class DatabaseBackupService
     // Attempt Native pg_dump using child_process execFile (shell: false)
     let pgDumpSuccess = false;
     try {
-      const dbUrl =
-        process.env.DATABASE_URL ||
-        'postgresql://postgres:postgres@postgres:5432/gms';
+      const dbUrl = process.env.DATABASE_URL;
+      if (!dbUrl) {
+        throw new InternalServerErrorException(
+          'DATABASE_URL environment variable must be set for backup operations.',
+        );
+      }
       const parsedUrl = new URL(dbUrl);
       const host = parsedUrl.hostname || 'postgres';
       const port = parsedUrl.port || '5432';
@@ -1447,10 +1450,13 @@ export class DatabaseBackupService
               const actualChecksum =
                 this.calculateChecksumForBuffer(fileBuffer);
               if (actualChecksum !== file.checksum) {
-                this.logger.warn(
-                  `Attachment checksum mismatch blocked for file: ${file.fileName}`,
+                this.logger.error(
+                  `Attachment checksum mismatch for file: ${file.fileName}`,
                 );
-                continue;
+                throw new BadRequestException({
+                  success: false,
+                  message: `Integritas berkas attachment ${file.fileName} gagal diverifikasi (Checksum mismatch). Pemulihan dibatalkan.`,
+                });
               }
             }
             fs.writeFileSync(targetPath, fileBuffer);

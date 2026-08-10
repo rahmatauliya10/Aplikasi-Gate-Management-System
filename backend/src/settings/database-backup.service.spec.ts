@@ -202,5 +202,62 @@ describe('DatabaseBackupService', () => {
         ),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('should throw BadRequestException if portable bundle signature is tampered', async () => {
+      const tamperedBundle = {
+        metadata: { system: 'GMS_GATE_MANAGEMENT_SYSTEM' },
+        dumpBase64: 'dummy_dump',
+        signature: 'invalid_tampered_signature_hash',
+      };
+
+      await expect(
+        service.restoreFromPortableBundle(
+          mockAdminUser,
+          tamperedBundle,
+          'SecretAdmin123',
+          '127.0.0.1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should throw BadRequestException when portable attachment checksum fails', async () => {
+      const hashedPassword = await argon2.hash('SecretAdmin123');
+      prismaService.user.findUnique.mockResolvedValue({
+        id: mockAdminUser.id,
+        passwordHash: hashedPassword,
+      });
+
+      const badAttachmentBundle = {
+        metadata: {
+          system: 'GMS_GATE_MANAGEMENT_SYSTEM',
+          backupId: 'BKP-TEST',
+          checksums: {
+            dump: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+          },
+        },
+        dumpBase64: '',
+        signature: 'valid_sig',
+        attachmentsContent: {
+          files: [
+            {
+              fileName: 'photo.jpg',
+              base64Content: Buffer.from('test_data').toString('base64'),
+              checksum: 'wrong_checksum_value',
+            },
+          ],
+        },
+      };
+
+      process.env.BACKUP_SIGNATURE_SECRET = 'test_secret';
+
+      await expect(
+        service.restoreFromPortableBundle(
+          mockAdminUser,
+          badAttachmentBundle,
+          'SecretAdmin123',
+          '127.0.0.1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });
