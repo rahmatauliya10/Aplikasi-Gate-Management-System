@@ -423,58 +423,6 @@ const handleWeightSave = async (weight) => {
       toast.success(`Processed Weight ${weight}kg saved — proceed to Incoming Material Check.`)
       selectedTruck.value = null
     } catch(e) {} finally { isProcessing.value = false; }
-  }
-}
-
-const openChecklist = () => {
-  if (selectedTruck.value && selectedTruck.value.status === 'INCOMING_CHECK_PENDING') {
-    const listLen = currentChecklist.value ? currentChecklist.value.length : 0
-    checklistStates.value = Array(listLen).fill(null)
-    rejectComment.value = ''
-    truckStore.updateTruckStatus(selectedTruck.value.id, 'INCOMING_CHECK_IN_PROGRESS')
-  }
-  showChecklistModal.value = true
-}
-
-const acceptChecklist = async (isNote = false) => {
-  if (isProcessing.value) return;
-  isProcessing.value = true;
-  try {
-    const checks = currentChecklist.value.map((item, idx) => `Item ${idx+1}: ${checklistStates.value[idx] ? 'OK' : 'NOT OK'}`);
-    let resultStrs = [];
-    if (isNote || hasChecklistReject.value) {
-      resultStrs.push('DITERIMA DENGAN CATATAN');
-    }
-    resultStrs.push(`Checklist: [${checks.join(' | ')}]`);
-    const remarks = resultStrs.join(' | ');
-
-    const response = await warehouseStore.submitIncomingCheck(selectedTruck.value.id, { decision: 'passed', remarks })
-    const updatedTruck = response?.data || response;
-    if (updatedTruck) {
-      updatedTruck.compiledChecklist = remarks;
-      truckStore.upsertTruck(updatedTruck);
-    }
-    showChecklistModal.value = false
-    toast.success(isNote || hasChecklistReject.value ? 'Incoming Check Passed (With Note) — Proceed to outbound weighbridge.' : 'Incoming Check Complete — Proceed to outbound weighbridge.')
-    selectedTruck.value = null
-  } catch(e) {} finally { isProcessing.value = false; }
-}
-
-const rejectChecklist = async () => {
-  const ok = await confirm({ title: 'Confirm Rejection', message: `REJECT inspection for ${selectedTruck.value.plateNumber}? Truck will be redirected to outbound weighbridge.`, type: 'danger', confirmText: 'Yes, Reject' })
-  if (ok) {
-    if (isProcessing.value) return;
-    isProcessing.value = true;
-    try {
-      const response = await warehouseStore.submitIncomingCheck(selectedTruck.value.id, { decision: 'rejected', rejectReason: rejectComment.value.trim() })
-      const updatedTruck = response?.data || response;
-      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-      toast.error(`${selectedTruck.value.plateNumber} rejected — ${rejectComment.value.trim()}`)
-      rejectComment.value = ''
-      showChecklistModal.value = false
-      selectedTruck.value = null
-    } catch(e) {} finally { isProcessing.value = false; }
-  }
 }
 </script>
 

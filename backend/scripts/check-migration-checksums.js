@@ -51,7 +51,9 @@ async function checkUnmanagedLegacyDb(prismaClient) {
       process.exit(1);
     }
   } catch (checkErr) {
-    console.error('⚠️ Could not verify table existence for fresh database check:', checkErr.message);
+    console.error('❌ Could not verify table existence for fresh database check (FAIL CLOSED):', checkErr.message);
+    await prismaClient.$disconnect();
+    process.exit(1);
   }
 }
 
@@ -73,6 +75,9 @@ async function main() {
       ORDER BY started_at
     `;
   } catch (err) {
+    const errCode = err?.meta?.code || err?.code;
+    const errMsg = String(err?.message || err);
+
     // Check if error is PostgreSQL 42P01 (relation "_prisma_migrations" does not exist)
     const isRelationMissing =
       errCode === '42P01' ||

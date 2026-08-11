@@ -62,11 +62,16 @@ jobs:
           npx prisma migrate deploy
 
       - name: Verify Migration Checksums (P0-01 Evidence)
-        if: matrix.db_state == 'upgraded'
         working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
         run: node scripts/check-migration-checksums.js
+
+      - name: Verify Prisma Schema Drift (Zero Drift Gate)
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+        run: npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --exit-code
 
       - name: Build Backend Production Bundle
         working-directory: ./backend

@@ -50,7 +50,9 @@ async function checkUnmanagedLegacyDb(prismaClient) {
       process.exit(1);
     }
   } catch (checkErr) {
-    console.error('⚠️ Could not verify table existence for fresh database check:', checkErr.message);
+    console.error('❌ Could not verify table existence for fresh database check (FAIL CLOSED):', checkErr.message);
+    await prismaClient.$disconnect();
+    process.exit(1);
   }
 }
 

@@ -308,7 +308,7 @@ export class QcService {
           defectNotes: dto.defectNotes,
           notes: dto.notes,
           checkedById: userId,
-          startedAt: tx.incomingQcStartAt || tx.qcStartAt || new Date(),
+          startedAt: tx.incomingQcStartAt || new Date(),
           completedAt: new Date(),
         },
       });

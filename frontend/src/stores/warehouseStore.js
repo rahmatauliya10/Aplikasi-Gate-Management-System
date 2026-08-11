@@ -42,22 +42,6 @@ export const useWarehouseStore = defineStore('warehouse', {
         this.loading = false;
       }
     },
-
-    async submitIncomingCheck(id, payload) {
-      this.loading = true;
-      this.error = null;
-      const notificationStore = useNotificationStore();
-      try {
-        const response = await warehouseService.submitIncomingCheck(id, payload);
-        return response.data;
-      } catch (error) {
-        const parsedError = handleApiError(error);
-        this.error = parsedError.message;
-        notificationStore.addNotification('Error', this.error, 'error');
-        throw error;
-      } finally {
-        this.loading = false;
-      }
     },
 
     async completeQcAnalysis(id, data = {}) {

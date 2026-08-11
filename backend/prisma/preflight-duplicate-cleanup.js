@@ -2,7 +2,7 @@ const { PrismaClient } = require('@prisma/client');
 
 async function main() {
   console.log('===================================================');
-  console.log('  GMS - MIGRATION PREFLIGHT DUPLICATE AUDIT/CLEANUP ');
+  console.log('  GMS - REVISION-AWARE PREFLIGHT DUPLICATE AUDIT   ');
   console.log('===================================================\n');
 
   const args = process.argv.slice(2);
@@ -10,15 +10,12 @@ async function main() {
   const isFailOnDuplicates = args.includes('--fail-on-duplicates');
   const isReportOnly = !isExecuteCleanup || args.includes('--report-only');
 
-  if (isReportOnly) {
-    console.log('[MODE]: REPORT-ONLY (DRY-RUN). No data will be deleted.');
-    if (isFailOnDuplicates) {
-      console.log('[OPTION]: --fail-on-duplicates ENABLED (Will exit code 2 if duplicates exist).');
-    }
-    console.log('To execute cleanup, run with: --execute-cleanup --approve\n');
+  console.log('[MODE]: REVISION-AWARE PREFLIGHT AUDIT.');
+  console.log('[SAFETY]: Automatic deletion of revision history is DISABLED to preserve audit logs.');
+  if (isFailOnDuplicates) {
+    console.log('[OPTION]: --fail-on-duplicates ENABLED (Will exit code 2 if duplicate active current records exist).\n');
   } else {
-    console.log('[MODE]: EXECUTE CLEANUP (DESTRUCTIVE MODE).');
-    console.log('Confirmed with --execute-cleanup --approve flags.\n');
+    console.log('\n');
   }
 
   const rawUrl = process.env.DATABASE_URL;
@@ -35,7 +32,7 @@ async function main() {
   try {
     await prisma.$connect();
 
-    // Check table existence helper
+    // Helper: Check table existence
     const checkTableExists = async (tableName) => {
       const res = await prisma.$queryRaw`
         SELECT EXISTS (
@@ -47,134 +44,167 @@ async function main() {
       return Array.isArray(res) && res[0] && res[0].exists === true;
     };
 
-    let qcCleaned = 0;
-    let incomingCleaned = 0;
-    let warehouseCleaned = 0;
+    // Helper: Check column existence
+    const checkColumnExists = async (tableName, columnName) => {
+      const res = await prisma.$queryRaw`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns 
+          WHERE table_schema = 'public' 
+          AND table_name = ${tableName}
+          AND column_name = ${columnName}
+        ) as exists;
+      `;
+      return Array.isArray(res) && res[0] && res[0].exists === true;
+    };
+
+    let totalDuplicateCurrentRecords = 0;
 
     // 1. QcVehicleCheck
     const hasQcTable = await checkTableExists('QcVehicleCheck');
     if (!hasQcTable) {
-      console.log('[1/3] Table "QcVehicleCheck" does not exist yet. Skipping check.');
+      console.log('[1/4] Table "QcVehicleCheck" does not exist yet. Skipping check.');
     } else {
-      console.log('[1/3] Checking duplicates in QcVehicleCheck (transactionId)...');
-      const qcDuplicates = await prisma.$queryRaw`
-        SELECT "transactionId", COUNT(*) as count
-        FROM "QcVehicleCheck"
-        GROUP BY "transactionId"
-        HAVING COUNT(*) > 1;
-      `;
+      const hasIsCurrent = await checkColumnExists('QcVehicleCheck', 'isCurrent');
+      console.log(`[1/4] Checking duplicate active current records in QcVehicleCheck (isCurrent column: ${hasIsCurrent})...`);
+      const qcDuplicates = hasIsCurrent
+        ? await prisma.$queryRaw`
+            SELECT "transactionId", COUNT(*) as count
+            FROM "QcVehicleCheck"
+            WHERE "isCurrent" = true
+            GROUP BY "transactionId"
+            HAVING COUNT(*) > 1;
+          `
+        : await prisma.$queryRaw`
+            SELECT "transactionId", COUNT(*) as count
+            FROM "QcVehicleCheck"
+            GROUP BY "transactionId"
+            HAVING COUNT(*) > 1;
+          `;
 
-      const qcIdsToDelete = [];
-      for (const dup of qcDuplicates) {
-        const records = await prisma.qcVehicleCheck.findMany({
-          where: { transactionId: dup.transactionId },
-          orderBy: { createdAt: 'desc' },
-        });
-        const ids = records.slice(1).map((r) => r.id);
-        qcIdsToDelete.push(...ids);
-      }
-
-      qcCleaned = qcIdsToDelete.length;
-      if (isReportOnly) {
-        console.log(`- Report: Found ${qcCleaned} duplicate QcVehicleCheck records (dry-run).`);
-      } else if (qcIdsToDelete.length > 0) {
-        await prisma.$transaction(async (tx) => {
-          await tx.qcVehicleCheck.deleteMany({ where: { id: { in: qcIdsToDelete } } });
-        });
-        console.log(`- Executed: ${qcCleaned} duplicate QcVehicleCheck records removed.`);
+      if (qcDuplicates.length > 0) {
+        console.error(`⚠️ Found ${qcDuplicates.length} transaction(s) with multiple active (isCurrent=true) QcVehicleCheck records:`);
+        for (const dup of qcDuplicates) {
+          console.error(`   - transactionId: ${dup.transactionId} (Count: ${dup.count})`);
+        }
+        totalDuplicateCurrentRecords += qcDuplicates.length;
       } else {
-        console.log(`- Status: No duplicate QcVehicleCheck records found.`);
+        console.log('- Status: No duplicate active current QcVehicleCheck records found.');
       }
     }
 
     // 2. IncomingMaterialCheck
     const hasIncomingTable = await checkTableExists('IncomingMaterialCheck');
     if (!hasIncomingTable) {
-      console.log('[2/3] Table "IncomingMaterialCheck" does not exist yet. Skipping check.');
+      console.log('[2/4] Table "IncomingMaterialCheck" does not exist yet. Skipping check.');
     } else {
-      console.log('[2/3] Checking duplicates in IncomingMaterialCheck (transactionId)...');
-      const incomingDuplicates = await prisma.$queryRaw`
-        SELECT "transactionId", COUNT(*) as count
-        FROM "IncomingMaterialCheck"
-        GROUP BY "transactionId"
-        HAVING COUNT(*) > 1;
-      `;
+      const hasIsCurrent = await checkColumnExists('IncomingMaterialCheck', 'isCurrent');
+      console.log(`[2/4] Checking duplicate active current records in IncomingMaterialCheck (isCurrent column: ${hasIsCurrent})...`);
+      const incomingDuplicates = hasIsCurrent
+        ? await prisma.$queryRaw`
+            SELECT "transactionId", COUNT(*) as count
+            FROM "IncomingMaterialCheck"
+            WHERE "isCurrent" = true
+            GROUP BY "transactionId"
+            HAVING COUNT(*) > 1;
+          `
+        : await prisma.$queryRaw`
+            SELECT "transactionId", COUNT(*) as count
+            FROM "IncomingMaterialCheck"
+            GROUP BY "transactionId"
+            HAVING COUNT(*) > 1;
+          `;
 
-      const incomingIdsToDelete = [];
-      for (const dup of incomingDuplicates) {
-        const records = await prisma.incomingMaterialCheck.findMany({
-          where: { transactionId: dup.transactionId },
-          orderBy: { createdAt: 'desc' },
-        });
-        const ids = records.slice(1).map((r) => r.id);
-        incomingIdsToDelete.push(...ids);
-      }
-
-      incomingCleaned = incomingIdsToDelete.length;
-      if (isReportOnly) {
-        console.log(`- Report: Found ${incomingCleaned} duplicate IncomingMaterialCheck records (dry-run).`);
-      } else if (incomingIdsToDelete.length > 0) {
-        await prisma.$transaction(async (tx) => {
-          await tx.incomingMaterialCheck.deleteMany({ where: { id: { in: incomingIdsToDelete } } });
-        });
-        console.log(`- Executed: ${incomingCleaned} duplicate IncomingMaterialCheck records removed.`);
+      if (incomingDuplicates.length > 0) {
+        console.error(`⚠️ Found ${incomingDuplicates.length} transaction(s) with multiple active (isCurrent=true) IncomingMaterialCheck records:`);
+        for (const dup of incomingDuplicates) {
+          console.error(`   - transactionId: ${dup.transactionId} (Count: ${dup.count})`);
+        }
+        totalDuplicateCurrentRecords += incomingDuplicates.length;
       } else {
-        console.log(`- Status: No duplicate IncomingMaterialCheck records found.`);
+        console.log('- Status: No duplicate active current IncomingMaterialCheck records found.');
       }
     }
 
     // 3. WarehouseProcess
     const hasWarehouseTable = await checkTableExists('WarehouseProcess');
     if (!hasWarehouseTable) {
-      console.log('[3/3] Table "WarehouseProcess" does not exist yet. Skipping check.');
+      console.log('[3/4] Table "WarehouseProcess" does not exist yet. Skipping check.');
     } else {
-      console.log('[3/3] Checking duplicates in WarehouseProcess (transactionId, processType)...');
-      const warehouseDuplicates = await prisma.$queryRaw`
-        SELECT "transactionId", "processType", COUNT(*) as count
-        FROM "WarehouseProcess"
-        GROUP BY "transactionId", "processType"
-        HAVING COUNT(*) > 1;
-      `;
+      const hasIsCurrent = await checkColumnExists('WarehouseProcess', 'isCurrent');
+      console.log(`[3/4] Checking duplicate active current records in WarehouseProcess (isCurrent column: ${hasIsCurrent})...`);
+      const warehouseDuplicates = hasIsCurrent
+        ? await prisma.$queryRaw`
+            SELECT "transactionId", "processType", COUNT(*) as count
+            FROM "WarehouseProcess"
+            WHERE "isCurrent" = true
+            GROUP BY "transactionId", "processType"
+            HAVING COUNT(*) > 1;
+          `
+        : await prisma.$queryRaw`
+            SELECT "transactionId", "processType", COUNT(*) as count
+            FROM "WarehouseProcess"
+            GROUP BY "transactionId", "processType"
+            HAVING COUNT(*) > 1;
+          `;
 
-      const warehouseIdsToDelete = [];
-      for (const dup of warehouseDuplicates) {
-        const records = await prisma.warehouseProcess.findMany({
-          where: {
-            transactionId: dup.transactionId,
-            processType: dup.processType,
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-        const ids = records.slice(1).map((r) => r.id);
-        warehouseIdsToDelete.push(...ids);
-      }
-
-      warehouseCleaned = warehouseIdsToDelete.length;
-      if (isReportOnly) {
-        console.log(`- Report: Found ${warehouseCleaned} duplicate WarehouseProcess records (dry-run).`);
-      } else if (warehouseIdsToDelete.length > 0) {
-        await prisma.$transaction(async (tx) => {
-          await tx.warehouseProcess.deleteMany({ where: { id: { in: warehouseIdsToDelete } } });
-        });
-        console.log(`- Executed: ${warehouseCleaned} duplicate WarehouseProcess records removed.`);
+      if (warehouseDuplicates.length > 0) {
+        console.error(`⚠️ Found ${warehouseDuplicates.length} process(es) with multiple active (isCurrent=true) WarehouseProcess records:`);
+        for (const dup of warehouseDuplicates) {
+          console.error(`   - transactionId: ${dup.transactionId}, processType: ${dup.processType} (Count: ${dup.count})`);
+        }
+        totalDuplicateCurrentRecords += warehouseDuplicates.length;
       } else {
-        console.log(`- Status: No duplicate WarehouseProcess records found.`);
+        console.log('- Status: No duplicate active current WarehouseProcess records found.');
       }
     }
 
-    const totalDuplicates = qcCleaned + incomingCleaned + warehouseCleaned;
+    // 4. WeighbridgeRecord
+    const hasWeighbridgeTable = await checkTableExists('WeighbridgeRecord');
+    if (!hasWeighbridgeTable) {
+      console.log('[4/4] Table "WeighbridgeRecord" does not exist yet. Skipping check.');
+    } else {
+      const hasIsCurrent = await checkColumnExists('WeighbridgeRecord', 'isCurrent');
+      console.log(`[4/4] Checking duplicate active current records in WeighbridgeRecord (isCurrent column: ${hasIsCurrent})...`);
+      const weighbridgeDuplicates = hasIsCurrent
+        ? await prisma.$queryRaw`
+            SELECT "transactionId", "type", COUNT(*) as count
+            FROM "WeighbridgeRecord"
+            WHERE "isCurrent" = true
+            GROUP BY "transactionId", "type"
+            HAVING COUNT(*) > 1;
+          `
+        : await prisma.$queryRaw`
+            SELECT "transactionId", "type", COUNT(*) as count
+            FROM "WeighbridgeRecord"
+            GROUP BY "transactionId", "type"
+            HAVING COUNT(*) > 1;
+          `;
+
+      if (weighbridgeDuplicates.length > 0) {
+        console.error(`⚠️ Found ${weighbridgeDuplicates.length} record(s) with multiple active (isCurrent=true) WeighbridgeRecord entries:`);
+        for (const dup of weighbridgeDuplicates) {
+          console.error(`   - transactionId: ${dup.transactionId}, type: ${dup.type} (Count: ${dup.count})`);
+        }
+        totalDuplicateCurrentRecords += weighbridgeDuplicates.length;
+      } else {
+        console.log('- Status: No duplicate active current WeighbridgeRecord entries found.');
+      }
+    }
 
     console.log('\n===================================================');
-    console.log('  SUCCESS: PREFLIGHT MIGRATION AUDIT COMPLETED     ');
+    console.log('  PREFLIGHT MIGRATION AUDIT COMPLETED              ');
     console.log('===================================================');
 
-    if (isReportOnly && isFailOnDuplicates && totalDuplicates > 0) {
-      console.error(`\n[PREFLIGHT BLOCKER]: Found ${totalDuplicates} total duplicate records in database.`);
-      console.error('Migration halted due to --fail-on-duplicates flag.');
-      console.error('Run cleanup runbook before re-attempting migration.');
-      process.exit(2);
+    if (totalDuplicateCurrentRecords > 0) {
+      console.error(`\n[PREFLIGHT BLOCKER]: Found ${totalDuplicateCurrentRecords} conflict(s) where multiple records have isCurrent=true.`);
+      console.error('Automated deletion of historical audit logs is forbidden.');
+      console.error('Please manually reconcile the duplicate current records (set isCurrent=false on superseded rows) before proceeding.');
+      if (isFailOnDuplicates || isReportOnly || isExecuteCleanup) {
+        process.exit(2);
+      }
     }
 
+    console.log('✅ No duplicate active current records found. Safe to proceed.\n');
     process.exit(0);
   } catch (e) {
     console.error(`\nERROR PREFLIGHT MIGRATION CHECK GAGAL: ${e.message}`);
