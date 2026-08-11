@@ -50,7 +50,9 @@ describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
       isActive: false,
     });
 
-    const result = await service.updateStatus('usr-regular', { isActive: false });
+    const result = await service.updateStatus('usr-regular', {
+      isActive: false,
+    });
 
     expect(mockPrismaService.user.update).toHaveBeenCalledWith(
       expect.objectContaining({

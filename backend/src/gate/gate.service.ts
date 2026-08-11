@@ -54,7 +54,9 @@ export class GateService {
     const normalizedPlate = normalizePlateNumber(dto.plateNumber);
     const rawPlate = getRawPlateNumber(dto.plateNumber);
 
-    this.logger.log(`Gate check-in attempt for plate: ${normalizedPlate} (${rawPlate})`);
+    this.logger.log(
+      `Gate check-in attempt for plate: ${normalizedPlate} (${rawPlate})`,
+    );
 
     let transaction: any;
     let retries = 3;
@@ -130,7 +132,10 @@ export class GateService {
         });
         break;
       } catch (error: any) {
-        if (error instanceof ConflictException || error instanceof BadRequestException) {
+        if (
+          error instanceof ConflictException ||
+          error instanceof BadRequestException
+        ) {
           throw error;
         }
         if (error.code === 'P2002') {
