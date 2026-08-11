@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +13,7 @@ import { TransactionStatus, Prisma } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 import { GATE_DETAIL_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
+import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 
 @Injectable()
 export class GateService {
@@ -143,7 +145,6 @@ export class GateService {
       userId: user.id,
       action: 'GATE_CHECK_IN',
       module: 'GATE',
-
       referenceId: transaction.id,
       description: `Vehicle ${dto.plateNumber} checked in`,
       status: 'SUCCESS',
@@ -219,7 +220,6 @@ export class GateService {
       userId: user.id,
       action: 'GATE_QUEUE_VIEW',
       module: 'GATE',
-
       description: `User viewed gate queue`,
       status: 'SUCCESS',
     });
@@ -263,7 +263,6 @@ export class GateService {
       userId: user.id,
       action: 'GATE_DETAIL_VIEW',
       module: 'GATE',
-
       referenceId: id,
       description: `User viewed transaction detail ${transaction.transactionNumber}`,
       status: 'SUCCESS',
@@ -294,53 +293,49 @@ export class GateService {
       });
     }
 
-    if (transaction.status === 'CANCELLED') {
-      throw new BadRequestException({
-        success: false,
-        message: 'Cannot check-out a cancelled transaction',
-        errors: [],
-      });
-    }
+    assertValidStatusTransition(transaction.status, 'COMPLETED');
 
-    if (transaction.status === 'COMPLETED') {
-      throw new BadRequestException({
-        success: false,
-        message: 'Transaction is already completed',
-        errors: [],
-      });
-    }
-
-    if (transaction.status !== 'WEIGH_OUT_DONE') {
-      throw new BadRequestException({
-        success: false,
-        message: 'Transaction is not ready for check-out (not WEIGH_OUT_DONE)',
-        errors: [],
-      });
-    }
-
-    const updated = await this.prisma.transaction.update({
-      where: { id },
-      data: {
-        revision: { increment: 1 },
-        status: 'COMPLETED',
-        gateOutAt: new Date(),
-        completedAt: new Date(),
-        statusHistory: {
-          create: {
-            oldStatus: transaction.status,
-            newStatus: 'COMPLETED',
-            changedById: user.id,
-            notes: 'Gate check-out processed',
-          },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.transaction.updateMany({
+        where: {
+          id,
+          status: 'WEIGH_OUT_DONE',
+          revision: transaction.revision,
         },
-      },
+        data: {
+          revision: { increment: 1 },
+          status: 'COMPLETED',
+          gateOutAt: new Date(),
+          completedAt: new Date(),
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await tx.transactionStatusHistory.create({
+        data: {
+          transactionId: id,
+          oldStatus: transaction.status,
+          newStatus: 'COMPLETED',
+          changedById: user.id,
+          notes: 'Gate check-out processed',
+        },
+      });
+
+      return tx.transaction.findUnique({ where: { id } });
     });
 
     await this.activityLogsService.logAction({
       userId: user.id,
       action: 'GATE_CHECK_OUT',
       module: 'GATE',
-
       referenceId: id,
       description: `Vehicle ${transaction.plateNumber} checked out`,
       status: 'SUCCESS',
@@ -372,46 +367,50 @@ export class GateService {
       });
     }
 
-    if (transaction.status === 'CANCELLED') {
-      throw new BadRequestException({
-        success: false,
-        message: 'Transaction is already cancelled',
-        errors: [],
-      });
-    }
+    assertValidStatusTransition(transaction.status, 'CANCELLED');
 
-    if (transaction.status === 'COMPLETED') {
-      throw new BadRequestException({
-        success: false,
-        message: 'Cannot cancel a completed transaction',
-        errors: [],
-      });
-    }
-
-    const updated = await this.prisma.transaction.update({
-      where: { id },
-      data: {
-        revision: { increment: 1 },
-        status: 'CANCELLED',
-        cancelledAt: new Date(),
-        cancellationReason: reason,
-        cancelledById: user.id,
-        statusHistory: {
-          create: {
-            oldStatus: transaction.status,
-            newStatus: 'CANCELLED',
-            changedById: user.id,
-            notes: `Cancelled: ${reason}`,
-          },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.transaction.updateMany({
+        where: {
+          id,
+          status: transaction.status,
+          revision: transaction.revision,
         },
-      },
+        data: {
+          revision: { increment: 1 },
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: reason,
+          cancelledById: user.id,
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await tx.transactionStatusHistory.create({
+        data: {
+          transactionId: id,
+          oldStatus: transaction.status,
+          newStatus: 'CANCELLED',
+          changedById: user.id,
+          notes: `Cancelled: ${reason}`,
+        },
+      });
+
+      return tx.transaction.findUnique({ where: { id } });
     });
 
     await this.activityLogsService.logAction({
       userId: user.id,
       action: 'TRANSACTION_CANCELLED',
       module: 'GATE',
-
       referenceId: id,
       description: `Transaction ${transaction.transactionNumber} cancelled. Reason: ${reason}`,
       status: 'SUCCESS',

@@ -13,6 +13,7 @@ import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
 import { WarehouseQueryDto } from './dto/warehouse-query.dto';
 import { TransactionStatus, Prisma, ProcessType } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 
 @Injectable()
 export class WarehouseService {
@@ -244,6 +245,8 @@ export class WarehouseService {
       });
     }
 
+    assertValidStatusTransition(tx.status, 'WAREHOUSE_IN_PROGRESS');
+
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       const maxRev = await prismaTx.warehouseProcess.aggregate({
         where: { transactionId },
@@ -255,6 +258,7 @@ export class WarehouseService {
         where: {
           id: transactionId,
           status: 'QC_VEHICLE_PASSED',
+          revision: tx.revision,
         },
         data: {
           revision: { increment: 1 },
@@ -461,6 +465,8 @@ export class WarehouseService {
       nextStatus = 'WAREHOUSE_DONE';
     }
 
+    assertValidStatusTransition(tx.status, nextStatus);
+
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       // Serialize deliveryChecklist if present and append to remarks
       let finalRemarks = dto.remarks || '';
@@ -478,6 +484,7 @@ export class WarehouseService {
         where: {
           id: transactionId,
           status: 'WAREHOUSE_IN_PROGRESS',
+          revision: tx.revision,
           warehouseEndAt: null,
         },
         data: {
@@ -714,6 +721,8 @@ export class WarehouseService {
       dto.rejectReason ||
       'Incoming check completed via Warehouse';
 
+    assertValidStatusTransition(tx.status, nextStatus);
+
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       const maxRev = await prismaTx.incomingMaterialCheck.aggregate({
         where: { transactionId },
@@ -732,8 +741,12 @@ export class WarehouseService {
         },
       });
 
-      return prismaTx.transaction.update({
-        where: { id: transactionId },
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
         data: {
           revision: { increment: 1 },
           status: nextStatus,
@@ -741,16 +754,29 @@ export class WarehouseService {
           remarks: dto.remarks
             ? `${tx.remarks ? tx.remarks + ' | ' : ''}GSP Check: ${dto.remarks}`
             : tx.remarks,
-          statusHistory: {
-            create: {
-              oldStatus: tx.status,
-              newStatus: nextStatus,
-              changedById: user.id,
-              notes: notesContent,
-            },
-          },
         },
       });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: notesContent,
+        },
+      });
+
+      return prismaTx.transaction.findUnique({ where: { id: transactionId } });
     });
 
     return {

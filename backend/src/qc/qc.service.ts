@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   Logger,
   ForbiddenException,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 import { QC_HISTORY_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
+import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 
 @Injectable()
 export class QcService {
@@ -114,34 +116,54 @@ export class QcService {
 
     const now = new Date();
     let nextStatus: TransactionStatus;
-    const updateData: any = {
-      revision: { increment: 1 },
-      statusHistory: {
-        create: {
-          newStatus: '',
-          changedById: userId,
-          notes: 'QC started',
-        },
-      },
-    };
 
     if (tx.status === 'QC_VEHICLE_PENDING') {
       nextStatus = 'QC_VEHICLE_IN_PROGRESS';
-      updateData.qcStartAt = tx.qcStartAt || now;
     } else if (tx.status === 'INCOMING_CHECK_PENDING') {
       nextStatus = 'INCOMING_CHECK_IN_PROGRESS';
-      updateData.incomingQcStartAt = tx.incomingQcStartAt || now;
     } else {
       throw new BadRequestException(
         'Transaction is not in a valid pending state to start QC',
       );
     }
-    updateData.status = nextStatus;
-    updateData.statusHistory.create.newStatus = nextStatus;
 
-    const updated = await this.prisma.transaction.update({
-      where: { id: transactionId },
-      data: updateData,
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+          ...(tx.status === 'QC_VEHICLE_PENDING' && { qcStartAt: tx.qcStartAt || now }),
+          ...(tx.status === 'INCOMING_CHECK_PENDING' && { incomingQcStartAt: tx.incomingQcStartAt || now }),
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: 'QC started',
+        },
+      });
+
+      return prismaTx.transaction.findUnique({ where: { id: transactionId } });
     });
 
     await this.activityLogsService.logAction({
@@ -189,6 +211,8 @@ export class QcService {
     const nextStatus =
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
+    assertValidStatusTransition(tx.status, nextStatus);
+
     const updated = await this.prisma.$transaction(async (prisma) => {
       const maxRev = await prisma.qcVehicleCheck.aggregate({
         where: { transactionId },
@@ -217,21 +241,41 @@ export class QcService {
         },
       });
 
-      return prisma.transaction.update({
-        where: { id: transactionId },
+      const claimed = await prisma.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
         data: {
-          revision: { increment: 1 },
           status: nextStatus,
+          revision: { increment: 1 },
           qcStartAt: tx.qcStartAt || new Date(),
           qcEndAt: new Date(),
-          statusHistory: {
-            create: {
-              newStatus: nextStatus,
-              changedById: userId,
-              notes: `Vehicle Check: ${result}`,
-            },
-          },
         },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Vehicle Check: ${result}`,
+        },
+      });
+
+      return prisma.transaction.findUnique({
+        where: { id: transactionId },
         include: { qcVehicleChecks: true },
       });
     });
@@ -282,6 +326,8 @@ export class QcService {
     const nextStatus =
       result === 'PASS' ? 'INCOMING_CHECK_PASSED' : 'INCOMING_CHECK_REJECTED';
 
+    assertValidStatusTransition(tx.status, nextStatus);
+
     const updated = await this.prisma.$transaction(async (prisma) => {
       const existingCount = await prisma.incomingMaterialCheck.count({
         where: { transactionId, isCurrent: true },
@@ -322,21 +368,41 @@ export class QcService {
         },
       });
 
-      return prisma.transaction.update({
-        where: { id: transactionId },
+      const claimed = await prisma.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
         data: {
-          revision: { increment: 1 },
           status: nextStatus,
+          revision: { increment: 1 },
           incomingQcStartAt: tx.incomingQcStartAt || new Date(),
           qcEndAt: new Date(),
-          statusHistory: {
-            create: {
-              newStatus: nextStatus,
-              changedById: userId,
-              notes: `Incoming Check: ${result}`,
-            },
-          },
         },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Incoming Check: ${result}`,
+        },
+      });
+
+      return prisma.transaction.findUnique({
+        where: { id: transactionId },
         include: { incomingMaterialChecks: true },
       });
     });
@@ -474,6 +540,29 @@ export class QcService {
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: 'WAREHOUSE_IN_PROGRESS',
+          revision: tx.revision,
+        },
+        data: {
+          revision: { increment: 1 },
+          qcAnalysisCompleted: true,
+          qcAnalysisCompletedAt: new Date(),
+          ...(remarks && { remarks }),
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
       if (remarks) {
         const activeProcess = await prismaTx.warehouseProcess.findFirst({
           where: { transactionId, isCurrent: true, endAt: null },
@@ -486,14 +575,8 @@ export class QcService {
         }
       }
 
-      return prismaTx.transaction.update({
+      return prismaTx.transaction.findUnique({
         where: { id: transactionId },
-        data: {
-          revision: { increment: 1 },
-          qcAnalysisCompleted: true,
-          qcAnalysisCompletedAt: new Date(),
-          ...(remarks && { remarks }),
-        },
         include: {
           warehouseProcesses: {
             where: { isCurrent: true },

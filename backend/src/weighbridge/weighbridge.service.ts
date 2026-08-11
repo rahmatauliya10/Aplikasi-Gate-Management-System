@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,6 +12,7 @@ import { WeighOutDto } from './dto/weigh-out.dto';
 import { WeighbridgeQueryDto } from './dto/weighbridge-query.dto';
 import { TransactionStatus, Prisma } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 
 @Injectable()
 export class WeighbridgeService {
@@ -281,31 +283,46 @@ export class WeighbridgeService {
         },
       });
 
-      const updateData: Prisma.TransactionUpdateInput = {
-        status: nextStatus,
-        weighInAt: new Date(),
-        weighInBy: { connect: { id: user.id } },
-        statusHistory: {
-          create: {
-            oldStatus: tx.status,
-            newStatus: nextStatus,
-            changedById: user.id,
-            notes: dto.remarks || 'Weigh-in processed successfully',
-          },
-        },
-      };
+      assertValidStatusTransition(tx.status, nextStatus);
 
-      if (grossWeight !== null) updateData.grossWeight = grossWeight;
-      if (tareWeight !== null) updateData.tareWeight = tareWeight;
-      if (nextStatus === 'QC_VEHICLE_PENDING' && !tx.qcStartAt) {
-        updateData.qcStartAt = new Date();
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: 'REGISTERED',
+          revision: tx.revision,
+        },
+        data: {
+          status: nextStatus,
+          weighInAt: new Date(),
+          weighInById: user.id,
+          revision: { increment: 1 },
+          ...(grossWeight !== null && { grossWeight }),
+          ...(tareWeight !== null && { tareWeight }),
+          ...(nextStatus === 'QC_VEHICLE_PENDING' && !tx.qcStartAt && { qcStartAt: new Date() }),
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
       }
 
-      updateData.revision = { increment: 1 };
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: dto.remarks || 'Weigh-in processed successfully',
+        },
+      });
 
-      return prismaTx.transaction.update({
+      return prismaTx.transaction.findUnique({
         where: { id: transactionId },
-        data: updateData,
         include: {
           weighInBy: {
             select: {
@@ -559,25 +576,46 @@ export class WeighbridgeService {
         },
       });
 
-      const txUpdate = await prismaTx.transaction.update({
-        where: { id: transactionId },
+      assertValidStatusTransition(tx.status, 'WEIGH_OUT_DONE');
+
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
         data: {
-          revision: { increment: 1 },
           status: 'WEIGH_OUT_DONE',
           weighOutAt: new Date(),
-          weighOutBy: { connect: { id: user.id } },
+          weighOutById: user.id,
           grossWeight: finalGrossWeight,
           tareWeight: finalTareWeight,
           netWeight: netWeight,
-          statusHistory: {
-            create: {
-              oldStatus: tx.status,
-              newStatus: 'WEIGH_OUT_DONE',
-              changedById: user.id,
-              notes: dto.remarks || 'Weigh-out processed successfully',
-            },
-          },
+          revision: { increment: 1 },
         },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: 'WEIGH_OUT_DONE',
+          changedById: user.id,
+          notes: dto.remarks || 'Weigh-out processed successfully',
+        },
+      });
+
+      const txUpdate = await prismaTx.transaction.findUnique({
+        where: { id: transactionId },
         include: {
           weighOutBy: {
             select: {
