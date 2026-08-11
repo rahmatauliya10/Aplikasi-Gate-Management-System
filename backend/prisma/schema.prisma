@@ -233,6 +233,7 @@ model Transaction {
   @@index([plateNumber])
   @@index([processType, status])
   @@index([createdAt])
+  @@index([id, status, revision], map: "idx_transaction_cas_status_revision")
 }
 
 model TransactionStatusHistory {
