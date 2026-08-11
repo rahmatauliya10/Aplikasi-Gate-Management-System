@@ -728,6 +728,45 @@ export class OperationLogCorrectionService {
         );
       }
 
+      // Step 5: Validate Business Rules (Gross >= Tare, warehouse start <= end)
+      const proposedGross =
+        txUpdateData.grossWeight !== undefined
+          ? Number(txUpdateData.grossWeight)
+          : tx.grossWeight;
+      const proposedTare =
+        txUpdateData.tareWeight !== undefined
+          ? Number(txUpdateData.tareWeight)
+          : tx.tareWeight;
+
+      if (
+        proposedGross !== null &&
+        proposedTare !== null &&
+        proposedGross < proposedTare
+      ) {
+        throw new BadRequestException(
+          'Gross weight tidak boleh lebih kecil dari Tare weight.',
+        );
+      }
+
+      const proposedStart =
+        txUpdateData.warehouseStartAt !== undefined
+          ? new Date(txUpdateData.warehouseStartAt)
+          : tx.warehouseStartAt;
+      const proposedEnd =
+        txUpdateData.warehouseEndAt !== undefined
+          ? new Date(txUpdateData.warehouseEndAt)
+          : tx.warehouseEndAt;
+
+      if (
+        proposedStart &&
+        proposedEnd &&
+        new Date(proposedStart).getTime() > new Date(proposedEnd).getTime()
+      ) {
+        throw new BadRequestException(
+          'Waktu mulai proses gudang tidak boleh melebihi waktu selesai.',
+        );
+      }
+
       // Step 6: Insert correction items & update header summary
       await prismaTx.transactionCorrectionItem.createMany({
         data: itemInsertPayloads,
@@ -742,15 +781,6 @@ export class OperationLogCorrectionService {
       });
 
       // Step 8 & 10: Auto-recalculate Net Weight if Gross/Tare changed
-      const proposedGross =
-        txUpdateData.grossWeight !== undefined
-          ? Number(txUpdateData.grossWeight)
-          : tx.grossWeight;
-      const proposedTare =
-        txUpdateData.tareWeight !== undefined
-          ? Number(txUpdateData.tareWeight)
-          : tx.tareWeight;
-
       if (proposedGross !== null && proposedTare !== null) {
         txUpdateData.netWeight = proposedGross - proposedTare;
       }

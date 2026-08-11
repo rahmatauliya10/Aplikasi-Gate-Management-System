@@ -103,6 +103,10 @@ describe('OperationLogCorrectionService PostgreSQL OCC & Audit Integration', () 
       },
       transactionCorrection: {
         create: jest.fn().mockResolvedValue({ id: 'corr-1' }),
+        update: jest.fn().mockResolvedValue({ id: 'corr-1' }),
+      },
+      transactionCorrectionItem: {
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
 

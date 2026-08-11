@@ -446,6 +446,18 @@ export class UsersService {
         errors: [],
       });
 
+    // Prevent deactivating primary administrator account
+    if (
+      (user.email === 'admin@gms.local' || user.username === 'admin') &&
+      !dto.isActive
+    ) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Cannot deactivate the primary administrator account',
+        errors: [],
+      });
+    }
+
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       if (user.role === 'ADMIN' && !dto.isActive) {
         const activeAdminCount = await prismaTx.user.count({
