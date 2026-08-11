@@ -17,6 +17,23 @@ export class AppController {
 
   @Get('health')
   async getHealth() {
+    return this.getReadiness();
+  }
+
+  @Get('health/liveness')
+  getLiveness() {
+    return {
+      success: true,
+      message: 'GMS backend liveness probe passed',
+      data: {
+        status: 'ok',
+        uptime: process.uptime(),
+      },
+    };
+  }
+
+  @Get('health/readiness')
+  async getReadiness() {
     let dbStatus = 'ok';
     try {
       await this.prisma.$queryRaw`SELECT 1`;
@@ -39,7 +56,7 @@ export class AppController {
 
     return {
       success: true,
-      message: 'GMS backend is running',
+      message: 'GMS backend readiness probe passed',
       data: {
         status: 'ok',
         database: dbStatus,
