@@ -210,51 +210,56 @@ export class TransactionsService {
       });
     }
 
-    const updateRes = await this.prisma.transaction.updateMany({
-      where: {
-        id,
-        status: { notIn: ['CANCELLED', 'COMPLETED'] },
-      },
-      data: {
-        status: 'CANCELLED',
-        cancelledAt: new Date(),
-        cancellationReason: reason,
-        cancelledById: user.id,
-        revision: { increment: 1 },
-      },
-    });
-
-    if (updateRes.count === 0) {
-      throw new ConflictException({
-        success: false,
-        message:
-          'Transaksi gagal dibatalkan karena telah diperbarui oleh proses lain atau sudah dalam status terminal.',
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const updateRes = await prismaTx.transaction.updateMany({
+        where: {
+          id,
+          revision: tx.revision,
+          status: { notIn: ['CANCELLED', 'COMPLETED'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancellationReason: reason,
+          cancelledById: user.id,
+          revision: { increment: 1 },
+        },
       });
-    }
 
-    await this.prisma.transactionStatusHistory.create({
-      data: {
-        transactionId: id,
-        oldStatus: tx.status,
-        newStatus: 'CANCELLED',
-        changedById: user.id,
-        notes: `Cancelled: ${reason}`,
-      },
-    });
+      if (updateRes.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi gagal dibatalkan karena telah diperbarui oleh proses lain atau sudah dalam status terminal.',
+        });
+      }
 
-    const updated = await this.prisma.transaction.findUnique({
-      where: { id },
-      include: { statusHistory: true },
-    });
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId: id,
+          oldStatus: tx.status,
+          newStatus: 'CANCELLED',
+          changedById: user.id,
+          notes: `Cancelled: ${reason}`,
+        },
+      });
 
-    await this.activityLogsService.logAction({
-      userId: user.id,
-      action: 'TRANSACTION_CANCELLED',
-      module: 'TRANSACTIONS',
+      await this.activityLogsService.logAction(
+        {
+          userId: user.id,
+          action: 'TRANSACTION_CANCELLED',
+          module: 'TRANSACTIONS',
+          referenceId: id,
+          description: `Transaction ${tx.transactionNumber} was cancelled by ${user.email}. Reason: ${reason}`,
+          status: 'SUCCESS',
+        },
+        prismaTx,
+      );
 
-      referenceId: id,
-      description: `Transaction ${tx.transactionNumber} was cancelled by ${user.email}. Reason: ${reason}`,
-      status: 'SUCCESS',
+      return prismaTx.transaction.findUnique({
+        where: { id },
+        include: { statusHistory: true },
+      });
     });
 
     return {
@@ -297,37 +302,54 @@ export class TransactionsService {
       };
     }
 
-    // Perform soft delete by setting status to CANCELLED to preserve audit trail
-    const updated = await this.prisma.transaction.update({
-      where: { id },
-      data: {
-        status: 'CANCELLED',
-        cancelledAt: new Date(),
-        cancelledById: user.id,
-        cancellationReason: 'Transaction deleted via API (soft-delete)',
-      },
-    });
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const updateRes = await prismaTx.transaction.updateMany({
+        where: {
+          id,
+          revision: tx.revision,
+          status: { notIn: ['CANCELLED', 'COMPLETED'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancelledById: user.id,
+          cancellationReason: 'Transaction deleted via API (soft-delete)',
+          revision: { increment: 1 },
+        },
+      });
 
-    await this.prisma.transactionStatusHistory.create({
-      data: {
-        transactionId: id,
-        oldStatus: tx.status,
-        newStatus: 'CANCELLED',
-        changedById: user.id,
-        notes: 'Deleted via API (soft-delete)',
-      },
-    });
+      if (updateRes.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi gagal dihapus/dibatalkan karena telah diperbarui oleh proses lain atau sudah dalam status terminal.',
+        });
+      }
 
-    await this.activityLogsService
-      .logAction({
-        userId: user.id,
-        action: 'TRANSACTION_DELETE',
-        module: 'TRANSACTIONS',
-        referenceId: id,
-        description: `Transaction ${tx.transactionNumber} (${tx.plateNumber}) in status ${tx.status} was soft-deleted (status set to CANCELLED) by Admin ${user.email}`,
-        status: 'SUCCESS',
-      })
-      .catch(() => {});
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId: id,
+          oldStatus: tx.status,
+          newStatus: 'CANCELLED',
+          changedById: user.id,
+          notes: 'Deleted via API (soft-delete)',
+        },
+      });
+
+      await this.activityLogsService.logAction(
+        {
+          userId: user.id,
+          action: 'TRANSACTION_DELETE',
+          module: 'TRANSACTIONS',
+          referenceId: id,
+          description: `Transaction ${tx.transactionNumber} (${tx.plateNumber}) in status ${tx.status} was soft-deleted (status set to CANCELLED) by Admin ${user.email}`,
+          status: 'SUCCESS',
+        },
+        prismaTx,
+      );
+
+      return prismaTx.transaction.findUnique({ where: { id } });
+    });
 
     return {
       success: true,

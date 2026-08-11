@@ -215,7 +215,10 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshTokenHash: null },
+      data: {
+        refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
+      },
     });
 
     await this.auditLog(userId, 'LOGOUT', {});

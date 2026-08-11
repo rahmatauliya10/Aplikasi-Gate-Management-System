@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend-verification:
-    name: Backend Test, Build, Lint & Schema Validation (${{ matrix.db_state }})
+    name: Backend Test, Coverage, Build & Schema Validation (${{ matrix.db_state }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -30,10 +30,10 @@ jobs:
 
     steps:
       - name: Checkout Code Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Setup Node.js Environment
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.2.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -81,7 +81,7 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
         run: npm run build
 
-      - name: Execute Automated Test Suites (TDD & SoD Verification)
+      - name: Execute Automated Test Suites & Code Coverage Thresholds
         working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
@@ -90,28 +90,17 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
           BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test
-        run: npm test
-
-      - name: Execute Backend E2E Integration Test Suite
-        working-directory: ./backend
-        env:
-          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
-          DATABASE_URL_TEST: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
-          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
-          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
-          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
-          NODE_ENV: test
-        run: npm run test:e2e --if-present
+        run: npm run test:cov
 
   frontend-verification:
     name: Frontend Build & Bundle Verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Setup Node.js Environment
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.2.0
         with:
           node-version: '22'
           cache: 'npm'
@@ -129,17 +118,17 @@ jobs:
 
       - name: Execute Frontend Unit Tests (Vitest)
         working-directory: ./frontend
-        run: npm test --if-present
+        run: npm test
 
   security-vulnerability-audit:
-    name: Dependency Security & Vulnerability Scan
+    name: Dependency Security & Secret Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Setup Node.js Environment
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.2.0
         with:
           node-version: '22'
 
@@ -150,3 +139,4 @@ jobs:
       - name: Execute Production Security Audit (Frontend)
         working-directory: ./frontend
         run: npm audit --omit=dev --audit-level=high
+

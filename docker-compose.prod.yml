@@ -28,7 +28,7 @@ services:
         max-file: "5"
 
   frontend:
-    image: gms-frontend:${RELEASE_TAG:-latest}
+    image: gms-frontend:${RELEASE_TAG:?RELEASE_TAG wajib diisi}
     build: 
       context: ./frontend
       dockerfile: Dockerfile
@@ -50,7 +50,7 @@ services:
         max-file: "5"
 
   backend:
-    image: gms-backend:${RELEASE_TAG:-latest}
+    image: gms-backend:${RELEASE_TAG:?RELEASE_TAG wajib diisi}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -80,6 +80,7 @@ services:
     volumes:
       - uploads:/app/uploads
       - backups_local:/app/backups/local
+      - audit_logs:/app/logs
       - ${NAS_MOUNT_PATH:?NAS_MOUNT_PATH must be set to a remote offsite/NAS mount directory}:/app/backups/nas
     deploy:
       resources:
@@ -136,3 +137,4 @@ volumes:
   pgdata:
   uploads:
   backups_local:
+  audit_logs:

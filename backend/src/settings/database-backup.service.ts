@@ -1636,46 +1636,83 @@ export class DatabaseBackupService
   }
 
   private async cleanOldBackupsRetention() {
-    // Retention policy: Keep max 30 daily backups
+    // Grandfather-Father-Son (GFS) retention policy:
+    // - Daily: keep for 30 days
+    // - Weekly: keep for 12 weeks (84 days)
+    // - Monthly: keep for 12 months (365 days)
     try {
       const history = await this.getBackupHistory();
-      if (history.length > 30) {
-        const toDelete = history.slice(30);
-        for (const item of toDelete) {
-          const dumpPath = path.join(
-            this.localBackupDir,
-            item.artifacts.dump || '',
-          );
-          const globalsPath = path.join(
-            this.localBackupDir,
-            item.artifacts.globals || '',
-          );
-          const manifestPath = path.join(
-            this.localBackupDir,
-            item.artifacts.manifest || '',
-          );
-          const snapshotPath = path.join(
-            this.localBackupDir,
-            item.artifacts.snapshot || '',
-          );
-          const attachmentsArchivePath = path.join(
-            this.localBackupDir,
-            item.artifacts.attachmentsArchive || '',
-          );
+      const now = Date.now();
+      const DAY_MS = 24 * 60 * 60 * 1000;
 
-          if (item.artifacts.dump && fs.existsSync(dumpPath))
-            fs.unlinkSync(dumpPath);
-          if (item.artifacts.globals && fs.existsSync(globalsPath))
-            fs.unlinkSync(globalsPath);
-          if (item.artifacts.manifest && fs.existsSync(manifestPath))
-            fs.unlinkSync(manifestPath);
-          if (item.artifacts.snapshot && fs.existsSync(snapshotPath))
-            fs.unlinkSync(snapshotPath);
-          if (
-            item.artifacts.attachmentsArchive &&
-            fs.existsSync(attachmentsArchivePath)
-          )
-            fs.unlinkSync(attachmentsArchivePath);
+      const weeklyMap = new Map<string, string>(); // 'YYYY-Www' -> backupId
+      const monthlyMap = new Map<string, string>(); // 'YYYY-MM' -> backupId
+
+      const toDelete: BackupManifest[] = [];
+
+      for (const item of history) {
+        const itemDate = new Date(item.createdAt);
+        const ageDays = (now - itemDate.getTime()) / DAY_MS;
+
+        if (ageDays <= 30) {
+          // Keep all daily backups within 30 days
+          continue;
+        }
+
+        // Check weekly retention (up to 12 weeks / 84 days)
+        if (ageDays <= 84) {
+          const year = itemDate.getUTCFullYear();
+          const weekNum = Math.ceil(
+            (itemDate.getTime() - new Date(year, 0, 1).getTime()) /
+              (7 * DAY_MS),
+          );
+          const weekKey = `${year}-W${weekNum}`;
+          if (!weeklyMap.has(weekKey)) {
+            weeklyMap.set(weekKey, item.backupId);
+            continue;
+          }
+        }
+
+        // Check monthly retention (up to 12 months / 365 days)
+        if (ageDays <= 365) {
+          const monthKey = `${itemDate.getUTCFullYear()}-${String(
+            itemDate.getUTCMonth() + 1,
+          ).padStart(2, '0')}`;
+          if (!monthlyMap.has(monthKey)) {
+            monthlyMap.set(monthKey, item.backupId);
+            continue;
+          }
+        }
+
+        // Mark for deletion if beyond retention rules
+        toDelete.push(item);
+      }
+
+      const dirsToClean = [this.localBackupDir, this.offsiteBackupDir];
+
+      for (const item of toDelete) {
+        for (const dir of dirsToClean) {
+          if (!fs.existsSync(dir)) continue;
+
+          const artifactFiles = [
+            item.artifacts?.dump,
+            item.artifacts?.globals,
+            item.artifacts?.manifest,
+            item.artifacts?.snapshot,
+            item.artifacts?.attachmentsArchive,
+          ].filter(Boolean);
+
+          for (const filename of artifactFiles) {
+            if (!filename) continue;
+            const fullPath = path.join(dir, filename);
+            if (fs.existsSync(fullPath)) {
+              try {
+                fs.unlinkSync(fullPath);
+              } catch (e) {
+                // ignore deletion error
+              }
+            }
+          }
         }
       }
     } catch (e: any) {
