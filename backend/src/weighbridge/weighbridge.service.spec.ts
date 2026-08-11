@@ -16,7 +16,11 @@ describe('WeighbridgeService Fraud Calculation', () => {
           useValue: {
             $transaction: jest.fn((cb) =>
               cb({
-                transaction: { findUnique: jest.fn(), update: jest.fn() },
+                transaction: {
+                  findUnique: jest.fn(),
+                  update: jest.fn(),
+                  updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+                },
                 weighbridgeRecord: {
                   create: jest.fn(),
                   aggregate: jest.fn().mockResolvedValue({
@@ -55,12 +59,14 @@ describe('WeighbridgeService Fraud Calculation', () => {
       grossWeight: 0,
       tareWeight: 0, // netWeight will be 0
       actualWeight: 0, // causes Math.max(0, 0) -> 0
+      revision: 1,
     };
 
     const txClient = {
       transaction: {
         findUnique: jest.fn().mockResolvedValue(mockTx),
         update: jest.fn().mockResolvedValue(mockTx),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       weighbridgeRecord: {
         create: jest.fn(),
@@ -146,14 +152,22 @@ describe('WeighbridgeService Fraud Calculation', () => {
       grossWeight: null, // missing on root transaction
       tareWeight: null,
       actualWeight: null,
+      revision: 1,
     };
 
     const txClient = {
       transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
+        findUnique: jest.fn().mockResolvedValue({
+          ...mockTx,
+          status: 'WEIGH_OUT_DONE',
+          grossWeight: 15000,
+          tareWeight: 5000,
+          netWeight: 10000,
+        }),
         update: jest
           .fn()
           .mockResolvedValue({ ...mockTx, status: 'WEIGH_OUT_DONE' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       weighbridgeRecord: {
         create: jest.fn(),
@@ -190,7 +204,7 @@ describe('WeighbridgeService Fraud Calculation', () => {
       id: 'user-1',
     } as any);
 
-    expect(txClient.transaction.update).toHaveBeenCalledWith(
+    expect(txClient.transaction.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           status: 'WEIGH_OUT_DONE',
