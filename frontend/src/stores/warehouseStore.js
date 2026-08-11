@@ -42,7 +42,6 @@ export const useWarehouseStore = defineStore('warehouse', {
         this.loading = false;
       }
     },
-    },
 
     async completeQcAnalysis(id, data = {}) {
       this.loading = true;
