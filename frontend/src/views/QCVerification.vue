@@ -570,6 +570,58 @@ const selectedWarehouse = ref('ALL')
 const qcForm = ref({ bau: '', warna: '', kadarAir: null, totalFM: null, bijiOK: null, status: '', note: '', pic: authStore.user?.name || 'QC Admin' })
 const isProcessing = ref(false)
 
+const selectTruck = (truck) => {
+  selectedTruck.value = truck
+}
+
+const qcTrucks = computed(() => {
+  return truckStore.trucks.filter(t => {
+    // QC Vehicle / QC Sampling (Stage 1)
+    if (t.status === 'QC_VEHICLE_PENDING' || t.status === 'QC_VEHICLE_IN_PROGRESS') {
+      return true
+    }
+    // QC Lab Analysis (Stage 3) for GBB and GSP
+    if (t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') {
+      return true
+    }
+    return false
+  })
+})
+
+const filteredQcTrucks = computed(() => {
+  let list = qcTrucks.value
+  
+  if (selectedWarehouse.value !== 'ALL') {
+    list = list.filter(t => getProcessType(t) === selectedWarehouse.value)
+  }
+  
+  const keyword = searchQuery.value.toLowerCase().trim()
+  if (keyword) {
+    list = list.filter(t => 
+      getPlateNumber(t).toLowerCase().includes(keyword) ||
+      (t.id && String(t.id).toLowerCase().includes(keyword))
+    )
+  }
+  
+  return list
+})
+
+const totalPages = computed(() => Math.ceil(filteredQcTrucks.value.length / 10) || 1)
+
+const paginatedQcTrucks = computed(() => {
+  const start = (currentPage.value - 1) * 10
+  const end = start + 10
+  return filteredQcTrucks.value.slice(start, end)
+})
+
+watch(filteredQcTrucks, () => {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = 1
+  }
+})
+watch(searchQuery, () => { currentPage.value = 1 })
+watch(selectedWarehouse, () => { currentPage.value = 1 })
+
 const showSamplingModal = ref(false)
 const samplingForm = ref({ visual: 'Normal', odor: 'Normal', moistureEst: null, note: '' })
 
