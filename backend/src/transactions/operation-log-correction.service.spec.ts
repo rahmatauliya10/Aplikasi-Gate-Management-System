@@ -33,13 +33,18 @@ describe('OperationLogCorrectionService', () => {
   const createMockTxClient = (mockTx: any, mockUpdatedTx?: any) => ({
     transaction: {
       findUnique: mockUpdatedTx
-        ? jest.fn().mockResolvedValueOnce(mockTx).mockResolvedValueOnce(mockUpdatedTx)
+        ? jest
+            .fn()
+            .mockResolvedValueOnce(mockTx)
+            .mockResolvedValueOnce(mockUpdatedTx)
         : jest.fn().mockResolvedValue(mockTx),
       update: jest.fn().mockResolvedValue(mockTx),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     transactionCorrection: {
-      create: jest.fn().mockResolvedValue({ id: 'cor-1', correctionNumber: 'COR-001' }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 'cor-1', correctionNumber: 'COR-001' }),
       update: jest.fn().mockResolvedValue({ id: 'cor-1' }),
       findMany: jest.fn().mockResolvedValue([]),
     },
@@ -51,27 +56,37 @@ describe('OperationLogCorrectionService', () => {
     },
     weighbridgeRecord: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      create: jest.fn().mockResolvedValue({ id: 'wb-new-1', revision: 2, isCurrent: true }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 'wb-new-1', revision: 2, isCurrent: true }),
       update: jest.fn().mockResolvedValue({ id: 'wb-1' }),
     },
     warehouseProcess: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      create: jest.fn().mockResolvedValue({ id: 'wh-new-1', revision: 2, isCurrent: true }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 'wh-new-1', revision: 2, isCurrent: true }),
       update: jest.fn().mockResolvedValue({ id: 'wh-1' }),
     },
     qcVehicleCheck: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      create: jest.fn().mockResolvedValue({ id: 'qcv-new-1', revision: 2, isCurrent: true }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 'qcv-new-1', revision: 2, isCurrent: true }),
       update: jest.fn().mockResolvedValue({ id: 'qcv-1' }),
     },
     incomingMaterialCheck: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      create: jest.fn().mockResolvedValue({ id: 'inc-new-1', revision: 2, isCurrent: true }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 'inc-new-1', revision: 2, isCurrent: true }),
       update: jest.fn().mockResolvedValue({ id: 'inc-1' }),
     },
     attachment: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      create: jest.fn().mockResolvedValue({ id: 'att-new-1', revision: 2, isCurrent: true }),
+      create: jest
+        .fn()
+        .mockResolvedValue({ id: 'att-new-1', revision: 2, isCurrent: true }),
       update: jest.fn().mockResolvedValue({ id: 'att-1' }),
     },
     fraudCheck: {
@@ -474,7 +489,15 @@ describe('OperationLogCorrectionService', () => {
         grossWeight: 18000,
         tareWeight: 8000,
         netWeight: 10000,
-        weighbridgeRecords: [{ id: 'wb-in', type: 'IN', weight: 18000, revision: 1, isCurrent: true }],
+        weighbridgeRecords: [
+          {
+            id: 'wb-in',
+            type: 'IN',
+            weight: 18000,
+            revision: 1,
+            isCurrent: true,
+          },
+        ],
       };
 
       const mockTxClient = createMockTxClient(mockTx);
@@ -523,7 +546,15 @@ describe('OperationLogCorrectionService', () => {
         grossWeight: 18000,
         tareWeight: 8000,
         netWeight: 10000,
-        weighbridgeRecords: [{ id: 'wb-in-gbj', type: 'IN', weight: 8000, revision: 1, isCurrent: true }],
+        weighbridgeRecords: [
+          {
+            id: 'wb-in-gbj',
+            type: 'IN',
+            weight: 8000,
+            revision: 1,
+            isCurrent: true,
+          },
+        ],
       };
 
       const mockTxClient = createMockTxClient(mockTx);
@@ -572,7 +603,15 @@ describe('OperationLogCorrectionService', () => {
         grossWeight: 18000,
         tareWeight: 8000,
         netWeight: 10000,
-        weighbridgeRecords: [{ id: 'wb-out-gbj', type: 'OUT', weight: 18000, revision: 1, isCurrent: true }],
+        weighbridgeRecords: [
+          {
+            id: 'wb-out-gbj',
+            type: 'OUT',
+            weight: 18000,
+            revision: 1,
+            isCurrent: true,
+          },
+        ],
       };
 
       const mockTxClient = createMockTxClient(mockTx);
@@ -621,7 +660,15 @@ describe('OperationLogCorrectionService', () => {
         tareWeight: 8000,
         netWeight: 12000,
         revision: 1,
-        weighbridgeRecords: [{ id: 'wb-out-gbb', type: 'OUT', weight: 8000, revision: 1, isCurrent: true }],
+        weighbridgeRecords: [
+          {
+            id: 'wb-out-gbb',
+            type: 'OUT',
+            weight: 8000,
+            revision: 1,
+            isCurrent: true,
+          },
+        ],
       };
 
       const mockTxClient = createMockTxClient(mockTx);
