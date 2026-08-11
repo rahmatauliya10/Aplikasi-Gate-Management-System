@@ -4,6 +4,8 @@ import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 
+import { ConfigService } from '@nestjs/config';
+
 describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
   let service: UsersService;
 
@@ -23,11 +25,16 @@ describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
     logAction: jest.fn().mockResolvedValue({}),
   };
 
+  const mockConfigService = {
+    get: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         { provide: PrismaService, useValue: mockPrismaService },
+        { provide: ConfigService, useValue: mockConfigService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
       ],
     }).compile();
