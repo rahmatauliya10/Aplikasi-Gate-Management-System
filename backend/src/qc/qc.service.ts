@@ -667,7 +667,7 @@ export class QcService {
         ...updated,
         remarks:
           remarks ||
-          (updated as any).warehouseProcesses?.[0]?.remarks ||
+          updated.warehouseProcesses?.[0]?.remarks ||
           updated.remarks ||
           null,
       },
