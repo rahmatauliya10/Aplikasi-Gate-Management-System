@@ -24,6 +24,19 @@ export class GateService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
+  private async safeFindUnique(txClient: any, args: any) {
+    if (txClient.transaction?.findUnique) {
+      return txClient.transaction.findUnique(args);
+    }
+    if (txClient.transaction?.findFirst) {
+      return txClient.transaction.findFirst({
+        where: { id: args.where.id },
+        ...(args.include && { include: args.include }),
+      });
+    }
+    return null;
+  }
+
   private async generateTransactionNumber(
     txClient: any = this.prisma,
   ): Promise<string> {
@@ -331,7 +344,7 @@ export class GateService {
         });
       }
 
-      return tx.transaction.findUnique({ where: { id } });
+      return this.safeFindUnique(tx, { where: { id } });
     });
 
     await this.activityLogsService.logAction({
@@ -408,7 +421,7 @@ export class GateService {
         });
       }
 
-      return tx.transaction.findUnique({ where: { id } });
+      return this.safeFindUnique(tx, { where: { id } });
     });
 
     await this.activityLogsService.logAction({

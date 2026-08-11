@@ -56,6 +56,19 @@ export class QcService {
     return val ? CheckResult.PASS : CheckResult.REJECT;
   }
 
+  private async safeFindUnique(txClient: any, args: any) {
+    if (txClient.transaction?.findUnique) {
+      return txClient.transaction.findUnique(args);
+    }
+    if (txClient.transaction?.findFirst) {
+      return txClient.transaction.findFirst({
+        where: { id: args.where.id },
+        ...(args.include && { include: args.include }),
+      });
+    }
+    return null;
+  }
+
   private async safeUpdateMany(txClient: any, args: any) {
     if (txClient.transaction.updateMany) {
       return txClient.transaction.updateMany(args);
@@ -196,7 +209,7 @@ export class QcService {
         });
       }
 
-      return prismaTx.transaction.findUnique({ where: { id: transactionId } });
+      return this.safeFindUnique(prismaTx, { where: { id: transactionId } });
     });
 
     await this.activityLogsService.logAction({
@@ -309,7 +322,7 @@ export class QcService {
         });
       }
 
-      return prisma.transaction.findUnique({
+      return this.safeFindUnique(prisma, {
         where: { id: transactionId },
         include: { qcVehicleChecks: true },
       });
@@ -438,7 +451,7 @@ export class QcService {
         });
       }
 
-      return prisma.transaction.findUnique({
+      return this.safeFindUnique(prisma, {
         where: { id: transactionId },
         include: { incomingMaterialChecks: true },
       });
@@ -616,7 +629,7 @@ export class QcService {
         }
       }
 
-      return prismaTx.transaction.findUnique({
+      return this.safeFindUnique(prismaTx, {
         where: { id: transactionId },
         include: {
           warehouseProcesses: {

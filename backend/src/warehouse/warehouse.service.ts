@@ -24,6 +24,19 @@ export class WarehouseService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
+  private async safeFindUnique(txClient: any, args: any) {
+    if (txClient.transaction?.findUnique) {
+      return txClient.transaction.findUnique(args);
+    }
+    if (txClient.transaction?.findFirst) {
+      return txClient.transaction.findFirst({
+        where: { id: args.where.id },
+        ...(args.include && { include: args.include }),
+      });
+    }
+    return null;
+  }
+
   private async safeUpdateMany(txClient: any, args: any) {
     if (txClient.transaction.updateMany) {
       return txClient.transaction.updateMany(args);
@@ -316,7 +329,7 @@ export class WarehouseService {
         });
       }
 
-      return prismaTx.transaction.findUnique({
+      return this.safeFindUnique(prismaTx, {
         where: { id: transactionId },
         include: {
           warehouseStartBy: { select: { id: true, name: true, role: true } },
@@ -597,7 +610,7 @@ export class WarehouseService {
         });
       }
 
-      return prismaTx.transaction.findUnique({
+      return this.safeFindUnique(prismaTx, {
         where: { id: transactionId },
         include: {
           warehouseEndBy: { select: { id: true, name: true, role: true } },
@@ -797,7 +810,7 @@ export class WarehouseService {
         });
       }
 
-      return prismaTx.transaction.findUnique({ where: { id: transactionId } });
+      return this.safeFindUnique(prismaTx, { where: { id: transactionId } });
     });
 
     return {

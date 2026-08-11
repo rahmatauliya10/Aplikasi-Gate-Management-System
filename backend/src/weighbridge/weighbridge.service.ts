@@ -23,6 +23,19 @@ export class WeighbridgeService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
+  private async safeFindUnique(txClient: any, args: any) {
+    if (txClient.transaction?.findUnique) {
+      return txClient.transaction.findUnique(args);
+    }
+    if (txClient.transaction?.findFirst) {
+      return txClient.transaction.findFirst({
+        where: { id: args.where.id },
+        ...(args.include && { include: args.include }),
+      });
+    }
+    return null;
+  }
+
   private async safeUpdateMany(txClient: any, args: any) {
     if (txClient.transaction.updateMany) {
       return txClient.transaction.updateMany(args);
@@ -338,7 +351,7 @@ export class WeighbridgeService {
         });
       }
 
-      return prismaTx.transaction.findUnique({
+      return this.safeFindUnique(prismaTx, {
         where: { id: transactionId },
         include: {
           weighInBy: {
@@ -641,7 +654,7 @@ export class WeighbridgeService {
         });
       }
 
-      const txUpdate = await prismaTx.transaction.findUnique({
+      const txUpdate = await this.safeFindUnique(prismaTx, {
         where: { id: transactionId },
         include: {
           weighOutBy: {
