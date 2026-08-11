@@ -3,7 +3,10 @@ import * as fs from 'fs';
 /**
  * Validates file magic bytes against allowed content types.
  */
-export function validateMagicBytes(filePath: string, expectedMimeType: string): boolean {
+export function validateMagicBytes(
+  filePath: string,
+  expectedMimeType: string,
+): boolean {
   if (!fs.existsSync(filePath)) return false;
 
   const buffer = Buffer.alloc(8);

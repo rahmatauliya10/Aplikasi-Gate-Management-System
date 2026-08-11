@@ -7,11 +7,17 @@ export function validateApiBaseUrl(rawUrl, allowedHosts = []) {
     return true;
   }
 
-  let parsed
+  if (rawUrl.startsWith('http://localhost') || rawUrl.startsWith('http://127.0.0.1')) {
+    throw new Error(
+      `Insecure localhost HTTP URL (${rawUrl}) is prohibited in production build! Must use explicit HTTPS URL or secure relative path.`,
+    );
+  }
+
+  let parsed;
   try {
-    parsed = new URL(rawUrl)
+    parsed = new URL(rawUrl);
   } catch {
-    throw new Error('VITE_API_BASE_URL wajib valid')
+    throw new Error('VITE_API_BASE_URL wajib valid');
   }
 
   if (parsed.protocol !== 'https:') {

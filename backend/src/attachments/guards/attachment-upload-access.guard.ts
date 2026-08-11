@@ -44,7 +44,10 @@ export class AttachmentUploadAccessGuard implements CanActivate {
       );
     }
 
-    if (['COMPLETED', 'CANCELLED'].includes(tx.status) && user.role !== 'ADMIN') {
+    if (
+      ['COMPLETED', 'CANCELLED'].includes(tx.status) &&
+      user.role !== 'ADMIN'
+    ) {
       throw new BadRequestException(
         'Lampiran tidak dapat ditambahkan pada transaksi berstatus terminal (COMPLETED/CANCELLED).',
       );

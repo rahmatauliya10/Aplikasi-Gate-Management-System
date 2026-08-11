@@ -40,7 +40,10 @@ export class AttachmentsController {
         const allowedMimeTypes = ['image/jpeg', 'image/png', 'application/pdf'];
         const ext = path.extname(file.originalname).toLowerCase();
         const allowedExts = ['.jpg', '.jpeg', '.png', '.pdf'];
-        if (allowedMimeTypes.includes(file.mimetype) && allowedExts.includes(ext)) {
+        if (
+          allowedMimeTypes.includes(file.mimetype) &&
+          allowedExts.includes(ext)
+        ) {
           cb(null, true);
         } else {
           cb(
@@ -59,8 +62,12 @@ export class AttachmentsController {
           cb(null, quarantine);
         },
         filename: (req: any, file: any, cb: any) => {
-          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          cb(null, `quarantine-${uniqueSuffix}${path.extname(file.originalname)}`);
+          const uniqueSuffix =
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(
+            null,
+            `quarantine-${uniqueSuffix}${path.extname(file.originalname)}`,
+          );
         },
       }),
       limits: {

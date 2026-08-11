@@ -95,7 +95,9 @@ export class AppController {
     }
 
     let nasStatus = 'ok';
-    const nasDir = path.resolve(process.env.OFFSITE_BACKUP_DIR || './backups/nas');
+    const nasDir = path.resolve(
+      process.env.OFFSITE_BACKUP_DIR || './backups/nas',
+    );
     try {
       if (!fs.existsSync(nasDir)) {
         nasStatus = 'DEGRADED';
@@ -104,7 +106,8 @@ export class AppController {
       nasStatus = 'DEGRADED';
     }
 
-    const overallStatus = dbStatus === 'ok' && nasStatus === 'ok' ? 'HEALTHY' : 'DEGRADED';
+    const overallStatus =
+      dbStatus === 'ok' && nasStatus === 'ok' ? 'HEALTHY' : 'DEGRADED';
 
     return {
       success: true,
@@ -113,9 +116,11 @@ export class AppController {
         status: overallStatus,
         database: dbStatus,
         nasBackupDirectory: nasStatus,
-        alert: nasStatus === 'DEGRADED' ? 'NAS storage unreachable or degraded' : null,
+        alert:
+          nasStatus === 'DEGRADED'
+            ? 'NAS storage unreachable or degraded'
+            : null,
       },
     };
   }
 }
-

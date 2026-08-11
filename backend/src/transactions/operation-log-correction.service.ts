@@ -488,8 +488,7 @@ export class OperationLogCorrectionService {
           const newRec = await prismaTx.qcVehicleCheck.create({
             data: {
               transactionId: rec.transactionId,
-              result:
-                item.fieldName === 'result' ? valueToUpdate : rec.result,
+              result: item.fieldName === 'result' ? valueToUpdate : rec.result,
               vehicleCleanliness:
                 item.fieldName === 'vehicleCleanliness'
                   ? item.newValue
@@ -514,10 +513,7 @@ export class OperationLogCorrectionService {
                 item.fieldName === 'sealCondition'
                   ? item.newValue
                   : rec.sealCondition,
-              notes:
-                item.fieldName === 'notes'
-                  ? String(item.newValue)
-                  : rec.notes,
+              notes: item.fieldName === 'notes' ? String(item.newValue) : rec.notes,
               checklistItems:
                 item.fieldName === 'checklistItems'
                   ? item.newValue
@@ -573,8 +569,7 @@ export class OperationLogCorrectionService {
           const newRec = await prismaTx.incomingMaterialCheck.create({
             data: {
               transactionId: rec.transactionId,
-              result:
-                item.fieldName === 'result' ? valueToUpdate : rec.result,
+              result: item.fieldName === 'result' ? valueToUpdate : rec.result,
               odor: item.fieldName === 'odor' ? item.newValue : rec.odor,
               color: item.fieldName === 'color' ? item.newValue : rec.color,
               moisture:
@@ -621,10 +616,7 @@ export class OperationLogCorrectionService {
                 item.fieldName === 'defectNotes'
                   ? String(item.newValue)
                   : rec.defectNotes,
-              notes:
-                item.fieldName === 'notes'
-                  ? String(item.newValue)
-                  : rec.notes,
+              notes: item.fieldName === 'notes' ? String(item.newValue) : rec.notes,
               checklistItems:
                 item.fieldName === 'checklistItems'
                   ? item.newValue
@@ -754,7 +746,7 @@ export class OperationLogCorrectionService {
 
       // P1-04 Fix: REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records
       if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
-        const targetReopenStatus = (statusUpdatedTo || 'QC_VEHICLE_PENDING') as string;
+        const targetReopenStatus = statusUpdatedTo || 'QC_VEHICLE_PENDING';
         const allowedReopenTargets = [
           'QC_VEHICLE_PENDING',
           'WEIGH_IN_PENDING',

@@ -139,7 +139,9 @@ export class AttachmentsService {
       if (fs.existsSync(tempPath)) {
         try {
           fs.unlinkSync(tempPath);
-        } catch {}
+        } catch (cleanupErr: any) {
+          this.logger.warn(`Quarantine cleanup warning: ${cleanupErr.message}`);
+        }
       }
       if (
         err instanceof BadRequestException ||
@@ -148,7 +150,10 @@ export class AttachmentsService {
       ) {
         throw err;
       }
-      this.logger.error(`Attachment processing failed: ${err.message}`, err.stack);
+      this.logger.error(
+        `Attachment processing failed: ${err.message}`,
+        err.stack,
+      );
       throw new InternalServerErrorException(
         `Gagal memproses lampiran: ${err.message}`,
       );
