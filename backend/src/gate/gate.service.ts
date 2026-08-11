@@ -15,6 +15,11 @@ import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { GATE_DETAIL_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 
+import {
+  normalizePlateNumber,
+  getRawPlateNumber,
+} from '../common/utils/normalize-plate.util';
+
 @Injectable()
 export class GateService {
   private readonly logger = new Logger(GateService.name);
@@ -24,19 +29,6 @@ export class GateService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private async safeFindUnique(txClient: any, args: any) {
-    if (txClient.transaction?.findUnique) {
-      return txClient.transaction.findUnique(args);
-    }
-    if (txClient.transaction?.findFirst) {
-      return txClient.transaction.findFirst({
-        where: { id: args.where.id },
-        ...(args.include && { include: args.include }),
-      });
-    }
-    return null;
-  }
-
   private async generateTransactionNumber(
     txClient: any = this.prisma,
   ): Promise<string> {
@@ -44,38 +36,34 @@ export class GateService {
     const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
     const prefix = `GMS-${dateStr}-`;
 
-    const lastTransaction = await txClient.transaction.findFirst({
+    const count = await txClient.transaction.count({
       where: {
-        transactionNumber: {
-          startsWith: prefix,
+        createdAt: {
+          gte: new Date(today.setHours(0, 0, 0, 0)),
+          lt: new Date(today.setHours(23, 59, 59, 999)),
         },
-      },
-      orderBy: {
-        transactionNumber: 'desc',
       },
     });
 
-    let sequence = 1;
-    if (lastTransaction) {
-      const lastSeqStr = lastTransaction.transactionNumber.split('-')[2];
-      sequence = parseInt(lastSeqStr, 10) + 1;
-    }
-
+    const sequence = count + 1;
     const sequenceStr = sequence.toString().padStart(4, '0');
     return `${prefix}${sequenceStr}`;
   }
 
   async checkIn(dto: CreateGateCheckInDto, user: JwtPayloadUser) {
-    this.logger.log(`Gate check-in attempt for plate: ${dto.plateNumber}`);
+    const normalizedPlate = normalizePlateNumber(dto.plateNumber);
+    const rawPlate = getRawPlateNumber(dto.plateNumber);
+
+    this.logger.log(`Gate check-in attempt for plate: ${normalizedPlate} (${rawPlate})`);
 
     let transaction: any;
     let retries = 3;
     while (retries > 0) {
       try {
         transaction = await this.prisma.$transaction(async (tx) => {
-          // Database-level concurrency lock on plate number hash
+          // Database-level concurrency lock on unspaced raw plate number hash
           try {
-            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.plateNumber}))`;
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${rawPlate}))`;
           } catch (e) {
             // Fallback for non-postgres database environments in testing
           }
@@ -84,7 +72,11 @@ export class GateService {
 
           const activeTransaction = await tx.transaction.findFirst({
             where: {
-              plateNumber: dto.plateNumber,
+              OR: [
+                { plateNumber: normalizedPlate },
+                { plateNumber: rawPlate },
+                { plateNumber: dto.plateNumber },
+              ],
               status: {
                 notIn: ['COMPLETED', 'CANCELLED'],
               },
@@ -93,17 +85,20 @@ export class GateService {
 
           if (activeTransaction) {
             this.logger.warn(
-              `Check-in rejected: Active transaction found for plate ${dto.plateNumber}`,
+              `Check-in rejected: Active transaction found for plate ${normalizedPlate}`,
             );
-            throw new BadRequestException(
-              'Kendaraan dengan pelat ini masih memiliki transaksi yang sedang aktif (Belum Gate Out). Harap selesaikan atau batalkan transaksi sebelumnya terlebih dahulu.',
-            );
+            throw new ConflictException({
+              success: false,
+              message:
+                'Kendaraan dengan pelat ini masih memiliki transaksi yang sedang aktif (Belum Gate Out). Harap selesaikan atau batalkan transaksi sebelumnya terlebih dahulu.',
+              errors: [],
+            });
           }
 
           return tx.transaction.create({
             data: {
               transactionNumber,
-              plateNumber: dto.plateNumber,
+              plateNumber: normalizedPlate,
               driverName: dto.driverName,
               driverPhone: dto.driverPhone,
               vendorName: dto.vendorName,
@@ -135,7 +130,7 @@ export class GateService {
         });
         break;
       } catch (error: any) {
-        if (error instanceof BadRequestException) {
+        if (error instanceof ConflictException || error instanceof BadRequestException) {
           throw error;
         }
         if (error.code === 'P2002') {
@@ -332,20 +327,26 @@ export class GateService {
         });
       }
 
-      if (tx.transactionStatusHistory?.create) {
-        await tx.transactionStatusHistory.create({
-          data: {
-            transactionId: id,
-            oldStatus: transaction.status,
-            newStatus: 'COMPLETED',
-            changedById: user.id,
-            notes: 'Gate check-out processed',
-          },
-        });
-      }
+      await tx.transactionStatusHistory.create({
+        data: {
+          transactionId: id,
+          oldStatus: transaction.status,
+          newStatus: 'COMPLETED',
+          changedById: user.id,
+          notes: 'Gate check-out processed',
+        },
+      });
 
-      return this.safeFindUnique(tx, { where: { id } });
+      return tx.transaction.findUnique({ where: { id } });
     });
+
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Updated transaction not found',
+        errors: [],
+      });
+    }
 
     await this.activityLogsService.logAction({
       userId: user.id,
@@ -363,11 +364,7 @@ export class GateService {
     return {
       success: true,
       message: 'Gate check-out processed successfully',
-      data: updated || {
-        ...transaction,
-        status: 'COMPLETED',
-        checkOutAt: new Date(),
-      },
+      data: updated,
     };
   }
 
@@ -413,20 +410,26 @@ export class GateService {
         });
       }
 
-      if (tx.transactionStatusHistory?.create) {
-        await tx.transactionStatusHistory.create({
-          data: {
-            transactionId: id,
-            oldStatus: transaction.status,
-            newStatus: 'CANCELLED',
-            changedById: user.id,
-            notes: `Cancelled: ${reason}`,
-          },
-        });
-      }
+      await tx.transactionStatusHistory.create({
+        data: {
+          transactionId: id,
+          oldStatus: transaction.status,
+          newStatus: 'CANCELLED',
+          changedById: user.id,
+          notes: `Cancelled: ${reason}`,
+        },
+      });
 
-      return this.safeFindUnique(tx, { where: { id } });
+      return tx.transaction.findUnique({ where: { id } });
     });
+
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Updated transaction not found',
+        errors: [],
+      });
+    }
 
     await this.activityLogsService.logAction({
       userId: user.id,
@@ -444,10 +447,7 @@ export class GateService {
     return {
       success: true,
       message: 'Transaction cancelled successfully',
-      data: updated || {
-        ...transaction,
-        status: 'CANCELLED',
-      },
+      data: updated,
     };
   }
 }
