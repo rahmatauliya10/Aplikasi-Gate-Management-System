@@ -413,7 +413,7 @@ export class OperationLogCorrectionService {
 
       // Process Root items (TRANSACTION, STATUS, REMARK)
       for (const item of rootItems) {
-        const extractedOldValue = (tx as any)[item.fieldName];
+        const extractedOldValue = tx[item.fieldName];
         txUpdateData[item.fieldName] = item.newValue;
         if (item.fieldName === 'status') {
           statusUpdatedTo = item.newValue as string;
