@@ -8,9 +8,8 @@ UPDATE "Attachment"
 SET "attachmentLineageId" = gen_random_uuid()::text 
 WHERE "attachmentLineageId" IS NULL;
 
--- 3. Set NOT NULL and DEFAULT on attachmentLineageId
+-- 3. Set NOT NULL
 ALTER TABLE "Attachment" ALTER COLUMN "attachmentLineageId" SET NOT NULL;
-ALTER TABLE "Attachment" ALTER COLUMN "attachmentLineageId" SET DEFAULT gen_random_uuid()::text;
 
 -- 4. Drop legacy unique constraint [transactionId, revision] if exists
 DROP INDEX IF EXISTS "Attachment_transactionId_revision_key";
