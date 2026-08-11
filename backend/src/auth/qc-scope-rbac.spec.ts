@@ -36,6 +36,7 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     warehouseProcess: {
       findFirst: jest.fn(),

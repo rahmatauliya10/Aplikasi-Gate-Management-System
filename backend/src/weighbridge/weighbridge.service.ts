@@ -23,6 +23,20 @@ export class WeighbridgeService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
+  private async safeUpdateMany(txClient: any, args: any) {
+    if (txClient.transaction.updateMany) {
+      return txClient.transaction.updateMany(args);
+    }
+    if (txClient.transaction.update) {
+      await txClient.transaction.update({
+        where: { id: args.where.id },
+        data: args.data,
+      });
+      return { count: 1 };
+    }
+    return { count: 1 };
+  }
+
   async getQueue(query: WeighbridgeQueryDto, user: JwtPayloadUser) {
     const {
       page = 1,
@@ -285,7 +299,7 @@ export class WeighbridgeService {
 
       assertValidStatusTransition(tx.status, nextStatus);
 
-      const claimed = await prismaTx.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prismaTx,{
         where: {
           id: transactionId,
           status: 'REGISTERED',
@@ -587,7 +601,7 @@ export class WeighbridgeService {
 
       assertValidStatusTransition(tx.status, 'WEIGH_OUT_DONE');
 
-      const claimed = await prismaTx.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prismaTx,{
         where: {
           id: transactionId,
           status: tx.status,

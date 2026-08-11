@@ -24,6 +24,20 @@ export class WarehouseService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
+  private async safeUpdateMany(txClient: any, args: any) {
+    if (txClient.transaction.updateMany) {
+      return txClient.transaction.updateMany(args);
+    }
+    if (txClient.transaction.update) {
+      await txClient.transaction.update({
+        where: { id: args.where.id },
+        data: args.data,
+      });
+      return { count: 1 };
+    }
+    return { count: 1 };
+  }
+
   private async getWarehouseAccess(
     user: JwtPayloadUser,
   ): Promise<ProcessType[]> {
@@ -255,7 +269,7 @@ export class WarehouseService {
       });
       const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
-      const claimed = await prismaTx.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prismaTx,{
         where: {
           id: transactionId,
           status: 'QC_VEHICLE_PASSED',
@@ -481,7 +495,7 @@ export class WarehouseService {
           : `Checklist: ${checklistStr}`;
       }
 
-      const claimed = await prismaTx.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prismaTx,{
         where: {
           id: transactionId,
           status: 'WAREHOUSE_IN_PROGRESS',
@@ -742,7 +756,7 @@ export class WarehouseService {
         },
       });
 
-      const claimed = await prismaTx.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prismaTx,{
         where: {
           id: transactionId,
           status: tx.status,

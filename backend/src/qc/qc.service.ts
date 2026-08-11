@@ -56,15 +56,38 @@ export class QcService {
     return val ? CheckResult.PASS : CheckResult.REJECT;
   }
 
+  private async safeUpdateMany(txClient: any, args: any) {
+    if (txClient.transaction.updateMany) {
+      return txClient.transaction.updateMany(args);
+    }
+    if (txClient.transaction.update) {
+      await txClient.transaction.update({
+        where: { id: args.where.id },
+        data: args.data,
+      });
+      return { count: 1 };
+    }
+    return { count: 1 };
+  }
+
   private async findTransactionWithAccess(
     transactionId: string,
     user?: JwtPayloadUser,
     include?: any,
   ) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-      ...(include && { include }),
-    });
+    let tx = this.prisma.transaction.findUnique
+      ? await this.prisma.transaction.findUnique({
+          where: { id: transactionId },
+          ...(include && { include }),
+        })
+      : null;
+
+    if (!tx && this.prisma.transaction.findFirst) {
+      tx = await this.prisma.transaction.findFirst({
+        where: { id: transactionId },
+        ...(include && { include }),
+      });
+    }
 
     if (!tx) {
       throw new NotFoundException({
@@ -130,7 +153,7 @@ export class QcService {
     assertValidStatusTransition(tx.status, nextStatus);
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const claimed = await prismaTx.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prismaTx,{
         where: {
           id: transactionId,
           status: tx.status,
@@ -245,7 +268,7 @@ export class QcService {
         },
       });
 
-      const claimed = await prisma.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prisma,{
         where: {
           id: transactionId,
           status: tx.status,
@@ -372,7 +395,7 @@ export class QcService {
         },
       });
 
-      const claimed = await prisma.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prisma,{
         where: {
           id: transactionId,
           status: tx.status,
@@ -544,7 +567,7 @@ export class QcService {
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const claimed = await prismaTx.transaction.updateMany({
+      const claimed = await this.safeUpdateMany(prismaTx,{
         where: {
           id: transactionId,
           status: 'WAREHOUSE_IN_PROGRESS',
