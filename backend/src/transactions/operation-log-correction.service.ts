@@ -174,6 +174,12 @@ export class OperationLogCorrectionService {
       );
     }
 
+    if (dto.reopenTargetStatus && dto.action !== CorrectionAction.REOPEN_WORKFLOW) {
+      throw new BadRequestException(
+        'reopenTargetStatus hanya boleh diberikan apabila action adalah REOPEN_WORKFLOW.',
+      );
+    }
+
     if (
       (!dto.items || dto.items.length === 0) &&
       dto.action !== CorrectionAction.REOPEN_WORKFLOW
@@ -236,7 +242,7 @@ export class OperationLogCorrectionService {
         },
       });
 
-      // Step 5: Validate Allowlist, Ownership, and Collect Collision-Proof Diffs
+      // Step 5: Validate Allowlist, Ownership, and Group Items by Target Record
       const oldValuesSummary: Record<string, any> = {};
       const newValuesSummary: Record<string, any> = {};
       const itemInsertPayloads: any[] = [];
@@ -244,7 +250,18 @@ export class OperationLogCorrectionService {
       let statusUpdatedTo: string | null = null;
       let hasActualChanges = false;
 
-      for (const item of dto.items) {
+      // Grouping buckets
+      const rootItems: any[] = [];
+      const recordGroups = new Map<
+        string,
+        {
+          targetModule: CorrectionTargetModule;
+          targetRecord: any;
+          items: any[];
+        }
+      >();
+
+      for (const item of dto.items || []) {
         const allowedFields = FIELD_ALLOWLIST[item.targetModule] || [];
         if (!allowedFields.includes(item.fieldName)) {
           throw new BadRequestException(
@@ -265,21 +282,12 @@ export class OperationLogCorrectionService {
         }
         item.newValue = valueToUpdate;
 
-        let extractedOldValue: any = null;
-        let targetIdToUse = item.targetRecordId || null;
-        let replacementIdToUse: string | null = null;
-
         if (
           item.targetModule === CorrectionTargetModule.TRANSACTION ||
           item.targetModule === CorrectionTargetModule.STATUS ||
           item.targetModule === CorrectionTargetModule.REMARK
         ) {
-          extractedOldValue = (tx as any)[item.fieldName];
-          txUpdateData[item.fieldName] = item.newValue;
-          targetIdToUse = tx.id;
-          if (item.fieldName === 'status') {
-            statusUpdatedTo = item.newValue as string;
-          }
+          rootItems.push(item);
         } else if (item.targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
           if (!tx.weighbridgeRecords || tx.weighbridgeRecords.length === 0) {
             throw new BadRequestException(
@@ -295,9 +303,145 @@ export class OperationLogCorrectionService {
               `Record timbangan ID ${item.targetRecordId} tidak ditemukan pada transaksi ini (Ownership Verification Gagal).`,
             );
           }
-          targetIdToUse = rec.id;
-          extractedOldValue = (rec as any)[item.fieldName];
 
+          const groupKey = `WEIGHBRIDGE:${rec.id}`;
+          if (!recordGroups.has(groupKey)) {
+            recordGroups.set(groupKey, {
+              targetModule: CorrectionTargetModule.WEIGHBRIDGE,
+              targetRecord: rec,
+              items: [],
+            });
+          }
+          recordGroups.get(groupKey)!.items.push(item);
+        } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
+          const rec = item.targetRecordId
+            ? tx.warehouseProcesses?.find((r) => r.id === item.targetRecordId)
+            : tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null;
+
+          if (!rec) {
+            throw new ConflictException(
+              'Original Warehouse record does not exist and cannot be corrected',
+            );
+          }
+
+          const groupKey = `WAREHOUSE:${rec.id}`;
+          if (!recordGroups.has(groupKey)) {
+            recordGroups.set(groupKey, {
+              targetModule: CorrectionTargetModule.WAREHOUSE,
+              targetRecord: rec,
+              items: [],
+            });
+          }
+          recordGroups.get(groupKey)!.items.push(item);
+        } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE) {
+          const rec = item.targetRecordId
+            ? tx.qcVehicleChecks?.find((r) => r.id === item.targetRecordId)
+            : tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null;
+
+          if (!rec) {
+            throw new ConflictException(
+              'Original QC Vehicle record does not exist and cannot be corrected',
+            );
+          }
+
+          const groupKey = `QC_VEHICLE:${rec.id}`;
+          if (!recordGroups.has(groupKey)) {
+            recordGroups.set(groupKey, {
+              targetModule: CorrectionTargetModule.QC_VEHICLE,
+              targetRecord: rec,
+              items: [],
+            });
+          }
+          recordGroups.get(groupKey)!.items.push(item);
+        } else if (
+          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
+          item.targetModule === CorrectionTargetModule.QC_MATERIAL
+        ) {
+          const rec = item.targetRecordId
+            ? tx.incomingMaterialChecks?.find(
+                (r) => r.id === item.targetRecordId,
+              )
+            : tx.incomingMaterialChecks?.[
+                tx.incomingMaterialChecks.length - 1
+              ] || null;
+
+          if (!rec) {
+            throw new ConflictException(
+              'Original QC/Incoming Material record does not exist and cannot be corrected',
+            );
+          }
+
+          const groupKey = `${item.targetModule}:${rec.id}`;
+          if (!recordGroups.has(groupKey)) {
+            recordGroups.set(groupKey, {
+              targetModule: item.targetModule,
+              targetRecord: rec,
+              items: [],
+            });
+          }
+          recordGroups.get(groupKey)!.items.push(item);
+        } else if (item.targetModule === CorrectionTargetModule.ATTACHMENT) {
+          if (!tx.attachments || tx.attachments.length === 0) {
+            throw new BadRequestException(
+              'Tidak ada lampiran pada transaksi ini.',
+            );
+          }
+          const rec = item.targetRecordId
+            ? tx.attachments.find((r) => r.id === item.targetRecordId)
+            : tx.attachments[tx.attachments.length - 1];
+
+          if (!rec) {
+            throw new BadRequestException(
+              `Record lampiran ID ${item.targetRecordId} tidak ditemukan pada transaksi ini (Ownership Verification Gagal).`,
+            );
+          }
+
+          const groupKey = `ATTACHMENT:${rec.id}`;
+          if (!recordGroups.has(groupKey)) {
+            recordGroups.set(groupKey, {
+              targetModule: CorrectionTargetModule.ATTACHMENT,
+              targetRecord: rec,
+              items: [],
+            });
+          }
+          recordGroups.get(groupKey)!.items.push(item);
+        }
+      }
+
+      // Process Root items (TRANSACTION, STATUS, REMARK)
+      for (const item of rootItems) {
+        const extractedOldValue = (tx as any)[item.fieldName];
+        txUpdateData[item.fieldName] = item.newValue;
+        if (item.fieldName === 'status') {
+          statusUpdatedTo = item.newValue as string;
+        }
+        if (
+          JSON.stringify(extractedOldValue) !== JSON.stringify(item.newValue)
+        ) {
+          hasActualChanges = true;
+        }
+
+        const summaryKey = `${item.targetModule}.${tx.id}.${item.fieldName}`;
+        oldValuesSummary[summaryKey] = extractedOldValue;
+        newValuesSummary[summaryKey] = item.newValue;
+
+        itemInsertPayloads.push({
+          correctionId: correction.id,
+          targetModule: item.targetModule,
+          targetRecordId: tx.id,
+          replacementRecordId: null,
+          fieldName: item.fieldName,
+          oldValue: extractedOldValue !== undefined ? extractedOldValue : null,
+          newValue: item.newValue !== undefined ? item.newValue : null,
+          itemRemark: item.itemRemark || null,
+        });
+      }
+
+      // Process Record-level Groups (WEIGHBRIDGE, WAREHOUSE, QC_VEHICLE, INCOMING_MATERIAL, ATTACHMENT)
+      for (const [, group] of recordGroups) {
+        const { targetModule, targetRecord: rec, items } = group;
+
+        if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
           const superseded = await prismaTx.weighbridgeRecord.updateMany({
             where: {
               id: rec.id,
@@ -317,59 +461,73 @@ export class OperationLogCorrectionService {
             );
           }
 
+          let updatedWeight = rec.weight;
+          let updatedTicketNumber = rec.ticketNumber;
+          let updatedRemarks = rec.remarks;
+
+          for (const item of items) {
+            const extractedOldValue = (rec as any)[item.fieldName];
+            if (item.fieldName === 'weight') {
+              updatedWeight = Number(item.newValue);
+              // GBJ vs GBB/GSP mapping rules:
+              // GBJ: OUT -> grossWeight, IN -> tareWeight
+              // GBB/GSP: IN -> grossWeight, OUT -> tareWeight
+              if (tx.processType === 'GBJ') {
+                if (rec.type === 'IN') {
+                  txUpdateData.tareWeight = updatedWeight;
+                } else if (rec.type === 'OUT') {
+                  txUpdateData.grossWeight = updatedWeight;
+                }
+              } else {
+                if (rec.type === 'IN') {
+                  txUpdateData.grossWeight = updatedWeight;
+                } else if (rec.type === 'OUT') {
+                  txUpdateData.tareWeight = updatedWeight;
+                }
+              }
+            } else if (item.fieldName === 'ticketNumber') {
+              updatedTicketNumber = String(item.newValue);
+            } else if (item.fieldName === 'remarks') {
+              updatedRemarks = String(item.newValue);
+            }
+
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `WEIGHBRIDGE.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+
           const newRec = await prismaTx.weighbridgeRecord.create({
             data: {
               transactionId: rec.transactionId,
               type: rec.type,
-              weight:
-                item.fieldName === 'weight'
-                  ? Number(item.newValue)
-                  : rec.weight,
-              ticketNumber:
-                item.fieldName === 'ticketNumber'
-                  ? String(item.newValue)
-                  : rec.ticketNumber,
+              weight: updatedWeight,
+              ticketNumber: updatedTicketNumber,
               operatorId: rec.operatorId,
-              remarks:
-                item.fieldName === 'remarks'
-                  ? String(item.newValue)
-                  : rec.remarks,
+              remarks: updatedRemarks,
               revision: rec.revision + 1,
               isCurrent: true,
             },
           });
-          replacementIdToUse = newRec.id;
 
-          // Adapter auto-sync to Transaction root using processType rules
-          if (item.fieldName === 'weight') {
-            if (tx.processType === 'GBJ') {
-              if (rec.type === 'IN') {
-                txUpdateData.tareWeight = Number(item.newValue);
-              } else if (rec.type === 'OUT') {
-                txUpdateData.grossWeight = Number(item.newValue);
-              }
-            } else {
-              if (rec.type === 'IN') {
-                txUpdateData.grossWeight = Number(item.newValue);
-              } else if (rec.type === 'OUT') {
-                txUpdateData.tareWeight = Number(item.newValue);
-              }
-            }
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: (rec as any)[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
           }
-        } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
-          const rec = item.targetRecordId
-            ? tx.warehouseProcesses?.find((r) => r.id === item.targetRecordId)
-            : tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null;
-
-          if (!rec) {
-            throw new ConflictException(
-              'Original Warehouse record does not exist and cannot be corrected',
-            );
-          }
-
-          targetIdToUse = rec.id;
-          extractedOldValue = (rec as any)[item.fieldName];
-
+        } else if (targetModule === CorrectionTargetModule.WAREHOUSE) {
           const superseded = await prismaTx.warehouseProcess.updateMany({
             where: {
               id: rec.id,
@@ -389,83 +547,94 @@ export class OperationLogCorrectionService {
             );
           }
 
+          const updatedFields: any = {
+            startAt: rec.startAt,
+            endAt: rec.endAt,
+            actualWeight: rec.actualWeight,
+            actualQuantity: rec.actualQuantity,
+            unit: rec.unit,
+            palletCount: rec.palletCount,
+            bagCount: rec.bagCount,
+            rollCount: rec.rollCount,
+            condition: rec.condition,
+            remarks: rec.remarks,
+            checklistItems: rec.checklistItems,
+          };
+
+          for (const item of items) {
+            const extractedOldValue = (rec as any)[item.fieldName];
+            if (['startAt', 'endAt'].includes(item.fieldName)) {
+              updatedFields[item.fieldName] = new Date(item.newValue);
+            } else if (
+              ['actualWeight', 'actualQuantity', 'palletCount', 'bagCount', 'rollCount'].includes(
+                item.fieldName,
+              )
+            ) {
+              updatedFields[item.fieldName] = Number(item.newValue);
+            } else if (item.fieldName === 'remarks') {
+              updatedFields[item.fieldName] = String(item.newValue);
+            } else {
+              updatedFields[item.fieldName] = item.newValue;
+            }
+
+            if (item.fieldName === 'actualWeight') {
+              txUpdateData.actualWeight = Number(item.newValue);
+            } else if (item.fieldName === 'actualQuantity') {
+              txUpdateData.actualQuantity = Number(item.newValue);
+            } else if (item.fieldName === 'unit') {
+              txUpdateData.warehouseUnit = item.newValue;
+            } else if (item.fieldName === 'startAt') {
+              txUpdateData.warehouseStartAt = new Date(item.newValue);
+            } else if (item.fieldName === 'endAt') {
+              txUpdateData.warehouseEndAt = new Date(item.newValue);
+            }
+
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `WAREHOUSE.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+
           const newRec = await prismaTx.warehouseProcess.create({
             data: {
               transactionId: rec.transactionId,
               processType: rec.processType,
-              startAt:
-                item.fieldName === 'startAt'
-                  ? new Date(item.newValue)
-                  : rec.startAt,
-              endAt:
-                item.fieldName === 'endAt'
-                  ? new Date(item.newValue)
-                  : rec.endAt,
+              startAt: updatedFields.startAt,
+              endAt: updatedFields.endAt,
               startById: rec.startById,
               endById: rec.endById,
-              actualWeight:
-                item.fieldName === 'actualWeight'
-                  ? Number(item.newValue)
-                  : rec.actualWeight,
-              actualQuantity:
-                item.fieldName === 'actualQuantity'
-                  ? Number(item.newValue)
-                  : rec.actualQuantity,
-              unit: item.fieldName === 'unit' ? item.newValue : rec.unit,
-              palletCount:
-                item.fieldName === 'palletCount'
-                  ? Number(item.newValue)
-                  : rec.palletCount,
-              bagCount:
-                item.fieldName === 'bagCount'
-                  ? Number(item.newValue)
-                  : rec.bagCount,
-              rollCount:
-                item.fieldName === 'rollCount'
-                  ? Number(item.newValue)
-                  : rec.rollCount,
-              condition:
-                item.fieldName === 'condition' ? item.newValue : rec.condition,
-              remarks:
-                item.fieldName === 'remarks'
-                  ? String(item.newValue)
-                  : rec.remarks,
-              checklistItems:
-                item.fieldName === 'checklistItems'
-                  ? item.newValue
-                  : (rec.checklistItems as any),
+              actualWeight: updatedFields.actualWeight,
+              actualQuantity: updatedFields.actualQuantity,
+              unit: updatedFields.unit,
+              palletCount: updatedFields.palletCount,
+              bagCount: updatedFields.bagCount,
+              rollCount: updatedFields.rollCount,
+              condition: updatedFields.condition,
+              remarks: updatedFields.remarks,
+              checklistItems: updatedFields.checklistItems,
               revision: rec.revision + 1,
               isCurrent: true,
             },
           });
-          replacementIdToUse = newRec.id;
 
-          // Adapter auto-sync to Transaction root
-          if (item.fieldName === 'actualWeight') {
-            txUpdateData.actualWeight = Number(item.newValue);
-          } else if (item.fieldName === 'actualQuantity') {
-            txUpdateData.actualQuantity = Number(item.newValue);
-          } else if (item.fieldName === 'unit') {
-            txUpdateData.warehouseUnit = item.newValue;
-          } else if (item.fieldName === 'startAt') {
-            txUpdateData.warehouseStartAt = new Date(item.newValue);
-          } else if (item.fieldName === 'endAt') {
-            txUpdateData.warehouseEndAt = new Date(item.newValue);
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: (rec as any)[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
           }
-        } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE) {
-          const rec = item.targetRecordId
-            ? tx.qcVehicleChecks?.find((r) => r.id === item.targetRecordId)
-            : tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null;
-
-          if (!rec) {
-            throw new ConflictException(
-              'Original QC Vehicle record does not exist and cannot be corrected',
-            );
-          }
-
-          targetIdToUse = rec.id;
-          extractedOldValue = (rec as any)[item.fieldName];
-
+        } else if (targetModule === CorrectionTargetModule.QC_VEHICLE) {
           const superseded = await prismaTx.qcVehicleCheck.updateMany({
             where: {
               id: rec.id,
@@ -485,40 +654,49 @@ export class OperationLogCorrectionService {
             );
           }
 
+          const updatedFields: any = {
+            result: rec.result,
+            vehicleCleanliness: rec.vehicleCleanliness,
+            vehicleOdor: rec.vehicleOdor,
+            pestEvidence: rec.pestEvidence,
+            vehicleCondition: rec.vehicleCondition,
+            documentCompleteness: rec.documentCompleteness,
+            sealCondition: rec.sealCondition,
+            notes: rec.notes,
+            checklistItems: rec.checklistItems,
+          };
+
+          for (const item of items) {
+            const extractedOldValue = (rec as any)[item.fieldName];
+            if (item.fieldName === 'notes') {
+              updatedFields[item.fieldName] = String(item.newValue);
+            } else {
+              updatedFields[item.fieldName] = item.newValue;
+            }
+
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `QC_VEHICLE.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+
           const newRec = await prismaTx.qcVehicleCheck.create({
             data: {
               transactionId: rec.transactionId,
-              result: item.fieldName === 'result' ? valueToUpdate : rec.result,
-              vehicleCleanliness:
-                item.fieldName === 'vehicleCleanliness'
-                  ? item.newValue
-                  : rec.vehicleCleanliness,
-              vehicleOdor:
-                item.fieldName === 'vehicleOdor'
-                  ? item.newValue
-                  : rec.vehicleOdor,
-              pestEvidence:
-                item.fieldName === 'pestEvidence'
-                  ? item.newValue
-                  : rec.pestEvidence,
-              vehicleCondition:
-                item.fieldName === 'vehicleCondition'
-                  ? item.newValue
-                  : rec.vehicleCondition,
-              documentCompleteness:
-                item.fieldName === 'documentCompleteness'
-                  ? item.newValue
-                  : rec.documentCompleteness,
-              sealCondition:
-                item.fieldName === 'sealCondition'
-                  ? item.newValue
-                  : rec.sealCondition,
-              notes:
-                item.fieldName === 'notes' ? String(item.newValue) : rec.notes,
-              checklistItems:
-                item.fieldName === 'checklistItems'
-                  ? item.newValue
-                  : (rec.checklistItems as any),
+              result: updatedFields.result,
+              vehicleCleanliness: updatedFields.vehicleCleanliness,
+              vehicleOdor: updatedFields.vehicleOdor,
+              pestEvidence: updatedFields.pestEvidence,
+              vehicleCondition: updatedFields.vehicleCondition,
+              documentCompleteness: updatedFields.documentCompleteness,
+              sealCondition: updatedFields.sealCondition,
+              notes: updatedFields.notes,
+              checklistItems: updatedFields.checklistItems,
               checkedById: rec.checkedById,
               startedAt: rec.startedAt,
               completedAt: rec.completedAt,
@@ -526,28 +704,23 @@ export class OperationLogCorrectionService {
               isCurrent: true,
             },
           });
-          replacementIdToUse = newRec.id;
-        } else if (
-          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
-          item.targetModule === CorrectionTargetModule.QC_MATERIAL
-        ) {
-          const rec = item.targetRecordId
-            ? tx.incomingMaterialChecks?.find(
-                (r) => r.id === item.targetRecordId,
-              )
-            : tx.incomingMaterialChecks?.[
-                tx.incomingMaterialChecks.length - 1
-              ] || null;
 
-          if (!rec) {
-            throw new ConflictException(
-              'Original QC/Incoming Material record does not exist and cannot be corrected',
-            );
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: (rec as any)[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
           }
-
-          targetIdToUse = rec.id;
-          extractedOldValue = (rec as any)[item.fieldName];
-
+        } else if (
+          targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
+          targetModule === CorrectionTargetModule.QC_MATERIAL
+        ) {
           const superseded = await prismaTx.incomingMaterialCheck.updateMany({
             where: {
               id: rec.id,
@@ -567,62 +740,69 @@ export class OperationLogCorrectionService {
             );
           }
 
+          const updatedFields: any = {
+            result: rec.result,
+            odor: rec.odor,
+            color: rec.color,
+            moisture: rec.moisture,
+            foreignMatter: rec.foreignMatter,
+            beanCondition: rec.beanCondition,
+            sampleWeight: rec.sampleWeight,
+            goodBeanPercentage: rec.goodBeanPercentage,
+            itemCondition: rec.itemCondition,
+            packagingCondition: rec.packagingCondition,
+            quantityCheck: rec.quantityCheck,
+            documentCheck: rec.documentCheck,
+            visualInspection: rec.visualInspection,
+            defectNotes: rec.defectNotes,
+            notes: rec.notes,
+            checklistItems: rec.checklistItems,
+          };
+
+          for (const item of items) {
+            const extractedOldValue = (rec as any)[item.fieldName];
+            if (
+              ['moisture', 'foreignMatter', 'sampleWeight', 'goodBeanPercentage'].includes(
+                item.fieldName,
+              )
+            ) {
+              updatedFields[item.fieldName] = Number(item.newValue);
+            } else if (['defectNotes', 'notes'].includes(item.fieldName)) {
+              updatedFields[item.fieldName] = String(item.newValue);
+            } else {
+              updatedFields[item.fieldName] = item.newValue;
+            }
+
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `${targetModule}.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+
           const newRec = await prismaTx.incomingMaterialCheck.create({
             data: {
               transactionId: rec.transactionId,
-              result: item.fieldName === 'result' ? valueToUpdate : rec.result,
-              odor: item.fieldName === 'odor' ? item.newValue : rec.odor,
-              color: item.fieldName === 'color' ? item.newValue : rec.color,
-              moisture:
-                item.fieldName === 'moisture'
-                  ? Number(item.newValue)
-                  : rec.moisture,
-              foreignMatter:
-                item.fieldName === 'foreignMatter'
-                  ? Number(item.newValue)
-                  : rec.foreignMatter,
-              beanCondition:
-                item.fieldName === 'beanCondition'
-                  ? item.newValue
-                  : rec.beanCondition,
-              sampleWeight:
-                item.fieldName === 'sampleWeight'
-                  ? Number(item.newValue)
-                  : rec.sampleWeight,
-              goodBeanPercentage:
-                item.fieldName === 'goodBeanPercentage'
-                  ? Number(item.newValue)
-                  : rec.goodBeanPercentage,
-              itemCondition:
-                item.fieldName === 'itemCondition'
-                  ? item.newValue
-                  : rec.itemCondition,
-              packagingCondition:
-                item.fieldName === 'packagingCondition'
-                  ? item.newValue
-                  : rec.packagingCondition,
-              quantityCheck:
-                item.fieldName === 'quantityCheck'
-                  ? item.newValue
-                  : rec.quantityCheck,
-              documentCheck:
-                item.fieldName === 'documentCheck'
-                  ? item.newValue
-                  : rec.documentCheck,
-              visualInspection:
-                item.fieldName === 'visualInspection'
-                  ? item.newValue
-                  : rec.visualInspection,
-              defectNotes:
-                item.fieldName === 'defectNotes'
-                  ? String(item.newValue)
-                  : rec.defectNotes,
-              notes:
-                item.fieldName === 'notes' ? String(item.newValue) : rec.notes,
-              checklistItems:
-                item.fieldName === 'checklistItems'
-                  ? item.newValue
-                  : (rec.checklistItems as any),
+              result: updatedFields.result,
+              odor: updatedFields.odor,
+              color: updatedFields.color,
+              moisture: updatedFields.moisture,
+              foreignMatter: updatedFields.foreignMatter,
+              beanCondition: updatedFields.beanCondition,
+              sampleWeight: updatedFields.sampleWeight,
+              goodBeanPercentage: updatedFields.goodBeanPercentage,
+              itemCondition: updatedFields.itemCondition,
+              packagingCondition: updatedFields.packagingCondition,
+              quantityCheck: updatedFields.quantityCheck,
+              documentCheck: updatedFields.documentCheck,
+              visualInspection: updatedFields.visualInspection,
+              defectNotes: updatedFields.defectNotes,
+              notes: updatedFields.notes,
+              checklistItems: updatedFields.checklistItems,
               checkedById: rec.checkedById,
               startedAt: rec.startedAt,
               completedAt: rec.completedAt,
@@ -630,25 +810,20 @@ export class OperationLogCorrectionService {
               isCurrent: true,
             },
           });
-          replacementIdToUse = newRec.id;
-        } else if (item.targetModule === CorrectionTargetModule.ATTACHMENT) {
-          if (!tx.attachments || tx.attachments.length === 0) {
-            throw new BadRequestException(
-              'Tidak ada lampiran pada transaksi ini.',
-            );
-          }
-          const rec = item.targetRecordId
-            ? tx.attachments.find((r) => r.id === item.targetRecordId)
-            : tx.attachments[tx.attachments.length - 1];
 
-          if (!rec) {
-            throw new BadRequestException(
-              `Record lampiran ID ${item.targetRecordId} tidak ditemukan pada transaksi ini (Ownership Verification Gagal).`,
-            );
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: (rec as any)[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
           }
-          targetIdToUse = rec.id;
-          extractedOldValue = (rec as any)[item.fieldName];
-
+        } else if (targetModule === CorrectionTargetModule.ATTACHMENT) {
           const superseded = await prismaTx.attachment.updateMany({
             where: {
               id: rec.id,
@@ -668,54 +843,57 @@ export class OperationLogCorrectionService {
             );
           }
 
+          const updatedFields: any = {
+            originalName: rec.originalName,
+            description: rec.description,
+          };
+
+          for (const item of items) {
+            const extractedOldValue = (rec as any)[item.fieldName];
+            updatedFields[item.fieldName] = String(item.newValue);
+
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `ATTACHMENT.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+
           const newRec = await prismaTx.attachment.create({
             data: {
               transactionId: rec.transactionId,
               module: rec.module,
               attachmentType: rec.attachmentType,
-              originalName:
-                item.fieldName === 'originalName'
-                  ? String(item.newValue)
-                  : rec.originalName,
+              originalName: updatedFields.originalName,
               fileName: rec.fileName,
               filePath: rec.filePath,
               mimeType: rec.mimeType,
               size: rec.size,
-              description:
-                item.fieldName === 'description'
-                  ? String(item.newValue)
-                  : rec.description,
+              description: updatedFields.description,
               uploadedById: rec.uploadedById,
               sha256: rec.sha256,
               revision: rec.revision + 1,
               isCurrent: true,
             },
           });
-          replacementIdToUse = newRec.id;
+
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: (rec as any)[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
+          }
         }
-
-        if (
-          JSON.stringify(extractedOldValue) !== JSON.stringify(item.newValue)
-        ) {
-          hasActualChanges = true;
-        }
-
-        const summaryKey = `${item.targetModule}.${
-          targetIdToUse || 'root'
-        }.${item.fieldName}`;
-        oldValuesSummary[summaryKey] = extractedOldValue;
-        newValuesSummary[summaryKey] = item.newValue;
-
-        itemInsertPayloads.push({
-          correctionId: correction.id,
-          targetModule: item.targetModule,
-          targetRecordId: targetIdToUse || null,
-          replacementRecordId: replacementIdToUse || null,
-          fieldName: item.fieldName,
-          oldValue: extractedOldValue !== undefined ? extractedOldValue : null,
-          newValue: item.newValue !== undefined ? item.newValue : null,
-          itemRemark: item.itemRemark || null,
-        });
       }
 
       if (
@@ -785,20 +963,24 @@ export class OperationLogCorrectionService {
         txUpdateData.netWeight = proposedGross - proposedTare;
       }
 
-      // P1-04 Fix: REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records
+      // REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records
       if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
-        const targetReopenStatus = statusUpdatedTo || 'QC_VEHICLE_PENDING';
+        const targetReopenStatus = dto.reopenTargetStatus || (statusUpdatedTo as TransactionStatus) || TransactionStatus.QC_VEHICLE_PENDING;
         const allowedReopenTargets = [
-          'QC_VEHICLE_PENDING',
-          'WEIGH_IN_PENDING',
-          'WAREHOUSE_PENDING',
-          'QC_ANALYSIS_PENDING',
+          TransactionStatus.REGISTERED,
+          TransactionStatus.WEIGH_IN_DONE,
+          TransactionStatus.QC_VEHICLE_PENDING,
+          TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+          TransactionStatus.INCOMING_CHECK_PENDING,
+          TransactionStatus.INCOMING_CHECK_IN_PROGRESS,
+          TransactionStatus.WAREHOUSE_IN_PROGRESS,
         ];
         if (!allowedReopenTargets.includes(targetReopenStatus)) {
           throw new BadRequestException(
             `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW. Status harus merupakan salah satu dari allowlist.`,
           );
         }
+        statusUpdatedTo = targetReopenStatus;
         txUpdateData.status = targetReopenStatus;
         txUpdateData.completedAt = null;
         txUpdateData.gateOutAt = null;

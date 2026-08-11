@@ -381,6 +381,7 @@ model IncomingMaterialCheck {
 
 model Attachment {
   id                       String         @id @default(uuid())
+  attachmentLineageId      String         @default(uuid())
   transactionId            String
   module                   String
   attachmentType           AttachmentType
@@ -403,7 +404,9 @@ model Attachment {
   supersededByCorrection TransactionCorrection? @relation("AttachmentSupersededBy", fields: [supersededByCorrectionId], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
-  @@unique([transactionId, revision])
+  @@index([transactionId, isCurrent])
+  @@index([attachmentLineageId])
+  @@unique([attachmentLineageId, revision])
 }
 
 model FraudCheck {

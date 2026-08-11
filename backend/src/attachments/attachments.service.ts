@@ -16,12 +16,16 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { validateMagicBytes } from '../common/utils/magic-byte.util';
 import type { Response } from 'express';
+import { UploadAttachmentDto } from './dto/upload-attachment.dto';
 
-export interface UploadAttachmentDto {
-  module?: string;
-  attachmentType?: AttachmentType;
-  description?: string;
-}
+const ALLOWED_MODULES = [
+  'qc',
+  'warehouse',
+  'gate',
+  'weighbridge',
+  'general',
+  'system',
+];
 
 @Injectable()
 export class AttachmentsService {
@@ -58,6 +62,33 @@ export class AttachmentsService {
     const tempPath = file.path;
 
     try {
+      // 0. Module path containment check
+      const rawModule = (dto.module || 'general').trim().toLowerCase();
+      if (
+        rawModule.includes('..') ||
+        rawModule.includes('/') ||
+        rawModule.includes('\\') ||
+        rawModule.includes('\0')
+      ) {
+        throw new BadRequestException(
+          'Nama modul mengandung karakter path traversal yang dilarang.',
+        );
+      }
+
+      if (!ALLOWED_MODULES.includes(rawModule)) {
+        throw new BadRequestException(
+          `Modul ${rawModule} tidak terdaftar pada approved allowlist.`,
+        );
+      }
+
+      const destDir = path.resolve(this.baseUploadDir, rawModule);
+      const relativeDir = path.relative(this.baseUploadDir, destDir);
+      if (relativeDir.startsWith('..') || path.isAbsolute(relativeDir)) {
+        throw new BadRequestException(
+          'Target direktori modul tidak berada dalam root penyimpanan unggahan.',
+        );
+      }
+
       // 1. Magic byte validation
       const isValidMagic = validateMagicBytes(tempPath, file.mimetype);
       if (!isValidMagic) {
@@ -73,11 +104,9 @@ export class AttachmentsService {
         .update(fileBuffer)
         .digest('hex');
 
-      // 3. Generate UUID physical filename
+      // 3. Generate UUID physical filename and unique attachment lineage ID
       const ext = path.extname(file.originalname).toLowerCase();
       const uuidFilename = `${crypto.randomUUID()}${ext}`;
-      const moduleFolder = (dto.module || 'general').toLowerCase();
-      const destDir = path.join(this.baseUploadDir, moduleFolder);
       if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
 
       const destPath = path.join(destDir, uuidFilename);
@@ -85,49 +114,71 @@ export class AttachmentsService {
         .relative(this.baseUploadDir, destPath)
         .replace(/\\/g, '/');
 
-      // 4. Create Attachment record in atomic database transaction
+      const attachmentLineageId = crypto.randomUUID();
       const attachmentType = dto.attachmentType || AttachmentType.OTHER;
 
-      const attachment = await this.prisma.$transaction(async (prismaTx) => {
-        const created = await prismaTx.attachment.create({
-          data: {
-            transactionId,
-            module: moduleFolder.toUpperCase(),
-            attachmentType,
-            originalName: file.originalname,
-            fileName: uuidFilename,
-            filePath: relativeFilePath,
-            mimeType: file.mimetype,
-            size: file.size,
-            description: dto.description || null,
-            uploadedById: user.id,
-            sha256,
-            isCurrent: true,
-            revision: 1,
-          },
+      // 4. Create Attachment record in atomic database transaction
+      let attachment: any = null;
+      try {
+        attachment = await this.prisma.$transaction(async (prismaTx) => {
+          const created = await prismaTx.attachment.create({
+            data: {
+              attachmentLineageId,
+              transactionId,
+              module: rawModule.toUpperCase(),
+              attachmentType,
+              originalName: file.originalname,
+              fileName: uuidFilename,
+              filePath: relativeFilePath,
+              mimeType: file.mimetype,
+              size: file.size,
+              description: dto.description || null,
+              uploadedById: user.id,
+              sha256,
+              isCurrent: true,
+              revision: 1,
+            },
+          });
+
+          await this.activityLogsService.logAction(
+            {
+              userId: user.id,
+              action: 'ATTACHMENT_UPLOAD',
+              module: 'ATTACHMENTS',
+              referenceId: created.id,
+              description: `Uploaded attachment ${file.originalname} (${sha256.substring(
+                0,
+                8,
+              )}...) for transaction ${transactionId}`,
+              status: 'SUCCESS',
+              ipAddress,
+            },
+            prismaTx,
+          );
+
+          return created;
         });
+      } catch (dbErr: any) {
+        // If DB fails, temporary file cleanup handles it below
+        throw dbErr;
+      }
 
-        await this.activityLogsService.logAction(
-          {
-            userId: user.id,
-            action: 'ATTACHMENT_UPLOAD',
-            module: 'ATTACHMENTS',
-            referenceId: created.id,
-            description: `Uploaded attachment ${file.originalname} (${sha256.substring(
-              0,
-              8,
-            )}...) for transaction ${transactionId}`,
-            status: 'SUCCESS',
-            ipAddress,
-          },
-          prismaTx,
+      // 5. Atomic file move from quarantine to permanent storage with compensating cleanup
+      try {
+        fs.renameSync(tempPath, destPath);
+      } catch (moveErr: any) {
+        // Compensating action: Delete DB record if file move fails
+        if (attachment?.id) {
+          await this.prisma.attachment.delete({
+            where: { id: attachment.id },
+          }).catch((delErr) =>
+            this.logger.error(`Compensating DB cleanup failed: ${delErr.message}`),
+          );
+        }
+        throw new InternalServerErrorException(
+          `Gagal memindahkan berkas fisik ke lokasi permanen: ${moveErr.message}`,
         );
-
-        return created;
-      });
-
-      // 5. Atomic file move from quarantine to permanent storage
-      fs.renameSync(tempPath, destPath);
+      }
 
       return {
         success: true,
@@ -135,7 +186,7 @@ export class AttachmentsService {
         data: attachment,
       };
     } catch (err: any) {
-      // Cleanup temporary file on ALL error paths
+      // Cleanup temporary quarantine file on ALL error paths
       if (fs.existsSync(tempPath)) {
         try {
           fs.unlinkSync(tempPath);
@@ -205,6 +256,21 @@ export class AttachmentsService {
       throw new NotFoundException(
         'Berkas fisik lampiran tidak ditemukan di penyimpanan server.',
       );
+    }
+
+    // SHA-256 integrity verification on download
+    if (attachment.sha256) {
+      const fileBuffer = fs.readFileSync(fullPhysicalPath);
+      const computedSha256 = crypto
+        .createHash('sha256')
+        .update(fileBuffer)
+        .digest('hex');
+
+      if (computedSha256 !== attachment.sha256) {
+        throw new InternalServerErrorException(
+          'Integritas berkas lampiran rusak (Checksum SHA-256 tidak sesuai).',
+        );
+      }
     }
 
     res.setHeader('Content-Type', attachment.mimeType);

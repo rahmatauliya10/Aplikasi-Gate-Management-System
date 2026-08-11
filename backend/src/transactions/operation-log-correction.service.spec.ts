@@ -707,5 +707,114 @@ describe('OperationLogCorrectionService', () => {
         }),
       );
     });
+
+    it('should group 5+ QC_VEHICLE fields into a single successor creation call', async () => {
+      const mockTx = {
+        id: 'tx-qc-batch',
+        status: 'COMPLETED',
+        processType: 'GBB',
+        revision: 1,
+        qcVehicleChecks: [
+          {
+            id: 'qcv-1',
+            result: 'REJECT',
+            vehicleCleanliness: 'REJECT',
+            vehicleOdor: 'REJECT',
+            pestEvidence: 'REJECT',
+            vehicleCondition: 'REJECT',
+            notes: 'Kondisi kotor',
+            revision: 1,
+            isCurrent: true,
+          },
+        ],
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+
+      jest
+        .spyOn(mockPrismaService, '$transaction')
+        .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT_LAPANGAN',
+        remark: 'Koreksi 5 field QC sekaligus dari hasil audit ulang',
+        expectedRevision: 1,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.QC_VEHICLE,
+            targetRecordId: 'qcv-1',
+            fieldName: 'result',
+            newValue: 'PASS',
+          },
+          {
+            targetModule: CorrectionTargetModule.QC_VEHICLE,
+            targetRecordId: 'qcv-1',
+            fieldName: 'vehicleCleanliness',
+            newValue: 'PASS',
+          },
+          {
+            targetModule: CorrectionTargetModule.QC_VEHICLE,
+            targetRecordId: 'qcv-1',
+            fieldName: 'vehicleOdor',
+            newValue: 'PASS',
+          },
+          {
+            targetModule: CorrectionTargetModule.QC_VEHICLE,
+            targetRecordId: 'qcv-1',
+            fieldName: 'pestEvidence',
+            newValue: 'PASS',
+          },
+          {
+            targetModule: CorrectionTargetModule.QC_VEHICLE,
+            targetRecordId: 'qcv-1',
+            fieldName: 'vehicleCondition',
+            newValue: 'PASS',
+          },
+        ],
+      };
+
+      await service.correctOperationLog('tx-qc-batch', dto as any, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      // Verify ONLY ONE updateMany and ONE create occurred for the target qcVehicleCheck
+      expect(mockTxClient.qcVehicleCheck.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalledTimes(1);
+      expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            result: 'PASS',
+            vehicleCleanliness: 'PASS',
+            vehicleOdor: 'PASS',
+            pestEvidence: 'PASS',
+            vehicleCondition: 'PASS',
+            revision: 2,
+            isCurrent: true,
+          }),
+        }),
+      );
+    });
+
+    it('should reject reopenTargetStatus if action is not REOPEN_WORKFLOW', async () => {
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reopenTargetStatus: 'QC_VEHICLE_PENDING',
+        reasonCode: 'SALAH_ACTION',
+        remark: 'Percobaan reopen via CORRECT_DATA (harus ditolak)',
+        expectedRevision: 1,
+        items: [],
+      };
+
+      await expect(
+        service.correctOperationLog('tx-1', dto as any, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });

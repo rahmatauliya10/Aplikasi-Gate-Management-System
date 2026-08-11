@@ -1224,6 +1224,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useConfirm } from '../composables/useConfirm'
 import truckService from '../services/truckService'
 import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
+import { getWeightRecordTypes } from '../utils/weightHelpers'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -2246,36 +2247,44 @@ const getWeightVal = (val) => {
 const grossInVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.gross !== 'IN') return null
   let val = getWeightVal(t.weights?.gross)
   if (val === null) val = getWeightVal(t.grossWeight)
-  if (val === null && t.processType !== 'GBJ') val = getWeightVal(t.weighInWeight)
+  if (val === null) val = getWeightVal(t.weighInWeight)
   return val
 })
 
 const tareOutVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.tare !== 'OUT') return null
   let val = getWeightVal(t.weights?.tare)
   if (val === null) val = getWeightVal(t.tareWeight)
-  if (val === null && t.processType !== 'GBJ') val = getWeightVal(t.weighOutWeight)
+  if (val === null) val = getWeightVal(t.weighOutWeight)
   return val
 })
 
 const tareInVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.tare !== 'IN') return null
   let val = getWeightVal(t.weights?.tare)
   if (val === null) val = getWeightVal(t.tareWeight)
-  if (val === null && t.processType === 'GBJ') val = getWeightVal(t.weighInWeight)
+  if (val === null) val = getWeightVal(t.weighInWeight)
   return val
 })
 
 const grossOutVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.gross !== 'OUT') return null
   let val = getWeightVal(t.weights?.gross)
   if (val === null) val = getWeightVal(t.grossWeight)
-  if (val === null && t.processType === 'GBJ') val = getWeightVal(t.weighOutWeight)
+  if (val === null) val = getWeightVal(t.weighOutWeight)
   return val
 })
 

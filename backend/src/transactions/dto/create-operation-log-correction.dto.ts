@@ -15,7 +15,7 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CorrectionAction, CorrectionTargetModule } from '@prisma/client';
+import { CorrectionAction, CorrectionTargetModule, TransactionStatus } from '@prisma/client';
 
 export class CorrectionItemDto {
   @ApiProperty({
@@ -71,6 +71,14 @@ export class CreateOperationLogCorrectionDto {
   @IsOptional()
   @IsEnum(CorrectionAction)
   action?: CorrectionAction = CorrectionAction.CORRECT_DATA;
+
+  @ApiPropertyOptional({
+    description: 'Explicit target status for REOPEN_WORKFLOW',
+    enum: TransactionStatus,
+  })
+  @IsOptional()
+  @IsEnum(TransactionStatus)
+  reopenTargetStatus?: TransactionStatus;
 
   @ApiProperty({
     description: 'Standardized reason code selected from dropdown (mandatory)',
