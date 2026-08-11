@@ -55,11 +55,13 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
       findFirst: jest.fn(),
     },
     userWarehouseAccess: {
-      findMany: jest.fn().mockResolvedValue([
-        { processType: 'GBB' },
-        { processType: 'GBJ' },
-        { processType: 'GSP' },
-      ]),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([
+          { processType: 'GBB' },
+          { processType: 'GBJ' },
+          { processType: 'GSP' },
+        ]),
     },
     $transaction: jest.fn((cb) => cb(mockPrismaService)),
     $executeRaw: jest.fn().mockResolvedValue(1),
