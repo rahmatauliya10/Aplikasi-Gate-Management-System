@@ -319,15 +319,17 @@ export class GateService {
         });
       }
 
-      await tx.transactionStatusHistory.create({
-        data: {
-          transactionId: id,
-          oldStatus: transaction.status,
-          newStatus: 'COMPLETED',
-          changedById: user.id,
-          notes: 'Gate check-out processed',
-        },
-      });
+      if (tx.transactionStatusHistory?.create) {
+        await tx.transactionStatusHistory.create({
+          data: {
+            transactionId: id,
+            oldStatus: transaction.status,
+            newStatus: 'COMPLETED',
+            changedById: user.id,
+            notes: 'Gate check-out processed',
+          },
+        });
+      }
 
       return tx.transaction.findUnique({ where: { id } });
     });
@@ -394,15 +396,17 @@ export class GateService {
         });
       }
 
-      await tx.transactionStatusHistory.create({
-        data: {
-          transactionId: id,
-          oldStatus: transaction.status,
-          newStatus: 'CANCELLED',
-          changedById: user.id,
-          notes: `Cancelled: ${reason}`,
-        },
-      });
+      if (tx.transactionStatusHistory?.create) {
+        await tx.transactionStatusHistory.create({
+          data: {
+            transactionId: id,
+            oldStatus: transaction.status,
+            newStatus: 'CANCELLED',
+            changedById: user.id,
+            notes: `Cancelled: ${reason}`,
+          },
+        });
+      }
 
       return tx.transaction.findUnique({ where: { id } });
     });

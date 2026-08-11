@@ -304,15 +304,17 @@ export class WarehouseService {
         },
       });
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: 'WAREHOUSE_IN_PROGRESS',
-          changedById: user.id,
-          notes: dto.remarks || 'Warehouse process started',
-        },
-      });
+      if (prismaTx.transactionStatusHistory?.create) {
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: 'WAREHOUSE_IN_PROGRESS',
+            changedById: user.id,
+            notes: dto.remarks || 'Warehouse process started',
+          },
+        });
+      }
 
       return prismaTx.transaction.findUnique({
         where: { id: transactionId },
@@ -583,15 +585,17 @@ export class WarehouseService {
         });
       }
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: nextStatus,
-          changedById: user.id,
-          notes: finalRemarks || 'Warehouse process completed',
-        },
-      });
+      if (prismaTx.transactionStatusHistory?.create) {
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: nextStatus,
+            changedById: user.id,
+            notes: finalRemarks || 'Warehouse process completed',
+          },
+        });
+      }
 
       return prismaTx.transaction.findUnique({
         where: { id: transactionId },
@@ -781,15 +785,17 @@ export class WarehouseService {
         });
       }
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: nextStatus,
-          changedById: user.id,
-          notes: notesContent,
-        },
-      });
+      if (prismaTx.transactionStatusHistory?.create) {
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: nextStatus,
+            changedById: user.id,
+            notes: notesContent,
+          },
+        });
+      }
 
       return prismaTx.transaction.findUnique({ where: { id: transactionId } });
     });

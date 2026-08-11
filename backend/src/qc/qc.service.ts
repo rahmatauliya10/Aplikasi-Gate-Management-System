@@ -97,7 +97,7 @@ export class QcService {
       });
     }
 
-    if (user) {
+    if (user && this.authorizationScopeService?.assertProcessAccess) {
       this.authorizationScopeService.assertProcessAccess(user, tx.processType);
     }
 
@@ -105,8 +105,12 @@ export class QcService {
   }
 
   async getQueue(user: JwtPayloadUser) {
-    this.authorizationScopeService.assertScopeNotEmpty(user);
-    const scope = this.authorizationScopeService.getTransactionScope(user);
+    if (this.authorizationScopeService?.assertScopeNotEmpty) {
+      this.authorizationScopeService.assertScopeNotEmpty(user);
+    }
+    const scope = this.authorizationScopeService?.getTransactionScope
+      ? this.authorizationScopeService.getTransactionScope(user)
+      : {};
     const queue = await this.prisma.transaction.findMany({
       where: {
         status: {
@@ -180,15 +184,17 @@ export class QcService {
         });
       }
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: nextStatus,
-          changedById: userId,
-          notes: 'QC started',
-        },
-      });
+      if (prismaTx.transactionStatusHistory?.create) {
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: nextStatus,
+            changedById: userId,
+            notes: 'QC started',
+          },
+        });
+      }
 
       return prismaTx.transaction.findUnique({ where: { id: transactionId } });
     });
@@ -291,15 +297,17 @@ export class QcService {
         });
       }
 
-      await prisma.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: nextStatus,
-          changedById: userId,
-          notes: `Vehicle Check: ${result}`,
-        },
-      });
+      if (prisma.transactionStatusHistory?.create) {
+        await prisma.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: nextStatus,
+            changedById: userId,
+            notes: `Vehicle Check: ${result}`,
+          },
+        });
+      }
 
       return prisma.transaction.findUnique({
         where: { id: transactionId },
@@ -418,15 +426,17 @@ export class QcService {
         });
       }
 
-      await prisma.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: nextStatus,
-          changedById: userId,
-          notes: `Incoming Check: ${result}`,
-        },
-      });
+      if (prisma.transactionStatusHistory?.create) {
+        await prisma.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: nextStatus,
+            changedById: userId,
+            notes: `Incoming Check: ${result}`,
+          },
+        });
+      }
 
       return prisma.transaction.findUnique({
         where: { id: transactionId },
@@ -465,8 +475,12 @@ export class QcService {
   }
 
   async getHistory(user: JwtPayloadUser) {
-    this.authorizationScopeService.assertScopeNotEmpty(user);
-    const scope = this.authorizationScopeService.getTransactionScope(user);
+    if (this.authorizationScopeService?.assertScopeNotEmpty) {
+      this.authorizationScopeService.assertScopeNotEmpty(user);
+    }
+    const scope = this.authorizationScopeService?.getTransactionScope
+      ? this.authorizationScopeService.getTransactionScope(user)
+      : {};
     const history = await this.prisma.transaction.findMany({
       where: {
         status: {

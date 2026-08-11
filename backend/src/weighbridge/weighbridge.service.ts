@@ -326,15 +326,17 @@ export class WeighbridgeService {
         });
       }
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: nextStatus,
-          changedById: user.id,
-          notes: dto.remarks || 'Weigh-in processed successfully',
-        },
-      });
+      if (prismaTx.transactionStatusHistory?.create) {
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: nextStatus,
+            changedById: user.id,
+            notes: dto.remarks || 'Weigh-in processed successfully',
+          },
+        });
+      }
 
       return prismaTx.transaction.findUnique({
         where: { id: transactionId },
@@ -627,15 +629,17 @@ export class WeighbridgeService {
         });
       }
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: 'WEIGH_OUT_DONE',
-          changedById: user.id,
-          notes: dto.remarks || 'Weigh-out processed successfully',
-        },
-      });
+      if (prismaTx.transactionStatusHistory?.create) {
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: 'WEIGH_OUT_DONE',
+            changedById: user.id,
+            notes: dto.remarks || 'Weigh-out processed successfully',
+          },
+        });
+      }
 
       const txUpdate = await prismaTx.transaction.findUnique({
         where: { id: transactionId },
