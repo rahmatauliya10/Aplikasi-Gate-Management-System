@@ -423,6 +423,7 @@ const handleWeightSave = async (weight) => {
       toast.success(`Processed Weight ${weight}kg saved — proceed to Incoming Material Check.`)
       selectedTruck.value = null
     } catch(e) {} finally { isProcessing.value = false; }
+  }
 }
 </script>
 
