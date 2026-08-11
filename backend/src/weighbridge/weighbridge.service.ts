@@ -298,7 +298,8 @@ export class WeighbridgeService {
           revision: { increment: 1 },
           ...(grossWeight !== null && { grossWeight }),
           ...(tareWeight !== null && { tareWeight }),
-          ...(nextStatus === 'QC_VEHICLE_PENDING' && !tx.qcStartAt && { qcStartAt: new Date() }),
+          ...(nextStatus === 'QC_VEHICLE_PENDING' &&
+            !tx.qcStartAt && { qcStartAt: new Date() }),
         },
       });
 

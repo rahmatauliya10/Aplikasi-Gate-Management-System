@@ -37,7 +37,7 @@ export class AuthorizationScopeService {
     }
 
     if (user.role === 'WAREHOUSE' || user.role === 'QC') {
-      const allowed = (user.warehouseAccess || []) as string[];
+      const allowed = user.warehouseAccess || [];
       if (allowed.length === 0) {
         throw new ForbiddenException({
           success: false,

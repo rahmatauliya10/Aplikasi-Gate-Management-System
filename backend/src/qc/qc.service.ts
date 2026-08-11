@@ -139,8 +139,12 @@ export class QcService {
         data: {
           status: nextStatus,
           revision: { increment: 1 },
-          ...(tx.status === 'QC_VEHICLE_PENDING' && { qcStartAt: tx.qcStartAt || now }),
-          ...(tx.status === 'INCOMING_CHECK_PENDING' && { incomingQcStartAt: tx.incomingQcStartAt || now }),
+          ...(tx.status === 'QC_VEHICLE_PENDING' && {
+            qcStartAt: tx.qcStartAt || now,
+          }),
+          ...(tx.status === 'INCOMING_CHECK_PENDING' && {
+            incomingQcStartAt: tx.incomingQcStartAt || now,
+          }),
         },
       });
 

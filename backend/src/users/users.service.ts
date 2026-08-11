@@ -53,8 +53,9 @@ export class UsersService {
       if (!dto.warehouseAccess || dto.warehouseAccess.length === 0) {
         throw new BadRequestException({
           success: false,
-          message:
-            `${dto.role === 'WAREHOUSE' ? 'Warehouse' : 'QC'} role requires at least 1 process scope selection`,
+          message: `${
+            dto.role === 'WAREHOUSE' ? 'Warehouse' : 'QC'
+          } role requires at least 1 process scope selection`,
           errors: [],
         });
       }
@@ -256,16 +257,18 @@ export class UsersService {
         if (dto.warehouseAccess.length === 0) {
           throw new BadRequestException({
             success: false,
-            message:
-              `${targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'} role requires at least 1 process scope selection`,
+            message: `${
+              targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'
+            } role requires at least 1 process scope selection`,
             errors: [],
           });
         }
       } else if (user.warehouseAccess.length === 0) {
         throw new BadRequestException({
           success: false,
-          message:
-            `${targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'} role requires at least 1 process scope selection`,
+          message: `${
+            targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'
+          } role requires at least 1 process scope selection`,
           errors: [],
         });
       }

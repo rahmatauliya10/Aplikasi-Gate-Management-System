@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { QcService } from '../qc/qc.service';
 import { WarehouseService } from '../warehouse/warehouse.service';
@@ -69,7 +73,9 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
     usersService = module.get<UsersService>(UsersService);
     qcService = module.get<QcService>(QcService);
     warehouseService = module.get<WarehouseService>(WarehouseService);
-    scopeService = module.get<AuthorizationScopeService>(AuthorizationScopeService);
+    scopeService = module.get<AuthorizationScopeService>(
+      AuthorizationScopeService,
+    );
   });
 
   describe('UsersService - QC Role Process Scope & Revocation', () => {
@@ -107,10 +113,7 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
           data: expect.objectContaining({
             role: 'QC',
             warehouseAccess: {
-              create: [
-                { processType: 'GBB' },
-                { processType: 'GBJ' },
-              ],
+              create: [{ processType: 'GBB' }, { processType: 'GBJ' }],
             },
           }),
         }),
@@ -159,10 +162,14 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
       });
 
       expect(result.success).toBe(true);
-      expect(mockPrismaService.userWarehouseAccess.deleteMany).toHaveBeenCalledWith({
+      expect(
+        mockPrismaService.userWarehouseAccess.deleteMany,
+      ).toHaveBeenCalledWith({
         where: { userId: 'user-qc-1' },
       });
-      expect(mockPrismaService.userWarehouseAccess.createMany).toHaveBeenCalledWith({
+      expect(
+        mockPrismaService.userWarehouseAccess.createMany,
+      ).toHaveBeenCalledWith({
         data: [
           { userId: 'user-qc-1', processType: 'GBB' },
           { userId: 'user-qc-1', processType: 'GSP' },
@@ -250,14 +257,19 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
       };
 
       // Transaction tx-gbb exists but has processType GBB
-      mockPrismaService.transaction.findFirst.mockResolvedValue({
+      mockPrismaService.transaction.findUnique.mockResolvedValue({
         id: 'tx-gbb',
         processType: 'GBB',
         status: 'QC_VEHICLE_PENDING',
       });
 
       await expect(
-        qcService.startQc('tx-gbb', { processType: 'GBB' } as any, 'qc-gbj', userWithGbjOnly),
+        qcService.startQc(
+          'tx-gbb',
+          { processType: 'GBB' } as any,
+          'qc-gbj',
+          userWithGbjOnly,
+        ),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -268,7 +280,7 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
         warehouseAccess: ['GBB'],
       };
 
-      mockPrismaService.transaction.findFirst.mockResolvedValue(null);
+      mockPrismaService.transaction.findUnique.mockResolvedValue(null);
 
       await expect(
         qcService.startQc('non-existent-tx', {} as any, 'qc-gbb', userWithGbb),
@@ -285,14 +297,18 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
         warehouseAccess: ['GBB'],
       };
 
-      mockPrismaService.transaction.findFirst.mockResolvedValue({
+      mockPrismaService.transaction.findUnique.mockResolvedValue({
         id: 'tx-gbb',
         processType: 'GBB',
         status: 'WAREHOUSE_IN_PROGRESS',
       });
 
       await expect(
-        qcService.completeQcAnalysis('tx-gbb', warehouseUser, 'Self QC signoff'),
+        qcService.completeQcAnalysis(
+          'tx-gbb',
+          warehouseUser,
+          'Self QC signoff',
+        ),
       ).rejects.toThrow(ForbiddenException);
 
       expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
@@ -313,14 +329,15 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
         warehouseAccess: ['GBB'],
       };
 
-      mockPrismaService.transaction.findFirst.mockResolvedValue({
+      mockPrismaService.transaction.findUnique.mockResolvedValue({
         id: 'tx-gbb',
         processType: 'GBB',
         status: 'WAREHOUSE_IN_PROGRESS',
         plateNumber: 'B 1234 ABC',
       });
 
-      mockPrismaService.transaction.update.mockResolvedValue({
+      mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 1 });
+      mockPrismaService.transaction.findUnique.mockResolvedValue({
         id: 'tx-gbb',
         processType: 'GBB',
         status: 'WAREHOUSE_IN_PROGRESS',
@@ -329,7 +346,11 @@ describe('PR-01: QC Scope RBAC and GBB Separation of Duties (SoD)', () => {
         warehouseProcesses: [{ remarks: 'Checked by QC' }],
       });
 
-      const result = await qcService.completeQcAnalysis('tx-gbb', qcUser, 'Lab PASS');
+      const result = await qcService.completeQcAnalysis(
+        'tx-gbb',
+        qcUser,
+        'Lab PASS',
+      );
       expect(result.success).toBe(true);
       expect(result.data.qcAnalysisCompleted).toBe(true);
     });

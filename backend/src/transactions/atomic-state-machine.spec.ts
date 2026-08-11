@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { GateService } from '../gate/gate.service';
 import { WeighbridgeService } from '../weighbridge/weighbridge.service';
 import { QcService } from '../qc/qc.service';
@@ -8,13 +11,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ConfigService } from '@nestjs/config';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
-import { assertValidStatusTransition, isValidStatusTransition } from '../common/state-machine/workflow-state-machine';
+import {
+  assertValidStatusTransition,
+  isValidStatusTransition,
+} from '../common/state-machine/workflow-state-machine';
 
 describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
   let gateService: GateService;
-  let weighbridgeService: WeighbridgeService;
-  let qcService: QcService;
-  let warehouseService: WarehouseService;
 
   const mockPrismaService = {
     transaction: {
@@ -55,7 +58,11 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
       findFirst: jest.fn(),
     },
     userWarehouseAccess: {
-      findMany: jest.fn().mockResolvedValue([{ processType: 'GBB' }, { processType: 'GBJ' }, { processType: 'GSP' }]),
+      findMany: jest.fn().mockResolvedValue([
+        { processType: 'GBB' },
+        { processType: 'GBJ' },
+        { processType: 'GSP' },
+      ]),
     },
     $transaction: jest.fn((cb) => cb(mockPrismaService)),
     $executeRaw: jest.fn().mockResolvedValue(1),
@@ -86,30 +93,55 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
     }).compile();
 
     gateService = module.get<GateService>(GateService);
-    weighbridgeService = module.get<WeighbridgeService>(WeighbridgeService);
-    qcService = module.get<QcService>(QcService);
-    warehouseService = module.get<WarehouseService>(WarehouseService);
   });
 
   describe('Centralized State Transition Machine Unit Tests', () => {
     it('should allow valid workflow status transitions', () => {
-      expect(isValidStatusTransition('REGISTERED', 'WEIGH_IN_DONE')).toBe(true);
-      expect(isValidStatusTransition('WEIGH_IN_DONE', 'QC_VEHICLE_PENDING')).toBe(true);
-      expect(isValidStatusTransition('QC_VEHICLE_PENDING', 'QC_VEHICLE_IN_PROGRESS')).toBe(true);
-      expect(isValidStatusTransition('QC_VEHICLE_IN_PROGRESS', 'QC_VEHICLE_PASSED')).toBe(true);
-      expect(isValidStatusTransition('QC_VEHICLE_PASSED', 'WAREHOUSE_IN_PROGRESS')).toBe(true);
-      expect(isValidStatusTransition('WAREHOUSE_IN_PROGRESS', 'INCOMING_CHECK_PENDING')).toBe(true);
-      expect(isValidStatusTransition('INCOMING_CHECK_PASSED', 'WEIGH_OUT_DONE')).toBe(true);
-      expect(isValidStatusTransition('WEIGH_OUT_DONE', 'COMPLETED')).toBe(true);
+      expect(isValidStatusTransition('REGISTERED', 'WEIGH_IN_DONE')).toBe(
+        true,
+      );
+      expect(
+        isValidStatusTransition('WEIGH_IN_DONE', 'QC_VEHICLE_PENDING'),
+      ).toBe(true);
+      expect(
+        isValidStatusTransition(
+          'QC_VEHICLE_PENDING',
+          'QC_VEHICLE_IN_PROGRESS',
+        ),
+      ).toBe(true);
+      expect(
+        isValidStatusTransition('QC_VEHICLE_IN_PROGRESS', 'QC_VEHICLE_PASSED'),
+      ).toBe(true);
+      expect(
+        isValidStatusTransition('QC_VEHICLE_PASSED', 'WAREHOUSE_IN_PROGRESS'),
+      ).toBe(true);
+      expect(
+        isValidStatusTransition(
+          'WAREHOUSE_IN_PROGRESS',
+          'INCOMING_CHECK_PENDING',
+        ),
+      ).toBe(true);
+      expect(
+        isValidStatusTransition('INCOMING_CHECK_PASSED', 'WEIGH_OUT_DONE'),
+      ).toBe(true);
+      expect(isValidStatusTransition('WEIGH_OUT_DONE', 'COMPLETED')).toBe(
+        true,
+      );
     });
 
     it('should reject invalid status transitions (e.g. REGISTERED directly to COMPLETED)', () => {
-      expect(() => assertValidStatusTransition('REGISTERED', 'COMPLETED')).toThrow(BadRequestException);
+      expect(() =>
+        assertValidStatusTransition('REGISTERED', 'COMPLETED'),
+      ).toThrow(BadRequestException);
     });
 
     it('should reject transitions out of terminal states (CANCELLED, COMPLETED)', () => {
-      expect(() => assertValidStatusTransition('CANCELLED', 'REGISTERED')).toThrow(BadRequestException);
-      expect(() => assertValidStatusTransition('COMPLETED', 'WEIGH_OUT_DONE')).toThrow(BadRequestException);
+      expect(() =>
+        assertValidStatusTransition('CANCELLED', 'REGISTERED'),
+      ).toThrow(BadRequestException);
+      expect(() =>
+        assertValidStatusTransition('COMPLETED', 'WEIGH_OUT_DONE'),
+      ).toThrow(BadRequestException);
     });
   });
 
@@ -126,9 +158,15 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
       // CAS updateMany returns count: 0 simulating that another worker modified revision/status concurrently
       mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 0 });
 
-      const user: any = { id: 'admin-1', email: 'admin@gms.local', role: 'ADMIN' };
+      const user: any = {
+        id: 'admin-1',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      };
 
-      await expect(gateService.checkOut('tx-1', user)).rejects.toThrow(ConflictException);
+      await expect(gateService.checkOut('tx-1', user)).rejects.toThrow(
+        ConflictException,
+      );
     });
 
     it('should return 409 Conflict when concurrent cancel attempt races with state change', async () => {
@@ -142,11 +180,15 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
 
       mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 0 });
 
-      const user: any = { id: 'admin-1', email: 'admin@gms.local', role: 'ADMIN' };
+      const user: any = {
+        id: 'admin-1',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      };
 
-      await expect(gateService.cancel('tx-1', 'Cancelled by operator', user)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        gateService.cancel('tx-1', 'Cancelled by operator', user),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('should prevent CANCELLED transaction from being checked out or completed', async () => {
@@ -158,9 +200,15 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
         revision: 3,
       });
 
-      const user: any = { id: 'admin-1', email: 'admin@gms.local', role: 'ADMIN' };
+      const user: any = {
+        id: 'admin-1',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      };
 
-      await expect(gateService.checkOut('tx-cancelled', user)).rejects.toThrow(BadRequestException);
+      await expect(gateService.checkOut('tx-cancelled', user)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should execute root update, status history, and audit log in a single atomic database transaction', async () => {
@@ -180,7 +228,11 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
         revision: 6,
       });
 
-      const user: any = { id: 'admin-1', email: 'admin@gms.local', role: 'ADMIN' };
+      const user: any = {
+        id: 'admin-1',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      };
 
       const result = await gateService.checkOut('tx-1', user);
       expect(result.success).toBe(true);

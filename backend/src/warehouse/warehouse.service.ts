@@ -51,7 +51,8 @@ export class WarehouseService {
     if (user.role === 'WAREHOUSE' && allowedProcessTypes.length === 0) {
       throw new ForbiddenException({
         success: false,
-        message: 'Akses ditolak: Akun Warehouse Anda belum memiliki scope proses/gudang yang valid.',
+        message:
+          'Akses ditolak: Akun Warehouse Anda belum memiliki scope proses/gudang yang valid.',
         errors: [],
       });
     }

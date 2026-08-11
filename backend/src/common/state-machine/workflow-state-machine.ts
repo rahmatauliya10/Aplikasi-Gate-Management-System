@@ -1,9 +1,18 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { TransactionStatus } from '@prisma/client';
 
-export const VALID_STATUS_TRANSITIONS: Record<TransactionStatus, TransactionStatus[]> = {
-  REGISTERED: [TransactionStatus.WEIGH_IN_DONE, TransactionStatus.CANCELLED],
-  WEIGH_IN_DONE: [TransactionStatus.QC_VEHICLE_PENDING, TransactionStatus.CANCELLED],
+export const VALID_STATUS_TRANSITIONS: Record<
+  TransactionStatus,
+  TransactionStatus[]
+> = {
+  REGISTERED: [
+    TransactionStatus.WEIGH_IN_DONE,
+    TransactionStatus.CANCELLED,
+  ],
+  WEIGH_IN_DONE: [
+    TransactionStatus.QC_VEHICLE_PENDING,
+    TransactionStatus.CANCELLED,
+  ],
   QC_VEHICLE_PENDING: [
     TransactionStatus.QC_VEHICLE_IN_PROGRESS,
     TransactionStatus.QC_VEHICLE_PASSED,
