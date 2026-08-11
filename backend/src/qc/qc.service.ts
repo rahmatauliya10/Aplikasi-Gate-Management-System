@@ -206,7 +206,7 @@ export class QcService {
       throw new BadRequestException(
         'Transaction must be in QC_VEHICLE_PENDING or QC_VEHICLE_IN_PROGRESS state.',
       );
-    if (tx.qcVehicleChecks.length > 0)
+    if ((tx as any).qcVehicleChecks?.length > 0)
       throw new BadRequestException(
         'Result has already been submitted for this transaction',
       );
@@ -321,7 +321,7 @@ export class QcService {
       throw new BadRequestException(
         'Transaction must be in INCOMING_CHECK_PENDING or INCOMING_CHECK_IN_PROGRESS state.',
       );
-    if (tx.incomingMaterialChecks.length > 0)
+    if ((tx as any).incomingMaterialChecks?.length > 0)
       throw new BadRequestException(
         'Result has already been submitted for this transaction',
       );
@@ -602,6 +602,14 @@ export class QcService {
       })
       .catch(() => {});
 
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Updated transaction not found',
+        errors: [],
+      });
+    }
+
     return {
       success: true,
       message: 'QC analysis marked as completed',
@@ -609,7 +617,7 @@ export class QcService {
         ...updated,
         remarks:
           remarks ||
-          updated.warehouseProcesses?.[0]?.remarks ||
+          (updated as any).warehouseProcesses?.[0]?.remarks ||
           updated.remarks ||
           null,
       },

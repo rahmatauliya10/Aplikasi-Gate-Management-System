@@ -336,6 +336,14 @@ export class WeighbridgeService {
       });
     });
 
+    if (!updated) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Failed to retrieve updated transaction',
+        errors: [],
+      });
+    }
+
     this.logger.log(
       `Weigh-in successful: ${updated.transactionNumber}, weight: ${dto.weight}`,
     );
@@ -677,6 +685,14 @@ export class WeighbridgeService {
 
       return txUpdate;
     });
+
+    if (!updated) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Failed to retrieve updated transaction',
+        errors: [],
+      });
+    }
 
     this.logger.log(
       `Weigh-out successful: ${updated.transactionNumber}, weight: ${dto.weight}, netWeight: ${netWeight}`,
