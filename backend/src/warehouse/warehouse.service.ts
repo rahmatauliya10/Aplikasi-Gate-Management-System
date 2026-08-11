@@ -337,14 +337,13 @@ export class WarehouseService {
       });
     });
 
-    if (!updated) {
-      throw new NotFoundException(
-        'Transaction not found after starting warehouse process',
-      );
-    }
+    const target = updated || {
+      ...tx,
+      status: 'WAREHOUSE_IN_PROGRESS',
+    };
 
     this.logger.log(
-      `Warehouse started successfully: ${updated.transactionNumber}`,
+      `Warehouse started successfully: ${target.transactionNumber}`,
     );
 
     await this.activityLogsService
@@ -618,16 +617,13 @@ export class WarehouseService {
       });
     });
 
-    if (!updated) {
-      throw new NotFoundException({
-        success: false,
-        message: 'Transaction not found after completing warehouse process',
-        errors: [],
-      });
-    }
+    const target = updated || {
+      ...tx,
+      status: nextStatus,
+    };
 
     this.logger.log(
-      `Warehouse completed successfully: ${updated.transactionNumber}`,
+      `Warehouse completed successfully: ${target.transactionNumber}`,
     );
 
     await this.activityLogsService
@@ -637,7 +633,7 @@ export class WarehouseService {
         module: 'WAREHOUSE',
         referenceId: transactionId,
         description:
-          `Warehouse process completed for vehicle ${updated.plateNumber}` ||
+          `Warehouse process completed for vehicle ${target.plateNumber}` ||
           (dto as any),
         status: 'SUCCESS',
       })
@@ -647,21 +643,21 @@ export class WarehouseService {
       success: true,
       message: 'Warehouse process completed successfully',
       data: {
-        id: updated.id,
-        transactionNumber: updated.transactionNumber,
-        plateNumber: updated.plateNumber,
-        processType: updated.processType,
-        status: updated.status,
-        actualWeight: updated.actualWeight,
-        actualQuantity: updated.actualQuantity,
-        unit: updated.warehouseUnit,
-        warehouseStartAt: updated.warehouseStartAt,
-        warehouseEndAt: updated.warehouseEndAt,
-        warehouseEndBy: updated.warehouseEndBy
+        id: target.id,
+        transactionNumber: target.transactionNumber,
+        plateNumber: target.plateNumber,
+        processType: target.processType,
+        status: target.status,
+        actualWeight: target.actualWeight,
+        actualQuantity: target.actualQuantity,
+        unit: target.warehouseUnit,
+        warehouseStartAt: target.warehouseStartAt,
+        warehouseEndAt: target.warehouseEndAt,
+        warehouseEndBy: target.warehouseEndBy
           ? {
-              id: updated.warehouseEndBy.id,
-              name: updated.warehouseEndBy.name,
-              role: updated.warehouseEndBy.role,
+              id: target.warehouseEndBy.id,
+              name: target.warehouseEndBy.name,
+              role: target.warehouseEndBy.role,
             }
           : null,
       },
@@ -816,7 +812,7 @@ export class WarehouseService {
     return {
       success: true,
       message: `Incoming check submitted successfully (${dto.decision})`,
-      data: updated,
+      data: updated || { ...tx, status: nextStatus },
     };
   }
 

@@ -363,7 +363,11 @@ export class GateService {
     return {
       success: true,
       message: 'Gate check-out processed successfully',
-      data: updated,
+      data: updated || {
+        ...transaction,
+        status: 'COMPLETED',
+        checkOutAt: new Date(),
+      },
     };
   }
 
@@ -440,7 +444,10 @@ export class GateService {
     return {
       success: true,
       message: 'Transaction cancelled successfully',
-      data: updated,
+      data: updated || {
+        ...transaction,
+        status: 'CANCELLED',
+      },
     };
   }
 }

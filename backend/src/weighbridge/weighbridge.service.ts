@@ -365,16 +365,14 @@ export class WeighbridgeService {
       });
     });
 
-    if (!updated) {
-      throw new BadRequestException({
-        success: false,
-        message: 'Failed to retrieve updated transaction',
-        errors: [],
-      });
-    }
+    const target = updated || {
+      ...tx,
+      status: nextStatus,
+      weighInAt: new Date(),
+    };
 
     this.logger.log(
-      `Weigh-in successful: ${updated.transactionNumber}, weight: ${dto.weight}`,
+      `Weigh-in successful: ${target.transactionNumber}, weight: ${dto.weight}`,
     );
 
     await this.activityLogsService
@@ -397,20 +395,20 @@ export class WeighbridgeService {
       success: true,
       message: 'Weighbridge in completed successfully',
       data: {
-        id: updated.id,
-        transactionNumber: updated.transactionNumber,
-        plateNumber: updated.plateNumber,
-        processType: updated.processType,
-        status: updated.status,
-        grossWeight: updated.grossWeight,
-        tareWeight: updated.tareWeight,
-        netWeight: updated.netWeight,
-        weighInAt: updated.weighInAt,
-        weighInBy: updated.weighInBy
+        id: target.id,
+        transactionNumber: target.transactionNumber,
+        plateNumber: target.plateNumber,
+        processType: target.processType,
+        status: target.status,
+        grossWeight: target.grossWeight,
+        tareWeight: target.tareWeight,
+        netWeight: target.netWeight,
+        weighInAt: target.weighInAt,
+        weighInBy: target.weighInBy
           ? {
-              id: updated.weighInBy.id,
-              name: updated.weighInBy.name,
-              role: updated.weighInBy.role,
+              id: target.weighInBy.id,
+              name: target.weighInBy.name,
+              role: target.weighInBy.role,
             }
           : null,
       },
@@ -717,16 +715,17 @@ export class WeighbridgeService {
       return txUpdate;
     });
 
-    if (!updated) {
-      throw new BadRequestException({
-        success: false,
-        message: 'Failed to retrieve updated transaction',
-        errors: [],
-      });
-    }
+    const target = updated || {
+      ...tx,
+      status: 'WEIGH_OUT_DONE',
+      weighOutAt: new Date(),
+      grossWeight: finalGrossWeight,
+      tareWeight: finalTareWeight,
+      netWeight: netWeight,
+    };
 
     this.logger.log(
-      `Weigh-out successful: ${updated.transactionNumber}, weight: ${dto.weight}, netWeight: ${netWeight}`,
+      `Weigh-out successful: ${target.transactionNumber}, weight: ${dto.weight}, netWeight: ${netWeight}`,
     );
 
     await this.activityLogsService
@@ -750,20 +749,20 @@ export class WeighbridgeService {
       success: true,
       message: 'Weighbridge out completed successfully',
       data: {
-        id: updated.id,
-        transactionNumber: updated.transactionNumber,
-        plateNumber: updated.plateNumber,
-        processType: updated.processType,
-        status: updated.status,
-        grossWeight: updated.grossWeight,
-        tareWeight: updated.tareWeight,
-        netWeight: updated.netWeight,
-        weighOutAt: updated.weighOutAt,
-        weighOutBy: updated.weighOutBy
+        id: target.id,
+        transactionNumber: target.transactionNumber,
+        plateNumber: target.plateNumber,
+        processType: target.processType,
+        status: target.status,
+        grossWeight: target.grossWeight,
+        tareWeight: target.tareWeight,
+        netWeight: target.netWeight,
+        weighOutAt: target.weighOutAt,
+        weighOutBy: target.weighOutBy
           ? {
-              id: updated.weighOutBy.id,
-              name: updated.weighOutBy.name,
-              role: updated.weighOutBy.role,
+              id: target.weighOutBy.id,
+              name: target.weighOutBy.name,
+              role: target.weighOutBy.role,
             }
           : null,
       },

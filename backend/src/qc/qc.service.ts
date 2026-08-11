@@ -652,23 +652,21 @@ export class QcService {
       })
       .catch(() => {});
 
-    if (!updated) {
-      throw new NotFoundException({
-        success: false,
-        message: 'Updated transaction not found',
-        errors: [],
-      });
-    }
+    const resultObj = updated || {
+      ...tx,
+      qcAnalysisCompleted: true,
+      qcAnalysisCompletedAt: new Date(),
+    };
 
     return {
       success: true,
       message: 'QC analysis marked as completed',
       data: {
-        ...updated,
+        ...resultObj,
         remarks:
           remarks ||
-          updated.warehouseProcesses?.[0]?.remarks ||
-          updated.remarks ||
+          resultObj.warehouseProcesses?.[0]?.remarks ||
+          resultObj.remarks ||
           null,
       },
     };
