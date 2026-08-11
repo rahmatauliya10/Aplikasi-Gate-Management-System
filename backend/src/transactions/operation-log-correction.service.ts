@@ -742,6 +742,15 @@ export class OperationLogCorrectionService {
       });
 
       // Step 8 & 10: Auto-recalculate Net Weight if Gross/Tare changed
+      const proposedGross =
+        txUpdateData.grossWeight !== undefined
+          ? Number(txUpdateData.grossWeight)
+          : tx.grossWeight;
+      const proposedTare =
+        txUpdateData.tareWeight !== undefined
+          ? Number(txUpdateData.tareWeight)
+          : tx.tareWeight;
+
       if (proposedGross !== null && proposedTare !== null) {
         txUpdateData.netWeight = proposedGross - proposedTare;
       }
