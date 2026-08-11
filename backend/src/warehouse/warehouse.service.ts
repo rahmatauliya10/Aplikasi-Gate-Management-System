@@ -24,33 +24,6 @@ export class WarehouseService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private async safeFindUnique(txClient: any, args: any) {
-    if (txClient.transaction?.findUnique) {
-      return txClient.transaction.findUnique(args);
-    }
-    if (txClient.transaction?.findFirst) {
-      return txClient.transaction.findFirst({
-        where: { id: args.where.id },
-        ...(args.include && { include: args.include }),
-      });
-    }
-    return null;
-  }
-
-  private async safeUpdateMany(txClient: any, args: any) {
-    if (txClient.transaction.updateMany) {
-      return txClient.transaction.updateMany(args);
-    }
-    if (txClient.transaction.update) {
-      await txClient.transaction.update({
-        where: { id: args.where.id },
-        data: args.data,
-      });
-      return { count: 1 };
-    }
-    return { count: 1 };
-  }
-
   private async getWarehouseAccess(
     user: JwtPayloadUser,
   ): Promise<ProcessType[]> {
@@ -282,7 +255,7 @@ export class WarehouseService {
       });
       const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
-      const claimed = await this.safeUpdateMany(prismaTx, {
+      const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: 'QC_VEHICLE_PASSED',
@@ -317,19 +290,17 @@ export class WarehouseService {
         },
       });
 
-      if (prismaTx.transactionStatusHistory?.create) {
-        await prismaTx.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: 'WAREHOUSE_IN_PROGRESS',
-            changedById: user.id,
-            notes: dto.remarks || 'Warehouse process started',
-          },
-        });
-      }
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: 'WAREHOUSE_IN_PROGRESS',
+          changedById: user.id,
+          notes: dto.remarks || 'Warehouse process started',
+        },
+      });
 
-      return this.safeFindUnique(prismaTx, {
+      return prismaTx.transaction.findUnique({
         where: { id: transactionId },
         include: {
           warehouseStartBy: { select: { id: true, name: true, role: true } },
@@ -337,13 +308,16 @@ export class WarehouseService {
       });
     });
 
-    const target = updated || {
-      ...tx,
-      status: 'WAREHOUSE_IN_PROGRESS',
-    };
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Transaction not found after starting warehouse process',
+        errors: [],
+      });
+    }
 
     this.logger.log(
-      `Warehouse started successfully: ${target.transactionNumber}`,
+      `Warehouse started successfully: ${updated.transactionNumber}`,
     );
 
     await this.activityLogsService
@@ -509,7 +483,7 @@ export class WarehouseService {
           : `Checklist: ${checklistStr}`;
       }
 
-      const claimed = await this.safeUpdateMany(prismaTx, {
+      const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: 'WAREHOUSE_IN_PROGRESS',
@@ -597,19 +571,17 @@ export class WarehouseService {
         });
       }
 
-      if (prismaTx.transactionStatusHistory?.create) {
-        await prismaTx.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: nextStatus,
-            changedById: user.id,
-            notes: finalRemarks || 'Warehouse process completed',
-          },
-        });
-      }
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: finalRemarks || 'Warehouse process completed',
+        },
+      });
 
-      return this.safeFindUnique(prismaTx, {
+      return prismaTx.transaction.findUnique({
         where: { id: transactionId },
         include: {
           warehouseEndBy: { select: { id: true, name: true, role: true } },
@@ -617,13 +589,16 @@ export class WarehouseService {
       });
     });
 
-    const target = updated || {
-      ...tx,
-      status: nextStatus,
-    };
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Transaction not found after completing warehouse process',
+        errors: [],
+      });
+    }
 
     this.logger.log(
-      `Warehouse completed successfully: ${target.transactionNumber}`,
+      `Warehouse completed successfully: ${updated.transactionNumber}`,
     );
 
     await this.activityLogsService
@@ -633,7 +608,7 @@ export class WarehouseService {
         module: 'WAREHOUSE',
         referenceId: transactionId,
         description:
-          `Warehouse process completed for vehicle ${target.plateNumber}` ||
+          `Warehouse process completed for vehicle ${updated.plateNumber}` ||
           (dto as any),
         status: 'SUCCESS',
       })
@@ -643,21 +618,21 @@ export class WarehouseService {
       success: true,
       message: 'Warehouse process completed successfully',
       data: {
-        id: target.id,
-        transactionNumber: target.transactionNumber,
-        plateNumber: target.plateNumber,
-        processType: target.processType,
-        status: target.status,
-        actualWeight: target.actualWeight,
-        actualQuantity: target.actualQuantity,
-        unit: target.warehouseUnit,
-        warehouseStartAt: target.warehouseStartAt,
-        warehouseEndAt: target.warehouseEndAt,
-        warehouseEndBy: target.warehouseEndBy
+        id: updated.id,
+        transactionNumber: updated.transactionNumber,
+        plateNumber: updated.plateNumber,
+        processType: updated.processType,
+        status: updated.status,
+        actualWeight: updated.actualWeight,
+        actualQuantity: updated.actualQuantity,
+        unit: updated.warehouseUnit,
+        warehouseStartAt: updated.warehouseStartAt,
+        warehouseEndAt: updated.warehouseEndAt,
+        warehouseEndBy: updated.warehouseEndBy
           ? {
-              id: target.warehouseEndBy.id,
-              name: target.warehouseEndBy.name,
-              role: target.warehouseEndBy.role,
+              id: updated.warehouseEndBy.id,
+              name: updated.warehouseEndBy.name,
+              role: updated.warehouseEndBy.role,
             }
           : null,
       },
@@ -769,7 +744,7 @@ export class WarehouseService {
         },
       });
 
-      const claimed = await this.safeUpdateMany(prismaTx, {
+      const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: tx.status,
@@ -794,25 +769,31 @@ export class WarehouseService {
         });
       }
 
-      if (prismaTx.transactionStatusHistory?.create) {
-        await prismaTx.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: nextStatus,
-            changedById: user.id,
-            notes: notesContent,
-          },
-        });
-      }
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: notesContent,
+        },
+      });
 
-      return this.safeFindUnique(prismaTx, { where: { id: transactionId } });
+      return prismaTx.transaction.findUnique({ where: { id: transactionId } });
     });
+
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Updated transaction not found',
+        errors: [],
+      });
+    }
 
     return {
       success: true,
       message: `Incoming check submitted successfully (${dto.decision})`,
-      data: updated || { ...tx, status: nextStatus },
+      data: updated,
     };
   }
 

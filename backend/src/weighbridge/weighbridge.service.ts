@@ -23,33 +23,6 @@ export class WeighbridgeService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private async safeFindUnique(txClient: any, args: any) {
-    if (txClient.transaction?.findUnique) {
-      return txClient.transaction.findUnique(args);
-    }
-    if (txClient.transaction?.findFirst) {
-      return txClient.transaction.findFirst({
-        where: { id: args.where.id },
-        ...(args.include && { include: args.include }),
-      });
-    }
-    return null;
-  }
-
-  private async safeUpdateMany(txClient: any, args: any) {
-    if (txClient.transaction.updateMany) {
-      return txClient.transaction.updateMany(args);
-    }
-    if (txClient.transaction.update) {
-      await txClient.transaction.update({
-        where: { id: args.where.id },
-        data: args.data,
-      });
-      return { count: 1 };
-    }
-    return { count: 1 };
-  }
-
   async getQueue(query: WeighbridgeQueryDto, user: JwtPayloadUser) {
     const {
       page = 1,
@@ -312,7 +285,7 @@ export class WeighbridgeService {
 
       assertValidStatusTransition(tx.status, nextStatus);
 
-      const claimed = await this.safeUpdateMany(prismaTx, {
+      const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: 'REGISTERED',
@@ -339,19 +312,17 @@ export class WeighbridgeService {
         });
       }
 
-      if (prismaTx.transactionStatusHistory?.create) {
-        await prismaTx.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: nextStatus,
-            changedById: user.id,
-            notes: dto.remarks || 'Weigh-in processed successfully',
-          },
-        });
-      }
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: dto.remarks || 'Weigh-in processed successfully',
+        },
+      });
 
-      return this.safeFindUnique(prismaTx, {
+      return prismaTx.transaction.findUnique({
         where: { id: transactionId },
         include: {
           weighInBy: {
@@ -365,14 +336,16 @@ export class WeighbridgeService {
       });
     });
 
-    const target = updated || {
-      ...tx,
-      status: nextStatus,
-      weighInAt: new Date(),
-    };
+    if (!updated) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Failed to retrieve updated transaction',
+        errors: [],
+      });
+    }
 
     this.logger.log(
-      `Weigh-in successful: ${target.transactionNumber}, weight: ${dto.weight}`,
+      `Weigh-in successful: ${updated.transactionNumber}, weight: ${dto.weight}`,
     );
 
     await this.activityLogsService
@@ -395,20 +368,20 @@ export class WeighbridgeService {
       success: true,
       message: 'Weighbridge in completed successfully',
       data: {
-        id: target.id,
-        transactionNumber: target.transactionNumber,
-        plateNumber: target.plateNumber,
-        processType: target.processType,
-        status: target.status,
-        grossWeight: target.grossWeight,
-        tareWeight: target.tareWeight,
-        netWeight: target.netWeight,
-        weighInAt: target.weighInAt,
-        weighInBy: target.weighInBy
+        id: updated.id,
+        transactionNumber: updated.transactionNumber,
+        plateNumber: updated.plateNumber,
+        processType: updated.processType,
+        status: updated.status,
+        grossWeight: updated.grossWeight,
+        tareWeight: updated.tareWeight,
+        netWeight: updated.netWeight,
+        weighInAt: updated.weighInAt,
+        weighInBy: updated.weighInBy
           ? {
-              id: target.weighInBy.id,
-              name: target.weighInBy.name,
-              role: target.weighInBy.role,
+              id: updated.weighInBy.id,
+              name: updated.weighInBy.name,
+              role: updated.weighInBy.role,
             }
           : null,
       },
@@ -614,7 +587,7 @@ export class WeighbridgeService {
 
       assertValidStatusTransition(tx.status, 'WEIGH_OUT_DONE');
 
-      const claimed = await this.safeUpdateMany(prismaTx, {
+      const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: tx.status,
@@ -640,19 +613,17 @@ export class WeighbridgeService {
         });
       }
 
-      if (prismaTx.transactionStatusHistory?.create) {
-        await prismaTx.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: 'WEIGH_OUT_DONE',
-            changedById: user.id,
-            notes: dto.remarks || 'Weigh-out processed successfully',
-          },
-        });
-      }
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: 'WEIGH_OUT_DONE',
+          changedById: user.id,
+          notes: dto.remarks || 'Weigh-out processed successfully',
+        },
+      });
 
-      const txUpdate = await this.safeFindUnique(prismaTx, {
+      const txUpdate = await prismaTx.transaction.findUnique({
         where: { id: transactionId },
         include: {
           weighOutBy: {
@@ -715,17 +686,16 @@ export class WeighbridgeService {
       return txUpdate;
     });
 
-    const target = updated || {
-      ...tx,
-      status: 'WEIGH_OUT_DONE',
-      weighOutAt: new Date(),
-      grossWeight: finalGrossWeight,
-      tareWeight: finalTareWeight,
-      netWeight: netWeight,
-    };
+    if (!updated) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Failed to retrieve updated transaction',
+        errors: [],
+      });
+    }
 
     this.logger.log(
-      `Weigh-out successful: ${target.transactionNumber}, weight: ${dto.weight}, netWeight: ${netWeight}`,
+      `Weigh-out successful: ${updated.transactionNumber}, weight: ${dto.weight}, netWeight: ${netWeight}`,
     );
 
     await this.activityLogsService
@@ -749,20 +719,20 @@ export class WeighbridgeService {
       success: true,
       message: 'Weighbridge out completed successfully',
       data: {
-        id: target.id,
-        transactionNumber: target.transactionNumber,
-        plateNumber: target.plateNumber,
-        processType: target.processType,
-        status: target.status,
-        grossWeight: target.grossWeight,
-        tareWeight: target.tareWeight,
-        netWeight: target.netWeight,
-        weighOutAt: target.weighOutAt,
-        weighOutBy: target.weighOutBy
+        id: updated.id,
+        transactionNumber: updated.transactionNumber,
+        plateNumber: updated.plateNumber,
+        processType: updated.processType,
+        status: updated.status,
+        grossWeight: updated.grossWeight,
+        tareWeight: updated.tareWeight,
+        netWeight: updated.netWeight,
+        weighOutAt: updated.weighOutAt,
+        weighOutBy: updated.weighOutBy
           ? {
-              id: target.weighOutBy.id,
-              name: target.weighOutBy.name,
-              role: target.weighOutBy.role,
+              id: updated.weighOutBy.id,
+              name: updated.weighOutBy.name,
+              role: updated.weighOutBy.role,
             }
           : null,
       },

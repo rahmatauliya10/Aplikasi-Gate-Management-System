@@ -56,51 +56,15 @@ export class QcService {
     return val ? CheckResult.PASS : CheckResult.REJECT;
   }
 
-  private async safeFindUnique(txClient: any, args: any) {
-    if (txClient.transaction?.findUnique) {
-      return txClient.transaction.findUnique(args);
-    }
-    if (txClient.transaction?.findFirst) {
-      return txClient.transaction.findFirst({
-        where: { id: args.where.id },
-        ...(args.include && { include: args.include }),
-      });
-    }
-    return null;
-  }
-
-  private async safeUpdateMany(txClient: any, args: any) {
-    if (txClient.transaction.updateMany) {
-      return txClient.transaction.updateMany(args);
-    }
-    if (txClient.transaction.update) {
-      await txClient.transaction.update({
-        where: { id: args.where.id },
-        data: args.data,
-      });
-      return { count: 1 };
-    }
-    return { count: 1 };
-  }
-
   private async findTransactionWithAccess(
     transactionId: string,
     user?: JwtPayloadUser,
     include?: any,
   ) {
-    let tx = this.prisma.transaction.findUnique
-      ? await this.prisma.transaction.findUnique({
-          where: { id: transactionId },
-          ...(include && { include }),
-        })
-      : null;
-
-    if (!tx && this.prisma.transaction.findFirst) {
-      tx = await this.prisma.transaction.findFirst({
-        where: { id: transactionId },
-        ...(include && { include }),
-      });
-    }
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      ...(include && { include }),
+    });
 
     if (!tx) {
       throw new NotFoundException({
@@ -110,7 +74,7 @@ export class QcService {
       });
     }
 
-    if (user && this.authorizationScopeService?.assertProcessAccess) {
+    if (user) {
       this.authorizationScopeService.assertProcessAccess(user, tx.processType);
     }
 
@@ -118,12 +82,8 @@ export class QcService {
   }
 
   async getQueue(user: JwtPayloadUser) {
-    if (this.authorizationScopeService?.assertScopeNotEmpty) {
-      this.authorizationScopeService.assertScopeNotEmpty(user);
-    }
-    const scope = this.authorizationScopeService?.getTransactionScope
-      ? this.authorizationScopeService.getTransactionScope(user)
-      : {};
+    this.authorizationScopeService.assertScopeNotEmpty(user);
+    const scope = this.authorizationScopeService.getTransactionScope(user);
     const queue = await this.prisma.transaction.findMany({
       where: {
         status: {
@@ -170,7 +130,7 @@ export class QcService {
     assertValidStatusTransition(tx.status, nextStatus);
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const claimed = await this.safeUpdateMany(prismaTx, {
+      const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: tx.status,
@@ -197,19 +157,17 @@ export class QcService {
         });
       }
 
-      if (prismaTx.transactionStatusHistory?.create) {
-        await prismaTx.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: nextStatus,
-            changedById: userId,
-            notes: 'QC started',
-          },
-        });
-      }
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: 'QC started',
+        },
+      });
 
-      return this.safeFindUnique(prismaTx, { where: { id: transactionId } });
+      return prismaTx.transaction.findUnique({ where: { id: transactionId } });
     });
 
     await this.activityLogsService.logAction({
@@ -287,7 +245,7 @@ export class QcService {
         },
       });
 
-      const claimed = await this.safeUpdateMany(prisma, {
+      const claimed = await prisma.transaction.updateMany({
         where: {
           id: transactionId,
           status: tx.status,
@@ -310,19 +268,17 @@ export class QcService {
         });
       }
 
-      if (prisma.transactionStatusHistory?.create) {
-        await prisma.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: nextStatus,
-            changedById: userId,
-            notes: `Vehicle Check: ${result}`,
-          },
-        });
-      }
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Vehicle Check: ${result}`,
+        },
+      });
 
-      return this.safeFindUnique(prisma, {
+      return prisma.transaction.findUnique({
         where: { id: transactionId },
         include: { qcVehicleChecks: true },
       });
@@ -416,7 +372,7 @@ export class QcService {
         },
       });
 
-      const claimed = await this.safeUpdateMany(prisma, {
+      const claimed = await prisma.transaction.updateMany({
         where: {
           id: transactionId,
           status: tx.status,
@@ -439,19 +395,17 @@ export class QcService {
         });
       }
 
-      if (prisma.transactionStatusHistory?.create) {
-        await prisma.transactionStatusHistory.create({
-          data: {
-            transactionId,
-            oldStatus: tx.status,
-            newStatus: nextStatus,
-            changedById: userId,
-            notes: `Incoming Check: ${result}`,
-          },
-        });
-      }
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Incoming Check: ${result}`,
+        },
+      });
 
-      return this.safeFindUnique(prisma, {
+      return prisma.transaction.findUnique({
         where: { id: transactionId },
         include: { incomingMaterialChecks: true },
       });
@@ -488,12 +442,8 @@ export class QcService {
   }
 
   async getHistory(user: JwtPayloadUser) {
-    if (this.authorizationScopeService?.assertScopeNotEmpty) {
-      this.authorizationScopeService.assertScopeNotEmpty(user);
-    }
-    const scope = this.authorizationScopeService?.getTransactionScope
-      ? this.authorizationScopeService.getTransactionScope(user)
-      : {};
+    this.authorizationScopeService.assertScopeNotEmpty(user);
+    const scope = this.authorizationScopeService.getTransactionScope(user);
     const history = await this.prisma.transaction.findMany({
       where: {
         status: {
@@ -594,7 +544,7 @@ export class QcService {
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const claimed = await this.safeUpdateMany(prismaTx, {
+      const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
           status: 'WAREHOUSE_IN_PROGRESS',
@@ -629,7 +579,7 @@ export class QcService {
         }
       }
 
-      return this.safeFindUnique(prismaTx, {
+      return prismaTx.transaction.findUnique({
         where: { id: transactionId },
         include: {
           warehouseProcesses: {
@@ -652,21 +602,23 @@ export class QcService {
       })
       .catch(() => {});
 
-    const resultObj = updated || {
-      ...tx,
-      qcAnalysisCompleted: true,
-      qcAnalysisCompletedAt: new Date(),
-    };
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Updated transaction not found',
+        errors: [],
+      });
+    }
 
     return {
       success: true,
       message: 'QC analysis marked as completed',
       data: {
-        ...resultObj,
+        ...updated,
         remarks:
           remarks ||
-          resultObj.warehouseProcesses?.[0]?.remarks ||
-          resultObj.remarks ||
+          updated.warehouseProcesses?.[0]?.remarks ||
+          updated.remarks ||
           null,
       },
     };

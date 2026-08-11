@@ -7,10 +7,15 @@ import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 describe('Reopen Rerun Revisioning (P0-02)', () => {
   let qcService: QcService;
 
-  const mockPrismaService = {
+  const mockPrismaService: any = {
     transaction: {
       findFirst: jest.fn(),
+      findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    transactionStatusHistory: {
+      create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
     },
     qcVehicleCheck: {
       count: jest.fn(),
@@ -30,6 +35,8 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
   };
 
   const mockAuthScopeService = {
+    assertProcessAccess: jest.fn(),
+    assertScopeNotEmpty: jest.fn(),
     getTransactionScope: jest.fn().mockReturnValue({}),
   };
 
@@ -51,18 +58,21 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
 
     qcService = module.get<QcService>(QcService);
     jest.clearAllMocks();
-    mockPrismaService.$transaction.mockImplementation((cb) =>
+    mockPrismaService.$transaction.mockImplementation((cb: any) =>
       cb(mockPrismaService),
     );
   });
 
   it('should calculate revision = max(revision) + 1 when submitting vehicle check after REOPEN', async () => {
-    mockPrismaService.transaction.findFirst.mockResolvedValueOnce({
+    const mockTx = {
       id: 'tx-100',
       status: 'QC_VEHICLE_PENDING',
       processType: 'GBB',
+      revision: 1,
       qcVehicleChecks: [],
-    });
+    };
+    mockPrismaService.transaction.findUnique.mockResolvedValue(mockTx);
+    mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 1 });
 
     mockPrismaService.qcVehicleCheck.count.mockResolvedValueOnce(0);
     mockPrismaService.qcVehicleCheck.aggregate.mockResolvedValueOnce({
@@ -73,11 +83,6 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
       transactionId: 'tx-100',
       revision: 2,
       result: 'PASS',
-    });
-    mockPrismaService.transaction.update.mockResolvedValueOnce({
-      id: 'tx-100',
-      status: 'QC_VEHICLE_PASSED',
-      revision: 3,
     });
 
     const result = await qcService.submitVehicleCheck(
@@ -106,12 +111,15 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
   });
 
   it('should calculate revision = max(revision) + 1 when submitting incoming material check after REOPEN', async () => {
-    mockPrismaService.transaction.findFirst.mockResolvedValueOnce({
+    const mockTx = {
       id: 'tx-101',
       status: 'INCOMING_CHECK_PENDING',
       processType: 'GBB',
+      revision: 1,
       incomingMaterialChecks: [],
-    });
+    };
+    mockPrismaService.transaction.findUnique.mockResolvedValue(mockTx);
+    mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 1 });
 
     mockPrismaService.incomingMaterialCheck.count.mockResolvedValueOnce(0);
     mockPrismaService.incomingMaterialCheck.aggregate.mockResolvedValueOnce({
@@ -122,11 +130,6 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
       transactionId: 'tx-101',
       revision: 2,
       result: 'PASS',
-    });
-    mockPrismaService.transaction.update.mockResolvedValueOnce({
-      id: 'tx-101',
-      status: 'INCOMING_CHECK_PASSED',
-      revision: 3,
     });
 
     const result = await qcService.submitIncomingCheck(
@@ -157,12 +160,14 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
   });
 
   it('completeQcAnalysis should increment transaction revision (P1-02 OCC fix)', async () => {
-    mockPrismaService.transaction.findFirst.mockResolvedValueOnce({
+    const mockTx = {
       id: 'tx-200',
       status: 'WAREHOUSE_IN_PROGRESS',
       processType: 'GBB',
       plateNumber: 'AB1234CD',
-    });
+      revision: 10,
+    };
+    mockPrismaService.transaction.findUnique.mockResolvedValue(mockTx);
 
     const mockWarehouseProcess = {
       id: 'wp-1',
@@ -170,19 +175,11 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
       remarks: null,
     };
 
-    // Mock for the remarks update query
-    const mockFindFirst = jest.fn().mockResolvedValue(mockWarehouseProcess);
     mockPrismaService.warehouseProcess = {
-      findFirst: mockFindFirst,
+      findFirst: jest.fn().mockResolvedValue(mockWarehouseProcess),
       update: jest.fn().mockResolvedValue({}),
     };
-
-    mockPrismaService.transaction.update = jest.fn().mockResolvedValue({
-      id: 'tx-200',
-      revision: 11,
-      qcAnalysisCompleted: true,
-      warehouseProcesses: [{ remarks: 'test' }],
-    });
+    mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 1 });
 
     const qcUser = {
       id: 'qc-1',
@@ -196,8 +193,13 @@ describe('Reopen Rerun Revisioning (P0-02)', () => {
       'Analysis complete',
     );
 
-    expect(mockPrismaService.transaction.update).toHaveBeenCalledWith(
+    expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: expect.objectContaining({
+          id: 'tx-200',
+          status: 'WAREHOUSE_IN_PROGRESS',
+          revision: 10,
+        }),
         data: expect.objectContaining({
           revision: { increment: 1 },
           qcAnalysisCompleted: true,

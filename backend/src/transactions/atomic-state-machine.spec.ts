@@ -230,5 +230,34 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
       expect(result.success).toBe(true);
       expect(mockPrismaService.$transaction).toHaveBeenCalled();
     });
+
+    it('should throw ConflictException (409) when updating with stale revision', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValue({
+        id: 'tx-stale',
+        transactionNumber: 'GMS-20260811-0003',
+        plateNumber: 'B 5555 STALE',
+        status: 'WEIGH_OUT_DONE',
+        revision: 1, // Stale revision
+      });
+
+      // CAS updateMany returns count: 0 simulating revision mismatch in DB
+      mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 0 });
+
+      const user: any = {
+        id: 'admin-1',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      };
+
+      await expect(gateService.checkOut('tx-stale', user)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('should throw BadRequestException when status mismatch occurs', () => {
+      expect(() =>
+        assertValidStatusTransition('WEIGH_IN_DONE', 'COMPLETED'),
+      ).toThrow(BadRequestException);
+    });
   });
 });

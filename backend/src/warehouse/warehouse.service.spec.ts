@@ -137,14 +137,17 @@ describe('WarehouseService Revisioning (P1-01)', () => {
 
     const mockTxClient = {
       transaction: {
-        findFirst: jest.fn().mockResolvedValue(mockTx),
-        update: jest
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest
           .fn()
           .mockResolvedValue({ ...mockTx, status: 'INCOMING_CHECK_PASSED' }),
       },
       incomingMaterialCheck: {
         aggregate: jest.fn().mockResolvedValue({ _max: { revision: 1 } }),
         create: jest.fn().mockResolvedValue({ id: 'im-new', revision: 2 }),
+      },
+      transactionStatusHistory: {
+        create: jest.fn().mockResolvedValue({}),
       },
     };
 

@@ -43,7 +43,11 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
         {
           provide: AuthorizationScopeService,
-          useValue: { getTransactionScope: jest.fn().mockReturnValue({}) },
+          useValue: {
+            assertProcessAccess: jest.fn(),
+            assertScopeNotEmpty: jest.fn(),
+            getTransactionScope: jest.fn().mockReturnValue({}),
+          },
         },
       ],
     }).compile();
@@ -58,7 +62,7 @@ describe('QcService - Segregation of Duties (SoD)', () => {
   });
 
   it('should THROW ForbiddenException (403) when WAREHOUSE role calls completeQcAnalysis on GBB transaction', async () => {
-    mockPrismaService.transaction.findFirst.mockResolvedValueOnce({
+    mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
       id: 'tx-124',
       processType: 'GBB',
       status: 'INCOMING_CHECK_PENDING',
@@ -86,13 +90,14 @@ describe('QcService - Segregation of Duties (SoD)', () => {
       id: 'tx-124',
       processType: 'GBB',
       status: 'WAREHOUSE_IN_PROGRESS',
+      revision: 1,
     };
 
-    mockPrismaService.transaction.findFirst.mockResolvedValue(mockTx);
+    mockPrismaService.transaction.findUnique.mockResolvedValue(mockTx);
     mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
       cb({
         transaction: {
-          update: jest.fn().mockResolvedValue({
+          findUnique: jest.fn().mockResolvedValue({
             ...mockTx,
             status: 'COMPLETED',
           }),
