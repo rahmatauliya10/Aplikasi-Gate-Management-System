@@ -298,7 +298,9 @@ export class OperationLogCorrectionService {
             );
           }
           const rec = item.targetRecordId
-            ? tx.weighbridgeRecords.find((r) => r.id === item.targetRecordId)
+            ? tx.weighbridgeRecords.find(
+                (r: any) => r.id === item.targetRecordId,
+              )
             : tx.weighbridgeRecords[tx.weighbridgeRecords.length - 1];
 
           if (!rec) {
@@ -318,7 +320,9 @@ export class OperationLogCorrectionService {
           recordGroups.get(groupKey)!.items.push(item);
         } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
           const rec = item.targetRecordId
-            ? tx.warehouseProcesses?.find((r) => r.id === item.targetRecordId)
+            ? tx.warehouseProcesses?.find(
+                (r: any) => r.id === item.targetRecordId,
+              )
             : tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null;
 
           if (!rec) {
@@ -338,7 +342,7 @@ export class OperationLogCorrectionService {
           recordGroups.get(groupKey)!.items.push(item);
         } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE) {
           const rec = item.targetRecordId
-            ? tx.qcVehicleChecks?.find((r) => r.id === item.targetRecordId)
+            ? tx.qcVehicleChecks?.find((r: any) => r.id === item.targetRecordId)
             : tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null;
 
           if (!rec) {
@@ -362,7 +366,7 @@ export class OperationLogCorrectionService {
         ) {
           const rec = item.targetRecordId
             ? tx.incomingMaterialChecks?.find(
-                (r) => r.id === item.targetRecordId,
+                (r: any) => r.id === item.targetRecordId,
               )
             : tx.incomingMaterialChecks?.[
                 tx.incomingMaterialChecks.length - 1
@@ -390,7 +394,7 @@ export class OperationLogCorrectionService {
             );
           }
           const rec = item.targetRecordId
-            ? tx.attachments.find((r) => r.id === item.targetRecordId)
+            ? tx.attachments.find((r: any) => r.id === item.targetRecordId)
             : tx.attachments[tx.attachments.length - 1];
 
           if (!rec) {
@@ -979,7 +983,7 @@ export class OperationLogCorrectionService {
           dto.reopenTargetStatus ||
           (statusUpdatedTo as TransactionStatus) ||
           TransactionStatus.QC_VEHICLE_PENDING;
-        const allowedReopenTargets = [
+        const allowedReopenTargets: TransactionStatus[] = [
           TransactionStatus.REGISTERED,
           TransactionStatus.WEIGH_IN_DONE,
           TransactionStatus.QC_VEHICLE_PENDING,
