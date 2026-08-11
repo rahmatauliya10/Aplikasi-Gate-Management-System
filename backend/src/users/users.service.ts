@@ -351,6 +351,7 @@ export class UsersService {
         isActive: false,
         email: `${user.email}_deleted_${timestamp}`,
         username: `${user.username}_deleted_${timestamp}`,
+        tokenVersion: { increment: 1 },
         refreshTokenHash: null,
       },
     });

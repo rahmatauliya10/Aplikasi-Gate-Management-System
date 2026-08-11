@@ -10,10 +10,19 @@ export function getOrCreateBootstrapAdminPassword(
   )?.trim();
   const weakPasswords = [
     'admin123',
+    'admin123!',
     'password',
+    'password123',
+    'password123!',
     'admin',
     'supersecret',
+    'changeit',
+    'changeme',
+    'gms123',
+    'gms123!',
     '12345678',
+    '123456789',
+    '1234567890',
   ];
 
   if (
