@@ -10,10 +10,12 @@ describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
   let service: UsersService;
 
   const mockPrismaService = {
+    $transaction: jest.fn().mockImplementation(async (cb: any) => cb(mockPrismaService)),
     user: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
+      count: jest.fn().mockResolvedValue(2),
     },
     userWarehouseAccess: {
       deleteMany: jest.fn(),

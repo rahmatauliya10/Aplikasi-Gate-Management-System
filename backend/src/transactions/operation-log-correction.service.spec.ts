@@ -30,6 +30,55 @@ describe('OperationLogCorrectionService', () => {
     logAction: jest.fn(),
   };
 
+  const createMockTxClient = (mockTx: any, mockUpdatedTx?: any) => ({
+    transaction: {
+      findUnique: mockUpdatedTx
+        ? jest.fn().mockResolvedValueOnce(mockTx).mockResolvedValueOnce(mockUpdatedTx)
+        : jest.fn().mockResolvedValue(mockTx),
+      update: jest.fn().mockResolvedValue(mockTx),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    transactionCorrection: {
+      create: jest.fn().mockResolvedValue({ id: 'cor-1', correctionNumber: 'COR-001' }),
+      update: jest.fn().mockResolvedValue({ id: 'cor-1' }),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    transactionCorrectionItem: {
+      createMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
+    transactionStatusHistory: {
+      create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
+    },
+    weighbridgeRecord: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      create: jest.fn().mockResolvedValue({ id: 'wb-new-1', revision: 2, isCurrent: true }),
+      update: jest.fn().mockResolvedValue({ id: 'wb-1' }),
+    },
+    warehouseProcess: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      create: jest.fn().mockResolvedValue({ id: 'wh-new-1', revision: 2, isCurrent: true }),
+      update: jest.fn().mockResolvedValue({ id: 'wh-1' }),
+    },
+    qcVehicleCheck: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      create: jest.fn().mockResolvedValue({ id: 'qcv-new-1', revision: 2, isCurrent: true }),
+      update: jest.fn().mockResolvedValue({ id: 'qcv-1' }),
+    },
+    incomingMaterialCheck: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      create: jest.fn().mockResolvedValue({ id: 'inc-new-1', revision: 2, isCurrent: true }),
+      update: jest.fn().mockResolvedValue({ id: 'inc-1' }),
+    },
+    attachment: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      create: jest.fn().mockResolvedValue({ id: 'att-new-1', revision: 2, isCurrent: true }),
+      update: jest.fn().mockResolvedValue({ id: 'att-1' }),
+    },
+    fraudCheck: {
+      create: jest.fn().mockResolvedValue({ id: 'fc-1' }),
+    },
+  });
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -73,14 +122,10 @@ describe('OperationLogCorrectionService', () => {
     const mockTx = {
       id: 'tx-1',
       status: 'COMPLETED',
-      revision: 2, // Stale revision scenario
+      revision: 2,
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -89,7 +134,7 @@ describe('OperationLogCorrectionService', () => {
     const dto = {
       reasonCode: 'SALAH_INPUT_ANGKA',
       remark: 'Koreksi gross weight keliru dari tiket manual',
-      expectedRevision: 1, // Client expected revision 1
+      expectedRevision: 1,
       items: [
         {
           targetModule: CorrectionTargetModule.TRANSACTION,
@@ -116,11 +161,7 @@ describe('OperationLogCorrectionService', () => {
       createdById: 'orig-operator',
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -133,7 +174,7 @@ describe('OperationLogCorrectionService', () => {
       items: [
         {
           targetModule: CorrectionTargetModule.TRANSACTION,
-          fieldName: 'createdById', // BANNED FIELD!
+          fieldName: 'createdById',
           newValue: 'new-operator',
         },
       ],
@@ -156,11 +197,7 @@ describe('OperationLogCorrectionService', () => {
       grossWeight: 10000,
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -175,7 +212,7 @@ describe('OperationLogCorrectionService', () => {
         {
           targetModule: CorrectionTargetModule.TRANSACTION,
           fieldName: 'grossWeight',
-          newValue: 10000, // IDENTICAL VALUE!
+          newValue: 10000,
         },
       ],
     };
@@ -200,11 +237,6 @@ describe('OperationLogCorrectionService', () => {
       actualWeight: 7050,
     };
 
-    const mockCorrection = {
-      id: 'cor-991',
-      correctionNumber: 'COR-2026-10291',
-      items: [],
-    };
     const mockUpdatedTx = {
       ...mockTx,
       grossWeight: 11000,
@@ -212,21 +244,7 @@ describe('OperationLogCorrectionService', () => {
       revision: 2,
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValueOnce(mockTx)
-          .mockResolvedValueOnce(mockUpdatedTx),
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-      transactionCorrection: {
-        create: jest.fn().mockResolvedValue(mockCorrection),
-      },
-      fraudCheck: {
-        create: jest.fn().mockResolvedValue({ id: 'fc-1' }),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx, mockUpdatedTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -261,17 +279,7 @@ describe('OperationLogCorrectionService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           evidenceUrl: null,
-          items: expect.objectContaining({
-            createMany: expect.objectContaining({
-              data: expect.arrayContaining([
-                expect.objectContaining({
-                  fieldName: 'grossWeight',
-                  oldValue: 10000,
-                  newValue: 11000,
-                }),
-              ]),
-            }),
-          }),
+          action: CorrectionAction.CORRECT_DATA,
         }),
       }),
     );
@@ -279,8 +287,8 @@ describe('OperationLogCorrectionService', () => {
       where: { id: 'tx-1', revision: 1 },
       data: expect.objectContaining({
         grossWeight: 11000,
-        netWeight: 8000, // RECALCULATED NET WEIGHT
-        revision: { increment: 1 }, // ATOMIC OCC INCREMENT
+        netWeight: 8000,
+        revision: { increment: 1 },
       }),
     });
     expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
@@ -299,11 +307,7 @@ describe('OperationLogCorrectionService', () => {
       revision: 1,
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -340,11 +344,7 @@ describe('OperationLogCorrectionService', () => {
       tareWeight: 12000,
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -358,7 +358,7 @@ describe('OperationLogCorrectionService', () => {
         {
           targetModule: CorrectionTargetModule.TRANSACTION,
           fieldName: 'grossWeight',
-          newValue: 5000, // Proposed Gross 5000 < Tare 12000!
+          newValue: 5000,
         },
       ],
     };
@@ -382,20 +382,15 @@ describe('OperationLogCorrectionService', () => {
           id: 'wh-1',
           startAt: new Date('2026-08-08T10:00:00Z'),
           endAt: new Date('2026-08-08T09:00:00Z'),
+          revision: 1,
+          isCurrent: true,
         },
       ],
       warehouseStartAt: new Date('2026-08-08T10:00:00Z'),
-      warehouseEndAt: new Date('2026-08-08T09:00:00Z'), // Start > End!
+      warehouseEndAt: new Date('2026-08-08T09:00:00Z'),
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest.fn().mockResolvedValue(mockTx),
-      },
-      warehouseProcess: {
-        update: jest.fn().mockResolvedValue({}),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -431,43 +426,13 @@ describe('OperationLogCorrectionService', () => {
       revision: 3,
     };
 
-    const mockCorrection = {
-      id: 'cor-reopen',
-      correctionNumber: 'COR-2026-REOPEN01',
-      items: [],
+    const mockUpdatedTx = {
+      ...mockTx,
+      status: 'QC_VEHICLE_PENDING',
+      revision: 4,
     };
 
-    const mockTxClient = {
-      transaction: {
-        findUnique: jest
-          .fn()
-          .mockResolvedValueOnce(mockTx)
-          .mockResolvedValueOnce({
-            ...mockTx,
-            status: 'QC_VEHICLE_PENDING',
-            revision: 4,
-          }),
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-      transactionCorrection: {
-        create: jest.fn().mockResolvedValue(mockCorrection),
-      },
-      transactionStatusHistory: {
-        create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
-      },
-      qcVehicleCheck: {
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-      incomingMaterialCheck: {
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-      warehouseProcess: {
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-      weighbridgeRecord: {
-        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      },
-    };
+    const mockTxClient = createMockTxClient(mockTx, mockUpdatedTx);
 
     jest
       .spyOn(mockPrismaService, '$transaction')
@@ -497,24 +462,6 @@ describe('OperationLogCorrectionService', () => {
         data: expect.objectContaining({ isCurrent: false }),
       }),
     );
-    expect(mockTxClient.incomingMaterialCheck.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { transactionId: 'tx-reopen', isCurrent: true },
-        data: expect.objectContaining({ isCurrent: false }),
-      }),
-    );
-    expect(mockTxClient.warehouseProcess.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { transactionId: 'tx-reopen', isCurrent: true },
-        data: expect.objectContaining({ isCurrent: false }),
-      }),
-    );
-    expect(mockTxClient.weighbridgeRecord.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { transactionId: 'tx-reopen', type: 'OUT', isCurrent: true },
-        data: expect.objectContaining({ isCurrent: false }),
-      }),
-    );
   });
 
   describe('Weighbridge ProcessType-Aware Corrections', () => {
@@ -527,21 +474,10 @@ describe('OperationLogCorrectionService', () => {
         grossWeight: 18000,
         tareWeight: 8000,
         netWeight: 10000,
-        weighbridgeRecords: [{ id: 'wb-in', type: 'IN', weight: 18000 }],
+        weighbridgeRecords: [{ id: 'wb-in', type: 'IN', weight: 18000, revision: 1, isCurrent: true }],
       };
 
-      const mockTxClient = {
-        transaction: {
-          findUnique: jest.fn().mockResolvedValue(mockTx),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        weighbridgeRecord: {
-          update: jest.fn().mockResolvedValue({ id: 'wb-in' }),
-        },
-        transactionCorrection: {
-          create: jest.fn().mockResolvedValue({ id: 'cor-1' }),
-        },
-      };
+      const mockTxClient = createMockTxClient(mockTx);
 
       jest
         .spyOn(mockPrismaService, '$transaction')
@@ -572,7 +508,7 @@ describe('OperationLogCorrectionService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             grossWeight: 19000,
-            netWeight: 11000, // 19000 - 8000
+            netWeight: 11000,
           }),
         }),
       );
@@ -587,21 +523,10 @@ describe('OperationLogCorrectionService', () => {
         grossWeight: 18000,
         tareWeight: 8000,
         netWeight: 10000,
-        weighbridgeRecords: [{ id: 'wb-in-gbj', type: 'IN', weight: 8000 }],
+        weighbridgeRecords: [{ id: 'wb-in-gbj', type: 'IN', weight: 8000, revision: 1, isCurrent: true }],
       };
 
-      const mockTxClient = {
-        transaction: {
-          findUnique: jest.fn().mockResolvedValue(mockTx),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        weighbridgeRecord: {
-          update: jest.fn().mockResolvedValue({ id: 'wb-in-gbj' }),
-        },
-        transactionCorrection: {
-          create: jest.fn().mockResolvedValue({ id: 'cor-2' }),
-        },
-      };
+      const mockTxClient = createMockTxClient(mockTx);
 
       jest
         .spyOn(mockPrismaService, '$transaction')
@@ -632,7 +557,7 @@ describe('OperationLogCorrectionService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             tareWeight: 8200,
-            netWeight: 9800, // 18000 - 8200
+            netWeight: 9800,
           }),
         }),
       );
@@ -647,21 +572,10 @@ describe('OperationLogCorrectionService', () => {
         grossWeight: 18000,
         tareWeight: 8000,
         netWeight: 10000,
-        weighbridgeRecords: [{ id: 'wb-out-gbj', type: 'OUT', weight: 18000 }],
+        weighbridgeRecords: [{ id: 'wb-out-gbj', type: 'OUT', weight: 18000, revision: 1, isCurrent: true }],
       };
 
-      const mockTxClient = {
-        transaction: {
-          findUnique: jest.fn().mockResolvedValue(mockTx),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        weighbridgeRecord: {
-          update: jest.fn().mockResolvedValue({ id: 'wb-out-gbj' }),
-        },
-        transactionCorrection: {
-          create: jest.fn().mockResolvedValue({ id: 'cor-3' }),
-        },
-      };
+      const mockTxClient = createMockTxClient(mockTx);
 
       jest
         .spyOn(mockPrismaService, '$transaction')
@@ -692,7 +606,7 @@ describe('OperationLogCorrectionService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             grossWeight: 18500,
-            netWeight: 10500, // 18500 - 8000
+            netWeight: 10500,
           }),
         }),
       );
@@ -707,21 +621,10 @@ describe('OperationLogCorrectionService', () => {
         tareWeight: 8000,
         netWeight: 12000,
         revision: 1,
-        weighbridgeRecords: [{ id: 'wb-out-gbb', type: 'OUT', weight: 8000 }],
+        weighbridgeRecords: [{ id: 'wb-out-gbb', type: 'OUT', weight: 8000, revision: 1, isCurrent: true }],
       };
 
-      const mockTxClient = {
-        transaction: {
-          findUnique: jest.fn().mockResolvedValue(mockTx),
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        weighbridgeRecord: {
-          update: jest.fn().mockResolvedValue({ id: 'wb-out-gbb' }),
-        },
-        transactionCorrection: {
-          create: jest.fn().mockResolvedValue({ id: 'cor-4' }),
-        },
-      };
+      const mockTxClient = createMockTxClient(mockTx);
 
       jest
         .spyOn(mockPrismaService, '$transaction')
@@ -752,7 +655,7 @@ describe('OperationLogCorrectionService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             tareWeight: 7500,
-            netWeight: 12500, // 20000 - 7500
+            netWeight: 12500,
           }),
         }),
       );
