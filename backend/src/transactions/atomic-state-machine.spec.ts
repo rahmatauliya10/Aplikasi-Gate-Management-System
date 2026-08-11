@@ -97,9 +97,9 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
   describe('Centralized State Transition Machine Unit Tests', () => {
     it('should allow valid workflow status transitions', () => {
       expect(isValidStatusTransition('REGISTERED', 'WEIGH_IN_DONE')).toBe(true);
-      expect(
-        isValidStatusTransition('REGISTERED', 'QC_VEHICLE_PENDING'),
-      ).toBe(true);
+      expect(isValidStatusTransition('REGISTERED', 'QC_VEHICLE_PENDING')).toBe(
+        true,
+      );
       expect(
         isValidStatusTransition('WEIGH_IN_DONE', 'QC_VEHICLE_PENDING'),
       ).toBe(true);
