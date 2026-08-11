@@ -513,9 +513,8 @@ export class OperationLogCorrectionService {
                 item.fieldName === 'sealCondition'
                   ? item.newValue
                   : rec.sealCondition,
-              notes: item.fieldName === 'notes'
-                ? String(item.newValue)
-                : rec.notes,
+              notes:
+                item.fieldName === 'notes' ? String(item.newValue) : rec.notes,
               checklistItems:
                 item.fieldName === 'checklistItems'
                   ? item.newValue
@@ -618,9 +617,8 @@ export class OperationLogCorrectionService {
                 item.fieldName === 'defectNotes'
                   ? String(item.newValue)
                   : rec.defectNotes,
-              notes: item.fieldName === 'notes'
-                ? String(item.newValue)
-                : rec.notes,
+              notes:
+                item.fieldName === 'notes' ? String(item.newValue) : rec.notes,
               checklistItems:
                 item.fieldName === 'checklistItems'
                   ? item.newValue
