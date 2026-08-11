@@ -48,13 +48,13 @@ export class UsersService {
         errors: [],
       });
 
-    // Validate warehouse role constraints
-    if (dto.role === 'WAREHOUSE') {
+    // Validate warehouse and QC role process scope constraints
+    if (dto.role === 'WAREHOUSE' || dto.role === 'QC') {
       if (!dto.warehouseAccess || dto.warehouseAccess.length === 0) {
         throw new BadRequestException({
           success: false,
           message:
-            'Warehouse role requires at least 1 warehouse access selection',
+            `${dto.role === 'WAREHOUSE' ? 'Warehouse' : 'QC'} role requires at least 1 process scope selection`,
           errors: [],
         });
       }
@@ -239,15 +239,25 @@ export class UsersService {
       data.role = dto.role;
     }
 
+    // Revoke sessions if role, status, or process scope privilege changes
+    if (
+      dto.role !== undefined ||
+      dto.warehouseAccess !== undefined ||
+      dto.isActive !== undefined
+    ) {
+      data.tokenVersion = { increment: 1 };
+      data.refreshTokenHash = null;
+    }
+
     // Determine warehouseAccess logic based on final role
     let updatedAccess = dto.warehouseAccess;
-    if (targetRole === 'WAREHOUSE') {
+    if (targetRole === 'WAREHOUSE' || targetRole === 'QC') {
       if (dto.warehouseAccess) {
         if (dto.warehouseAccess.length === 0) {
           throw new BadRequestException({
             success: false,
             message:
-              'Warehouse role requires at least 1 warehouse access selection',
+              `${targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'} role requires at least 1 process scope selection`,
             errors: [],
           });
         }
@@ -255,7 +265,7 @@ export class UsersService {
         throw new BadRequestException({
           success: false,
           message:
-            'Warehouse role requires at least 1 warehouse access selection',
+            `${targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'} role requires at least 1 process scope selection`,
           errors: [],
         });
       }
@@ -428,7 +438,11 @@ export class UsersService {
 
     const updated = await this.prisma.user.update({
       where: { id },
-      data: { isActive: dto.isActive },
+      data: {
+        isActive: dto.isActive,
+        tokenVersion: { increment: 1 },
+        refreshTokenHash: null,
+      },
     });
 
     return {

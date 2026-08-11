@@ -245,7 +245,7 @@ const hasAccess = (roles, warehouseCode = null) => {
   
   if (roles && !roles.includes(user.role)) return false
   
-  if (warehouseCode && user.role === 'WAREHOUSE') {
+  if (warehouseCode && (user.role === 'WAREHOUSE' || user.role === 'QC')) {
     const access = user.warehouseAccess || []
     if (!access.includes(warehouseCode)) return false
   }

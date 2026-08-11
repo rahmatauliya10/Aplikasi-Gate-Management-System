@@ -6,6 +6,7 @@ import {
   MinLength,
   IsBoolean,
   IsArray,
+  IsIn,
   Matches,
 } from 'class-validator';
 
@@ -36,7 +37,10 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
+  @IsIn(['GBB', 'GBJ', 'GSP'], {
+    each: true,
+    message: 'Setiap akses gudang harus berupa salah satu dari: GBB, GBJ, GSP',
+  })
   warehouseAccess?: string[];
 
   @IsOptional()

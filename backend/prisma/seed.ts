@@ -83,7 +83,7 @@ async function main() {
     if (!existingQC) {
       console.log('Seeding QC user...');
       const tempQCPassword = isTest ? 'QCPassword123!' : generateTempPassword();
-      await prisma.user.create({
+      const qcUser = await prisma.user.create({
         data: {
           email: 'frengky.qc@gms.local',
           username: 'qc',
@@ -95,11 +95,27 @@ async function main() {
           temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
+      await prisma.userWarehouseAccess.createMany({
+        data: [
+          { userId: qcUser.id, processType: 'GBB' },
+          { userId: qcUser.id, processType: 'GBJ' },
+          { userId: qcUser.id, processType: 'GSP' },
+        ],
+        skipDuplicates: true,
+      });
       if (!isTest) {
-        console.log(`[SEED] QC created. Temporary Password: ${tempQCPassword}`);
+        console.log(`[SEED] QC created with GBB, GBJ, GSP access. Temporary Password: ${tempQCPassword}`);
       }
     } else {
-      console.log('User qc already exists, skipped.');
+      await prisma.userWarehouseAccess.createMany({
+        data: [
+          { userId: existingQC.id, processType: 'GBB' },
+          { userId: existingQC.id, processType: 'GBJ' },
+          { userId: existingQC.id, processType: 'GSP' },
+        ],
+        skipDuplicates: true,
+      });
+      console.log('User qc already exists, process access mapping verified.');
     }
 
     // 3. Warehouse

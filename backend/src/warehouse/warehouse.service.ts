@@ -47,6 +47,13 @@ export class WarehouseService {
       endDate,
     } = query;
     const allowedProcessTypes = await this.getWarehouseAccess(user);
+    if (user.role === 'WAREHOUSE' && allowedProcessTypes.length === 0) {
+      throw new ForbiddenException({
+        success: false,
+        message: 'Akses ditolak: Akun Warehouse Anda belum memiliki scope proses/gudang yang valid.',
+        errors: [],
+      });
+    }
 
     const andConditions: Prisma.TransactionWhereInput[] = [];
 

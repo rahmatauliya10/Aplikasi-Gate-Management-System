@@ -118,9 +118,11 @@ function hasRoleAccess(userRole, allowedRoles) {
 
 function hasWarehouseAccess(user, warehouseCode) {
   if (!warehouseCode) return true;
-  if (user?.role === "ADMIN") return true;
-  if (user?.role !== "WAREHOUSE") return false;
-  return Array.isArray(user?.warehouseAccess) && user.warehouseAccess.includes(warehouseCode);
+  if (user?.role === "ADMIN" || user?.role === "SECURITY") return true;
+  if (user?.role === "WAREHOUSE" || user?.role === "QC") {
+    return Array.isArray(user?.warehouseAccess) && user.warehouseAccess.includes(warehouseCode);
+  }
+  return false;
 }
 
 router.beforeEach(async (to, from, next) => {
