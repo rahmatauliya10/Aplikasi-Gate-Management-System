@@ -299,7 +299,7 @@ export class WeighbridgeService {
 
       assertValidStatusTransition(tx.status, nextStatus);
 
-      const claimed = await this.safeUpdateMany(prismaTx,{
+      const claimed = await this.safeUpdateMany(prismaTx, {
         where: {
           id: transactionId,
           status: 'REGISTERED',
@@ -601,7 +601,7 @@ export class WeighbridgeService {
 
       assertValidStatusTransition(tx.status, 'WEIGH_OUT_DONE');
 
-      const claimed = await this.safeUpdateMany(prismaTx,{
+      const claimed = await this.safeUpdateMany(prismaTx, {
         where: {
           id: transactionId,
           status: tx.status,

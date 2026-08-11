@@ -269,7 +269,7 @@ export class WarehouseService {
       });
       const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
-      const claimed = await this.safeUpdateMany(prismaTx,{
+      const claimed = await this.safeUpdateMany(prismaTx, {
         where: {
           id: transactionId,
           status: 'QC_VEHICLE_PASSED',
@@ -495,7 +495,7 @@ export class WarehouseService {
           : `Checklist: ${checklistStr}`;
       }
 
-      const claimed = await this.safeUpdateMany(prismaTx,{
+      const claimed = await this.safeUpdateMany(prismaTx, {
         where: {
           id: transactionId,
           status: 'WAREHOUSE_IN_PROGRESS',
@@ -756,7 +756,7 @@ export class WarehouseService {
         },
       });
 
-      const claimed = await this.safeUpdateMany(prismaTx,{
+      const claimed = await this.safeUpdateMany(prismaTx, {
         where: {
           id: transactionId,
           status: tx.status,

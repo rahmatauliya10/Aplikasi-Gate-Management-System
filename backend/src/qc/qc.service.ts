@@ -153,7 +153,7 @@ export class QcService {
     assertValidStatusTransition(tx.status, nextStatus);
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const claimed = await this.safeUpdateMany(prismaTx,{
+      const claimed = await this.safeUpdateMany(prismaTx, {
         where: {
           id: transactionId,
           status: tx.status,
@@ -268,7 +268,7 @@ export class QcService {
         },
       });
 
-      const claimed = await this.safeUpdateMany(prisma,{
+      const claimed = await this.safeUpdateMany(prisma, {
         where: {
           id: transactionId,
           status: tx.status,
@@ -395,7 +395,7 @@ export class QcService {
         },
       });
 
-      const claimed = await this.safeUpdateMany(prisma,{
+      const claimed = await this.safeUpdateMany(prisma, {
         where: {
           id: transactionId,
           status: tx.status,
@@ -567,7 +567,7 @@ export class QcService {
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const claimed = await this.safeUpdateMany(prismaTx,{
+      const claimed = await this.safeUpdateMany(prismaTx, {
         where: {
           id: transactionId,
           status: 'WAREHOUSE_IN_PROGRESS',
