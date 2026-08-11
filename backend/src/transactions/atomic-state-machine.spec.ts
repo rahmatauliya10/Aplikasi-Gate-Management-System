@@ -1,8 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ConflictException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { GateService } from '../gate/gate.service';
 import { WeighbridgeService } from '../weighbridge/weighbridge.service';
 import { QcService } from '../qc/qc.service';
@@ -97,17 +94,12 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
 
   describe('Centralized State Transition Machine Unit Tests', () => {
     it('should allow valid workflow status transitions', () => {
-      expect(isValidStatusTransition('REGISTERED', 'WEIGH_IN_DONE')).toBe(
-        true,
-      );
+      expect(isValidStatusTransition('REGISTERED', 'WEIGH_IN_DONE')).toBe(true);
       expect(
         isValidStatusTransition('WEIGH_IN_DONE', 'QC_VEHICLE_PENDING'),
       ).toBe(true);
       expect(
-        isValidStatusTransition(
-          'QC_VEHICLE_PENDING',
-          'QC_VEHICLE_IN_PROGRESS',
-        ),
+        isValidStatusTransition('QC_VEHICLE_PENDING', 'QC_VEHICLE_IN_PROGRESS'),
       ).toBe(true);
       expect(
         isValidStatusTransition('QC_VEHICLE_IN_PROGRESS', 'QC_VEHICLE_PASSED'),
@@ -124,9 +116,7 @@ describe('PR-02: Atomic Workflow State Machine & Concurrency Controls', () => {
       expect(
         isValidStatusTransition('INCOMING_CHECK_PASSED', 'WEIGH_OUT_DONE'),
       ).toBe(true);
-      expect(isValidStatusTransition('WEIGH_OUT_DONE', 'COMPLETED')).toBe(
-        true,
-      );
+      expect(isValidStatusTransition('WEIGH_OUT_DONE', 'COMPLETED')).toBe(true);
     });
 
     it('should reject invalid status transitions (e.g. REGISTERED directly to COMPLETED)', () => {

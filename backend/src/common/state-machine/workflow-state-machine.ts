@@ -5,10 +5,7 @@ export const VALID_STATUS_TRANSITIONS: Record<
   TransactionStatus,
   TransactionStatus[]
 > = {
-  REGISTERED: [
-    TransactionStatus.WEIGH_IN_DONE,
-    TransactionStatus.CANCELLED,
-  ],
+  REGISTERED: [TransactionStatus.WEIGH_IN_DONE, TransactionStatus.CANCELLED],
   WEIGH_IN_DONE: [
     TransactionStatus.QC_VEHICLE_PENDING,
     TransactionStatus.CANCELLED,
@@ -60,10 +57,7 @@ export const VALID_STATUS_TRANSITIONS: Record<
     TransactionStatus.WEIGH_OUT_DONE,
     TransactionStatus.CANCELLED,
   ],
-  WEIGH_OUT_DONE: [
-    TransactionStatus.COMPLETED,
-    TransactionStatus.CANCELLED,
-  ],
+  WEIGH_OUT_DONE: [TransactionStatus.COMPLETED, TransactionStatus.CANCELLED],
   COMPLETED: [],
   CANCELLED: [],
 };
