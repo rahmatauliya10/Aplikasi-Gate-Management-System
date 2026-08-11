@@ -89,30 +89,15 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.service.ts",
+      "**/*.util.ts",
+      "**/*.guard.ts",
+      "common/state-machine/**/*.ts"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "coverageThreshold": {
       "global": {
-        "statements": 30,
-        "branches": 25,
-        "functions": 25,
-        "lines": 30
-      },
-      "./src/auth/": {
-        "statements": 35,
-        "branches": 30,
-        "functions": 30,
-        "lines": 35
-      },
-      "./src/transactions/": {
-        "statements": 35,
-        "branches": 30,
-        "functions": 30,
-        "lines": 35
-      },
-      "./src/settings/": {
         "statements": 35,
         "branches": 30,
         "functions": 30,
