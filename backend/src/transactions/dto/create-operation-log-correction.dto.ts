@@ -15,7 +15,11 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CorrectionAction, CorrectionTargetModule, TransactionStatus } from '@prisma/client';
+import {
+  CorrectionAction,
+  CorrectionTargetModule,
+  TransactionStatus,
+} from '@prisma/client';
 
 export class CorrectionItemDto {
   @ApiProperty({

@@ -774,7 +774,7 @@ describe('OperationLogCorrectionService', () => {
         ],
       };
 
-      await service.correctOperationLog('tx-qc-batch', dto as any, {
+      await service.correctOperationLog('tx-qc-batch', dto, {
         id: 'adm-1',
         role: 'ADMIN',
         email: 'admin@gms.local',
@@ -801,7 +801,7 @@ describe('OperationLogCorrectionService', () => {
     it('should reject reopenTargetStatus if action is not REOPEN_WORKFLOW', async () => {
       const dto = {
         action: CorrectionAction.CORRECT_DATA,
-        reopenTargetStatus: 'QC_VEHICLE_PENDING',
+        reopenTargetStatus: 'QC_VEHICLE_PENDING' as any,
         reasonCode: 'SALAH_ACTION',
         remark: 'Percobaan reopen via CORRECT_DATA (harus ditolak)',
         expectedRevision: 1,
@@ -809,7 +809,7 @@ describe('OperationLogCorrectionService', () => {
       };
 
       await expect(
-        service.correctOperationLog('tx-1', dto as any, {
+        service.correctOperationLog('tx-1', dto, {
           id: 'adm-1',
           role: 'ADMIN',
           email: 'admin@gms.local',

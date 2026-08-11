@@ -118,50 +118,44 @@ export class AttachmentsService {
       const attachmentType = dto.attachmentType || AttachmentType.OTHER;
 
       // 4. Create Attachment record in atomic database transaction
-      let attachment: any = null;
-      try {
-        attachment = await this.prisma.$transaction(async (prismaTx) => {
-          const created = await prismaTx.attachment.create({
-            data: {
-              attachmentLineageId,
-              transactionId,
-              module: rawModule.toUpperCase(),
-              attachmentType,
-              originalName: file.originalname,
-              fileName: uuidFilename,
-              filePath: relativeFilePath,
-              mimeType: file.mimetype,
-              size: file.size,
-              description: dto.description || null,
-              uploadedById: user.id,
-              sha256,
-              isCurrent: true,
-              revision: 1,
-            },
-          });
-
-          await this.activityLogsService.logAction(
-            {
-              userId: user.id,
-              action: 'ATTACHMENT_UPLOAD',
-              module: 'ATTACHMENTS',
-              referenceId: created.id,
-              description: `Uploaded attachment ${file.originalname} (${sha256.substring(
-                0,
-                8,
-              )}...) for transaction ${transactionId}`,
-              status: 'SUCCESS',
-              ipAddress,
-            },
-            prismaTx,
-          );
-
-          return created;
+      const attachment = await this.prisma.$transaction(async (prismaTx) => {
+        const created = await prismaTx.attachment.create({
+          data: {
+            attachmentLineageId,
+            transactionId,
+            module: rawModule.toUpperCase(),
+            attachmentType,
+            originalName: file.originalname,
+            fileName: uuidFilename,
+            filePath: relativeFilePath,
+            mimeType: file.mimetype,
+            size: file.size,
+            description: dto.description || null,
+            uploadedById: user.id,
+            sha256,
+            isCurrent: true,
+            revision: 1,
+          },
         });
-      } catch (dbErr: any) {
-        // If DB fails, temporary file cleanup handles it below
-        throw dbErr;
-      }
+
+        await this.activityLogsService.logAction(
+          {
+            userId: user.id,
+            action: 'ATTACHMENT_UPLOAD',
+            module: 'ATTACHMENTS',
+            referenceId: created.id,
+            description: `Uploaded attachment ${file.originalname} (${sha256.substring(
+              0,
+              8,
+            )}...) for transaction ${transactionId}`,
+            status: 'SUCCESS',
+            ipAddress,
+          },
+          prismaTx,
+        );
+
+        return created;
+      });
 
       // 5. Atomic file move from quarantine to permanent storage with compensating cleanup
       try {
@@ -169,11 +163,15 @@ export class AttachmentsService {
       } catch (moveErr: any) {
         // Compensating action: Delete DB record if file move fails
         if (attachment?.id) {
-          await this.prisma.attachment.delete({
-            where: { id: attachment.id },
-          }).catch((delErr) =>
-            this.logger.error(`Compensating DB cleanup failed: ${delErr.message}`),
-          );
+          try {
+            await this.prisma.attachment.delete({
+              where: { id: attachment.id },
+            });
+          } catch (delErr: any) {
+            this.logger.error(
+              `Compensating DB cleanup failed: ${delErr.message}`,
+            );
+          }
         }
         throw new InternalServerErrorException(
           `Gagal memindahkan berkas fisik ke lokasi permanen: ${moveErr.message}`,

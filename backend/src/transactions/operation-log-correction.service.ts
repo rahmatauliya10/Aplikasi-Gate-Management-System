@@ -174,7 +174,10 @@ export class OperationLogCorrectionService {
       );
     }
 
-    if (dto.reopenTargetStatus && dto.action !== CorrectionAction.REOPEN_WORKFLOW) {
+    if (
+      dto.reopenTargetStatus &&
+      dto.action !== CorrectionAction.REOPEN_WORKFLOW
+    ) {
       throw new BadRequestException(
         'reopenTargetStatus hanya boleh diberikan apabila action adalah REOPEN_WORKFLOW.',
       );
@@ -197,7 +200,7 @@ export class OperationLogCorrectionService {
 
     const result = await this.prisma.$transaction(async (prismaTx) => {
       // Step 2 & 3: Validate Terminal Status and OCC Revision
-      const tx = await prismaTx.transaction.findUnique({
+      const tx: any = await prismaTx.transaction.findUnique({
         where: { id },
         include: {
           weighbridgeRecords: { where: { isCurrent: true } },
@@ -218,7 +221,7 @@ export class OperationLogCorrectionService {
         );
       }
 
-      if ((tx as any).revision !== dto.expectedRevision) {
+      if (tx.revision !== dto.expectedRevision) {
         throw new ConflictException(
           'Data transaksi telah diperbarui oleh pengguna lain (Revisi Tidak Cocok). Silakan muat ulang data terbaru sebelum melakukan koreksi.',
         );
@@ -466,7 +469,7 @@ export class OperationLogCorrectionService {
           let updatedRemarks = rec.remarks;
 
           for (const item of items) {
-            const extractedOldValue = (rec as any)[item.fieldName];
+            const extractedOldValue = rec[item.fieldName];
             if (item.fieldName === 'weight') {
               updatedWeight = Number(item.newValue);
               // GBJ vs GBB/GSP mapping rules:
@@ -522,7 +525,7 @@ export class OperationLogCorrectionService {
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
               fieldName: item.fieldName,
-              oldValue: (rec as any)[item.fieldName] ?? null,
+              oldValue: rec[item.fieldName] ?? null,
               newValue: item.newValue ?? null,
               itemRemark: item.itemRemark || null,
             });
@@ -562,13 +565,17 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = (rec as any)[item.fieldName];
+            const extractedOldValue = rec[item.fieldName];
             if (['startAt', 'endAt'].includes(item.fieldName)) {
               updatedFields[item.fieldName] = new Date(item.newValue);
             } else if (
-              ['actualWeight', 'actualQuantity', 'palletCount', 'bagCount', 'rollCount'].includes(
-                item.fieldName,
-              )
+              [
+                'actualWeight',
+                'actualQuantity',
+                'palletCount',
+                'bagCount',
+                'rollCount',
+              ].includes(item.fieldName)
             ) {
               updatedFields[item.fieldName] = Number(item.newValue);
             } else if (item.fieldName === 'remarks') {
@@ -629,7 +636,7 @@ export class OperationLogCorrectionService {
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
               fieldName: item.fieldName,
-              oldValue: (rec as any)[item.fieldName] ?? null,
+              oldValue: rec[item.fieldName] ?? null,
               newValue: item.newValue ?? null,
               itemRemark: item.itemRemark || null,
             });
@@ -667,7 +674,7 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = (rec as any)[item.fieldName];
+            const extractedOldValue = rec[item.fieldName];
             if (item.fieldName === 'notes') {
               updatedFields[item.fieldName] = String(item.newValue);
             } else {
@@ -712,7 +719,7 @@ export class OperationLogCorrectionService {
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
               fieldName: item.fieldName,
-              oldValue: (rec as any)[item.fieldName] ?? null,
+              oldValue: rec[item.fieldName] ?? null,
               newValue: item.newValue ?? null,
               itemRemark: item.itemRemark || null,
             });
@@ -760,11 +767,14 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = (rec as any)[item.fieldName];
+            const extractedOldValue = rec[item.fieldName];
             if (
-              ['moisture', 'foreignMatter', 'sampleWeight', 'goodBeanPercentage'].includes(
-                item.fieldName,
-              )
+              [
+                'moisture',
+                'foreignMatter',
+                'sampleWeight',
+                'goodBeanPercentage',
+              ].includes(item.fieldName)
             ) {
               updatedFields[item.fieldName] = Number(item.newValue);
             } else if (['defectNotes', 'notes'].includes(item.fieldName)) {
@@ -818,7 +828,7 @@ export class OperationLogCorrectionService {
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
               fieldName: item.fieldName,
-              oldValue: (rec as any)[item.fieldName] ?? null,
+              oldValue: rec[item.fieldName] ?? null,
               newValue: item.newValue ?? null,
               itemRemark: item.itemRemark || null,
             });
@@ -849,7 +859,7 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = (rec as any)[item.fieldName];
+            const extractedOldValue = rec[item.fieldName];
             updatedFields[item.fieldName] = String(item.newValue);
 
             if (
@@ -888,7 +898,7 @@ export class OperationLogCorrectionService {
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
               fieldName: item.fieldName,
-              oldValue: (rec as any)[item.fieldName] ?? null,
+              oldValue: rec[item.fieldName] ?? null,
               newValue: item.newValue ?? null,
               itemRemark: item.itemRemark || null,
             });
@@ -965,7 +975,10 @@ export class OperationLogCorrectionService {
 
       // REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records
       if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
-        const targetReopenStatus = dto.reopenTargetStatus || (statusUpdatedTo as TransactionStatus) || TransactionStatus.QC_VEHICLE_PENDING;
+        const targetReopenStatus =
+          dto.reopenTargetStatus ||
+          (statusUpdatedTo as TransactionStatus) ||
+          TransactionStatus.QC_VEHICLE_PENDING;
         const allowedReopenTargets = [
           TransactionStatus.REGISTERED,
           TransactionStatus.WEIGH_IN_DONE,

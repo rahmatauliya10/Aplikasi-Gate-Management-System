@@ -3,13 +3,14 @@ import { AttachmentsService } from './attachments.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 
 describe('AttachmentsService', () => {
   let service: AttachmentsService;
-  let prismaService: PrismaService;
 
   const mockPrismaService = {
     $transaction: jest.fn(),
@@ -37,12 +38,14 @@ describe('AttachmentsService', () => {
         AttachmentsService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
-        { provide: AuthorizationScopeService, useValue: mockAuthorizationScopeService },
+        {
+          provide: AuthorizationScopeService,
+          useValue: mockAuthorizationScopeService,
+        },
       ],
     }).compile();
 
     service = module.get<AttachmentsService>(AttachmentsService);
-    prismaService = module.get<PrismaService>(PrismaService);
   });
 
   afterEach(() => {

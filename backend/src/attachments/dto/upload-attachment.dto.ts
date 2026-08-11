@@ -1,10 +1,17 @@
-import { IsEnum, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { AttachmentType } from '@prisma/client';
 
 export class UploadAttachmentDto {
   @ApiPropertyOptional({
-    description: 'Nama modul target untuk lampiran (misal: qc, warehouse, gate)',
+    description:
+      'Nama modul target untuk lampiran (misal: qc, warehouse, gate)',
     example: 'qc',
   })
   @IsOptional()
