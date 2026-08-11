@@ -341,14 +341,15 @@ const handleWeightSubmit = async (weight) => {
   isProcessing.value = true
   const truck = selectedTruck.value
   const isFirst = truck.status === 'REGISTERED'
+  const pType = getProcessType(truck)
   
   try {
-    if (truck.processType === 'GBB' || truck.processType === 'GSP') {
+    if (pType === 'GBB' || pType === 'GSP') {
       if (isFirst) { 
         const response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
         const updatedTruck = response?.data || response;
         if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Gross Weight Saved: ${weight} kg. Proceed to ${truck.processType}.`) 
+        toast.success(`Gross Weight Saved: ${weight} kg. Proceed to ${pType}.`) 
       } else { 
         const response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
         const updatedTruck = response?.data || response;
