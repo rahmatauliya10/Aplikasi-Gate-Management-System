@@ -65,7 +65,7 @@ export class QcController {
     @Body() dto: StartQcDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.qcService.startQc(id, dto, user);
+    return this.qcService.startQc(id, dto, user.id, user);
   }
 
   @Post('vehicle-check/:transactionId')

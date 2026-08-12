@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AttachmentsService } from './attachments.service';
+import { UploadAttachmentDto } from './dto/upload-attachment.dto';
 import { AttachmentUploadAccessGuard } from './guards/attachment-upload-access.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
