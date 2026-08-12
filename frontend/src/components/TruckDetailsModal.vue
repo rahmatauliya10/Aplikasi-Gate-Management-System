@@ -1750,24 +1750,27 @@ const executeCorrectionSubmission = async () => {
       }
     }
 
-    if (items.length === 0 && !correctionForm.value.isReopen) {
+    let action = 'CORRECT_DATA'
+    let reopenTargetStatus = undefined
+    if (correctionForm.value.isReopen || correctionForm.value.action === 'REOPEN_WORKFLOW' || correctionForm.value.status === 'REOPEN_WORKFLOW') {
+      action = 'REOPEN_WORKFLOW'
+      reopenTargetStatus = correctionForm.value.reopenTargetStatus || correctionForm.value.targetStatus || 'QC_VEHICLE_PENDING'
+    }
+
+    if (items.length === 0 && action !== 'REOPEN_WORKFLOW') {
       correctionError.value = 'Tidak ada perubahan data yang terdeteksi (No-Op). Silakan ubah minimal satu nilai untuk melakukan koreksi.'
       correctionLoading.value = false
       return
     }
 
-    let action = 'CORRECT_DATA'
-    if (correctionForm.value.isReopen || correctionForm.value.status === 'REOPEN_WORKFLOW') {
-      action = 'REOPEN_WORKFLOW'
-    }
-
     const payload = {
       action,
+      reopenTargetStatus: action === 'REOPEN_WORKFLOW' ? reopenTargetStatus : undefined,
       reasonCode: correctionForm.value.reasonCategory,
       remark: correctionForm.value.remark.trim(),
       evidenceUrl: correctionForm.value.evidenceUrl?.trim() || undefined,
       expectedRevision: props.truck?.revision || 1,
-      items
+      items: action === 'REOPEN_WORKFLOW' ? undefined : items
     }
 
     let res = null

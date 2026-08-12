@@ -957,7 +957,14 @@ describe('OperationLogCorrectionService', () => {
         reasonCode: 'SALAH_ACTION',
         remark: 'Percobaan reopen via CORRECT_DATA (harus ditolak)',
         expectedRevision: 1,
-        items: [],
+        items: [
+          {
+            targetModule: 'WEIGHBRIDGE' as any,
+            targetRecordId: 'wb-1',
+            fieldName: 'weight',
+            newValue: 1000,
+          },
+        ],
       };
 
       await expect(
@@ -967,6 +974,102 @@ describe('OperationLogCorrectionService', () => {
           email: 'admin@gms.local',
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject REOPEN_WORKFLOW if reopenTargetStatus is missing', async () => {
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reasonCode: 'SALAH_INPUT',
+        remark: 'Reopen tanpa target status',
+        expectedRevision: 1,
+      };
+
+      await expect(
+        service.correctOperationLog('tx-1', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow('reopenTargetStatus wajib diisi');
+    });
+
+    it('should reject REOPEN_WORKFLOW if combined with field correction items', async () => {
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'QC_VEHICLE_PENDING' as any,
+        reasonCode: 'SALAH_INPUT',
+        remark: 'Reopen digabung dengan item koreksi',
+        expectedRevision: 1,
+        items: [
+          {
+            targetModule: 'WEIGHBRIDGE' as any,
+            targetRecordId: 'wb-1',
+            fieldName: 'weight',
+            newValue: 1000,
+          },
+        ],
+      };
+
+      await expect(
+        service.correctOperationLog('tx-1', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow('REOPEN_WORKFLOW tidak boleh digabung dengan items koreksi data');
+    });
+
+    it('should create new active WarehouseProcess when reopening to WAREHOUSE_IN_PROGRESS', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValue({
+        id: 'tx-1',
+        status: 'COMPLETED',
+        processType: 'GBB',
+        revision: 1,
+        weighbridgeRecords: [],
+        warehouseProcesses: [{ id: 'wh-1', warehouseLineageId: 'lineage-wh-1', revision: 1 }],
+        qcVehicleChecks: [],
+        incomingMaterialChecks: [],
+        attachments: [],
+      });
+
+      const mockTxClient = {
+        operationLogCorrection: { create: jest.fn().mockResolvedValue({ id: 'cor-99' }) },
+        correctionItem: { createMany: jest.fn() },
+        weighbridgeRecord: { updateMany: jest.fn() },
+        qcVehicleCheck: { updateMany: jest.fn() },
+        incomingMaterialCheck: { updateMany: jest.fn() },
+        warehouseProcess: {
+          updateMany: jest.fn(),
+          findFirst: jest.fn().mockResolvedValue({ id: 'wh-1', warehouseLineageId: 'lineage-wh-1', revision: 1 }),
+          create: jest.fn().mockResolvedValue({ id: 'wh-2' }),
+        },
+        attachment: { updateMany: jest.fn() },
+        transaction: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      };
+      mockPrismaService.$transaction.mockImplementation((cb: any) => cb(mockTxClient));
+
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'WAREHOUSE_IN_PROGRESS' as any,
+        reasonCode: 'REOPEN_GUDANG',
+        remark: 'Reopen ke proses gudang',
+        expectedRevision: 1,
+      };
+
+      await service.correctOperationLog('tx-1', dto, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          transactionId: 'tx-1',
+          warehouseLineageId: 'lineage-wh-1',
+          revision: 2,
+          isCurrent: true,
+        }),
+      });
     });
   });
 });

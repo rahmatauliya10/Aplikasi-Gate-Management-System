@@ -174,6 +174,19 @@ export class OperationLogCorrectionService {
       );
     }
 
+    if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
+      if (!dto.reopenTargetStatus) {
+        throw new BadRequestException(
+          'reopenTargetStatus wajib diisi apabila action adalah REOPEN_WORKFLOW.',
+        );
+      }
+      if (dto.items && dto.items.length > 0) {
+        throw new BadRequestException(
+          'REOPEN_WORKFLOW tidak boleh digabung dengan items koreksi data. Kirim transaksi REOPEN_WORKFLOW secara terpisah.',
+        );
+      }
+    }
+
     if (
       dto.reopenTargetStatus &&
       dto.action !== CorrectionAction.REOPEN_WORKFLOW
@@ -1166,6 +1179,24 @@ export class OperationLogCorrectionService {
               },
             });
           }
+
+          const latestWh = await prismaTx.warehouseProcess.findFirst({
+            where: { transactionId: id },
+            orderBy: { revision: 'desc' },
+          });
+          const nextRevision = (latestWh?.revision || 0) + 1;
+          const lineageId = latestWh?.warehouseLineageId || crypto.randomUUID();
+
+          await prismaTx.warehouseProcess.create({
+            data: {
+              transactionId: id,
+              warehouseLineageId: lineageId,
+              revision: nextRevision,
+              isCurrent: true,
+              createdById: userId,
+              startAt: txUpdateData.warehouseStartAt || new Date(),
+            },
+          });
         } else if (
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_PENDING ||
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS

@@ -167,4 +167,19 @@ describe('Production Migration Preflight (PR-28 Hard Gate)', () => {
     expect(report.unresolvedLegacyCorrections.weighbridge).toBe(0);
     expect(report.missingPhysicalAttachments).toEqual([]);
   });
+
+  it('should rethrow error directly when checkTableExists query fails', async () => {
+    mockPrisma.$queryRaw.mockRejectedValue(new Error('Permission denied on information_schema'));
+    await expect(checkTableExists(mockPrisma, 'Transaction')).rejects.toThrow('Permission denied on information_schema');
+  });
+
+  it('should set isReadyForMigration to false when a database query throws an error during preflight', async () => {
+    mockPrisma.$queryRaw.mockRejectedValue(new Error('Database connection timeout'));
+
+    const report = await runProductionMigrationPreflight(mockPrisma);
+
+    expect(report.isReadyForMigration).toBe(false);
+    expect(report.queryErrors).toBeDefined();
+    expect(report.queryErrors?.[0]).toContain('Database connection timeout');
+  });
 });

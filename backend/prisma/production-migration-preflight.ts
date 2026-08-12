@@ -5,6 +5,7 @@ import * as path from 'path';
 export interface PreflightReport {
   timestamp: string;
   isReadyForMigration: boolean;
+  queryErrors?: string[];
   unresolvedLegacyCorrections: {
     weighbridge: number;
     warehouse: number;
@@ -41,34 +42,26 @@ export interface PreflightReport {
 }
 
 export async function checkTableExists(prisma: PrismaClient, tableName: string): Promise<boolean> {
-  try {
-    const res = await prisma.$queryRaw<Array<{ exists: boolean }>>`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = ${tableName}
-      ) as exists;
-    `;
-    return Array.isArray(res) && res[0] && res[0].exists === true;
-  } catch {
-    return false;
-  }
+  const res = await prisma.$queryRaw<Array<{ exists: boolean }>>`
+    SELECT EXISTS (
+      SELECT FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name = ${tableName}
+    ) as exists;
+  `;
+  return Array.isArray(res) && res[0] && res[0].exists === true;
 }
 
 export async function checkColumnExists(prisma: PrismaClient, tableName: string, columnName: string): Promise<boolean> {
-  try {
-    const res = await prisma.$queryRaw<Array<{ exists: boolean }>>`
-      SELECT EXISTS (
-        SELECT FROM information_schema.columns 
-        WHERE table_schema = 'public' 
-        AND table_name = ${tableName}
-        AND column_name = ${columnName}
-      ) as exists;
-    `;
-    return Array.isArray(res) && res[0] && res[0].exists === true;
-  } catch {
-    return false;
-  }
+  const res = await prisma.$queryRaw<Array<{ exists: boolean }>>`
+    SELECT EXISTS (
+      SELECT FROM information_schema.columns 
+      WHERE table_schema = 'public' 
+      AND table_name = ${tableName}
+      AND column_name = ${columnName}
+    ) as exists;
+  `;
+  return Array.isArray(res) && res[0] && res[0].exists === true;
 }
 
 export async function runProductionMigrationPreflight(
@@ -348,6 +341,11 @@ export async function runProductionMigrationPreflight(
     console.log(`Duplicate Active Plates: ${report.duplicateActivePlates.length}`);
     console.log(`Orphan User References: ${report.orphanUserReferences.length}\n`);
 
+    return report;
+  } catch (error: any) {
+    console.error('❌ PREFLIGHT DATABASE QUERY ERROR:', error);
+    report.isReadyForMigration = false;
+    report.queryErrors = [error?.message || String(error)];
     return report;
   } finally {
     if (shouldDisconnect) {

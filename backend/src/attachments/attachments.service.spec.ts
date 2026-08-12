@@ -57,6 +57,11 @@ describe('AttachmentsService', () => {
   });
 
   it('should reject path traversal in module name', async () => {
+    mockPrismaService.transaction.findFirst.mockResolvedValue({
+      id: 'tx-1',
+      status: 'IN_PROGRESS',
+    });
+
     const mockFile = {
       path: '/tmp/quarantine/test.jpg',
       originalname: 'test.jpg',
@@ -75,6 +80,11 @@ describe('AttachmentsService', () => {
   });
 
   it('should reject unapproved module name', async () => {
+    mockPrismaService.transaction.findFirst.mockResolvedValue({
+      id: 'tx-1',
+      status: 'IN_PROGRESS',
+    });
+
     const mockFile = {
       path: '/tmp/quarantine/test.jpg',
       originalname: 'test.jpg',
@@ -87,6 +97,49 @@ describe('AttachmentsService', () => {
         mockFile,
         'tx-1',
         { module: 'malicious' },
+        { id: 'usr-1', role: 'QC', email: 'qc@gms.local' },
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should throw NotFoundException if transaction is not found or outside user scope', async () => {
+    mockPrismaService.transaction.findFirst.mockResolvedValue(null);
+
+    const mockFile = {
+      path: '/tmp/quarantine/test.jpg',
+      originalname: 'test.jpg',
+      mimetype: 'image/jpeg',
+      size: 1024,
+    };
+
+    await expect(
+      service.processQuarantineUpload(
+        mockFile,
+        'tx-unauthorized',
+        { module: 'qc' },
+        { id: 'usr-1', role: 'QC', email: 'qc@gms.local' },
+      ),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('should throw BadRequestException if transaction is COMPLETED and user is non-ADMIN', async () => {
+    mockPrismaService.transaction.findFirst.mockResolvedValue({
+      id: 'tx-1',
+      status: 'COMPLETED',
+    });
+
+    const mockFile = {
+      path: '/tmp/quarantine/test.jpg',
+      originalname: 'test.jpg',
+      mimetype: 'image/jpeg',
+      size: 1024,
+    };
+
+    await expect(
+      service.processQuarantineUpload(
+        mockFile,
+        'tx-1',
+        { module: 'qc' },
         { id: 'usr-1', role: 'QC', email: 'qc@gms.local' },
       ),
     ).rejects.toThrow(BadRequestException);

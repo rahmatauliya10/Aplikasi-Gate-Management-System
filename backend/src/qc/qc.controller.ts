@@ -68,7 +68,7 @@ export class QcController {
     return this.qcService.startQc(id, dto, user.id, user);
   }
 
-  @Post('vehicle-check/:transactionId')
+  @Post(['vehicle-result/:transactionId', 'vehicle-check/:transactionId'])
   @Roles('QC')
   @ApiOperation({ summary: 'Submit vehicle check result' })
   submitVehicleCheck(
@@ -79,7 +79,7 @@ export class QcController {
     return this.qcService.submitVehicleCheck(id, dto, user.id, user);
   }
 
-  @Post('incoming-check/:transactionId')
+  @Post(['incoming-result/:transactionId', 'incoming-check/:transactionId'])
   @Roles('QC')
   @ApiOperation({ summary: 'Submit incoming check result' })
   submitIncomingCheck(

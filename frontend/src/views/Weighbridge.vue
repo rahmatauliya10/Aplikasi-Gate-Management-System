@@ -353,7 +353,7 @@ const handleWeightSubmit = async (weight) => {
         response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
         toast.success(`Tare Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to Gate Out.`) 
       }
-    } else {
+    } else if (pType === 'GBJ') {
       if (isFirst) { 
         response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
         toast.success(`Tare Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to QC Inspection.`) 
@@ -361,6 +361,9 @@ const handleWeightSubmit = async (weight) => {
         response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
         toast.success(`Gross Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to Gate Out.`) 
       }
+    } else {
+      toast.error(`Jenis proses '${pType || 'UNKNOWN'}' tidak valid. Penimbangan dibatalkan.`)
+      return
     }
     
     const updatedTruck = response?.data || response
