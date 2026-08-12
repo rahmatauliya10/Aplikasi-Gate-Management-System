@@ -18,7 +18,10 @@ param(
     [string]$ComposeFile = "docker-compose.prod.yml",
 
     [Parameter(Mandatory=$false)]
-    [switch]$RollbackOnly
+    [switch]$RollbackOnly,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$UsePrebuiltImages
 )
 
 Set-StrictMode -Version Latest
@@ -91,10 +94,14 @@ if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
 $env:RELEASE_TAG = $TargetReleaseTag
 
 try {
-    # Step 1.2: Explicitly build fresh release images before running migration or booting
-    Write-Host "[GMS Deploy] Explicitly building image pair for release [$TargetReleaseTag]..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env build backend frontend
-    if ($LASTEXITCODE -ne 0) { throw "Docker compose build failed with exit code $LASTEXITCODE." }
+    # Step 1.2: Verify or build image pair for target release
+    if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag)) {
+        Write-Host "[GMS Deploy] Pre-built image pair found for [$TargetReleaseTag]. Using immutable pre-built images (--no-build)..." -ForegroundColor Green
+    } else {
+        Write-Host "[GMS Deploy] Building image pair for release [$TargetReleaseTag] from local working tree..." -ForegroundColor Cyan
+        & docker compose -f $ComposeFile --env-file backend\.env build backend frontend
+        if ($LASTEXITCODE -ne 0) { throw "Docker compose build failed with exit code $LASTEXITCODE." }
+    }
 
     # Step 1.5: Database preflight audit and migration using newly built backend image
     Write-Host "[GMS Preflight & Migration] Running database preflight audit and Prisma migration..." -ForegroundColor Cyan

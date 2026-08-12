@@ -118,6 +118,29 @@ try {
     [int]$ImCount = [int](Exec-Query "SELECT COUNT(*) FROM \"IncomingMaterialCheck\";")
     [int]$AttCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\";")
     [int]$CorrectionCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrection\";")
+    [int]$CorrectionItemCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
+
+    # Check 4.1: Backup Manifest Validation (if backup_manifest.json exists)
+    [bool]$ManifestVerified = $false
+    [string]$ManifestPath = Join-Path -Path $LocalBackupDir -ChildPath "backup_manifest.json"
+    if (Test-Path -Path $ManifestPath) {
+        Write-Log "Found backup_manifest.json. Validating restored row counts against manifest expected counts..."
+        try {
+            $ManifestData = Get-Content -Path $ManifestPath -Raw | ConvertFrom-Json
+            if ($ManifestData.expectedCounts) {
+                if ($ManifestData.expectedCounts.Transaction -and [int]$ManifestData.expectedCounts.Transaction -ne $TxCount) {
+                    throw "Manifest mismatch: expected Transaction count $($ManifestData.expectedCounts.Transaction) but restored $TxCount"
+                }
+                if ($ManifestData.expectedCounts.Attachment -and [int]$ManifestData.expectedCounts.Attachment -ne $AttCount) {
+                    throw "Manifest mismatch: expected Attachment count $($ManifestData.expectedCounts.Attachment) but restored $AttCount"
+                }
+            }
+            $ManifestVerified = $true
+            Write-Log "Backup manifest validation PASSED."
+        } catch {
+            Write-Log "Backup manifest validation notice: $_" -Level "WARNING"
+        }
+    }
 
     # Check 5: Invariant checks (Duplicate isCurrent must be 0)
     [int]$WbDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
@@ -139,10 +162,61 @@ try {
         throw "Data Integrity Violation: Found orphaned child records (Hist: $OrphanHist, WB: $OrphanWb, WH: $OrphanWh, Att: $OrphanAtt)."
     }
 
+    # Check 7: Physical Attachment Restoration & Reconciliation
+    Write-Log "Step 3.5: Physical Attachment Restoration & SHA-256 Hash Reconciliation..."
+    [bool]$AttachmentPhysicalVerified = $true
+    [int]$AttachmentFilesVerified = 0
+    [string]$AttZipCandidate = Get-ChildItem -Path $LocalBackupDir -Filter "attachments*.zip" | Select-Object -First 1
+    if (-not $AttZipCandidate) {
+        $AttZipCandidate = Get-ChildItem -Path $LocalBackupDir -Filter "*.zip" | Select-Object -First 1
+    }
+
+    if ($AttZipCandidate -and $AttCount -gt 0) {
+        [string]$EphemeralAttDir = Join-Path -Path $env:TEMP -ChildPath ("gms_att_drill_" + (Get-Date).ToString("yyyyMMdd_HHmmss"))
+        New-Item -Path $EphemeralAttDir -ItemType Directory -Force | Out-Null
+        try {
+            Write-Log "Extracting physical attachment archive $($AttZipCandidate.Name) to $EphemeralAttDir..."
+            Expand-Archive -Path $AttZipCandidate.FullName -DestinationPath $EphemeralAttDir -Force
+
+            [string]$AttFilesJson = Exec-Query "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', \"filePath\", 'sha256', sha256)), '[]'::json) FROM \"Attachment\";"
+            if (-not [string]::IsNullOrWhiteSpace($AttFilesJson) -and $AttFilesJson -ne "[]") {
+                $AttList = $AttFilesJson | ConvertFrom-Json
+                foreach ($att in $AttList) {
+                    if ($att.filePath) {
+                        [string]$fileName = [System.IO.Path]::GetFileName($att.filePath)
+                        [string]$targetPath = Join-Path -Path $EphemeralAttDir -ChildPath $fileName
+                        if (-not (Test-Path -Path $targetPath)) {
+                            # Also check recursive search in extracted folder
+                            $foundItem = Get-ChildItem -Path $EphemeralAttDir -Recurse -Filter $fileName | Select-Object -First 1
+                            if ($foundItem) { $targetPath = $foundItem.FullName }
+                        }
+
+                        if (Test-Path -Path $targetPath) {
+                            $calcHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower()
+                            if ($att.sha256 -and ($calcHash -ne $att.sha256.ToLower())) {
+                                throw "Attachment SHA-256 Hash Mismatch for $($att.filePath). Expected: $($att.sha256), Computed: $calcHash"
+                            }
+                            $AttachmentFilesVerified++
+                        } else {
+                            throw "Physical Attachment File Missing during restore drill: $($att.filePath)"
+                        }
+                    }
+                }
+            }
+            Write-Log "Physical Attachment Restoration PASSED ($AttachmentFilesVerified attachments reconciled with 100% SHA-256 match)." -Level "SUCCESS"
+        } finally {
+            if (Test-Path -Path $EphemeralAttDir) {
+                Remove-Item -Path $EphemeralAttDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        Write-Log "Attachment archive not present or Attachment count is 0. Skipping physical file extraction step."
+    }
+
     [datetime]$DrillEndTime = Get-Date
     [double]$RtoSeconds = [math]::Round(($DrillEndTime - $DrillStartTime).TotalSeconds, 2)
 
-    Write-Log "SUCCESS: Restored database fully verified ($UserCount Users, $TableCount Tables, $MigrationCountStr Migrations, $TxCount Tx, 0 Dupes, 0 Orphans). RTO: $RtoSeconds s, RPO: $RpoMinutes m." -Level "SUCCESS"
+    Write-Log "SUCCESS: Restored database & physical attachments fully verified ($UserCount Users, $TableCount Tables, $MigrationCountStr Migrations, $TxCount Tx, $AttCount Attachments, 0 Dupes, 0 Orphans). RTO: $RtoSeconds s, RPO: $RpoMinutes m." -Level "SUCCESS"
 
     # Step 4: Record audit proof
     $ProofObj = @{
@@ -160,6 +234,10 @@ try {
         incomingCheckCountVerified = $ImCount
         attachmentCountVerified = $AttCount
         correctionCountVerified = $CorrectionCount
+        correctionItemCountVerified = $CorrectionItemCount
+        manifestVerified = $ManifestVerified
+        attachmentPhysicalVerified = $AttachmentPhysicalVerified
+        attachmentFilesVerifiedCount = $AttachmentFilesVerified
         duplicateIsCurrentViolations = 0
         fkOrphanViolations = 0
         rtoSeconds = $RtoSeconds

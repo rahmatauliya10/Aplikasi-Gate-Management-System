@@ -634,6 +634,47 @@
 
             <!-- Main Form (Hidden if confirming sensitive change) -->
             <div v-else class="space-y-4">
+              <!-- 0. Jenis Tindakan Koreksi (Action) -->
+              <div class="p-3 bg-amber-50/40 rounded-xl border border-amber-200/80 space-y-2">
+                <label class="block font-bold text-slate-700 text-[11px] uppercase tracking-wider">
+                  Jenis Tindakan Koreksi <span class="text-red-500">*</span>
+                </label>
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all"
+                    :class="correctionForm.action === 'CORRECT_DATA' ? 'border-amber-500 bg-white ring-2 ring-amber-400/20 shadow-2xs' : 'border-slate-200 bg-slate-50/60 hover:bg-white'">
+                    <input type="radio" v-model="correctionForm.action" value="CORRECT_DATA" class="mt-0.5 text-amber-600 focus:ring-amber-500" />
+                    <div>
+                      <div class="text-xs font-bold text-slate-800">Koreksi Data</div>
+                      <div class="text-[10px] text-slate-500">Ubah nilai timbangan, identitas, atau QC</div>
+                    </div>
+                  </label>
+                  <label class="flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all"
+                    :class="correctionForm.action === 'REOPEN_WORKFLOW' ? 'border-amber-500 bg-white ring-2 ring-amber-400/20 shadow-2xs' : 'border-slate-200 bg-slate-50/60 hover:bg-white'">
+                    <input type="radio" v-model="correctionForm.action" value="REOPEN_WORKFLOW" class="mt-0.5 text-amber-600 focus:ring-amber-500" />
+                    <div>
+                      <div class="text-xs font-bold text-slate-800">Buka Ulang Workflow</div>
+                      <div class="text-[10px] text-slate-500">REOPEN ke tahap sebelumnya</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Explicit Target Tahap REOPEN (hanya jika action === 'REOPEN_WORKFLOW') -->
+              <div v-if="correctionForm.action === 'REOPEN_WORKFLOW'" class="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-2 animate-fade">
+                <label class="block font-bold text-amber-900 text-[11px] uppercase tracking-wider">
+                  Target Tahap REOPEN <span class="text-red-500">*</span>
+                </label>
+                <select v-model="correctionForm.reopenTargetStatus" class="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs shadow-2xs">
+                  <option value="" disabled>-- Pilih Target Tahap REOPEN (Wajib) --</option>
+                  <option v-for="target in allowedReopenTargets" :key="target.value" :value="target.value">
+                    {{ target.label }}
+                  </option>
+                </select>
+                <p class="text-[10px] text-amber-800 font-medium">
+                  * Matriks target REOPEN untuk tipe proses: <b class="uppercase">{{ currentProcessType }}</b>
+                </p>
+              </div>
+
               <!-- 1. Alasan Koreksi (Wajib) -->
               <div>
                 <label class="block font-bold text-slate-700 mb-1 text-[11px] uppercase tracking-wider">Kategori Alasan Koreksi <span class="text-red-500">*</span></label>
@@ -668,7 +709,6 @@
                       <span class="material-icons text-sm text-amber-600">upload_file</span> Pilih Bukti Fisik / Foto:
                     </span>
                     <input type="file" @change="handleEvidenceUpload" class="text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" accept="image/*,.pdf" />
-                  </div>
                   <span v-if="correctionForm.evidencePhoto" class="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
                     ✓ File terlampir: {{ correctionForm.evidencePhoto }}
                   </span>
@@ -676,7 +716,7 @@
               </div>
 
               <!-- 4. Target Nilai Koreksi Per Modul (Tabs) -->
-              <div class="p-5 bg-slate-50/90 rounded-2xl border border-slate-200/80 space-y-4 shadow-2xs">
+              <div v-if="correctionForm.action === 'CORRECT_DATA'" class="p-5 bg-slate-50/90 rounded-2xl border border-slate-200/80 space-y-4 shadow-2xs">
                 <div class="space-y-2 border-b border-slate-200/80 pb-3">
                   <div class="flex items-center justify-between">
                     <h4 class="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -1393,6 +1433,8 @@ const whOriginal = computed(() => {
 })
 
 const correctionForm = ref({
+  action: 'CORRECT_DATA',
+  reopenTargetStatus: '',
   driverName: '',
   driverPhone: '',
   suratJalanNumber: '',
@@ -1441,6 +1483,32 @@ const correctionForm = ref({
   qcvNotes: '',
   whCondition: 'GOOD',
   whRemarks: '',
+})
+
+const currentProcessType = computed(() => {
+  return (props.truck?.processType || 'GBB').toUpperCase()
+})
+
+const allowedReopenTargets = computed(() => {
+  const processType = currentProcessType.value
+  if (processType === 'GBJ') {
+    return [
+      { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
+      { value: 'WEIGH_IN_DONE', label: '2. Weigh In Done (Timbang Masuk Selesai)' },
+      { value: 'QC_VEHICLE_PENDING', label: '3. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+      { value: 'QC_VEHICLE_IN_PROGRESS', label: '4. QC Vehicle In Progress (QC Kendaraan)' },
+      { value: 'WAREHOUSE_IN_PROGRESS', label: '5. Warehouse In Progress (Bongkar/Muat Gudang)' },
+    ]
+  }
+  return [
+    { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
+    { value: 'WEIGH_IN_DONE', label: '2. Weigh In Done (Timbang Masuk Selesai)' },
+    { value: 'QC_VEHICLE_PENDING', label: '3. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+    { value: 'QC_VEHICLE_IN_PROGRESS', label: '4. QC Vehicle In Progress (QC Kendaraan)' },
+    { value: 'INCOMING_CHECK_PENDING', label: '5. Incoming Check Pending (Menunggu QC Material)' },
+    { value: 'INCOMING_CHECK_IN_PROGRESS', label: '6. Incoming Check In Progress (QC Material)' },
+    { value: 'WAREHOUSE_IN_PROGRESS', label: '7. Warehouse In Progress (Bongkar/Muat Gudang)' },
+  ]
 })
 
 const handleEvidenceUpload = (event) => {
@@ -1533,6 +1601,8 @@ const openCorrectionModal = () => {
   const wh = whOriginal.value
 
   correctionForm.value = {
+    action: 'CORRECT_DATA',
+    reopenTargetStatus: '',
     driverName: props.truck?.driverName || '',
     driverPhone: props.truck?.driverPhone || '',
     suratJalanNumber: props.truck?.suratJalanNumber || '',

@@ -1053,6 +1053,35 @@ describe('OperationLogCorrectionService', () => {
       );
     });
 
+    it('should reject REOPEN_WORKFLOW if processType is unknown or unsupported', async () => {
+      const mockTx = {
+        id: 'tx-unknown-1',
+        status: 'COMPLETED',
+        processType: 'UNKNOWN_TYPE',
+        revision: 1,
+      };
+      const mockTxClient = createMockTxClient(mockTx);
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'REGISTERED' as any,
+        reasonCode: 'SALAH_INPUT',
+        remark: 'Percobaan reopen processType tidak dikenal',
+        expectedRevision: 1,
+      };
+
+      await expect(
+        service.correctOperationLog('tx-unknown-1', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow('Unsupported processType for REOPEN_WORKFLOW: UNKNOWN_TYPE');
+    });
+
     it('should create new active WarehouseProcess when reopening to WAREHOUSE_IN_PROGRESS', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValue({
         id: 'tx-1',
