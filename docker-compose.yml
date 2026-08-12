@@ -23,13 +23,9 @@ services:
       - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
-      # WARNING: Provide these via .env file or secret manager, not here.
-      # - JWT_ACCESS_SECRET
-      # - JWT_REFRESH_SECRET
-      # - DEFAULT_ADMIN_PASSWORD
-      # - DEFAULT_QC_PASSWORD
-      # - DEFAULT_WAREHOUSE_PASSWORD
-      # - DEFAULT_SECURITY_PASSWORD
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - BACKUP_SIGNATURE_SECRET=${BACKUP_SIGNATURE_SECRET}
       - JWT_ACCESS_EXPIRES_IN=1h
       - JWT_REFRESH_EXPIRES_IN=7d
       - PORT=3001
