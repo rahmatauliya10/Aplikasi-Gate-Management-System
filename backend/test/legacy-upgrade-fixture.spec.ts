@@ -20,26 +20,31 @@ describe('Legacy Upgrade Fixture & Multi-Attachment Safety (P0-01 & P0-02)', () 
       incomingMaterialCheck: { findMany: jest.fn().mockResolvedValue([]) },
       transaction: { findMany: jest.fn().mockResolvedValue([]) },
       attachment: {
-        findMany: jest.fn().mockResolvedValue([
-          {
-            id: 'att-1',
-            transactionId: 'tx-legacy-1',
-            fileName: 'f1.jpg',
-            filePath: 'uploads/f1.jpg',
-          },
-          {
-            id: 'att-2',
-            transactionId: 'tx-legacy-1',
-            fileName: 'f2.pdf',
-            filePath: 'uploads/f2.pdf',
-          },
-          {
-            id: 'att-3',
-            transactionId: 'tx-legacy-1',
-            fileName: 'f3.png',
-            filePath: 'uploads/f3.png',
-          },
-        ]),
+        findMany: jest.fn().mockImplementation((args: any) => {
+          if (args?.where?.supersededByCorrectionId) {
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([
+            {
+              id: 'att-1',
+              transactionId: 'tx-legacy-1',
+              fileName: 'f1.jpg',
+              filePath: 'uploads/f1.jpg',
+            },
+            {
+              id: 'att-2',
+              transactionId: 'tx-legacy-1',
+              fileName: 'f2.pdf',
+              filePath: 'uploads/f2.pdf',
+            },
+            {
+              id: 'att-3',
+              transactionId: 'tx-legacy-1',
+              fileName: 'f3.png',
+              filePath: 'uploads/f3.png',
+            },
+          ]);
+        }),
       },
     };
 

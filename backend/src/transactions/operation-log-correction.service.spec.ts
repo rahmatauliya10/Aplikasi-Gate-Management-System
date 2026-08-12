@@ -802,6 +802,7 @@ describe('OperationLogCorrectionService', () => {
       const mockTx = {
         id: 'tx-att-1',
         revision: 1,
+        status: 'COMPLETED',
         attachments: [
           {
             id: 'att-1',

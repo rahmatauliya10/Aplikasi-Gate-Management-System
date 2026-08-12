@@ -318,7 +318,8 @@ export async function runProductionMigrationPreflight(
           WHERE t."${field}" IS NOT NULL AND u.id IS NULL
         `;
 
-        const orphans = await prisma.$queryRawUnsafe<Array<{ recordId: string; invalidUserId: string }>>(orphanQuery);
+        const rawOrphans = await prisma.$queryRawUnsafe<Array<{ recordId: string; invalidUserId: string }>>(orphanQuery);
+        const orphans = Array.isArray(rawOrphans) ? rawOrphans : [];
         if (orphans.length > 0) {
           report.isReadyForMigration = false;
           for (const o of orphans) {
