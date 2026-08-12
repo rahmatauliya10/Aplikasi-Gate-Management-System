@@ -173,6 +173,9 @@ jobs:
         run: |
           echo "Initializing full-stack staging gate environment..."
           cp backend/.env.example backend/.env 2>/dev/null || touch backend/.env
+          docker compose -f docker-compose.yml up -d postgres
+          sleep 5
+          docker compose -f docker-compose.yml run --rm backend npx prisma migrate deploy
           docker compose -f docker-compose.yml up -d --build
           sleep 10
           docker compose ps
