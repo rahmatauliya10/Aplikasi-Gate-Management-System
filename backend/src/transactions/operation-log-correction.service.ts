@@ -997,18 +997,41 @@ export class OperationLogCorrectionService {
           dto.reopenTargetStatus ||
           (statusUpdatedTo as TransactionStatus) ||
           TransactionStatus.QC_VEHICLE_PENDING;
-        const allowedReopenTargets: TransactionStatus[] = [
-          TransactionStatus.REGISTERED,
-          TransactionStatus.WEIGH_IN_DONE,
-          TransactionStatus.QC_VEHICLE_PENDING,
-          TransactionStatus.QC_VEHICLE_IN_PROGRESS,
-          TransactionStatus.INCOMING_CHECK_PENDING,
-          TransactionStatus.INCOMING_CHECK_IN_PROGRESS,
-          TransactionStatus.WAREHOUSE_IN_PROGRESS,
-        ];
+        const processType = (tx.processType || 'GBB').toUpperCase();
+        const REOPEN_ALLOWED_TARGETS: Record<string, TransactionStatus[]> = {
+          GBB: [
+            TransactionStatus.REGISTERED,
+            TransactionStatus.WEIGH_IN_DONE,
+            TransactionStatus.QC_VEHICLE_PENDING,
+            TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+            TransactionStatus.INCOMING_CHECK_PENDING,
+            TransactionStatus.INCOMING_CHECK_IN_PROGRESS,
+            TransactionStatus.WAREHOUSE_IN_PROGRESS,
+          ],
+          GSP: [
+            TransactionStatus.REGISTERED,
+            TransactionStatus.WEIGH_IN_DONE,
+            TransactionStatus.QC_VEHICLE_PENDING,
+            TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+            TransactionStatus.INCOMING_CHECK_PENDING,
+            TransactionStatus.INCOMING_CHECK_IN_PROGRESS,
+            TransactionStatus.WAREHOUSE_IN_PROGRESS,
+          ],
+          GBJ: [
+            TransactionStatus.REGISTERED,
+            TransactionStatus.WEIGH_IN_DONE,
+            TransactionStatus.QC_VEHICLE_PENDING,
+            TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+            TransactionStatus.WAREHOUSE_IN_PROGRESS,
+          ],
+        };
+
+        const allowedReopenTargets =
+          REOPEN_ALLOWED_TARGETS[processType] || REOPEN_ALLOWED_TARGETS['GBB'];
+
         if (!allowedReopenTargets.includes(targetReopenStatus)) {
           throw new BadRequestException(
-            `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW. Status harus merupakan salah satu dari allowlist.`,
+            `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW transaksi tipe ${processType}. Target status harus sesuai dengan workflow matriks tipe proses.`,
           );
         }
         statusUpdatedTo = targetReopenStatus;

@@ -59,36 +59,35 @@ export class AttachmentsService {
       throw new BadRequestException('Berkas lampiran wajib diunggah.');
     }
 
-    if (!transactionId) {
-      throw new BadRequestException('ID Transaksi wajib diberikan.');
-    }
-
-    const scope = this.authorizationScopeService.getTransactionScope(user);
-    const targetTx = await this.prisma.transaction.findFirst({
-      where: {
-        id: transactionId,
-        ...scope,
-      },
-    });
-
-    if (!targetTx) {
-      throw new NotFoundException(
-        'Transaksi tidak ditemukan atau Anda tidak memiliki akses ke transaksi ini.',
-      );
-    }
-
-    if (
-      ['COMPLETED', 'CANCELLED'].includes(targetTx.status) &&
-      user.role !== 'ADMIN'
-    ) {
-      throw new BadRequestException(
-        'Lampiran tidak dapat ditambahkan pada transaksi berstatus terminal (COMPLETED/CANCELLED).',
-      );
-    }
-
     const tempPath = file.path;
 
     try {
+      if (!transactionId) {
+        throw new BadRequestException('ID Transaksi wajib diberikan.');
+      }
+
+      const scope = this.authorizationScopeService.getTransactionScope(user);
+      const targetTx = await this.prisma.transaction.findFirst({
+        where: {
+          id: transactionId,
+          ...scope,
+        },
+      });
+
+      if (!targetTx) {
+        throw new NotFoundException(
+          'Transaksi tidak ditemukan atau Anda tidak memiliki akses ke transaksi ini.',
+        );
+      }
+
+      if (
+        ['COMPLETED', 'CANCELLED'].includes(targetTx.status) &&
+        user.role !== 'ADMIN'
+      ) {
+        throw new BadRequestException(
+          'Lampiran tidak dapat ditambahkan pada transaksi berstatus terminal (COMPLETED/CANCELLED).',
+        );
+      }
       // 0. Module path containment check
       const rawModule = (dto.module || 'general').trim().toLowerCase();
       if (

@@ -1022,6 +1022,38 @@ describe('OperationLogCorrectionService', () => {
       );
     });
 
+    it('should reject REOPEN_WORKFLOW to INCOMING_CHECK_PENDING for GBJ transaction', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValue({
+        id: 'tx-gbj-1',
+        status: 'COMPLETED',
+        processType: 'GBJ',
+        revision: 1,
+        weighbridgeRecords: [],
+        warehouseProcesses: [],
+        qcVehicleChecks: [],
+        incomingMaterialChecks: [],
+        attachments: [],
+      });
+
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'INCOMING_CHECK_PENDING' as any,
+        reasonCode: 'SALAH_INPUT',
+        remark: 'Percobaan reopen GBJ ke incoming check',
+        expectedRevision: 1,
+      };
+
+      await expect(
+        service.correctOperationLog('tx-gbj-1', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow(
+        'Target status INCOMING_CHECK_PENDING tidak diizinkan untuk REOPEN_WORKFLOW transaksi tipe GBJ',
+      );
+    });
+
     it('should create new active WarehouseProcess when reopening to WAREHOUSE_IN_PROGRESS', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValue({
         id: 'tx-1',

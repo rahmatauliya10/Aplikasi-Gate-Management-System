@@ -145,6 +145,33 @@ describe('AttachmentsService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('should clean up temporary file in quarantine if authorization or terminal check fails', async () => {
+    const fs = require('fs');
+    jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+    const unlinkSpy = jest.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+
+    mockPrismaService.transaction.findFirst.mockResolvedValue(null);
+
+    const mockFile = {
+      path: '/tmp/quarantine/temp-12345.jpg',
+      originalname: 'temp.jpg',
+      mimetype: 'image/jpeg',
+      size: 1024,
+    };
+
+    await expect(
+      service.processQuarantineUpload(
+        mockFile,
+        'tx-unauthorized',
+        { module: 'qc' },
+        { id: 'usr-1', role: 'QC', email: 'qc@gms.local' },
+      ),
+    ).rejects.toThrow(NotFoundException);
+
+    expect(unlinkSpy).toHaveBeenCalledWith('/tmp/quarantine/temp-12345.jpg');
+    unlinkSpy.mockRestore();
+  });
+
   it('should throw NotFoundException if attachment is missing on download', async () => {
     mockPrismaService.attachment.findFirst.mockResolvedValue(null);
 

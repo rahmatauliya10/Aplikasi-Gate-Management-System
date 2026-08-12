@@ -1754,7 +1754,12 @@ const executeCorrectionSubmission = async () => {
     let reopenTargetStatus = undefined
     if (correctionForm.value.isReopen || correctionForm.value.action === 'REOPEN_WORKFLOW' || correctionForm.value.status === 'REOPEN_WORKFLOW') {
       action = 'REOPEN_WORKFLOW'
-      reopenTargetStatus = correctionForm.value.reopenTargetStatus || correctionForm.value.targetStatus || 'QC_VEHICLE_PENDING'
+      reopenTargetStatus = correctionForm.value.reopenTargetStatus || correctionForm.value.targetStatus
+      if (!reopenTargetStatus) {
+        correctionError.value = 'Target stage/status untuk REOPEN_WORKFLOW wajib dipilih secara eksplisit.'
+        correctionLoading.value = false
+        return
+      }
     }
 
     if (items.length === 0 && action !== 'REOPEN_WORKFLOW') {

@@ -77,24 +77,29 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to container." }
 
     $RestoreOut = & docker exec $ContainerName pg_restore --username=$PgUser --dbname=$DrillDbName --no-owner --no-privileges $TmpDumpPath 2>&1
-    if ($LASTEXITCODE -gt 1) {
+    if ($LASTEXITCODE -ne 0) {
         throw "pg_restore failed with exit code $LASTEXITCODE. Output: $RestoreOut"
     }
 
     # Clean tmp dump in container
     & docker exec $ContainerName rm -f $TmpDumpPath 2>&1 | Out-Null
 
-    Write-Log "Step 3: Deep Data Integrity Verification (Schema, Tables, FKs, Migrations)..."
+    Write-Log "Step 3: Deep Data Integrity & Invariant Verification..."
     
+    # Helper to run query
+    function Exec-Query([string]$sql) {
+        return (& docker exec $ContainerName psql -t -A -U $PgUser -d $DrillDbName -c "$sql" 2>&1).ToString().Trim()
+    }
+
     # Check 1: User table count
-    [string]$UserCountStr = (& docker exec $ContainerName psql -t -A -U $PgUser -d $DrillDbName -c "SELECT COUNT(*) FROM \""User\"";" 2>&1).ToString().Trim()
+    [string]$UserCountStr = Exec-Query "SELECT COUNT(*) FROM \""User\"";"
     [int]$UserCount = 0
     if (-not [int]::TryParse($UserCountStr, [ref]$UserCount) -or $UserCount -eq 0) {
         throw "User table validation failed. Restored count: $UserCountStr"
     }
 
     # Check 2: Table count check (expect >= 14 tables)
-    [string]$TableCountStr = (& docker exec $ContainerName psql -t -A -U $PgUser -d $DrillDbName -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>&1).ToString().Trim()
+    [string]$TableCountStr = Exec-Query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
     [int]$TableCount = 0
     [int]::TryParse($TableCountStr, [ref]$TableCount) | Out-Null
     if ($TableCount -lt 10) {
@@ -102,12 +107,42 @@ try {
     }
 
     # Check 3: Prisma Migrations table
-    [string]$MigrationCountStr = (& docker exec $ContainerName psql -t -A -U $PgUser -d $DrillDbName -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>&1).ToString().Trim()
+    [string]$MigrationCountStr = Exec-Query "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
+
+    # Check 4: Deep table row counts
+    [int]$TxCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\";")
+    [int]$TxHistCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionStatusHistory\";")
+    [int]$WbCount = [int](Exec-Query "SELECT COUNT(*) FROM \"WeighbridgeRecord\";")
+    [int]$WhCount = [int](Exec-Query "SELECT COUNT(*) FROM \"WarehouseProcess\";")
+    [int]$QcvCount = [int](Exec-Query "SELECT COUNT(*) FROM \"QcVehicleCheck\";")
+    [int]$ImCount = [int](Exec-Query "SELECT COUNT(*) FROM \"IncomingMaterialCheck\";")
+    [int]$AttCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\";")
+    [int]$CorrectionCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrection\";")
+
+    # Check 5: Invariant checks (Duplicate isCurrent must be 0)
+    [int]$WbDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
+    [int]$WhDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    [int]$QcvDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    [int]$ImDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+
+    if (($WbDupeCurrent + $WhDupeCurrent + $QcvDupeCurrent + $ImDupeCurrent) -gt 0) {
+        throw "Data Invariant Violation: Found duplicate isCurrent=true records (WB: $WbDupeCurrent, WH: $WhDupeCurrent, QCV: $QcvDupeCurrent, IM: $ImDupeCurrent)."
+    }
+
+    # Check 6: FK Orphan Checks (must be 0)
+    [int]$OrphanHist = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$OrphanWb = [int](Exec-Query "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$OrphanWh = [int](Exec-Query "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$OrphanAtt = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+
+    if (($OrphanHist + $OrphanWb + $OrphanWh + $OrphanAtt) -gt 0) {
+        throw "Data Integrity Violation: Found orphaned child records (Hist: $OrphanHist, WB: $OrphanWb, WH: $OrphanWh, Att: $OrphanAtt)."
+    }
 
     [datetime]$DrillEndTime = Get-Date
     [double]$RtoSeconds = [math]::Round(($DrillEndTime - $DrillStartTime).TotalSeconds, 2)
 
-    Write-Log "SUCCESS: Restored database fully verified ($UserCount Users, $TableCount Tables, $MigrationCountStr Migrations). RTO: $RtoSeconds s, RPO: $RpoMinutes m." -Level "SUCCESS"
+    Write-Log "SUCCESS: Restored database fully verified ($UserCount Users, $TableCount Tables, $MigrationCountStr Migrations, $TxCount Tx, 0 Dupes, 0 Orphans). RTO: $RtoSeconds s, RPO: $RpoMinutes m." -Level "SUCCESS"
 
     # Step 4: Record audit proof
     $ProofObj = @{
@@ -116,6 +151,17 @@ try {
         verifiedDump = $LatestDump.Name
         userCountVerified = $UserCount
         tableCountVerified = $TableCount
+        migrationCountVerified = [int]$MigrationCountStr
+        transactionCountVerified = $TxCount
+        historyCountVerified = $TxHistCount
+        weighbridgeCountVerified = $WbCount
+        warehouseCountVerified = $WhCount
+        qcVehicleCountVerified = $QcvCount
+        incomingCheckCountVerified = $ImCount
+        attachmentCountVerified = $AttCount
+        correctionCountVerified = $CorrectionCount
+        duplicateIsCurrentViolations = 0
+        fkOrphanViolations = 0
         rtoSeconds = $RtoSeconds
         rpoMinutes = $RpoMinutes
     }
