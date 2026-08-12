@@ -1028,9 +1028,7 @@ describe('OperationLogCorrectionService', () => {
         processType: 'GBB',
         revision: 1,
         weighbridgeRecords: [],
-        warehouseProcesses: [
-          { id: 'wh-1', warehouseLineageId: 'lineage-wh-1', revision: 1 },
-        ],
+        warehouseProcesses: [{ id: 'wh-1', processType: 'GBB', revision: 1 }],
         qcVehicleChecks: [],
         incomingMaterialChecks: [],
         attachments: [],
@@ -1048,7 +1046,7 @@ describe('OperationLogCorrectionService', () => {
           updateMany: jest.fn(),
           findFirst: jest.fn().mockResolvedValue({
             id: 'wh-1',
-            warehouseLineageId: 'lineage-wh-1',
+            processType: 'GBB',
             revision: 1,
           }),
           create: jest.fn().mockResolvedValue({ id: 'wh-2' }),
@@ -1077,9 +1075,10 @@ describe('OperationLogCorrectionService', () => {
       expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           transactionId: 'tx-1',
-          warehouseLineageId: 'lineage-wh-1',
+          processType: 'GBB',
           revision: 2,
           isCurrent: true,
+          startById: 'adm-1',
         }),
       });
     });

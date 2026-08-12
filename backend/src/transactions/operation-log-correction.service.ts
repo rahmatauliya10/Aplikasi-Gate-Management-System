@@ -1185,15 +1185,14 @@ export class OperationLogCorrectionService {
             orderBy: { revision: 'desc' },
           });
           const nextRevision = (latestWh?.revision || 0) + 1;
-          const lineageId = latestWh?.warehouseLineageId || crypto.randomUUID();
 
           await prismaTx.warehouseProcess.create({
             data: {
               transactionId: id,
-              warehouseLineageId: lineageId,
+              processType: tx.processType,
               revision: nextRevision,
               isCurrent: true,
-              createdById: userId,
+              startById: user?.id,
               startAt: txUpdateData.warehouseStartAt || new Date(),
             },
           });
