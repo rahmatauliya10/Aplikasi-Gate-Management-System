@@ -458,6 +458,7 @@ describe('OperationLogCorrectionService', () => {
 
     const dto = {
       action: CorrectionAction.REOPEN_WORKFLOW,
+      reopenTargetStatus: 'QC_VEHICLE_PENDING' as any,
       reasonCode: 'REOPEN_REQUESTED',
       remark: 'Membalikkan status transaksi untuk pemeriksaan ulang QC',
       expectedRevision: 3,
@@ -1052,7 +1053,22 @@ describe('OperationLogCorrectionService', () => {
           create: jest.fn().mockResolvedValue({ id: 'wh-2' }),
         },
         attachment: { updateMany: jest.fn() },
-        transaction: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        transaction: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'tx-1',
+            status: 'COMPLETED',
+            processType: 'GBB',
+            revision: 1,
+            weighbridgeRecords: [],
+            warehouseProcesses: [
+              { id: 'wh-1', processType: 'GBB', revision: 1 },
+            ],
+            qcVehicleChecks: [],
+            incomingMaterialChecks: [],
+            attachments: [],
+          }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
       };
       mockPrismaService.$transaction.mockImplementation((cb: any) =>
         cb(mockTxClient),
