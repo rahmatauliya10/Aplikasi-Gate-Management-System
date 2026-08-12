@@ -997,7 +997,7 @@ export class OperationLogCorrectionService {
           dto.reopenTargetStatus ||
           (statusUpdatedTo as TransactionStatus) ||
           TransactionStatus.QC_VEHICLE_PENDING;
-        const processType = (tx.processType || '').toUpperCase();
+        const processType = (tx.processType || 'GBB').toUpperCase();
         const REOPEN_ALLOWED_TARGETS: Record<string, TransactionStatus[]> = {
           GBB: [
             TransactionStatus.REGISTERED,
