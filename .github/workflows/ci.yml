@@ -166,6 +166,7 @@ jobs:
           POSTGRES_DB: gms
           JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
           DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
           DEFAULT_QC_PASSWORD: test-qc-password-12345
           DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
