@@ -1036,7 +1036,7 @@ describe('OperationLogCorrectionService', () => {
       });
 
       const mockTxClient = {
-        operationLogCorrection: {
+        transactionCorrection: {
           create: jest.fn().mockResolvedValue({ id: 'cor-99' }),
         },
         correctionItem: { createMany: jest.fn() },
