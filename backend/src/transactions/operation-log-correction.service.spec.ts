@@ -1041,6 +1041,9 @@ describe('OperationLogCorrectionService', () => {
           update: jest.fn().mockResolvedValue({ id: 'cor-99' }),
         },
         transactionCorrectionItem: { createMany: jest.fn() },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
+        },
         weighbridgeRecord: { updateMany: jest.fn() },
         qcVehicleCheck: { updateMany: jest.fn() },
         incomingMaterialCheck: { updateMany: jest.fn() },
