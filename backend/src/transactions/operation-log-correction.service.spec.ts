@@ -1039,7 +1039,7 @@ describe('OperationLogCorrectionService', () => {
         transactionCorrection: {
           create: jest.fn().mockResolvedValue({ id: 'cor-99' }),
         },
-        correctionItem: { createMany: jest.fn() },
+        transactionCorrectionItem: { createMany: jest.fn() },
         weighbridgeRecord: { updateMany: jest.fn() },
         qcVehicleCheck: { updateMany: jest.fn() },
         incomingMaterialCheck: { updateMany: jest.fn() },
