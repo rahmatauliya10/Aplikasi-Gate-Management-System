@@ -1,15 +1,15 @@
 # ==============================================================================
-# GMS Automated Actual Restore Drill Protocol (P0-05)
+# GMS Automated Actual Restore Drill Protocol (P0-05 / P0-06)
 # ==============================================================================
 # Purpose: Executes an actual physical restore drill into an ephemeral database,
-# verifies data structural integrity via SQL query, logs result for SLA compliance,
-# and destroys the temporary database cleanly.
+# verifies data structural integrity via SQL query, reconciles physical attachment
+# files (JSON base64 format) & SHA-256 hashes, reconciles backup manifest record counts,
+# logs result for SLA compliance, and destroys temporary database cleanly.
 # ==============================================================================
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
 [string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
 [array]$CandidateBackupDirs = @(
     (Join-Path -Path $ProjectRootDir -ChildPath "backups\local"),
@@ -46,10 +46,10 @@ function Write-Log {
     Write-Host $LogEntry
 }
 
-Write-Log "Starting GMS Comprehensive Actual Restore Drill Protocol (P0-05)..."
+Write-Log "Starting GMS Comprehensive Actual Restore Drill Protocol (P0-05/P0-06)..."
 [datetime]$DrillStartTime = Get-Date
 
-# 1. Locate latest dump or json backup file
+# 1. Locate latest dump file
 $LatestDump = Get-ChildItem -Path $LocalBackupDir -Filter "*.dump" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 if (-not $LatestDump) {
@@ -59,6 +59,12 @@ if (-not $LatestDump) {
 
 [double]$RpoMinutes = [math]::Round(((Get-Date) - $LatestDump.LastWriteTime).TotalMinutes, 2)
 Write-Log "Selected dump candidate: $($LatestDump.Name) ($($LatestDump.Length) bytes). Calculated RPO: $RpoMinutes minutes."
+
+# Extract backup timestamp prefix from dump name if possible (e.g. gms_2026-08-12T10-00-00-000Z.dump -> 2026-08-12T10-00-00-000Z)
+[string]$BackupTimestamp = ""
+if ($LatestDump.Name -match "gms_(.+)\.dump") {
+    $BackupTimestamp = $Matches[1]
+}
 
 [string]$DrillDbName = "gms_drill_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
 [string]$ContainerName = "gate-system-postgres"
@@ -98,7 +104,7 @@ try {
         throw "User table validation failed. Restored count: $UserCountStr"
     }
 
-    # Check 2: Table count check (expect >= 14 tables)
+    # Check 2: Table count check (expect >= 10 tables)
     [string]$TableCountStr = Exec-Query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
     [int]$TableCount = 0
     [int]::TryParse($TableCountStr, [ref]$TableCount) | Out-Null
@@ -120,26 +126,51 @@ try {
     [int]$CorrectionCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrection\";")
     [int]$CorrectionItemCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
 
-    # Check 4.1: Backup Manifest Validation (if backup_manifest.json exists)
+    # Check 4.1: Mandatory Backup Manifest Validation (gms_<timestamp>_manifest.json or backup_manifest.json)
     [bool]$ManifestVerified = $false
-    [string]$ManifestPath = Join-Path -Path $LocalBackupDir -ChildPath "backup_manifest.json"
-    if (Test-Path -Path $ManifestPath) {
-        Write-Log "Found backup_manifest.json. Validating restored row counts against manifest expected counts..."
-        try {
-            $ManifestData = Get-Content -Path $ManifestPath -Raw | ConvertFrom-Json
-            if ($ManifestData.expectedCounts) {
-                if ($ManifestData.expectedCounts.Transaction -and [int]$ManifestData.expectedCounts.Transaction -ne $TxCount) {
-                    throw "Manifest mismatch: expected Transaction count $($ManifestData.expectedCounts.Transaction) but restored $TxCount"
-                }
-                if ($ManifestData.expectedCounts.Attachment -and [int]$ManifestData.expectedCounts.Attachment -ne $AttCount) {
-                    throw "Manifest mismatch: expected Attachment count $($ManifestData.expectedCounts.Attachment) but restored $AttCount"
-                }
-            }
-            $ManifestVerified = $true
-            Write-Log "Backup manifest validation PASSED."
-        } catch {
-            Write-Log "Backup manifest validation notice: $_" -Level "WARNING"
+    [string]$ManifestCandidatePath = ""
+    if ($BackupTimestamp) {
+        $foundManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*${BackupTimestamp}*_manifest.json" | Select-Object -First 1
+        if ($foundManifest) { $ManifestCandidatePath = $foundManifest.FullName }
+    }
+    if (-not $ManifestCandidatePath) {
+        $foundManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*manifest.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($foundManifest) { $ManifestCandidatePath = $foundManifest.FullName }
+    }
+
+    if ($ManifestCandidatePath -and (Test-Path -Path $ManifestCandidatePath)) {
+        Write-Log "Found backup manifest ($ManifestCandidatePath). Validating restored row counts against manifest..."
+        $ManifestData = Get-Content -Path $ManifestCandidatePath -Raw | ConvertFrom-Json
+        
+        # Check recordCounts (GMS format) or expectedCounts (legacy format)
+        $CountsObj = $null
+        if ($ManifestData.recordCounts) {
+            $CountsObj = $ManifestData.recordCounts
+        } elseif ($ManifestData.expectedCounts) {
+            $CountsObj = $ManifestData.expectedCounts
         }
+
+        if ($CountsObj) {
+            if ($CountsObj.transactions -ne $null -and [int]$CountsObj.transactions -ne $TxCount) {
+                throw "Manifest validation FAILED: expected Transaction count $($CountsObj.transactions) but restored $TxCount"
+            }
+            if ($CountsObj.Transaction -ne $null -and [int]$CountsObj.Transaction -ne $TxCount) {
+                throw "Manifest validation FAILED: expected Transaction count $($CountsObj.Transaction) but restored $TxCount"
+            }
+            if ($CountsObj.attachments -ne $null -and [int]$CountsObj.attachments -ne $AttCount) {
+                throw "Manifest validation FAILED: expected Attachment count $($CountsObj.attachments) but restored $AttCount"
+            }
+            if ($CountsObj.Attachment -ne $null -and [int]$CountsObj.Attachment -ne $AttCount) {
+                throw "Manifest validation FAILED: expected Attachment count $($CountsObj.Attachment) but restored $AttCount"
+            }
+            if ($CountsObj.users -ne $null -and [int]$CountsObj.users -ne $UserCount) {
+                throw "Manifest validation FAILED: expected User count $($CountsObj.users) but restored $UserCount"
+            }
+        }
+        $ManifestVerified = $true
+        Write-Log "Backup manifest validation PASSED."
+    } else {
+        throw "Backup Manifest Missing: Required manifest JSON file (*manifest.json) matching dump candidate was not found in $LocalBackupDir."
     }
 
     # Check 5: Invariant checks (Duplicate isCurrent must be 0)
@@ -162,55 +193,87 @@ try {
         throw "Data Integrity Violation: Found orphaned child records (Hist: $OrphanHist, WB: $OrphanWb, WH: $OrphanWh, Att: $OrphanAtt)."
     }
 
-    # Check 7: Physical Attachment Restoration & Reconciliation
+    # Check 7: Physical Attachment Restoration & Reconciliation (gms_<timestamp>_attachments.json)
     Write-Log "Step 3.5: Physical Attachment Restoration & SHA-256 Hash Reconciliation..."
-    [bool]$AttachmentPhysicalVerified = $true
+    [bool]$AttachmentPhysicalVerified = $false
     [int]$AttachmentFilesVerified = 0
-    [string]$AttZipCandidate = Get-ChildItem -Path $LocalBackupDir -Filter "attachments*.zip" | Select-Object -First 1
-    if (-not $AttZipCandidate) {
-        $AttZipCandidate = Get-ChildItem -Path $LocalBackupDir -Filter "*.zip" | Select-Object -First 1
+
+    [string]$AttJsonCandidatePath = ""
+    if ($BackupTimestamp) {
+        $foundAtt = Get-ChildItem -Path $LocalBackupDir -Filter "*${BackupTimestamp}*_attachments.json" | Select-Object -First 1
+        if ($foundAtt) { $AttJsonCandidatePath = $foundAtt.FullName }
+    }
+    if (-not $AttJsonCandidatePath) {
+        $foundAtt = Get-ChildItem -Path $LocalBackupDir -Filter "*attachments.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($foundAtt) { $AttJsonCandidatePath = $foundAtt.FullName }
     }
 
-    if ($AttZipCandidate -and $AttCount -gt 0) {
+    if ($AttCount -gt 0 -and (-not $AttJsonCandidatePath -or -not (Test-Path -Path $AttJsonCandidatePath))) {
+        throw "Physical Attachment Restore FAILED: Database contains $AttCount attachments, but physical attachment JSON archive (*attachments.json) was not found."
+    }
+
+    if ($AttJsonCandidatePath -and (Test-Path -Path $AttJsonCandidatePath)) {
         [string]$EphemeralAttDir = Join-Path -Path $env:TEMP -ChildPath ("gms_att_drill_" + (Get-Date).ToString("yyyyMMdd_HHmmss"))
         New-Item -Path $EphemeralAttDir -ItemType Directory -Force | Out-Null
         try {
-            Write-Log "Extracting physical attachment archive $($AttZipCandidate.Name) to $EphemeralAttDir..."
-            Expand-Archive -Path $AttZipCandidate.FullName -DestinationPath $EphemeralAttDir -Force
+            Write-Log "Decoding physical attachment archive $($AttJsonCandidatePath)..."
+            $AttJsonData = Get-Content -Path $AttJsonCandidatePath -Raw | ConvertFrom-Json
 
+            if ($AttJsonData.files) {
+                foreach ($fileObj in $AttJsonData.files) {
+                    [string]$relPath = $fileObj.relativePath
+                    if (-not $relPath) { $relPath = $fileObj.fileName }
+                    
+                    [string]$targetFile = Join-Path -Path $EphemeralAttDir -ChildPath $relPath
+                    [string]$targetParent = Split-Path $targetFile -Parent
+                    if (-not (Test-Path -Path $targetParent -PathType Container)) {
+                        New-Item -Path $targetParent -ItemType Directory -Force | Out-Null
+                    }
+
+                    [byte[]]$bytes = [System.Convert]::FromBase64String($fileObj.base64Content)
+                    [System.IO.File]::WriteAllBytes($targetFile, $bytes)
+
+                    # Hash check
+                    $calcHash = (Get-FileHash -Path $targetFile -Algorithm SHA256).Hash.ToLower()
+                    if ($fileObj.checksum -and ($calcHash -ne $fileObj.checksum.ToLower())) {
+                        throw "Attachment file checksum mismatch for $relPath. Expected: $($fileObj.checksum), Computed: $calcHash"
+                    }
+                    $AttachmentFilesVerified++
+                }
+            }
+
+            # Reconcile DB Attachment records
             [string]$AttFilesJson = Exec-Query "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', \"filePath\", 'sha256', sha256)), '[]'::json) FROM \"Attachment\";"
             if (-not [string]::IsNullOrWhiteSpace($AttFilesJson) -and $AttFilesJson -ne "[]") {
                 $AttList = $AttFilesJson | ConvertFrom-Json
                 foreach ($att in $AttList) {
                     if ($att.filePath) {
                         [string]$fileName = [System.IO.Path]::GetFileName($att.filePath)
-                        [string]$targetPath = Join-Path -Path $EphemeralAttDir -ChildPath $fileName
-                        if (-not (Test-Path -Path $targetPath)) {
-                            # Also check recursive search in extracted folder
-                            $foundItem = Get-ChildItem -Path $EphemeralAttDir -Recurse -Filter $fileName | Select-Object -First 1
-                            if ($foundItem) { $targetPath = $foundItem.FullName }
-                        }
-
-                        if (Test-Path -Path $targetPath) {
-                            $calcHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash.ToLower()
-                            if ($att.sha256 -and ($calcHash -ne $att.sha256.ToLower())) {
-                                throw "Attachment SHA-256 Hash Mismatch for $($att.filePath). Expected: $($att.sha256), Computed: $calcHash"
-                            }
-                            $AttachmentFilesVerified++
-                        } else {
+                        $foundItem = Get-ChildItem -Path $EphemeralAttDir -Recurse -Filter $fileName | Select-Object -First 1
+                        if (-not $foundItem) {
                             throw "Physical Attachment File Missing during restore drill: $($att.filePath)"
+                        }
+                        if ($att.sha256) {
+                            $calcHash = (Get-FileHash -Path $foundItem.FullName -Algorithm SHA256).Hash.ToLower()
+                            if ($calcHash -ne $att.sha256.ToLower()) {
+                                throw "Attachment SHA-256 DB Hash Mismatch for $($att.filePath). Expected DB SHA: $($att.sha256), Physical SHA: $calcHash"
+                            }
                         }
                     }
                 }
             }
-            Write-Log "Physical Attachment Restoration PASSED ($AttachmentFilesVerified attachments reconciled with 100% SHA-256 match)." -Level "SUCCESS"
+
+            $AttachmentPhysicalVerified = $true
+            Write-Log "Physical Attachment Restoration PASSED ($AttachmentFilesVerified files restored & reconciled with 100% SHA-256 match)." -Level "SUCCESS"
         } finally {
             if (Test-Path -Path $EphemeralAttDir) {
                 Remove-Item -Path $EphemeralAttDir -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
     } else {
-        Write-Log "Attachment archive not present or Attachment count is 0. Skipping physical file extraction step."
+        # 0 DB attachments and no archive
+        $AttachmentPhysicalVerified = $true
+        Write-Log "Attachment archive not present and DB attachment count is 0."
     }
 
     [datetime]$DrillEndTime = Get-Date

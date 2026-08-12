@@ -98,6 +98,9 @@ try {
     if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag)) {
         Write-Host "[GMS Deploy] Pre-built image pair found for [$TargetReleaseTag]. Using immutable pre-built images (--no-build)..." -ForegroundColor Green
     } else {
+        if ($UsePrebuiltImages -or ($ComposeFile -like "*prod*")) {
+            throw "Production deployment error: Prebuilt immutable image pair [gms-backend:$TargetReleaseTag, gms-frontend:$TargetReleaseTag] was not found in registry/local engine. Building on production server working tree is disabled for release immutability."
+        }
         Write-Host "[GMS Deploy] Building image pair for release [$TargetReleaseTag] from local working tree..." -ForegroundColor Cyan
         & docker compose -f $ComposeFile --env-file backend\.env build backend frontend
         if ($LASTEXITCODE -ne 0) { throw "Docker compose build failed with exit code $LASTEXITCODE." }
