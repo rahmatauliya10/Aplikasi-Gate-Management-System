@@ -1,6 +1,14 @@
 import { runProductionMigrationPreflight, checkTableExists, checkColumnExists } from './production-migration-preflight';
 import * as fs from 'fs';
 
+jest.mock('fs', () => {
+  const actualFs = jest.requireActual('fs');
+  return {
+    ...actualFs,
+    existsSync: jest.fn(actualFs.existsSync),
+  };
+});
+
 describe('Production Migration Preflight (PR-28 Hard Gate)', () => {
   let mockPrisma: any;
 
@@ -94,7 +102,7 @@ describe('Production Migration Preflight (PR-28 Hard Gate)', () => {
       { id: 'att-1', transactionId: 'tx-1', fileName: 'missing.pdf', filePath: 'non_existent_file.pdf' },
     ]);
 
-    jest.spyOn(fs, 'existsSync').mockReturnValue(false);
+    (fs.existsSync as jest.Mock).mockReturnValue(false);
 
     const report = await runProductionMigrationPreflight(mockPrisma);
 
