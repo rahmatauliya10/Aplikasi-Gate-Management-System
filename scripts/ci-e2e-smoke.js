@@ -7,7 +7,7 @@
 
 const http = require('http');
 
-const API_BASE_URL = process.env.E2E_API_URL || 'http://localhost:3000';
+const API_BASE_URL = process.env.E2E_API_URL || 'http://localhost:3001';
 const ADMIN_USERNAME = process.env.DEFAULT_ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.DEFAULT_ADMIN_PASSWORD || 'test-admin-password-12345';
 
