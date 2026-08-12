@@ -1124,7 +1124,9 @@ export class OperationLogCorrectionService {
               supersededByCorrectionId: correction.id,
             },
           });
-        } else if (targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS) {
+        } else if (
+          targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS
+        ) {
           // Reopen to Warehouse process stage
           txUpdateData.warehouseStartAt = tx.warehouseStartAt || new Date();
           txUpdateData.warehouseEndAt = null;

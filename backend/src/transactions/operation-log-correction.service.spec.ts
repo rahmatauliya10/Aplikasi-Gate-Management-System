@@ -941,7 +941,9 @@ describe('OperationLogCorrectionService', () => {
       });
 
       // Incoming check should be superseded
-      expect(mockTxClient.incomingMaterialCheck.updateMany).toHaveBeenCalledTimes(1);
+      expect(
+        mockTxClient.incomingMaterialCheck.updateMany,
+      ).toHaveBeenCalledTimes(1);
       // Vehicle QC and Warehouse should NOT be superseded for INCOMING_CHECK_PENDING
       expect(mockTxClient.qcVehicleCheck.updateMany).not.toHaveBeenCalled();
       expect(mockTxClient.warehouseProcess.updateMany).not.toHaveBeenCalled();

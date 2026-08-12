@@ -144,7 +144,9 @@ export class WarehouseController {
 
   @Post('attachments/:transactionId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Upload warehouse attachment via centralized pipeline' })
+  @ApiOperation({
+    summary: 'Upload warehouse attachment via centralized pipeline',
+  })
   @UseInterceptors(
     FileInterceptor('file', {
       fileFilter: (req: any, file: any, cb: any) => {

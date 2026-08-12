@@ -141,7 +141,9 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         },
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          findUnique: jest.fn().mockResolvedValue({ ...mockTx, status: 'INCOMING_CHECK_PASSED' }),
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ ...mockTx, status: 'INCOMING_CHECK_PASSED' }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
@@ -159,7 +161,12 @@ describe('QcService - Segregation of Duties (SoD)', () => {
       sampleWeight: 250,
     };
 
-    await service.submitIncomingCheck('tx-inc-1', dto, 'user-qc-1', qcUser as any);
+    await service.submitIncomingCheck(
+      'tx-inc-1',
+      dto,
+      'user-qc-1',
+      qcUser as any,
+    );
 
     expect(mockCreateIncoming).toHaveBeenCalledWith(
       expect.objectContaining({
