@@ -1016,7 +1016,9 @@ describe('OperationLogCorrectionService', () => {
           role: 'ADMIN',
           email: 'admin@gms.local',
         }),
-      ).rejects.toThrow('REOPEN_WORKFLOW tidak boleh digabung dengan items koreksi data');
+      ).rejects.toThrow(
+        'REOPEN_WORKFLOW tidak boleh digabung dengan items koreksi data',
+      );
     });
 
     it('should create new active WarehouseProcess when reopening to WAREHOUSE_IN_PROGRESS', async () => {
@@ -1026,27 +1028,37 @@ describe('OperationLogCorrectionService', () => {
         processType: 'GBB',
         revision: 1,
         weighbridgeRecords: [],
-        warehouseProcesses: [{ id: 'wh-1', warehouseLineageId: 'lineage-wh-1', revision: 1 }],
+        warehouseProcesses: [
+          { id: 'wh-1', warehouseLineageId: 'lineage-wh-1', revision: 1 },
+        ],
         qcVehicleChecks: [],
         incomingMaterialChecks: [],
         attachments: [],
       });
 
       const mockTxClient = {
-        operationLogCorrection: { create: jest.fn().mockResolvedValue({ id: 'cor-99' }) },
+        operationLogCorrection: {
+          create: jest.fn().mockResolvedValue({ id: 'cor-99' }),
+        },
         correctionItem: { createMany: jest.fn() },
         weighbridgeRecord: { updateMany: jest.fn() },
         qcVehicleCheck: { updateMany: jest.fn() },
         incomingMaterialCheck: { updateMany: jest.fn() },
         warehouseProcess: {
           updateMany: jest.fn(),
-          findFirst: jest.fn().mockResolvedValue({ id: 'wh-1', warehouseLineageId: 'lineage-wh-1', revision: 1 }),
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'wh-1',
+            warehouseLineageId: 'lineage-wh-1',
+            revision: 1,
+          }),
           create: jest.fn().mockResolvedValue({ id: 'wh-2' }),
         },
         attachment: { updateMany: jest.fn() },
         transaction: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       };
-      mockPrismaService.$transaction.mockImplementation((cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
 
       const dto = {
         action: CorrectionAction.REOPEN_WORKFLOW,
