@@ -709,6 +709,7 @@
                       <span class="material-icons text-sm text-amber-600">upload_file</span> Pilih Bukti Fisik / Foto:
                     </span>
                     <input type="file" @change="handleEvidenceUpload" class="text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" accept="image/*,.pdf" />
+                  </div>
                   <span v-if="correctionForm.evidencePhoto" class="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
                     ✓ File terlampir: {{ correctionForm.evidencePhoto }}
                   </span>

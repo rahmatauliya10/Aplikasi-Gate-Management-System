@@ -1079,7 +1079,9 @@ describe('OperationLogCorrectionService', () => {
           role: 'ADMIN',
           email: 'admin@gms.local',
         }),
-      ).rejects.toThrow('Unsupported processType for REOPEN_WORKFLOW: UNKNOWN_TYPE');
+      ).rejects.toThrow(
+        'Unsupported processType for REOPEN_WORKFLOW: UNKNOWN_TYPE',
+      );
     });
 
     it('should create new active WarehouseProcess when reopening to WAREHOUSE_IN_PROGRESS', async () => {
