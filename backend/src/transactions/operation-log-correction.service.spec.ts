@@ -798,6 +798,155 @@ describe('OperationLogCorrectionService', () => {
       );
     });
 
+    it('should preserve attachmentLineageId when correcting an ATTACHMENT record (P0-03)', async () => {
+      const mockTx = {
+        id: 'tx-att-1',
+        revision: 1,
+        attachments: [
+          {
+            id: 'att-1',
+            attachmentLineageId: 'lineage-uuid-12345',
+            transactionId: 'tx-att-1',
+            module: 'QC',
+            attachmentType: 'PHOTO',
+            originalName: 'foto_lama.jpg',
+            fileName: 'file-1.jpg',
+            filePath: 'qc/file-1.jpg',
+            mimeType: 'image/jpeg',
+            size: 1024,
+            description: 'Deskripsi lama',
+            uploadedById: 'user-1',
+            sha256: 'abc123sha',
+            revision: 1,
+            isCurrent: true,
+          },
+        ],
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_DESKRIPSI',
+        remark: 'Koreksi deskripsi foto',
+        expectedRevision: 1,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.ATTACHMENT,
+            targetRecordId: 'att-1',
+            fieldName: 'description',
+            newValue: 'Deskripsi baru revisi 2',
+          },
+        ],
+      };
+
+      await service.correctOperationLog('tx-att-1', dto, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(mockTxClient.attachment.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attachmentLineageId: 'lineage-uuid-12345',
+            description: 'Deskripsi baru revisi 2',
+            revision: 2,
+            isCurrent: true,
+          }),
+        }),
+      );
+    });
+
+    it('should clear cancellation fields and supersede IN weighbridge when reopening CANCELLED to REGISTERED (P0-04)', async () => {
+      const mockTx = {
+        id: 'tx-cancel-1',
+        status: 'CANCELLED',
+        processType: 'GBB',
+        cancelledAt: new Date(),
+        cancelledById: 'usr-1',
+        cancellationReason: 'Salah input vendor',
+        revision: 1,
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'REGISTERED' as any,
+        reasonCode: 'REOPEN_CANCELLED',
+        remark: 'Buka kembali transaksi batal',
+        expectedRevision: 1,
+        items: [],
+      };
+
+      await service.correctOperationLog('tx-cancel-1', dto, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'REGISTERED',
+            cancelledAt: null,
+            cancelledById: null,
+            cancellationReason: null,
+            weighInAt: null,
+          }),
+        }),
+      );
+
+      // Verify IN weighbridge record was superseded for REGISTERED reopen
+      expect(mockTxClient.weighbridgeRecord.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ type: 'IN', isCurrent: true }),
+        }),
+      );
+    });
+
+    it('should retain upstream Vehicle QC and Warehouse processes when reopening GBB to INCOMING_CHECK_PENDING (P0-04)', async () => {
+      const mockTx = {
+        id: 'tx-gbb-comp',
+        status: 'COMPLETED',
+        processType: 'GBB',
+        revision: 1,
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'INCOMING_CHECK_PENDING' as any,
+        reasonCode: 'REOPEN_INCOMING',
+        remark: 'Uji ulang sampel QC incoming GBB',
+        expectedRevision: 1,
+        items: [],
+      };
+
+      await service.correctOperationLog('tx-gbb-comp', dto, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      // Incoming check should be superseded
+      expect(mockTxClient.incomingMaterialCheck.updateMany).toHaveBeenCalledTimes(1);
+      // Vehicle QC and Warehouse should NOT be superseded for INCOMING_CHECK_PENDING
+      expect(mockTxClient.qcVehicleCheck.updateMany).not.toHaveBeenCalled();
+      expect(mockTxClient.warehouseProcess.updateMany).not.toHaveBeenCalled();
+    });
+
     it('should reject reopenTargetStatus if action is not REOPEN_WORKFLOW', async () => {
       const dto = {
         action: CorrectionAction.CORRECT_DATA,

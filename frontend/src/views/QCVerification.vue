@@ -862,7 +862,8 @@ const verifyIncomingDecision = async (truck, decisionType) => {
         color: qcForm.value.warna,
         moisture: Number(qcForm.value.kadarAir),
         foreignMatter: Number(qcForm.value.totalFM),
-        sampleWeight: Number(qcForm.value.bijiOK || 0),
+        goodBeanPercentage: Number(qcForm.value.bijiOK || 0),
+        sampleWeight: qcForm.value.sampleWeight ? Number(qcForm.value.sampleWeight) : null,
         beanCondition: Number(qcForm.value.bijiOK || 100) >= 80,
         notes: finalNote
       };
@@ -913,7 +914,8 @@ const verifyTruck = async (truck, passed) => {
           color: qcForm.value.warna,
           moisture: Number(qcForm.value.kadarAir),
           foreignMatter: Number(qcForm.value.totalFM),
-          sampleWeight: Number(qcForm.value.bijiOK || 0),
+          goodBeanPercentage: Number(qcForm.value.bijiOK || 0),
+          sampleWeight: qcForm.value.sampleWeight ? Number(qcForm.value.sampleWeight) : null,
           beanCondition: Number(qcForm.value.bijiOK || 100) >= 80,
           notes: qcForm.value.note
         })

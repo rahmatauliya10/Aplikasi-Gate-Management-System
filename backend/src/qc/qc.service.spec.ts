@@ -120,4 +120,54 @@ describe('QcService - Segregation of Duties (SoD)', () => {
 
     expect(result.success).toBe(true);
   });
+
+  it('should store goodBeanPercentage in incomingMaterialCheck.create (P1 Data Accuracy)', async () => {
+    const mockTx = {
+      id: 'tx-inc-1',
+      processType: 'GBB',
+      status: 'INCOMING_CHECK_PENDING',
+      revision: 1,
+    };
+
+    const mockCreateIncoming = jest.fn().mockResolvedValue({ id: 'inc-chk-1' });
+
+    mockPrismaService.transaction.findUnique.mockResolvedValue(mockTx);
+    mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+      cb({
+        incomingMaterialCheck: {
+          count: jest.fn().mockResolvedValue(0),
+          aggregate: jest.fn().mockResolvedValue({ _max: { revision: 1 } }),
+          create: mockCreateIncoming,
+        },
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue({ ...mockTx, status: 'INCOMING_CHECK_PASSED' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({ id: 'tsh-1' }),
+        },
+      }),
+    );
+
+    const dto = {
+      result: 'PASS' as const,
+      odor: 'Normal',
+      color: 'Normal',
+      moisture: 12.5,
+      foreignMatter: 0.5,
+      goodBeanPercentage: 89.5,
+      sampleWeight: 250,
+    };
+
+    await service.submitIncomingCheck('tx-inc-1', dto, 'user-qc-1', qcUser as any);
+
+    expect(mockCreateIncoming).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          goodBeanPercentage: 89.5,
+          sampleWeight: 250,
+        }),
+      }),
+    );
+  });
 });

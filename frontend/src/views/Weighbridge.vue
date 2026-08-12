@@ -344,34 +344,33 @@ const handleWeightSubmit = async (weight) => {
   const pType = getProcessType(truck)
   
   try {
+    let response
     if (pType === 'GBB' || pType === 'GSP') {
       if (isFirst) { 
-        const response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Gross Weight Saved: ${weight} kg. Proceed to ${pType}.`) 
+        response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
+        toast.success(`Gross Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to QC Sampling.`) 
       } else { 
-        const response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Tare Weight Saved: ${weight} kg. Proceed to Gate Out.`); selectedTruck.value = null; return 
+        response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
+        toast.success(`Tare Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to Gate Out.`) 
       }
     } else {
       if (isFirst) { 
-        const response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Tare Weight Saved: ${weight} kg. Proceed to QC.`) 
+        response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
+        toast.success(`Tare Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to QC Inspection.`) 
       } else { 
-        const response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Gross Weight Saved: ${weight} kg. Proceed to Gate Out.`); selectedTruck.value = null; return 
+        response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
+        toast.success(`Gross Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to Gate Out.`) 
       }
     }
+    
+    const updatedTruck = response?.data || response
+    if (updatedTruck) {
+      truckStore.upsertTruck(updatedTruck)
+    }
+    await truckStore.fetchTrucks()
     selectedTruck.value = null
   } catch (error) {
-    // error handled by store
+    console.error('[Weighbridge] Submit error:', error)
   } finally {
     isProcessing.value = false
   }

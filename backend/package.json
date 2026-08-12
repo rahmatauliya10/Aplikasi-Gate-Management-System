@@ -15,11 +15,11 @@
     "postinstall": "prisma generate",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",
-    "prisma:preflight": "node prisma/preflight-duplicate-cleanup.js",
+    "prisma:preflight": "npx ts-node prisma/production-migration-preflight.ts",
     "db:verify:checksums": "node scripts/check-migration-checksums.js",
     "db:backup:pre-deploy": "node scripts/run-predeploy-backup.js",
-    "db:prepare:local": "npm run prisma:preflight -- --report-only --fail-on-duplicates && npx prisma migrate deploy && npx prisma generate",
-    "db:prepare:prod": "npm run db:verify:checksums && npm run db:backup:pre-deploy && npm run prisma:preflight -- --report-only --fail-on-duplicates && npx prisma migrate deploy",
+    "db:prepare:local": "npm run prisma:preflight && npx prisma migrate deploy && npx prisma generate",
+    "db:prepare:prod": "npm run db:verify:checksums && npm run db:backup:pre-deploy && npm run prisma:preflight && npx prisma migrate deploy",
     "rebuild:local": "npm run db:prepare:local && npm run build",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -83,18 +83,23 @@
       "json",
       "ts"
     ],
-    "rootDir": "src",
+    "rootDir": ".",
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/prisma",
+      "<rootDir>/test"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.service.ts",
-      "**/*.util.ts",
-      "**/*.guard.ts",
-      "common/state-machine/**/*.ts"
+      "src/**/*.service.ts",
+      "src/**/*.util.ts",
+      "src/**/*.guard.ts",
+      "src/common/state-machine/**/*.ts"
     ],
-    "coverageDirectory": "../coverage",
+    "coverageDirectory": "./coverage",
     "testEnvironment": "node",
     "coverageThreshold": {
       "global": {

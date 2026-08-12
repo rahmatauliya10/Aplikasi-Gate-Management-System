@@ -879,6 +879,7 @@ export class OperationLogCorrectionService {
 
           const newRec = await prismaTx.attachment.create({
             data: {
+              attachmentLineageId: rec.attachmentLineageId,
               transactionId: rec.transactionId,
               module: rec.module,
               attachmentType: rec.attachmentType,
@@ -977,7 +978,7 @@ export class OperationLogCorrectionService {
         txUpdateData.netWeight = proposedGross - proposedTare;
       }
 
-      // REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records
+      // REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records based on Stage Matrix
       if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
         const targetReopenStatus =
           dto.reopenTargetStatus ||
@@ -999,55 +1000,192 @@ export class OperationLogCorrectionService {
         }
         statusUpdatedTo = targetReopenStatus;
         txUpdateData.status = targetReopenStatus;
+
+        // 1. Always clear cancellation and terminal completion fields on REOPEN
+        txUpdateData.cancelledAt = null;
+        txUpdateData.cancelledById = null;
+        txUpdateData.cancellationReason = null;
         txUpdateData.completedAt = null;
         txUpdateData.gateOutAt = null;
         txUpdateData.weighOutAt = null;
         txUpdateData.weighOutById = null;
-        txUpdateData.qcEndAt = null;
-        txUpdateData.warehouseStartAt = null;
-        txUpdateData.warehouseEndAt = null;
-        txUpdateData.qcAnalysisCompleted = false;
-        txUpdateData.qcAnalysisCompletedAt = null;
 
-        // Supersede downstream workflow records using valid correction ID FK
-        await prismaTx.qcVehicleCheck.updateMany({
-          where: { transactionId: id, isCurrent: true },
-          data: {
-            isCurrent: false,
-            supersededAt: new Date(),
-            supersededByCorrectionId: correction.id,
-          },
-        });
-        await prismaTx.incomingMaterialCheck.updateMany({
-          where: { transactionId: id, isCurrent: true },
-          data: {
-            isCurrent: false,
-            supersededAt: new Date(),
-            supersededByCorrectionId: correction.id,
-          },
-        });
-        await prismaTx.warehouseProcess.updateMany({
-          where: { transactionId: id, isCurrent: true },
-          data: {
-            isCurrent: false,
-            supersededAt: new Date(),
-            supersededByCorrectionId: correction.id,
-          },
-        });
-
-        // Also supersede OUT weighbridge record so they can weigh out again
+        // 2. Always supersede OUT weighbridge record on REOPEN
         await prismaTx.weighbridgeRecord.updateMany({
-          where: {
-            transactionId: id,
-            type: 'OUT',
-            isCurrent: true,
-          },
+          where: { transactionId: id, type: 'OUT', isCurrent: true },
           data: {
             isCurrent: false,
             supersededAt: new Date(),
             supersededByCorrectionId: correction.id,
           },
         });
+
+        // 3. Stage Matrix based on targetReopenStatus & processType
+        if (targetReopenStatus === TransactionStatus.REGISTERED) {
+          // Reset back to before weigh-in
+          txUpdateData.weighInAt = null;
+          txUpdateData.weighInById = null;
+          txUpdateData.grossWeight = null;
+          txUpdateData.tareWeight = null;
+          txUpdateData.netWeight = null;
+          txUpdateData.qcStartAt = null;
+          txUpdateData.qcEndAt = null;
+          txUpdateData.incomingQcStartAt = null;
+          txUpdateData.qcAnalysisCompleted = false;
+          txUpdateData.qcAnalysisCompletedAt = null;
+          txUpdateData.warehouseStartAt = null;
+          txUpdateData.warehouseEndAt = null;
+          txUpdateData.warehouseStartById = null;
+          txUpdateData.warehouseEndById = null;
+          txUpdateData.actualWeight = null;
+          txUpdateData.actualQuantity = null;
+          txUpdateData.warehouseUnit = null;
+
+          // Supersede IN weighbridge and all downstream checks
+          await prismaTx.weighbridgeRecord.updateMany({
+            where: { transactionId: id, type: 'IN', isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+          await prismaTx.qcVehicleCheck.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+          await prismaTx.incomingMaterialCheck.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+          await prismaTx.warehouseProcess.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+        } else if (
+          targetReopenStatus === TransactionStatus.WEIGH_IN_DONE ||
+          targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING ||
+          targetReopenStatus === TransactionStatus.QC_VEHICLE_IN_PROGRESS
+        ) {
+          // Weigh-in completed, reopening to QC Vehicle stage
+          txUpdateData.qcEndAt = null;
+          txUpdateData.incomingQcStartAt = null;
+          txUpdateData.qcAnalysisCompleted = false;
+          txUpdateData.qcAnalysisCompletedAt = null;
+          txUpdateData.warehouseStartAt = null;
+          txUpdateData.warehouseEndAt = null;
+          txUpdateData.warehouseStartById = null;
+          txUpdateData.warehouseEndById = null;
+          txUpdateData.actualWeight = null;
+          txUpdateData.actualQuantity = null;
+          txUpdateData.warehouseUnit = null;
+
+          if (targetReopenStatus === TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
+            txUpdateData.qcStartAt = tx.qcStartAt || new Date();
+          } else {
+            txUpdateData.qcStartAt = null;
+          }
+
+          if (targetReopenStatus !== TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
+            await prismaTx.qcVehicleCheck.updateMany({
+              where: { transactionId: id, isCurrent: true },
+              data: {
+                isCurrent: false,
+                supersededAt: new Date(),
+                supersededByCorrectionId: correction.id,
+              },
+            });
+          }
+          await prismaTx.incomingMaterialCheck.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+          await prismaTx.warehouseProcess.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+        } else if (targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS) {
+          // Reopen to Warehouse process stage
+          txUpdateData.warehouseStartAt = tx.warehouseStartAt || new Date();
+          txUpdateData.warehouseEndAt = null;
+          txUpdateData.warehouseEndById = null;
+          txUpdateData.actualWeight = null;
+          txUpdateData.actualQuantity = null;
+          txUpdateData.warehouseUnit = null;
+          txUpdateData.incomingQcStartAt = null;
+          txUpdateData.qcAnalysisCompleted = false;
+          txUpdateData.qcAnalysisCompletedAt = null;
+
+          await prismaTx.warehouseProcess.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+          await prismaTx.incomingMaterialCheck.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+
+          // For GBJ, Vehicle QC is downstream, so supersede it; for GBB/GSP, Vehicle QC is upstream, so retain it.
+          if (tx.processType === 'GBJ') {
+            await prismaTx.qcVehicleCheck.updateMany({
+              where: { transactionId: id, isCurrent: true },
+              data: {
+                isCurrent: false,
+                supersededAt: new Date(),
+                supersededByCorrectionId: correction.id,
+              },
+            });
+          }
+        } else if (
+          targetReopenStatus === TransactionStatus.INCOMING_CHECK_PENDING ||
+          targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
+        ) {
+          // Reopen to Incoming QC stage (GBB / GSP)
+          txUpdateData.incomingQcStartAt =
+            targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
+              ? tx.incomingQcStartAt || new Date()
+              : null;
+          txUpdateData.qcAnalysisCompleted = false;
+          txUpdateData.qcAnalysisCompletedAt = null;
+
+          // Retain upstream QcVehicleCheck & WarehouseProcess! Only supersede IncomingMaterialCheck.
+          await prismaTx.incomingMaterialCheck.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+        }
       }
 
       // Step 12: Atomic OCC Update on Transaction

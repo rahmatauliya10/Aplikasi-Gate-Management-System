@@ -5,9 +5,6 @@ ALTER TABLE "Attachment" ADD COLUMN IF NOT EXISTS "isCurrent" BOOLEAN NOT NULL D
 ALTER TABLE "Attachment" ADD COLUMN IF NOT EXISTS "supersededAt" TIMESTAMP(3);
 ALTER TABLE "Attachment" ADD COLUMN IF NOT EXISTS "supersededByCorrectionId" TEXT;
 
--- CreateIndex for Attachment
-CREATE UNIQUE INDEX IF NOT EXISTS "Attachment_transactionId_revision_key" ON "Attachment"("transactionId", "revision");
-
 -- AlterTable TransactionCorrectionItem
 ALTER TABLE "TransactionCorrectionItem" ADD COLUMN IF NOT EXISTS "replacementRecordId" TEXT;
 

@@ -49,6 +49,13 @@ export class IncomingCheckResultDto {
   @Min(0)
   sampleWeight?: number;
 
+  @ApiPropertyOptional({ description: 'Persentase Biji OK / Good Beans (%)', example: 89.5 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  goodBeanPercentage?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

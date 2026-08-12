@@ -33,6 +33,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { AttachmentsService } from '../attachments/attachments.service';
 import { WarehouseService } from './warehouse.service';
 import { StartWarehouseDto } from './dto/start-warehouse.dto';
 import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
@@ -45,7 +46,10 @@ import { SubmitIncomingCheckDto } from './dto/submit-incoming-check.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'WAREHOUSE')
 export class WarehouseController {
-  constructor(private readonly warehouseService: WarehouseService) {}
+  constructor(
+    private readonly warehouseService: WarehouseService,
+    private readonly attachmentsService: AttachmentsService,
+  ) {}
 
   @Get('queue')
   @HttpCode(HttpStatus.OK)
@@ -140,7 +144,7 @@ export class WarehouseController {
 
   @Post('attachments/:transactionId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Upload warehouse attachment' })
+  @ApiOperation({ summary: 'Upload warehouse attachment via centralized pipeline' })
   @UseInterceptors(
     FileInterceptor('file', {
       fileFilter: (req: any, file: any, cb: any) => {
@@ -155,43 +159,49 @@ export class WarehouseController {
         } else {
           cb(
             new BadRequestException(
-              'File tidak valid. Hanya JPG, PNG, dan PDF yang diizinkan (Maks 5MB).',
+              'File tidak valid. Hanya JPG, PNG, dan PDF yang diizinkan (Maks 10MB).',
             ),
             false,
           );
         }
       },
       storage: multer.diskStorage({
-        destination: './uploads/warehouse',
+        destination: (req: any, file: any, cb: any) => {
+          const uploadDir = process.env.UPLOAD_DIR || './uploads';
+          const quarantine = path.resolve(path.join(uploadDir, 'quarantine'));
+          require('fs').mkdirSync(quarantine, { recursive: true });
+          cb(null, quarantine);
+        },
         filename: (req: any, file: any, cb: any) => {
           const uniqueSuffix =
-            Date.now() + '-' + crypto.randomBytes(4).toString('hex');
-          const ext = path.extname(file.originalname);
-          cb(null, `${uniqueSuffix}${ext}`);
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(
+            null,
+            `quarantine-${uniqueSuffix}${path.extname(file.originalname)}`,
+          );
         },
       }),
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
     }),
   )
   uploadAttachment(
     @Param('transactionId') id: string,
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({
-            maxSize: 5 * 1024 * 1024,
-            message: 'Ukuran file terlalu besar (Maks 5MB)',
-          }),
-          new FileTypeValidator({
-            fileType: '.(jpeg|jpg|png|pdf)',
-          }),
-        ],
-      }),
-    )
-    file: any,
+    @UploadedFile() file: any,
     @Body() dto: any,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.warehouseService.uploadAttachment(id, file, dto, user);
+    return this.attachmentsService.processQuarantineUpload(
+      file,
+      id,
+      {
+        module: 'warehouse',
+        attachmentType: dto?.attachmentType,
+        description: dto?.description,
+      },
+      user,
+    );
   }
 
   @Get('history')

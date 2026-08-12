@@ -78,7 +78,7 @@ export class AttachmentsController {
   uploadAttachment(
     @Param('transactionId') transactionId: string,
     @UploadedFile() file: any,
-    @Body() dto: any,
+    @Body() dto: UploadAttachmentDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.attachmentsService.processQuarantineUpload(

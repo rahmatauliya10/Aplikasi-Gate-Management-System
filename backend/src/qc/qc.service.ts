@@ -359,6 +359,7 @@ export class QcService {
           foreignMatter: dto.foreignMatter,
           beanCondition: this.booleanToCheckResult(dto.beanCondition),
           sampleWeight: dto.sampleWeight,
+          goodBeanPercentage: dto.goodBeanPercentage,
           itemCondition: this.booleanToCheckResult(dto.itemCondition),
           packagingCondition: this.booleanToCheckResult(dto.packagingCondition),
           quantityCheck: this.booleanToCheckResult(dto.quantityCheck),

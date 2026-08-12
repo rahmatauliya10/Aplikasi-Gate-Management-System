@@ -38,12 +38,17 @@ import { QcAttachmentDto } from './dto/qc-attachment.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { AttachmentsService } from '../attachments/attachments.service';
+
 @ApiTags('QC')
 @ApiBearerAuth()
 @Controller('qc')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class QcController {
-  constructor(private qcService: QcService) {}
+  constructor(
+    private qcService: QcService,
+    private attachmentsService: AttachmentsService,
+  ) {}
 
   @Get('queue')
   @Roles('QC')
@@ -60,10 +65,10 @@ export class QcController {
     @Body() dto: StartQcDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.qcService.startQc(id, dto, user.id, user);
+    return this.qcService.startQc(id, dto, user);
   }
 
-  @Post('vehicle-result/:transactionId')
+  @Post('vehicle-check/:transactionId')
   @Roles('QC')
   @ApiOperation({ summary: 'Submit vehicle check result' })
   submitVehicleCheck(
@@ -74,9 +79,9 @@ export class QcController {
     return this.qcService.submitVehicleCheck(id, dto, user.id, user);
   }
 
-  @Post('incoming-result/:transactionId')
+  @Post('incoming-check/:transactionId')
   @Roles('QC')
-  @ApiOperation({ summary: 'Submit incoming material check result' })
+  @ApiOperation({ summary: 'Submit incoming check result' })
   submitIncomingCheck(
     @Param('transactionId') id: string,
     @Body() dto: IncomingCheckResultDto,
@@ -104,7 +109,7 @@ export class QcController {
 
   @Post('attachments/:transactionId')
   @Roles('QC')
-  @ApiOperation({ summary: 'Upload QC attachment' })
+  @ApiOperation({ summary: 'Upload QC attachment via centralized pipeline' })
   @UseInterceptors(
     FileInterceptor('file', {
       fileFilter: (req: any, file: any, cb: any) => {
@@ -119,43 +124,49 @@ export class QcController {
         } else {
           cb(
             new BadRequestException(
-              'File tidak valid. Hanya JPG, PNG, dan PDF yang diizinkan (Maks 5MB).',
+              'File tidak valid. Hanya JPG, PNG, dan PDF yang diizinkan (Maks 10MB).',
             ),
             false,
           );
         }
       },
       storage: multer.diskStorage({
-        destination: './uploads/qc',
+        destination: (req: any, file: any, cb: any) => {
+          const uploadDir = process.env.UPLOAD_DIR || './uploads';
+          const quarantine = path.resolve(path.join(uploadDir, 'quarantine'));
+          require('fs').mkdirSync(quarantine, { recursive: true });
+          cb(null, quarantine);
+        },
         filename: (req: any, file: any, cb: any) => {
           const uniqueSuffix =
-            Date.now() + '-' + crypto.randomBytes(4).toString('hex');
-          const ext = path.extname(file.originalname);
-          cb(null, `${uniqueSuffix}${ext}`);
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(
+            null,
+            `quarantine-${uniqueSuffix}${path.extname(file.originalname)}`,
+          );
         },
       }),
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
     }),
   )
   uploadAttachment(
     @Param('transactionId') id: string,
-    @UploadedFile(
-      new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({
-            maxSize: 5 * 1024 * 1024,
-            message: 'Ukuran file terlalu besar (Maks 5MB)',
-          }),
-          new FileTypeValidator({
-            fileType: '.(jpeg|jpg|png|pdf)',
-          }),
-        ],
-      }),
-    )
-    file: any,
+    @UploadedFile() file: any,
     @Body() dto: QcAttachmentDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.qcService.uploadAttachment(id, file, dto, user.id, user);
+    return this.attachmentsService.processQuarantineUpload(
+      file,
+      id,
+      {
+        module: 'qc',
+        attachmentType: dto?.attachmentType as any,
+        description: dto?.description,
+      },
+      user,
+    );
   }
 
   @Post('analysis/complete/:transactionId')

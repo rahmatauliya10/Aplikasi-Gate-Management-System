@@ -24,3 +24,7 @@ ON "Attachment"("transactionId", "isCurrent");
 
 CREATE INDEX IF NOT EXISTS "Attachment_attachmentLineageId_idx" 
 ON "Attachment"("attachmentLineageId");
+
+-- 7. Add partial unique index enforcing max 1 active current revision per lineage
+CREATE UNIQUE INDEX IF NOT EXISTS "Attachment_attachmentLineageId_isCurrent_key" 
+ON "Attachment"("attachmentLineageId") WHERE "isCurrent" = true;
