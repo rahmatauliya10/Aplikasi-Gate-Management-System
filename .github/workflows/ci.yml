@@ -172,6 +172,7 @@ jobs:
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
         run: |
           echo "Initializing full-stack staging gate environment..."
+          cp backend/.env.example backend/.env 2>/dev/null || touch backend/.env
           docker compose -f docker-compose.yml up -d --build
           sleep 10
           docker compose ps
