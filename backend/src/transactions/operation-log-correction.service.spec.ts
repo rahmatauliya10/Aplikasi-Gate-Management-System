@@ -1023,17 +1023,16 @@ describe('OperationLogCorrectionService', () => {
     });
 
     it('should reject REOPEN_WORKFLOW to INCOMING_CHECK_PENDING for GBJ transaction', async () => {
-      mockPrismaService.transaction.findUnique.mockResolvedValue({
+      const mockTx = {
         id: 'tx-gbj-1',
         status: 'COMPLETED',
         processType: 'GBJ',
         revision: 1,
-        weighbridgeRecords: [],
-        warehouseProcesses: [],
-        qcVehicleChecks: [],
-        incomingMaterialChecks: [],
-        attachments: [],
-      });
+      };
+      const mockTxClient = createMockTxClient(mockTx);
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
 
       const dto = {
         action: CorrectionAction.REOPEN_WORKFLOW,
