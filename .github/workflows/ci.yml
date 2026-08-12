@@ -160,6 +160,16 @@ jobs:
           node-version: '22'
 
       - name: Verify Full-Stack Docker Stack Boot & API Smoke Gate
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword_staging_gate_ci
+          POSTGRES_DB: gms
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
+          DEFAULT_QC_PASSWORD: test-qc-password-12345
+          DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
+          DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
         run: |
           echo "Initializing full-stack staging gate environment..."
           docker compose -f docker-compose.yml up -d --build
