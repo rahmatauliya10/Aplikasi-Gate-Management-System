@@ -382,7 +382,7 @@ async function runE2ESmoke() {
   const gbjWhComp = await request(`/api/warehouse/complete/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
     actualWeight: 14000,
     actualQuantity: 500,
-    unit: 'BOX',
+    unit: 'PALLET',
     remarks: 'GBJ Loading finished',
   });
   if (!isSuccessStatus(gbjWhComp.statusCode)) {
