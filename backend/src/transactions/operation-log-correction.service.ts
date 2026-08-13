@@ -1042,7 +1042,10 @@ export class OperationLogCorrectionService {
             ? TransactionStatus.QC_VEHICLE_PASSED
             : targetReopenStatus;
 
-        if (!allowedReopenTargets.includes(effectiveTarget) && targetReopenStatus !== TransactionStatus.WAREHOUSE_IN_PROGRESS) {
+        if (
+          !allowedReopenTargets.includes(effectiveTarget) &&
+          targetReopenStatus !== TransactionStatus.WAREHOUSE_IN_PROGRESS
+        ) {
           throw new BadRequestException(
             `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW transaksi tipe ${processType}. Target status harus sesuai dengan workflow matriks tipe proses.`,
           );
@@ -1164,9 +1167,7 @@ export class OperationLogCorrectionService {
               supersededByCorrectionId: correction.id,
             },
           });
-        } else if (
-          effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED
-        ) {
+        } else if (effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED) {
           // Reopen to Warehouse ready stage (QC_VEHICLE_PASSED)
           // Clears warehouse fields so actual Warehouse user triggers startWarehouse() for clean SoD & audit attribution
           txUpdateData.warehouseStartAt = null;

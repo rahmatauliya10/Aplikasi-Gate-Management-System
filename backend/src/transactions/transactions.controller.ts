@@ -69,11 +69,7 @@ export class TransactionsController {
           'QC_VEHICLE_PASSED',
           'INCOMING_CHECK_PENDING',
         ],
-        GBJ: [
-          'REGISTERED',
-          'QC_VEHICLE_PENDING',
-          'QC_VEHICLE_PASSED',
-        ],
+        GBJ: ['REGISTERED', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_PASSED'],
       },
     };
   }
