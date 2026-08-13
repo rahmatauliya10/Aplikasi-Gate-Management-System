@@ -335,7 +335,7 @@ async function runE2ESmoke() {
   log(`  7. GSP Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
 
 
-  // Step 6: FULL GBJ WORKFLOW (Check-In -> QC Vehicle -> Warehouse Loading -> Weigh Out -> Gate Out -> COMPLETED)
+  // Step 6: FULL GBJ WORKFLOW (Check-In -> Weigh In -> QC Vehicle -> Warehouse Loading -> Weigh Out -> Gate Out -> COMPLETED)
   log(`[WORKFLOW 3/3] Executing Complete GBJ Lifecycle to COMPLETED...`);
 
   // 6a. Check-In
@@ -356,7 +356,17 @@ async function runE2ESmoke() {
   const gbjTxId = gbjRes.body.data.id;
   log(`  1. GBJ Check-In SUCCESS (ID: ${gbjTxId}, Status: REGISTERED)`);
 
-  // 6b. QC Vehicle Check
+  // 6b. Weigh In (Tare Weight for empty truck entering to load finished product)
+  const gbjWbIn = await request(`/api/weighbridge/in/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 4000,
+    ticketNumber: `WB-IN-GBJ-${timestampSuffix}`,
+  });
+  if (!isSuccessStatus(gbjWbIn.statusCode)) {
+    throw new Error(`GBJ Weigh-In FAILED: Status ${gbjWbIn.statusCode}, Body: ${JSON.stringify(gbjWbIn.body)}`);
+  }
+  log(`  2. GBJ Weigh-In SUCCESS (Tare: 4,000 kg, Status: QC_VEHICLE_PENDING)`);
+
+  // 6c. QC Vehicle Check
   const gbjQcV = await request(`/api/qc/vehicle-result/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
     result: 'PASS',
     vehicleCleanliness: true,
@@ -365,9 +375,9 @@ async function runE2ESmoke() {
   if (!isSuccessStatus(gbjQcV.statusCode)) {
     throw new Error(`GBJ QC Vehicle Check FAILED: Status ${gbjQcV.statusCode}, Body: ${JSON.stringify(gbjQcV.body)}`);
   }
-  log(`  2. GBJ QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
+  log(`  3. GBJ QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
 
-  // 6c. Warehouse Loading Start & Complete
+  // 6d. Warehouse Loading Start & Complete
   await request(`/api/warehouse/start/${gbjTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GBJ loading' });
   const gbjWhComp = await request(`/api/warehouse/complete/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
     actualWeight: 14000,
@@ -378,9 +388,9 @@ async function runE2ESmoke() {
   if (!isSuccessStatus(gbjWhComp.statusCode)) {
     throw new Error(`GBJ Warehouse Complete FAILED: Status ${gbjWhComp.statusCode}, Body: ${JSON.stringify(gbjWhComp.body)}`);
   }
-  log(`  3. GBJ Warehouse Loading SUCCESS (Status: WAREHOUSE_DONE)`);
+  log(`  4. GBJ Warehouse Loading SUCCESS (Status: WAREHOUSE_DONE)`);
 
-  // 6d. Weigh Out
+  // 6e. Weigh Out
   const gbjWbOut = await request(`/api/weighbridge/out/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
     weight: 14000,
     ticketNumber: `WB-OUT-GBJ-${timestampSuffix}`,
@@ -388,14 +398,14 @@ async function runE2ESmoke() {
   if (!isSuccessStatus(gbjWbOut.statusCode)) {
     throw new Error(`GBJ Weigh-Out FAILED: Status ${gbjWbOut.statusCode}, Body: ${JSON.stringify(gbjWbOut.body)}`);
   }
-  log(`  4. GBJ Weigh-Out SUCCESS (Gross: 14,000 kg, Status: WEIGH_OUT_DONE)`);
+  log(`  5. GBJ Weigh-Out SUCCESS (Gross: 14,000 kg, Net: 10,000 kg, Status: WEIGH_OUT_DONE)`);
 
-  // 6e. Gate Check-Out
+  // 6f. Gate Check-Out
   const gbjCheckOut = await request(`/api/gate/check-out/${gbjTxId}`, { method: 'POST', headers: authHeader });
   if (!isSuccessStatus(gbjCheckOut.statusCode)) {
     throw new Error(`GBJ Gate Check-Out FAILED: Status ${gbjCheckOut.statusCode}, Body: ${JSON.stringify(gbjCheckOut.body)}`);
   }
-  log(`  5. GBJ Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
+  log(`  6. GBJ Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
 
 
   // Step 7: REOPEN Matrix Business Rule Enforcement (GBJ + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400)
