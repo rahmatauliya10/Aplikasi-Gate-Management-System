@@ -116,15 +116,10 @@ const validateDomain = (
     ].includes(fieldName)
   ) {
     const num = Number(newValue);
-    if (isNaN(num) || num < 0)
+    if (isNaN(num) || num <= 0)
       throw new BadRequestException(
-        `Field ${fieldName} harus berupa angka positif.`,
+        `Field ${fieldName} harus berupa angka positif lebih dari 0.`,
       );
-    if (fieldName === 'sampleWeight' && num <= 0) {
-      throw new BadRequestException(
-        `Field sampleWeight harus berupa angka lebih dari 0 gram.`,
-      );
-    }
   }
   if (['moisture', 'foreignMatter', 'goodBeanPercentage'].includes(fieldName)) {
     const num = Number(newValue);
@@ -1017,19 +1012,19 @@ export class OperationLogCorrectionService {
           GBB: [
             TransactionStatus.REGISTERED,
             TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            TransactionStatus.QC_VEHICLE_PASSED,
             TransactionStatus.INCOMING_CHECK_PENDING,
           ],
           GSP: [
             TransactionStatus.REGISTERED,
             TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            TransactionStatus.QC_VEHICLE_PASSED,
             TransactionStatus.INCOMING_CHECK_PENDING,
           ],
           GBJ: [
             TransactionStatus.REGISTERED,
             TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            TransactionStatus.QC_VEHICLE_PASSED,
           ],
         };
 
@@ -1041,13 +1036,19 @@ export class OperationLogCorrectionService {
           );
         }
 
-        if (!allowedReopenTargets.includes(targetReopenStatus)) {
+        // Accept QC_VEHICLE_PASSED or legacy WAREHOUSE_IN_PROGRESS mapping to QC_VEHICLE_PASSED
+        const effectiveTarget =
+          targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS
+            ? TransactionStatus.QC_VEHICLE_PASSED
+            : targetReopenStatus;
+
+        if (!allowedReopenTargets.includes(effectiveTarget) && targetReopenStatus !== TransactionStatus.WAREHOUSE_IN_PROGRESS) {
           throw new BadRequestException(
             `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW transaksi tipe ${processType}. Target status harus sesuai dengan workflow matriks tipe proses.`,
           );
         }
-        statusUpdatedTo = targetReopenStatus;
-        txUpdateData.status = targetReopenStatus;
+        statusUpdatedTo = effectiveTarget;
+        txUpdateData.status = effectiveTarget;
 
         // 1. Always clear cancellation and terminal completion fields on REOPEN
         txUpdateData.cancelledAt = null;
@@ -1164,10 +1165,12 @@ export class OperationLogCorrectionService {
             },
           });
         } else if (
-          targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS
+          effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED
         ) {
-          // Reopen to Warehouse process stage
-          txUpdateData.warehouseStartAt = tx.warehouseStartAt || new Date();
+          // Reopen to Warehouse ready stage (QC_VEHICLE_PASSED)
+          // Clears warehouse fields so actual Warehouse user triggers startWarehouse() for clean SoD & audit attribution
+          txUpdateData.warehouseStartAt = null;
+          txUpdateData.warehouseStartById = null;
           txUpdateData.warehouseEndAt = null;
           txUpdateData.warehouseEndById = null;
           txUpdateData.actualWeight = null;
@@ -1191,25 +1194,6 @@ export class OperationLogCorrectionService {
               isCurrent: false,
               supersededAt: new Date(),
               supersededByCorrectionId: correction.id,
-            },
-          });
-
-          // Upstream checks (Weigh In, QC Vehicle for GBJ/GBB/GSP) are retained!
-
-          const latestWh = await prismaTx.warehouseProcess.findFirst({
-            where: { transactionId: id },
-            orderBy: { revision: 'desc' },
-          });
-          const nextRevision = (latestWh?.revision || 0) + 1;
-
-          await prismaTx.warehouseProcess.create({
-            data: {
-              transactionId: id,
-              processType: tx.processType,
-              revision: nextRevision,
-              isCurrent: true,
-              startById: user?.id,
-              startAt: txUpdateData.warehouseStartAt || new Date(),
             },
           });
         } else if (

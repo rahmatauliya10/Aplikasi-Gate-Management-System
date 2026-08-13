@@ -72,10 +72,13 @@ describe('AuthService Refresh Token Rotation', () => {
       UnauthorizedException,
     );
 
-    // Verify rotation security: it must nullify the stored hash
+    // Verify rotation security: it must nullify the stored hash and increment tokenVersion to revoke active access tokens
     expect(updateSpy).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { refreshTokenHash: null },
+      data: {
+        refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
+      },
     });
   });
 });

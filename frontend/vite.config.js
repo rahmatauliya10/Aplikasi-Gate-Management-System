@@ -12,7 +12,7 @@ export default defineConfig({
   build: {
     target: 'es2020',
     cssCodeSplit: true,
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 450,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -20,10 +20,16 @@ export default defineConfig({
             if (id.includes('vue') || id.includes('pinia') || id.includes('vue-router')) {
               return 'vendor-vue';
             }
-            if (id.includes('axios') || id.includes('lucide')) {
+            if (id.includes('chart.js') || id.includes('vue-chartjs')) {
+              return 'vendor-charts';
+            }
+            if (id.includes('lucide') || id.includes('@heroicons') || id.includes('material-icons')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('axios') || id.includes('lodash') || id.includes('dayjs')) {
               return 'vendor-utils';
             }
-            return 'vendor';
+            return 'vendor-core';
           }
         }
       }

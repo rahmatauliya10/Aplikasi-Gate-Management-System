@@ -273,10 +273,23 @@ export class AuthService {
       this.logger.warn(
         `Refresh token: token mismatch for ${payload.email} — possible token reuse attack`,
       );
-      // Invalidate all tokens (security measure)
+      // Invalidate all active tokens by clearing refresh hash AND incrementing tokenVersion (security containment)
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { refreshTokenHash: null },
+        data: {
+          refreshTokenHash: null,
+          tokenVersion: {
+            increment: 1,
+          },
+        },
+      });
+      await this.activityLogsService.logAction({
+        userId: user.id,
+        action: 'REFRESH_TOKEN_REUSE_DETECTED',
+        module: 'AUTH',
+        referenceId: user.id,
+        description: `Possible refresh token reuse attack detected for user ${user.email}. All sessions revoked.`,
+        status: 'FAILED',
       });
       throw new UnauthorizedException({
         success: false,

@@ -28,7 +28,7 @@ services:
         max-file: "5"
 
   frontend:
-    image: gms-frontend:${RELEASE_TAG:?RELEASE_TAG wajib diisi}
+    image: ${FRONTEND_IMAGE:?FRONTEND_IMAGE environment variable is required and must specify immutable image digest (@sha256)}
     build: 
       context: ./frontend
       dockerfile: Dockerfile
@@ -50,7 +50,7 @@ services:
         max-file: "5"
 
   backend:
-    image: gms-backend:${RELEASE_TAG:?RELEASE_TAG wajib diisi}
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE environment variable is required and must specify immutable image digest (@sha256)}
     build:
       context: ./backend
       dockerfile: Dockerfile

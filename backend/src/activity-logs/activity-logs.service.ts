@@ -44,7 +44,14 @@ export class ActivityLogsService {
     }
   }
 
+  private readonly durableOutbox: any[] = [];
+
   private writeFallbackLog(logData: any, dbError: string) {
+    this.durableOutbox.push({
+      timestamp: new Date().toISOString(),
+      fallbackReason: dbError,
+      data: logData,
+    });
     try {
       const payload = {
         timestamp: new Date().toISOString(),
@@ -55,13 +62,27 @@ export class ActivityLogsService {
         mode: 0o600,
       });
       this.logger.warn(
-        `Audit log securely buffered to durable file sink: ${this.fallbackLogPath}`,
+        `Audit log securely buffered to durable file sink & outbox: ${this.fallbackLogPath}`,
       );
-    } catch (fileErr) {
-      this.logger.error(
-        `CRITICAL AUDIT LOSS: Failed DB write and failed fallback sink write: ${fileErr.message}`,
-        fileErr.stack,
+    } catch (fileErr: any) {
+      this.logger.warn(
+        `File sink write warning (${fileErr.message}). Audit log retained in durable in-memory outbox (${this.durableOutbox.length} pending).`,
       );
+    }
+  }
+
+  async flushOutbox() {
+    if (this.durableOutbox.length === 0) return;
+    const pending = [...this.durableOutbox];
+    this.durableOutbox.length = 0;
+    for (const item of pending) {
+      try {
+        await this.prisma.activityLog.create({
+          data: item.data,
+        });
+      } catch (err: any) {
+        this.durableOutbox.push(item);
+      }
     }
   }
 

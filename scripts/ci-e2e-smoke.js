@@ -408,8 +408,48 @@ async function runE2ESmoke() {
   log(`  6. GBJ Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
 
 
-  // Step 7: REOPEN Matrix Business Rule Enforcement (GBJ + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400)
-  log(`Testing REOPEN business matrix fail-closed enforcement on real GBJ transaction (${gbjTxId})...`);
+  // Step 7: REOPEN Matrix Business Rule Enforcement
+  // 7a. Valid REOPEN to QC_VEHICLE_PASSED (Warehouse Ready stage) on COMPLETED GBJ transaction
+  log(`Testing valid REOPEN to QC_VEHICLE_PASSED on COMPLETED GBJ transaction (${gbjTxId})...`);
+  const validReopenRes = await request(
+    `/api/transactions/${gbjTxId}/operation-log-corrections`,
+    { method: 'POST', headers: authHeader },
+    {
+      action: 'REOPEN_WORKFLOW',
+      reasonCode: 'SALAH_INPUT_ANGKA',
+      remark: 'E2E Valid REOPEN to Warehouse Ready stage',
+      expectedRevision: 1,
+      reopenTargetStatus: 'QC_VEHICLE_PASSED',
+    }
+  );
+
+  if (!isSuccessStatus(validReopenRes.statusCode)) {
+    throw new Error(
+      `Valid REOPEN FAILED! Expected 200/201 for GBJ QC_VEHICLE_PASSED target, but received HTTP ${validReopenRes.statusCode}. Body: ${JSON.stringify(validReopenRes.body)}`
+    );
+  }
+  log(`  7a. Valid REOPEN to QC_VEHICLE_PASSED SUCCESS`, 'SUCCESS');
+
+  // Rerun Warehouse Start, Complete, Weigh Out, Check Out
+  const whStartRes = await request(`/api/warehouse/start/${gbjTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun Warehouse loading' });
+  if (!isSuccessStatus(whStartRes.statusCode)) {
+    throw new Error(`Rerun Warehouse Start FAILED: HTTP ${whStartRes.statusCode}, Body: ${JSON.stringify(whStartRes.body)}`);
+  }
+  await request(`/api/warehouse/complete/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
+    actualWeight: 14000,
+    actualQuantity: 500,
+    unit: 'PALLET',
+    remarks: 'Rerun GBJ Loading finished',
+  });
+  await request(`/api/weighbridge/out/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 14000,
+    ticketNumber: `WB-OUT-GBJ-RE-${timestampSuffix}`,
+  });
+  await request(`/api/gate/check-out/${gbjTxId}`, { method: 'POST', headers: authHeader });
+  log(`  7b. Rerun Workflow to COMPLETED SUCCESS`, 'SUCCESS');
+
+  // 7c. Fail-closed invalid REOPEN check (GBJ + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400)
+  log(`Testing REOPEN fail-closed enforcement (GBJ + INCOMING_CHECK_PENDING)...`);
   const reopenRes = await request(
     `/api/transactions/${gbjTxId}/operation-log-corrections`,
     {
@@ -418,8 +458,9 @@ async function runE2ESmoke() {
     },
     {
       action: 'REOPEN_WORKFLOW',
-      reason: 'E2E Matrix Fail-Closed Business Rule Verification',
-      expectedVersion: 1,
+      reasonCode: 'SALAH_INPUT_ANGKA',
+      remark: 'E2E Matrix Fail-Closed Business Rule Verification',
+      expectedRevision: 1,
       reopenTargetStatus: 'INCOMING_CHECK_PENDING',
     }
   );

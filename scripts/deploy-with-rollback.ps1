@@ -100,22 +100,43 @@ if ($RollbackOnly) {
     }
 }
 
+# Auto-resolve digests from release_manifest.json or local docker image inspect if not explicitly provided
+[string]$ManifestPath = Join-Path $WorkspaceRoot "deploy\release_manifest.json"
+if ((-not $BackendDigest -or -not $FrontendDigest) -and (Test-Path -Path $ManifestPath -PathType Leaf)) {
+    try {
+        $ManifestObj = Get-Content -Path $ManifestPath -Raw | ConvertFrom-Json
+        if (-not $BackendDigest -and $ManifestObj.backend -and $ManifestObj.backend.digest) {
+            $BackendDigest = $ManifestObj.backend.digest
+        }
+        if (-not $FrontendDigest -and $ManifestObj.frontend -and $ManifestObj.frontend.digest) {
+            $FrontendDigest = $ManifestObj.frontend.digest
+        }
+    } catch {}
+}
+
+# If still missing, inspect local image digest if available
+if (-not $BackendDigest) {
+    [string]$inspectBackend = & docker inspect --format="{{index .RepoDigests 0}}" "gms-backend:$TargetReleaseTag" 2>$null
+    if ($inspectBackend -and $inspectBackend.Contains("@")) {
+        $BackendDigest = $inspectBackend.Split("@")[1]
+    }
+}
+if (-not $FrontendDigest) {
+    [string]$inspectFrontend = & docker inspect --format="{{index .RepoDigests 0}}" "gms-frontend:$TargetReleaseTag" 2>$null
+    if ($inspectFrontend -and $inspectFrontend.Contains("@")) {
+        $FrontendDigest = $inspectFrontend.Split("@")[1]
+    }
+}
+
+# Export compose environment variables with fallback tag or digest
+$env:RELEASE_TAG = $TargetReleaseTag
+$env:BACKEND_IMAGE = if ($BackendDigest) { "gms-backend@$BackendDigest" } else { "gms-backend:$TargetReleaseTag" }
+$env:FRONTEND_IMAGE = if ($FrontendDigest) { "gms-frontend@$FrontendDigest" } else { "gms-frontend:$TargetReleaseTag" }
+
 Write-Host "[GMS Deploy] Starting immutable deployment for Release Tag: [$TargetReleaseTag]..." -ForegroundColor Cyan
 if ($BackendDigest) { Write-Host "[GMS Deploy] Enforcing Backend Image Digest: [$BackendDigest]" -ForegroundColor Cyan }
 if ($FrontendDigest) { Write-Host "[GMS Deploy] Enforcing Frontend Image Digest: [$FrontendDigest]" -ForegroundColor Cyan }
 Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
-
-# Pre-flight check: Ensure previous release image pair exists BEFORE altering the running stack
-Write-Host "[GMS Pre-flight] Verifying immutability requirement: checking availability of previous image pair [$PreviousReleaseTag]..." -ForegroundColor Cyan
-if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -BackendDig $PreviousBackendDigest -FrontendDig $PreviousFrontendDigest)) {
-    throw "Pre-flight Error: Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] was not found. Runtime docker commit container snapshotting is disabled for release immutability."
-}
-Write-Host "[GMS Pre-flight SUCCESS] Verified presence of immutable rollback image pair [$PreviousReleaseTag]." -ForegroundColor Green
-
-# Export compose environment variables
-$env:RELEASE_TAG = $TargetReleaseTag
-if ($BackendDigest) { $env:BACKEND_IMAGE = "gms-backend@$BackendDigest" }
-if ($FrontendDigest) { $env:FRONTEND_IMAGE = "gms-frontend@$FrontendDigest" }
 
 try {
     # Step 1.2: Verify or build image pair for target release

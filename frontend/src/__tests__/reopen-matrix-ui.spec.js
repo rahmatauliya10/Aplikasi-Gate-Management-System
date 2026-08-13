@@ -9,28 +9,20 @@ import { describe, it, expect } from 'vitest'
 const REOPEN_ALLOWED_TARGETS = {
   GBB: [
     'REGISTERED',
-    'WEIGH_IN_DONE',
     'QC_VEHICLE_PENDING',
-    'QC_VEHICLE_IN_PROGRESS',
+    'QC_VEHICLE_PASSED',
     'INCOMING_CHECK_PENDING',
-    'INCOMING_CHECK_IN_PROGRESS',
-    'WAREHOUSE_IN_PROGRESS',
   ],
   GSP: [
     'REGISTERED',
-    'WEIGH_IN_DONE',
     'QC_VEHICLE_PENDING',
-    'QC_VEHICLE_IN_PROGRESS',
+    'QC_VEHICLE_PASSED',
     'INCOMING_CHECK_PENDING',
-    'INCOMING_CHECK_IN_PROGRESS',
-    'WAREHOUSE_IN_PROGRESS',
   ],
   GBJ: [
     'REGISTERED',
-    'WEIGH_IN_DONE',
     'QC_VEHICLE_PENDING',
-    'QC_VEHICLE_IN_PROGRESS',
-    'WAREHOUSE_IN_PROGRESS',
+    'QC_VEHICLE_PASSED',
   ]
 }
 
@@ -40,31 +32,28 @@ function getAllowedReopenTargets(processType) {
 }
 
 describe('Frontend REOPEN Matrix Contract', () => {
-  it('should include Incoming QC stages for GBB process type', () => {
+  it('should include Incoming QC stage for GBB process type', () => {
     const targets = getAllowedReopenTargets('GBB')
     expect(targets).toContain('INCOMING_CHECK_PENDING')
-    expect(targets).toContain('INCOMING_CHECK_IN_PROGRESS')
-    expect(targets).toHaveLength(7)
+    expect(targets).toContain('QC_VEHICLE_PASSED')
+    expect(targets).toHaveLength(4)
   })
 
-  it('should include Incoming QC stages for GSP process type', () => {
+  it('should include Incoming QC stage for GSP process type', () => {
     const targets = getAllowedReopenTargets('GSP')
     expect(targets).toContain('INCOMING_CHECK_PENDING')
-    expect(targets).toContain('INCOMING_CHECK_IN_PROGRESS')
-    expect(targets).toHaveLength(7)
+    expect(targets).toContain('QC_VEHICLE_PASSED')
+    expect(targets).toHaveLength(4)
   })
 
-  it('should EXCLUDE Incoming QC stages for GBJ process type', () => {
+  it('should EXCLUDE Incoming QC stage for GBJ process type', () => {
     const targets = getAllowedReopenTargets('GBJ')
     expect(targets).not.toContain('INCOMING_CHECK_PENDING')
-    expect(targets).not.toContain('INCOMING_CHECK_IN_PROGRESS')
-    expect(targets).toHaveLength(5)
+    expect(targets).toHaveLength(3)
     expect(targets).toEqual([
       'REGISTERED',
-      'WEIGH_IN_DONE',
       'QC_VEHICLE_PENDING',
-      'QC_VEHICLE_IN_PROGRESS',
-      'WAREHOUSE_IN_PROGRESS'
+      'QC_VEHICLE_PASSED'
     ])
   })
 

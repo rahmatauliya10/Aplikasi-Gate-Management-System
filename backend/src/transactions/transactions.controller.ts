@@ -45,6 +45,39 @@ export class TransactionsController {
     return this.transactionsService.findAll(query, user);
   }
 
+  @Get('reopen-matrix')
+  @ApiOperation({
+    summary: 'Get canonical REOPEN target matrix by process type',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Allowed REOPEN targets map retrieved',
+  })
+  getReopenMatrix() {
+    return {
+      success: true,
+      data: {
+        GBB: [
+          'REGISTERED',
+          'QC_VEHICLE_PENDING',
+          'QC_VEHICLE_PASSED',
+          'INCOMING_CHECK_PENDING',
+        ],
+        GSP: [
+          'REGISTERED',
+          'QC_VEHICLE_PENDING',
+          'QC_VEHICLE_PASSED',
+          'INCOMING_CHECK_PENDING',
+        ],
+        GBJ: [
+          'REGISTERED',
+          'QC_VEHICLE_PENDING',
+          'QC_VEHICLE_PASSED',
+        ],
+      },
+    };
+  }
+
   @Get('active')
   @ApiOperation({
     summary: 'Get all active (non-completed/cancelled) transactions',

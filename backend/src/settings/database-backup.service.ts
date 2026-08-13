@@ -1100,7 +1100,78 @@ export class DatabaseBackupService
       });
     }
 
-    // 5. Perform pg_restore execution with --single-transaction and --exit-on-error
+    // 5. Pre-verify and stage physical attachments before running pg_restore (Fail-Closed Guard)
+    let restoredAttachmentsCount = 0;
+    let archiveContent: any = null;
+    let stagingDir = '';
+    const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
+
+    if (matchedManifest.artifacts.attachmentsArchive) {
+      const archivePath = path.join(
+        this.localBackupDir,
+        matchedManifest.artifacts.attachmentsArchive,
+      );
+      if (fs.existsSync(archivePath)) {
+        try {
+          archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+        } catch (e: any) {
+          throw new BadRequestException({
+            success: false,
+            message: `Berkas arsip lampiran tidak dapat dibaca (${e.message}). Pemulihan dibatalkan (Fail-Closed).`,
+          });
+        }
+
+        if (archiveContent.files && Array.isArray(archiveContent.files)) {
+          stagingDir = path.join(uploadDir, `_staging_restore_${Date.now()}`);
+          if (fs.existsSync(stagingDir)) {
+            fs.rmSync(stagingDir, { recursive: true, force: true });
+          }
+          fs.mkdirSync(stagingDir, { recursive: true });
+
+          try {
+            for (const file of archiveContent.files) {
+              const relPath = file.relativePath || file.fileName;
+              if (relPath && file.base64Content) {
+                const root = path.resolve(stagingDir);
+                const targetPath = path.resolve(root, relPath);
+                const relative = path.relative(root, targetPath);
+                if (relative.startsWith('..') || path.isAbsolute(relative)) {
+                  throw new BadRequestException({
+                    success: false,
+                    message: `Deteksi jalur berkas tidak valid (${relPath}). Pemulihan dibatalkan.`,
+                  });
+                }
+                const targetDir = path.dirname(targetPath);
+                if (!fs.existsSync(targetDir)) {
+                  fs.mkdirSync(targetDir, { recursive: true });
+                }
+                const buffer = Buffer.from(file.base64Content, 'base64');
+                fs.writeFileSync(targetPath, buffer);
+                const restoredChecksum =
+                  this.calculateChecksumForBuffer(buffer);
+                if (
+                  file.checksum &&
+                  restoredChecksum.toLowerCase() !== file.checksum.toLowerCase()
+                ) {
+                  throw new BadRequestException({
+                    success: false,
+                    message: `Integritas berkas lampiran gagal! Checksum mismatch pada berkas ${relPath}. Pemulihan dibatalkan (Fail-Closed).`,
+                  });
+                }
+                restoredAttachmentsCount++;
+              }
+            }
+          } catch (err: any) {
+            if (fs.existsSync(stagingDir)) {
+              fs.rmSync(stagingDir, { recursive: true, force: true });
+            }
+            throw err;
+          }
+        }
+      }
+    }
+
+    // 6. Perform pg_restore execution with --single-transaction and --exit-on-error
     try {
       this.logger.log(`Starting pg_restore for ${dumpFilePath}...`);
       const dbUrl = process.env.DATABASE_URL;
@@ -1165,79 +1236,23 @@ export class DatabaseBackupService
         }
       }
 
-      // 6. Restore physical upload attachment files atomically
-      let restoredAttachmentsCount = 0;
-      if (matchedManifest.artifacts.attachmentsArchive) {
-        const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
-        if (!fs.existsSync(uploadDir))
-          fs.mkdirSync(uploadDir, { recursive: true });
-
-        const archivePath = path.join(
-          this.localBackupDir,
-          matchedManifest.artifacts.attachmentsArchive,
-        );
-        if (fs.existsSync(archivePath)) {
-          const archiveContent = JSON.parse(
-            fs.readFileSync(archivePath, 'utf8'),
-          );
-          if (archiveContent.files && Array.isArray(archiveContent.files)) {
-            // Atomic staging -> verify -> swap
-            const stagingDir = path.join(uploadDir, '_staging_restore');
-            if (fs.existsSync(stagingDir))
-              fs.rmSync(stagingDir, { recursive: true, force: true });
-            fs.mkdirSync(stagingDir, { recursive: true });
-
-            try {
-              for (const file of archiveContent.files) {
-                const relPath = file.relativePath || file.fileName;
-                if (relPath && file.base64Content) {
-                  const root = path.resolve(stagingDir);
-                  const targetPath = path.resolve(root, relPath);
-                  const relative = path.relative(root, targetPath);
-                  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-                    throw new BadRequestException({
-                      success: false,
-                      message: `Deteksi jalur berkas tidak valid (${relPath}). Pemulihan dibatalkan.`,
-                    });
-                  }
-                  const targetDir = path.dirname(targetPath);
-                  if (!fs.existsSync(targetDir)) {
-                    fs.mkdirSync(targetDir, { recursive: true });
-                  }
-                  const buffer = Buffer.from(file.base64Content, 'base64');
-                  fs.writeFileSync(targetPath, buffer);
-                  const restoredChecksum =
-                    this.calculateChecksumForBuffer(buffer);
-                  if (file.checksum && restoredChecksum !== file.checksum) {
-                    throw new Error(
-                      `Checksum mismatch during attachment file restore: ${relPath}`,
-                    );
-                  }
-                  restoredAttachmentsCount++;
-                }
-              }
-
-              // Swap phase
-              for (const file of archiveContent.files) {
-                const relPath = file.relativePath || file.fileName;
-                if (relPath) {
-                  const stagingPath = path.join(stagingDir, relPath);
-                  const finalPath = path.join(uploadDir, relPath);
-                  const finalDir = path.dirname(finalPath);
-                  if (!fs.existsSync(finalDir)) {
-                    fs.mkdirSync(finalDir, { recursive: true });
-                  }
-                  if (fs.existsSync(stagingPath)) {
-                    fs.renameSync(stagingPath, finalPath);
-                  }
-                }
-              }
-            } finally {
-              if (fs.existsSync(stagingDir))
-                fs.rmSync(stagingDir, { recursive: true, force: true });
+      // 7. Promote verified staged attachments to live uploads directory
+      if (stagingDir && fs.existsSync(stagingDir) && archiveContent?.files) {
+        for (const file of archiveContent.files) {
+          const relPath = file.relativePath || file.fileName;
+          if (relPath) {
+            const stagingPath = path.join(stagingDir, relPath);
+            const finalPath = path.join(uploadDir, relPath);
+            const finalDir = path.dirname(finalPath);
+            if (!fs.existsSync(finalDir)) {
+              fs.mkdirSync(finalDir, { recursive: true });
+            }
+            if (fs.existsSync(stagingPath)) {
+              fs.renameSync(stagingPath, finalPath);
             }
           }
         }
+        fs.rmSync(stagingDir, { recursive: true, force: true });
       }
 
       this.logger.log(

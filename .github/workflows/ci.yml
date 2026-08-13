@@ -81,7 +81,7 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
         run: npm run build
 
-      - name: Execute Automated Test Suites & Code Coverage Thresholds
+      - name: Execute Automated Unit Test Suites & Code Coverage Thresholds
         working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
@@ -91,6 +91,17 @@ jobs:
           BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test
         run: npm run test:cov
+
+      - name: Execute Real Backend E2E Test Suite in CI (P1-10)
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          DATABASE_URL_TEST: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          NODE_ENV: test
+        run: npm run test:e2e
 
   frontend-verification:
     name: Frontend Build & Bundle Verification

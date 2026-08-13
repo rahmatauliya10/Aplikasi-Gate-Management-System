@@ -1495,20 +1495,15 @@ const allowedReopenTargets = computed(() => {
   if (processType === 'GBJ') {
     return [
       { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-      { value: 'WEIGH_IN_DONE', label: '2. Weigh In Done (Timbang Masuk Selesai)' },
-      { value: 'QC_VEHICLE_PENDING', label: '3. QC Vehicle Pending (Menunggu QC Kendaraan)' },
-      { value: 'QC_VEHICLE_IN_PROGRESS', label: '4. QC Vehicle In Progress (QC Kendaraan)' },
-      { value: 'WAREHOUSE_IN_PROGRESS', label: '5. Warehouse In Progress (Bongkar/Muat Gudang)' },
+      { value: 'QC_VEHICLE_PENDING', label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+      { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
     ]
   }
   return [
     { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-    { value: 'WEIGH_IN_DONE', label: '2. Weigh In Done (Timbang Masuk Selesai)' },
-    { value: 'QC_VEHICLE_PENDING', label: '3. QC Vehicle Pending (Menunggu QC Kendaraan)' },
-    { value: 'QC_VEHICLE_IN_PROGRESS', label: '4. QC Vehicle In Progress (QC Kendaraan)' },
-    { value: 'INCOMING_CHECK_PENDING', label: '5. Incoming Check Pending (Menunggu QC Material)' },
-    { value: 'INCOMING_CHECK_IN_PROGRESS', label: '6. Incoming Check In Progress (QC Material)' },
-    { value: 'WAREHOUSE_IN_PROGRESS', label: '7. Warehouse In Progress (Bongkar/Muat Gudang)' },
+    { value: 'QC_VEHICLE_PENDING', label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+    { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
+    { value: 'INCOMING_CHECK_PENDING', label: '4. Incoming Check Pending (Menunggu QC Material)' },
   ]
 })
 
@@ -2070,7 +2065,8 @@ const qcLabDetails = computed(() => {
       warna: check.color === 'PASS' ? 'Normal' : check.color === 'REJECT' ? 'Abnormal' : check.color || '',
       kadarAir: check.moisture,
       totalFM: check.foreignMatter,
-      bijiOK: check.sampleWeight
+      sampleWeight: check.sampleWeight,
+      bijiOK: check.goodBeanPercentage !== undefined && check.goodBeanPercentage !== null ? check.goodBeanPercentage : 0
     };
   }
 
@@ -2095,7 +2091,8 @@ const qcDetails = computed(() => {
       warna: check.color === 'PASS' ? 'Normal' : check.color === 'REJECT' ? 'Abnormal' : check.color || '',
       kadarAir: check.moisture,
       totalFM: check.foreignMatter,
-      bijiOK: check.sampleWeight
+      sampleWeight: check.sampleWeight,
+      bijiOK: check.goodBeanPercentage !== undefined && check.goodBeanPercentage !== null ? check.goodBeanPercentage : 0
     };
   }
   else if (props.truck?.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {

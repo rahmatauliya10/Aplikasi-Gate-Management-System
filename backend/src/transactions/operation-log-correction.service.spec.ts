@@ -1084,7 +1084,7 @@ describe('OperationLogCorrectionService', () => {
       );
     });
 
-    it('should create new active WarehouseProcess when reopening to WAREHOUSE_IN_PROGRESS', async () => {
+    it('should set status to QC_VEHICLE_PASSED and supersede warehouse processes when reopening to warehouse ready stage', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValue({
         id: 'tx-1',
         status: 'COMPLETED',
@@ -1142,7 +1142,7 @@ describe('OperationLogCorrectionService', () => {
 
       const dto = {
         action: CorrectionAction.REOPEN_WORKFLOW,
-        reopenTargetStatus: 'WAREHOUSE_IN_PROGRESS' as any,
+        reopenTargetStatus: 'QC_VEHICLE_PASSED' as any,
         reasonCode: 'REOPEN_GUDANG',
         remark: 'Reopen ke proses gudang',
         expectedRevision: 1,
@@ -1154,15 +1154,18 @@ describe('OperationLogCorrectionService', () => {
         email: 'admin@gms.local',
       });
 
-      expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          transactionId: 'tx-1',
-          processType: 'GBB',
-          revision: 2,
-          isCurrent: true,
-          startById: 'adm-1',
+      expect(mockTxClient.warehouseProcess.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { transactionId: 'tx-1', isCurrent: true },
+          data: expect.objectContaining({ isCurrent: false }),
         }),
-      });
+      );
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tx-1', revision: 1 },
+          data: expect.objectContaining({ status: 'QC_VEHICLE_PASSED' }),
+        }),
+      );
     });
   });
 });
