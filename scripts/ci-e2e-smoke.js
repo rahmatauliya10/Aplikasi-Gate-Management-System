@@ -411,6 +411,9 @@ async function runE2ESmoke() {
   // Step 7: REOPEN Matrix Business Rule Enforcement
   // 7a. Valid REOPEN to QC_VEHICLE_PASSED (Warehouse Ready stage) on COMPLETED GBJ transaction
   log(`Testing valid REOPEN to QC_VEHICLE_PASSED on COMPLETED GBJ transaction (${gbjTxId})...`);
+  const gbjDetailRes1 = await request(`/api/transactions/${gbjTxId}`, { headers: authHeader });
+  const currentRev1 = gbjDetailRes1.body?.data?.revision || 1;
+
   const validReopenRes = await request(
     `/api/transactions/${gbjTxId}/operation-log-corrections`,
     { method: 'POST', headers: authHeader },
@@ -418,7 +421,7 @@ async function runE2ESmoke() {
       action: 'REOPEN_WORKFLOW',
       reasonCode: 'SALAH_INPUT_ANGKA',
       remark: 'E2E Valid REOPEN to Warehouse Ready stage',
-      expectedRevision: 1,
+      expectedRevision: currentRev1,
       reopenTargetStatus: 'QC_VEHICLE_PASSED',
     }
   );
@@ -450,6 +453,9 @@ async function runE2ESmoke() {
 
   // 7c. Fail-closed invalid REOPEN check (GBJ + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400)
   log(`Testing REOPEN fail-closed enforcement (GBJ + INCOMING_CHECK_PENDING)...`);
+  const gbjDetailRes2 = await request(`/api/transactions/${gbjTxId}`, { headers: authHeader });
+  const currentRev2 = gbjDetailRes2.body?.data?.revision || 1;
+
   const reopenRes = await request(
     `/api/transactions/${gbjTxId}/operation-log-corrections`,
     {
@@ -460,7 +466,7 @@ async function runE2ESmoke() {
       action: 'REOPEN_WORKFLOW',
       reasonCode: 'SALAH_INPUT_ANGKA',
       remark: 'E2E Matrix Fail-Closed Business Rule Verification',
-      expectedRevision: 1,
+      expectedRevision: currentRev2,
       reopenTargetStatus: 'INCOMING_CHECK_PENDING',
     }
   );
