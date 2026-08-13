@@ -71,24 +71,9 @@ Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: 
 # Pre-flight check: Ensure previous release image pair exists BEFORE altering the running stack
 Write-Host "[GMS Pre-flight] Verifying immutability requirement: checking availability of previous image pair [$PreviousReleaseTag]..." -ForegroundColor Cyan
 if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
-    Write-Host "[GMS Pre-flight WARNING] Image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] incomplete. Attempting to snapshot current running container baseline..." -ForegroundColor Yellow
-    $runningBackend = & docker ps -q --filter "name=gate-system-backend" 2>$null
-    $runningFrontend = & docker ps -q --filter "name=gate-system-frontend" 2>$null
-
-    if ((-not [string]::IsNullOrWhiteSpace($runningBackend)) -and (-not [string]::IsNullOrWhiteSpace($runningFrontend))) {
-        & docker commit gate-system-backend "gms-backend:$PreviousReleaseTag" 2>$null
-        $commitBackendExit = $LASTEXITCODE
-        & docker commit gate-system-frontend "gms-frontend:$PreviousReleaseTag" 2>$null
-        $commitFrontendExit = $LASTEXITCODE
-
-        if ($commitBackendExit -ne 0 -or $commitFrontendExit -ne 0 -or (-not (Verify-Image-Exists -Tag $PreviousReleaseTag))) {
-            throw "Container snapshot commit failed or image pair verification failed post-commit."
-        }
-        Write-Host "[GMS Pre-flight SUCCESS] Captured current running backend & frontend containers as immutable rollback tag [$PreviousReleaseTag]." -ForegroundColor Green
-    } else {
-        throw "Neither rollback image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] nor active container pair [gate-system-backend, gate-system-frontend] is available. Deployment aborted for safety before stack alteration."
-    }
+    throw "Pre-flight Error: Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] was not found. Runtime docker commit container snapshotting is disabled for release immutability."
 }
+Write-Host "[GMS Pre-flight SUCCESS] Verified presence of immutable rollback image pair [$PreviousReleaseTag]." -ForegroundColor Green
 
 # Step 1: Export RELEASE_TAG environment variable for Compose
 $env:RELEASE_TAG = $TargetReleaseTag

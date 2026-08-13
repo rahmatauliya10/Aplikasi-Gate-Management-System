@@ -84,8 +84,13 @@ Write-Log "Using historical dump candidate: $ActualDumpPath"
 
 [string]$ContainerName = "gate-system-postgres"
 [string]$PgUser = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { "postgres" }
+[string]$PgPass = if ($env:POSTGRES_PASSWORD) { $env:POSTGRES_PASSWORD } else { "testpassword" }
 [string]$DrillDbName = "gms_historical_rehearsal_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
 [bool]$ExecutionSuccess = $false
+
+# Direct DATABASE_URL to the ephemeral rehearsal database
+[string]$DrillDbUrl = "postgresql://${PgUser}:${PgPass}@localhost:5432/${DrillDbName}?schema=public"
+$env:DATABASE_URL = $DrillDbUrl
 
 try {
     # 1. Create temporary rehearsal database
@@ -100,13 +105,50 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to container." }
 
     $RestoreOut = & docker exec $ContainerName pg_restore --username=$PgUser --dbname=$DrillDbName --no-owner --no-privileges $TmpDumpPath 2>&1
+    [int]$RestoreExitCode = $LASTEXITCODE
     & docker exec $ContainerName rm -f $TmpDumpPath 2>&1 | Out-Null
 
-    # 3. Check migration checksums in codebase
-    Write-Log "Step 3: Computing and verifying migration checksums..."
+    if ($RestoreExitCode -ne 0) {
+        throw "Historical pg_restore failed with exit code $RestoreExitCode: $RestoreOut"
+    }
+
+    # 3. Check migration checksums against rehearsal DB
+    Write-Log "Step 3: Computing and verifying migration checksums on rehearsal DB ($DrillDbName)..."
     [string]$ChecksumOut = & node (Join-Path $ProjectRootDir "scripts\check-migration-checksums.js") 2>&1
     Set-Content -Path (Join-Path $ArtifactsDir "migration-checksum.txt") -Value $ChecksumOut -Encoding utf8
-    if ($LASTEXITCODE -ne 0) { throw "Migration checksum verification failed." }
+    if ($LASTEXITCODE -ne 0) { throw "Migration checksum verification failed: $ChecksumOut" }
+
+    # 3.5 Production Preflight Duplicate Audit on Rehearsal DB
+    Write-Log "Step 3.5: Executing canonical production preflight duplicate audit on rehearsal DB..."
+    Push-Location (Join-Path $ProjectRootDir "backend")
+    try {
+        [string]$PreflightOut = & npm run prisma:preflight -- --report-only --fail-on-duplicates 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Production preflight duplicate audit failed on historical database rehearsal: $PreflightOut" }
+    } finally {
+        Pop-Location
+    }
+
+    # 3.6 Execute Prisma Migration Deploy on Rehearsal DB
+    Write-Log "Step 3.6: Executing Prisma migration deployment on historical database rehearsal..."
+    Push-Location (Join-Path $ProjectRootDir "backend")
+    try {
+        [string]$MigrateDeployOut = & npx prisma migrate deploy 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Prisma migrate deploy failed on historical database rehearsal: $MigrateDeployOut" }
+    } finally {
+        Pop-Location
+    }
+
+    # 3.7 Zero Schema Drift Gate Check
+    Write-Log "Step 3.7: Verifying zero schema drift post-migration..."
+    Push-Location (Join-Path $ProjectRootDir "backend")
+    [int]$SchemaDriftExitCode = 1
+    try {
+        & npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --exit-code 2>&1 | Out-Null
+        $SchemaDriftExitCode = $LASTEXITCODE
+        if ($SchemaDriftExitCode -ne 0) { throw "Schema drift detected on historical database rehearsal (exit code $SchemaDriftExitCode)." }
+    } finally {
+        Pop-Location
+    }
 
     # 4. Helper function to execute queries against rehearsal DB
     function Exec-Query([string]$sql) {
@@ -124,6 +166,14 @@ try {
     [int]$AttCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\";")
     [int]$CorrectionCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrection\";")
     [int]$CorrectionItemCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
+    [int]$MigrationCount = [int](Exec-Query "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;")
+
+    [int]$GbbCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\" WHERE \"processType\" = 'GBB';")
+    [int]$GbbCompletedCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\" WHERE \"processType\" = 'GBB' AND \"status\" = 'COMPLETED';")
+    [int]$GspCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\" WHERE \"processType\" = 'GSP';")
+    [int]$GspCompletedCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\" WHERE \"processType\" = 'GSP' AND \"status\" = 'COMPLETED';")
+    [int]$GbjCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\" WHERE \"processType\" = 'GBJ';")
+    [int]$GbjCompletedCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\" WHERE \"processType\" = 'GBJ' AND \"status\" = 'COMPLETED';")
 
     # Invariant queries
     [int]$WbDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
@@ -139,7 +189,7 @@ try {
     [int]$OrphanAtt = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
     [int]$TotalOrphans = $OrphanHist + $OrphanWb + $OrphanWh + $OrphanAtt
 
-    [bool]$PassedInvariants = ($TotalDupes -eq 0) -and ($TotalOrphans -eq 0)
+    [bool]$PassedInvariants = ($TotalDupes -eq 0) -and ($TotalOrphans -eq 0) -and ($SchemaDriftExitCode -eq 0)
     [string]$VerdictStatus = if ($PassedInvariants) { "PASSED" } else { "FAILED" }
 
     # 5. Generate preflight report artifact from actual data
@@ -152,13 +202,17 @@ try {
             duplicateIsCurrentViolations = $TotalDupes
             orphanReferences = $TotalOrphans
             unappliedMigrationsCount = 0
-            schemaDriftDetected = $false
+            schemaDriftDetected = ($SchemaDriftExitCode -ne 0)
+            schemaDriftExitCode = $SchemaDriftExitCode
         }
         reconciliationSummary = @{
-            gbbCompletedVerified = ($TxCount -ge 0)
-            gspCompletedVerified = ($TxCount -ge 0)
-            gbjCompletedVerified = ($TxCount -ge 0)
-            attachmentIntegrityPass = ($AttCount -ge 0)
+            gbbTotal = $GbbCount
+            gbbCompleted = $GbbCompletedCount
+            gspTotal = $GspCount
+            gspCompleted = $GspCompletedCount
+            gbjTotal = $GbjCount
+            gbjCompleted = $GbjCompletedCount
+            attachmentTotal = $AttCount
         }
     }
     Set-Content -Path (Join-Path $ArtifactsDir "historical-preflight.json") -Value ($PreflightObj | ConvertTo-Json -Depth 5) -Encoding utf8
@@ -170,16 +224,20 @@ try {
         status = $VerdictStatus
         verificationDetails = @{
             tableCount = $TableCount
-            userRecordsVerified = ($UserCount -gt 0)
-            transactionRecordsVerified = ($TxCount -ge 0)
-            weighbridgeRecordsVerified = ($WbCount -ge 0)
-            warehouseRecordsVerified = ($WhCount -ge 0)
-            qcVehicleRecordsVerified = ($QcvCount -ge 0)
-            incomingCheckRecordsVerified = ($ImCount -ge 0)
-            attachmentRecordsVerified = ($AttCount -ge 0)
-            transactionCorrectionRecordsVerified = ($CorrectionCount -ge 0)
-            transactionCorrectionItemRecordsVerified = ($CorrectionItemCount -ge 0)
-            attachmentSha256MatchRate = "100%"
+            userRecordsVerified = $UserCount
+            transactionRecordsVerified = $TxCount
+            gbbCompletedVerifiedCount = $GbbCompletedCount
+            gspCompletedVerifiedCount = $GspCompletedCount
+            gbjCompletedVerifiedCount = $GbjCompletedCount
+            weighbridgeRecordsVerified = $WbCount
+            warehouseRecordsVerified = $WhCount
+            qcVehicleRecordsVerified = $QcvCount
+            incomingCheckRecordsVerified = $ImCount
+            attachmentRecordsVerified = $AttCount
+            transactionCorrectionRecordsVerified = $CorrectionCount
+            transactionCorrectionItemRecordsVerified = $CorrectionItemCount
+            migrationCountVerified = $MigrationCount
+            schemaDriftZeroVerified = ($SchemaDriftExitCode -eq 0)
         }
     }
     Set-Content -Path (Join-Path $ArtifactsDir "restore-proof.json") -Value ($RestoreProofObj | ConvertTo-Json -Depth 5) -Encoding utf8
@@ -196,19 +254,25 @@ try {
 
 ## Executive Summary
 Restored historical production dump into isolated rehearsal sandbox database ($DrillDbName).
-Actual database preflight audits and invariant rules were computed against historical records.
+Ran canonical production preflight duplicate audit, verified migration checksums, executed `prisma migrate deploy`, and confirmed zero schema drift.
 
 ## Computed Invariants
+- **pg_restore Exit:** 0 (SUCCESS)
 - **Migration Checksums:** Verified
+- **Prisma Migration Deploy:** SUCCESS ($MigrationCount migrations applied)
+- **Schema Drift Exit Code:** $SchemaDriftExitCode (Zero Drift Verified)
 - **Tables Found:** $TableCount
 - **Duplicate `isCurrent=true`:** $TotalDupes violations
 - **Orphan Foreign Keys:** $TotalOrphans violations
 - **Attachment DB Records:** $AttCount verified
+- **GBB Completed Transactions:** $GbbCompletedCount / $GbbCount
+- **GSP Completed Transactions:** $GspCompletedCount / $GspCount
+- **GBJ Completed Transactions:** $GbjCompletedCount / $GbjCount
 "@
     Set-Content -Path (Join-Path $ArtifactsDir "staging-smoke-report.md") -Value $SmokeReportMd -Encoding utf8
 
     if (-not $PassedInvariants) {
-        throw "Invariant checks failed: Duplicate isCurrent = $TotalDupes, Orphan FKs = $TotalOrphans."
+        throw "Invariant checks failed: Duplicate isCurrent = $TotalDupes, Orphan FKs = $TotalOrphans, Schema Drift Exit Code = $SchemaDriftExitCode."
     }
 
     $ExecutionSuccess = $true

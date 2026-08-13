@@ -66,6 +66,30 @@ if ($LatestDump.Name -match "gms_(.+)\.dump") {
     $BackupTimestamp = $Matches[1]
 }
 
+# 1.1 Strict Backup Manifest Location & Pre-Verification (MUST match exact backup timestamp)
+[string]$ManifestCandidatePath = ""
+if ($BackupTimestamp) {
+    $foundManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*${BackupTimestamp}*_manifest.json" | Select-Object -First 1
+    if ($foundManifest) { $ManifestCandidatePath = $foundManifest.FullName }
+}
+
+if (-not $ManifestCandidatePath -or -not (Test-Path -Path $ManifestCandidatePath)) {
+    throw "Backup Manifest Missing: Required manifest JSON file matching dump candidate ($BackupTimestamp) was not found in $LocalBackupDir. Fallback pairing is disabled."
+}
+
+Write-Log "Found exact backup manifest ($ManifestCandidatePath). Pre-verifying checksums..."
+$ManifestData = Get-Content -Path $ManifestCandidatePath -Raw | ConvertFrom-Json
+
+# Pre-verify dump SHA-256 hash BEFORE pg_restore
+if ($ManifestData.checksums -and $ManifestData.checksums.dump) {
+    [string]$ActualDumpHash = (Get-FileHash -Path $LatestDump.FullName -Algorithm SHA256).Hash.ToLower()
+    [string]$ExpectedDumpHash = $ManifestData.checksums.dump.ToLower()
+    if ($ActualDumpHash -ne $ExpectedDumpHash) {
+        throw "Dump SHA-256 Checksum Mismatch against Manifest! Expected: $ExpectedDumpHash, Computed: $ActualDumpHash"
+    }
+    Write-Log "Dump SHA-256 pre-verification PASSED against manifest ($ActualDumpHash)."
+}
+
 [string]$DrillDbName = "gms_drill_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
 [string]$ContainerName = "gate-system-postgres"
 [string]$PgUser = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { "postgres" }
@@ -126,52 +150,37 @@ try {
     [int]$CorrectionCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrection\";")
     [int]$CorrectionItemCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
 
-    # Check 4.1: Mandatory Backup Manifest Validation (gms_<timestamp>_manifest.json or backup_manifest.json)
+    # Check 4.1: Record Count Reconciliation against Pre-Verified Manifest
     [bool]$ManifestVerified = $false
-    [string]$ManifestCandidatePath = ""
-    if ($BackupTimestamp) {
-        $foundManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*${BackupTimestamp}*_manifest.json" | Select-Object -First 1
-        if ($foundManifest) { $ManifestCandidatePath = $foundManifest.FullName }
-    }
-    if (-not $ManifestCandidatePath) {
-        $foundManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*manifest.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($foundManifest) { $ManifestCandidatePath = $foundManifest.FullName }
+    Write-Log "Validating restored row counts against manifest..."
+    
+    # Check recordCounts (GMS format) or expectedCounts (legacy format)
+    $CountsObj = $null
+    if ($ManifestData.recordCounts) {
+        $CountsObj = $ManifestData.recordCounts
+    } elseif ($ManifestData.expectedCounts) {
+        $CountsObj = $ManifestData.expectedCounts
     }
 
-    if ($ManifestCandidatePath -and (Test-Path -Path $ManifestCandidatePath)) {
-        Write-Log "Found backup manifest ($ManifestCandidatePath). Validating restored row counts against manifest..."
-        $ManifestData = Get-Content -Path $ManifestCandidatePath -Raw | ConvertFrom-Json
-        
-        # Check recordCounts (GMS format) or expectedCounts (legacy format)
-        $CountsObj = $null
-        if ($ManifestData.recordCounts) {
-            $CountsObj = $ManifestData.recordCounts
-        } elseif ($ManifestData.expectedCounts) {
-            $CountsObj = $ManifestData.expectedCounts
+    if ($CountsObj) {
+        if ($CountsObj.transactions -ne $null -and [int]$CountsObj.transactions -ne $TxCount) {
+            throw "Manifest validation FAILED: expected Transaction count $($CountsObj.transactions) but restored $TxCount"
         }
-
-        if ($CountsObj) {
-            if ($CountsObj.transactions -ne $null -and [int]$CountsObj.transactions -ne $TxCount) {
-                throw "Manifest validation FAILED: expected Transaction count $($CountsObj.transactions) but restored $TxCount"
-            }
-            if ($CountsObj.Transaction -ne $null -and [int]$CountsObj.Transaction -ne $TxCount) {
-                throw "Manifest validation FAILED: expected Transaction count $($CountsObj.Transaction) but restored $TxCount"
-            }
-            if ($CountsObj.attachments -ne $null -and [int]$CountsObj.attachments -ne $AttCount) {
-                throw "Manifest validation FAILED: expected Attachment count $($CountsObj.attachments) but restored $AttCount"
-            }
-            if ($CountsObj.Attachment -ne $null -and [int]$CountsObj.Attachment -ne $AttCount) {
-                throw "Manifest validation FAILED: expected Attachment count $($CountsObj.Attachment) but restored $AttCount"
-            }
-            if ($CountsObj.users -ne $null -and [int]$CountsObj.users -ne $UserCount) {
-                throw "Manifest validation FAILED: expected User count $($CountsObj.users) but restored $UserCount"
-            }
+        if ($CountsObj.Transaction -ne $null -and [int]$CountsObj.Transaction -ne $TxCount) {
+            throw "Manifest validation FAILED: expected Transaction count $($CountsObj.Transaction) but restored $TxCount"
         }
-        $ManifestVerified = $true
-        Write-Log "Backup manifest validation PASSED."
-    } else {
-        throw "Backup Manifest Missing: Required manifest JSON file (*manifest.json) matching dump candidate was not found in $LocalBackupDir."
+        if ($CountsObj.attachments -ne $null -and [int]$CountsObj.attachments -ne $AttCount) {
+            throw "Manifest validation FAILED: expected Attachment count $($CountsObj.attachments) but restored $AttCount"
+        }
+        if ($CountsObj.Attachment -ne $null -and [int]$CountsObj.Attachment -ne $AttCount) {
+            throw "Manifest validation FAILED: expected Attachment count $($CountsObj.Attachment) but restored $AttCount"
+        }
+        if ($CountsObj.users -ne $null -and [int]$CountsObj.users -ne $UserCount) {
+            throw "Manifest validation FAILED: expected User count $($CountsObj.users) but restored $UserCount"
+        }
     }
+    $ManifestVerified = $true
+    Write-Log "Backup manifest record count validation PASSED."
 
     # Check 5: Invariant checks (Duplicate isCurrent must be 0)
     [int]$WbDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
@@ -203,16 +212,22 @@ try {
         $foundAtt = Get-ChildItem -Path $LocalBackupDir -Filter "*${BackupTimestamp}*_attachments.json" | Select-Object -First 1
         if ($foundAtt) { $AttJsonCandidatePath = $foundAtt.FullName }
     }
-    if (-not $AttJsonCandidatePath) {
-        $foundAtt = Get-ChildItem -Path $LocalBackupDir -Filter "*attachments.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($foundAtt) { $AttJsonCandidatePath = $foundAtt.FullName }
-    }
 
     if ($AttCount -gt 0 -and (-not $AttJsonCandidatePath -or -not (Test-Path -Path $AttJsonCandidatePath))) {
-        throw "Physical Attachment Restore FAILED: Database contains $AttCount attachments, but physical attachment JSON archive (*attachments.json) was not found."
+        throw "Physical Attachment Restore FAILED: Database contains $AttCount attachments, but physical attachment JSON archive matching timestamp ($BackupTimestamp) was not found in $LocalBackupDir."
     }
 
     if ($AttJsonCandidatePath -and (Test-Path -Path $AttJsonCandidatePath)) {
+        # Pre-verify attachment archive SHA-256 against manifest checksum before decoding
+        if ($ManifestData.checksums -and $ManifestData.checksums.attachmentsArchive) {
+            [string]$ActualAttArchiveHash = (Get-FileHash -Path $AttJsonCandidatePath -Algorithm SHA256).Hash.ToLower()
+            [string]$ExpectedAttArchiveHash = $ManifestData.checksums.attachmentsArchive.ToLower()
+            if ($ActualAttArchiveHash -ne $ExpectedAttArchiveHash) {
+                throw "Attachment Archive SHA-256 Checksum Mismatch against Manifest! Expected: $ExpectedAttArchiveHash, Computed: $ActualAttArchiveHash"
+            }
+            Write-Log "Attachment archive SHA-256 pre-verification PASSED against manifest ($ActualAttArchiveHash)."
+        }
+
         [string]$EphemeralAttDir = Join-Path -Path $env:TEMP -ChildPath ("gms_att_drill_" + (Get-Date).ToString("yyyyMMdd_HHmmss"))
         New-Item -Path $EphemeralAttDir -ItemType Directory -Force | Out-Null
         try {
@@ -220,11 +235,18 @@ try {
             $AttJsonData = Get-Content -Path $AttJsonCandidatePath -Raw | ConvertFrom-Json
 
             if ($AttJsonData.files) {
+                [string]$BaseCanonicalDir = [System.IO.Path]::GetFullPath($EphemeralAttDir)
+
                 foreach ($fileObj in $AttJsonData.files) {
                     [string]$relPath = $fileObj.relativePath
                     if (-not $relPath) { $relPath = $fileObj.fileName }
                     
-                    [string]$targetFile = Join-Path -Path $EphemeralAttDir -ChildPath $relPath
+                    # Security Path Traversal Guard
+                    [string]$targetFile = [System.IO.Path]::GetFullPath((Join-Path -Path $BaseCanonicalDir -ChildPath $relPath))
+                    if (-not $targetFile.StartsWith($BaseCanonicalDir + [System.IO.Path]::DirectorySeparatorChar)) {
+                        throw "Security Exception: Path traversal attack detected in attachment relative path '$relPath'"
+                    }
+
                     [string]$targetParent = Split-Path $targetFile -Parent
                     if (-not (Test-Path -Path $targetParent -PathType Container)) {
                         New-Item -Path $targetParent -ItemType Directory -Force | Out-Null
