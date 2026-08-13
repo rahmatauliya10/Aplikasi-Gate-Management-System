@@ -126,9 +126,7 @@ const validateDomain = (
       );
     }
   }
-  if (
-    ['moisture', 'foreignMatter', 'goodBeanPercentage'].includes(fieldName)
-  ) {
+  if (['moisture', 'foreignMatter', 'goodBeanPercentage'].includes(fieldName)) {
     const num = Number(newValue);
     if (isNaN(num) || num < 0 || num > 100) {
       throw new BadRequestException(
@@ -265,10 +263,9 @@ export class OperationLogCorrectionService {
           reasonCode: dto.reasonCode,
           reason: dto.reasonCode,
           remark: dto.remark,
-          evidenceUrl:
-            dto.evidenceAttachmentId
-              ? `attachment:${dto.evidenceAttachmentId}`
-              : dto.evidenceUrl || null,
+          evidenceUrl: dto.evidenceAttachmentId
+            ? `attachment:${dto.evidenceAttachmentId}`
+            : dto.evidenceUrl || null,
           oldValues: {},
           newValues: {},
           expectedRevision: dto.expectedRevision,
