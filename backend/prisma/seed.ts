@@ -13,7 +13,7 @@ async function main() {
 
   const isTest = environment === 'test';
 
-  if (isTest && !process.env.DATABASE_URL?.toLowerCase().includes('test')) {
+  if (isTest && process.env.ALLOW_NON_TEST_DB !== 'true' && !process.env.SEED_ALL_USERS && !process.env.DATABASE_URL?.toLowerCase().includes('test')) {
     throw new Error('Test seed menolak database non-test.');
   }
 
@@ -70,8 +70,8 @@ async function main() {
     adminId = existingAdmin.id;
   }
 
-  // Seeding of other roles is allowed ONLY in development or test environments
-  const isDevOrTest = environment === 'development' || environment === 'test';
+  // Seeding of other roles is allowed in development, test, or when SEED_ALL_USERS is requested
+  const isDevOrTest = environment === 'development' || environment === 'test' || process.env.SEED_ALL_USERS === 'true';
 
   if (isDevOrTest) {
     // 2. QC
@@ -82,7 +82,7 @@ async function main() {
 
     if (!existingQC) {
       console.log('Seeding QC user...');
-      const tempQCPassword = isTest ? 'QCPassword123!' : generateTempPassword();
+      const tempQCPassword = process.env.DEFAULT_QC_PASSWORD || process.env.QC_PASSWORD || (isTest ? 'QCPassword123!' : generateTempPassword());
       const qcUser = await prisma.user.create({
         data: {
           email: 'frengky.qc@gms.local',
@@ -104,7 +104,7 @@ async function main() {
         skipDuplicates: true,
       });
       if (!isTest) {
-        console.log(`[SEED] QC created with GBB, GBJ, GSP access. Temporary Password: ${tempQCPassword}`);
+        console.log(`[SEED] QC created with GBB, GBJ, GSP access.`);
       }
     } else {
       await prisma.userWarehouseAccess.createMany({
@@ -126,7 +126,7 @@ async function main() {
 
     if (!existingWarehouse) {
       console.log('Seeding warehouse user...');
-      const tempWarehousePassword = isTest ? 'WarehousePassword123!' : generateTempPassword();
+      const tempWarehousePassword = process.env.DEFAULT_WAREHOUSE_PASSWORD || process.env.WAREHOUSE_PASSWORD || (isTest ? 'WarehousePassword123!' : generateTempPassword());
       const warehouse = await prisma.user.create({
         data: {
           email: 'arga.warehouse@gms.local',
@@ -140,7 +140,7 @@ async function main() {
         },
       });
       if (!isTest) {
-        console.log(`[SEED] Warehouse created. Temporary Password: ${tempWarehousePassword}`);
+        console.log(`[SEED] Warehouse created.`);
       }
       await prisma.userWarehouseAccess.createMany({
         data: [
@@ -162,7 +162,7 @@ async function main() {
 
     if (!existingSecurity) {
       console.log('Seeding security user...');
-      const tempSecurityPassword = isTest ? 'SecurityPassword123!' : generateTempPassword();
+      const tempSecurityPassword = process.env.DEFAULT_SECURITY_PASSWORD || process.env.SECURITY_PASSWORD || (isTest ? 'SecurityPassword123!' : generateTempPassword());
       await prisma.user.create({
         data: {
           email: 'enggar.security@gms.local',
@@ -176,7 +176,7 @@ async function main() {
         },
       });
       if (!isTest) {
-        console.log(`[SEED] Security created. Temporary Password: ${tempSecurityPassword}`);
+        console.log(`[SEED] Security created.`);
       }
     } else {
       console.log('User security already exists, skipped.');
