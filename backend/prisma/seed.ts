@@ -89,6 +89,7 @@ async function main() {
   }
 
   const isTest = environment === 'test';
+  const isDevOrTest = environment === 'development' || environment === 'test' || process.env.SEED_ALL_USERS === 'true';
 
   if (isTest && process.env.ALLOW_NON_TEST_DB !== 'true' && !process.env.SEED_ALL_USERS && !process.env.DATABASE_URL?.toLowerCase().includes('test')) {
     throw new Error('Test seed menolak database non-test.');
@@ -148,8 +149,6 @@ async function main() {
   }
 
   // Seeding of other roles is allowed in development, test, or when SEED_ALL_USERS is requested
-  const isDevOrTest = environment === 'development' || environment === 'test' || process.env.SEED_ALL_USERS === 'true';
-
   if (isDevOrTest) {
     // 2. QC
     console.log('Checking QC user...');
