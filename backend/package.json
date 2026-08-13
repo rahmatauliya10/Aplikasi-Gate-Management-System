@@ -15,7 +15,7 @@
     "postinstall": "prisma generate",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",
-    "prisma:preflight": "npx ts-node prisma/production-migration-preflight.ts",
+    "prisma:preflight": "node dist/prisma/production-migration-preflight.js",
     "db:verify:checksums": "node scripts/check-migration-checksums.js",
     "db:backup:pre-deploy": "node scripts/run-predeploy-backup.js",
     "db:prepare:local": "npm run prisma:preflight && npx prisma migrate deploy && npx prisma generate",
@@ -26,7 +26,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "node dist/prisma/seed.js"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
