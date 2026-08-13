@@ -61,7 +61,7 @@ if not exist deploy\nginx\ssl\server.key (
 echo [+] Sertifikat SSL TLS (server.crt dan server.key) terverifikasi.
 
 echo [4/4] Menjalankan Immutable Deployment Orchestrator (deploy-with-rollback.ps1)...
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-with-rollback.ps1 -TargetReleaseTag "%CURRENT_COMMIT%" -PreviousReleaseTag "%PREVIOUS_RELEASE_TAG%"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-with-rollback.ps1 -TargetReleaseTag "%CURRENT_COMMIT%" -PreviousReleaseTag "%PREVIOUS_RELEASE_TAG%" -RequireDigest
 if errorlevel 1 (
     echo.
     echo [!] GAGAL: Deployment produksi gagal atau dibatalkan oleh orchestrator!

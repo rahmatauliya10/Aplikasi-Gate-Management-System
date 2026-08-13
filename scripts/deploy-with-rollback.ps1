@@ -36,7 +36,10 @@ param(
     [switch]$RollbackOnly,
 
     [Parameter(Mandatory=$false)]
-    [switch]$UsePrebuiltImages
+    [switch]$UsePrebuiltImages,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$RequireDigest
 )
 
 Set-StrictMode -Version Latest
@@ -125,6 +128,13 @@ if (-not $FrontendDigest) {
     [string]$inspectFrontend = & docker inspect --format="{{index .RepoDigests 0}}" "gms-frontend:$TargetReleaseTag" 2>$null
     if ($inspectFrontend -and $inspectFrontend.Contains("@")) {
         $FrontendDigest = $inspectFrontend.Split("@")[1]
+    }
+}
+
+# Strict Production Immutability Verification Gate
+if ($RequireDigest -or ($ComposeFile -like "*prod*")) {
+    if (-not $BackendDigest -or -not $FrontendDigest) {
+        throw "[GMS IMMUTABILITY VIOLATION] Production deployment strictly requires SHA-256 image digests for gms-backend and gms-frontend. Tag fallbacks are strictly prohibited for Level 9 production readiness."
     }
 }
 

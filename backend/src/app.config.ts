@@ -2,8 +2,30 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import helmet from 'helmet';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { json, urlencoded } from 'express';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export function configureApp(app: INestApplication) {
+  // Maintenance Mode Guard / Application Write Freeze Middleware (P0-06)
+  app.use((req: any, res: any, next: any) => {
+    const rootMaintFlag = path.resolve(process.cwd(), '../maintenance.flag');
+    const localMaintFlag = path.resolve(process.cwd(), 'maintenance.flag');
+    const isMaintenance = fs.existsSync(rootMaintFlag) || fs.existsSync(localMaintFlag);
+
+    if (isMaintenance) {
+      const readMethods = ['GET', 'HEAD', 'OPTIONS'];
+      if (!readMethods.includes(req.method.toUpperCase())) {
+        return res.status(503).json({
+          statusCode: 503,
+          error: 'Service Unavailable',
+          message: 'System is currently under maintenance / restore write freeze. Write operations are temporarily suspended.',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+    next();
+  });
+
   // Trust proxy for Nginx reverse proxying
   try {
     const instance = app.getHttpAdapter().getInstance();

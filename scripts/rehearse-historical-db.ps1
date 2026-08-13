@@ -218,9 +218,30 @@ try {
     if ($AttachmentArchivePath -and (Test-Path -Path $AttachmentArchivePath -PathType Leaf)) {
         [string]$TmpExtractDir = Join-Path -Path $env:TEMP -ChildPath ("gms_att_rehearsal_" + $TimestampSuffix)
         New-Item -Path $TmpExtractDir -ItemType Directory -Force | Out-Null
-        Write-Log "Extracting physical attachment archive ($AttachmentArchivePath) to $TmpExtractDir..."
-        Expand-Archive -Path $AttachmentArchivePath -DestinationPath $TmpExtractDir -Force
-        $TargetUploadDir = $TmpExtractDir
+        
+        if ($AttachmentArchivePath.ToLower().EndsWith(".json")) {
+            Write-Log "Processing JSON attachment archive ($AttachmentArchivePath)..."
+            $AttJsonData = Get-Content -Path $AttachmentArchivePath -Raw | ConvertFrom-Json
+            if ($AttJsonData.files) {
+                foreach ($fileObj in $AttJsonData.files) {
+                    [string]$relPath = if ($fileObj.relativePath) { $fileObj.relativePath } else { $fileObj.fileName }
+                    [string]$targetFile = Join-Path -Path $TmpExtractDir -ChildPath $relPath
+                    [string]$targetParent = Split-Path $targetFile -Parent
+                    if (-not (Test-Path -Path $targetParent -PathType Container)) {
+                        New-Item -Path $targetParent -ItemType Directory -Force | Out-Null
+                    }
+                    if ($fileObj.base64Content) {
+                        [byte[]]$bytes = [System.Convert]::FromBase64String($fileObj.base64Content)
+                        [System.IO.File]::WriteAllBytes($targetFile, $bytes)
+                    }
+                }
+            }
+            $TargetUploadDir = $TmpExtractDir
+        } else {
+            Write-Log "Extracting physical attachment zip archive ($AttachmentArchivePath) to $TmpExtractDir..."
+            Expand-Archive -Path $AttachmentArchivePath -DestinationPath $TmpExtractDir -Force
+            $TargetUploadDir = $TmpExtractDir
+        }
     } elseif ($BackupDir -and (Test-Path -Path (Join-Path $BackupDir "uploads") -PathType Container)) {
         $TargetUploadDir = Join-Path $BackupDir "uploads"
     }
@@ -240,7 +261,14 @@ try {
             }
         }
     } else {
-        $ReconciledPhysicalFiles = $AttCount
+        if ($AttCount -gt 0) {
+            Write-Log "HARD FAIL: Database contains $AttCount Attachment records, but no attachment archive or directory was supplied." -Level "ERROR"
+            $MissingPhysicalFiles = $AttCount
+            $ReconciledPhysicalFiles = 0
+        } else {
+            $ReconciledPhysicalFiles = 0
+            $MissingPhysicalFiles = 0
+        }
     }
 
     [bool]$PassedInvariants = ($TotalDupes -eq 0) -and ($TotalOrphans -eq 0) -and ($SchemaDriftExitCode -eq 0) -and ($MissingPhysicalFiles -eq 0)
@@ -318,13 +346,14 @@ try {
 
     # 8. Generate smoke-test-report.json artifact
     Write-Log "Step 8: Generating Migration Rehearsal application smoke report..."
+    [bool]$SmokePassed = ($GbbCount -gt 0) -and ($GspCount -gt 0) -and ($GbjCount -gt 0)
     $SmokeObj = @{
         reportTitle = "Migration Rehearsal Application Read Smoke Report"
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        status = $VerdictStatus
-        gbbSmokePassed = ($GbbCount -ge 0)
-        gspSmokePassed = ($GspCount -ge 0)
-        gbjSmokePassed = ($GbjCount -ge 0)
+        status = if ($SmokePassed) { "PASSED" } else { "FAILED" }
+        gbbSmokePassed = ($GbbCount -gt 0)
+        gspSmokePassed = ($GspCount -gt 0)
+        gbjSmokePassed = ($GbjCount -gt 0)
         readQueryVerification = @{
             tableCount = $TableCount
             userCount = $UserCount

@@ -11,33 +11,41 @@
 
 -- Create gms_owner role
 DO $$
+DECLARE
+  pwd text := COALESCE(nullif(current_setting('gms.owner_password', true), ''), 'gms_owner_' || md5(random()::text));
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'gms_owner') THEN
-    CREATE ROLE gms_owner WITH LOGIN PASSWORD 'gms_owner_secure_pass_12345' CREATEDB;
+    EXECUTE format('CREATE ROLE gms_owner WITH LOGIN PASSWORD %L CREATEDB', pwd);
   END IF;
 END $$;
 
 -- Create gms_app role (Used by NestJS runtime DATABASE_URL)
 DO $$
+DECLARE
+  pwd text := COALESCE(nullif(current_setting('gms.app_password', true), ''), 'gms_app_' || md5(random()::text));
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'gms_app') THEN
-    CREATE ROLE gms_app WITH LOGIN PASSWORD 'gms_app_secure_pass_12345' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+    EXECUTE format('CREATE ROLE gms_app WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', pwd);
   END IF;
 END $$;
 
 -- Create gms_backup role
 DO $$
+DECLARE
+  pwd text := COALESCE(nullif(current_setting('gms.backup_password', true), ''), 'gms_backup_' || md5(random()::text));
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'gms_backup') THEN
-    CREATE ROLE gms_backup WITH LOGIN PASSWORD 'gms_backup_secure_pass_12345' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+    EXECUTE format('CREATE ROLE gms_backup WITH LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', pwd);
   END IF;
 END $$;
 
 -- Create restore_operator role
 DO $$
+DECLARE
+  pwd text := COALESCE(nullif(current_setting('gms.restore_password', true), ''), 'restore_' || md5(random()::text));
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'restore_operator') THEN
-    CREATE ROLE restore_operator WITH LOGIN PASSWORD 'restore_operator_secure_pass_12345' CREATEDB;
+    EXECUTE format('CREATE ROLE restore_operator WITH LOGIN PASSWORD %L CREATEDB', pwd);
   END IF;
 END $$;
 

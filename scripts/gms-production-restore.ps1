@@ -24,10 +24,13 @@ param(
     [string]$PgUser = "postgres",
 
     [Parameter(Mandatory=$false)]
-    [string]$PgPass = "postgres",
+    [string]$PgPass = "",
 
     [Parameter(Mandatory=$false)]
     [string]$PgHost = "localhost",
+
+    [Parameter(Mandatory=$false)]
+    [string]$LiveContainer = "gate-system-postgres",
 
     [Parameter(Mandatory=$false)]
     [switch]$Force
@@ -114,6 +117,10 @@ if ($AttArchiveFileName) {
     Write-Log "  Attachment archive SHA-256 checksum verified [PASS] ($ActualAttArchiveHash)" -Level "SUCCESS"
 }
 
+if (-not $PgPass) {
+    $PgPass = "gms_ephemeral_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 16)
+}
+
 # Step 3: Enter Maintenance Mode / Application Write Freeze
 Write-Log "Step 2: Enabling Maintenance Mode & Application Write Freeze..."
 [string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
@@ -126,7 +133,7 @@ Write-Log "  Maintenance flag created ($MaintFlagPath) [PASS]" -Level "SUCCESS"
 try {
     # Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
     Write-Log "Step 3: Spawning Isolated Staging PostgreSQL Container ($StagingContainer)..."
-    & docker run -d --name $StagingContainer -p "${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" postgres:15-alpine 2>&1 | Out-Null
+    & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" postgres:15-alpine 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Failed launching isolated PostgreSQL staging container." }
 
     # Wait for PostgreSQL container readiness
@@ -246,10 +253,42 @@ try {
         Write-Log "  Physical attachment 100% reconciliation PASSED ($RestoredPhysicalCount files verified)" -Level "SUCCESS"
     }
 
-    # Step 6: Atomic Switch-Over
-    Write-Log "Step 7: Executing Atomic Switch-Over (Promoting Staging to Production)..."
-    
-    # 7a. Atomic Directory Swap for Attachments
+    # Step 6: Atomic Switch-Over (Dual Promotion: Live DB & Physical Attachments)
+    Write-Log "Step 7: Executing Atomic Switch-Over (Promoting Staging DB & Attachments to Live Production)..."
+
+    # 7a. Atomic Live Database Promotion
+    Write-Log "  7a. Promoting Staging Database to Live Production Database ($LiveDbName)..."
+    [string]$LiveContainerId = (& docker ps -q -f "name=$LiveContainer" 2>&1).ToString().Trim()
+
+    if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
+        Write-Log "  Live Postgres Container [$LiveContainer] detected. Terminating active client connections..."
+        & docker exec $LiveContainer psql -U $PgUser -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$LiveDbName' AND pid <> pg_backend_pid();" 2>&1 | Out-Null
+
+        Write-Log "  Executing pg_restore directly into Live Production Database ($LiveDbName)..."
+        [string]$TmpDumpInLive = "/tmp/$DumpFileName"
+        & docker cp $DumpFilePath "${LiveContainer}:${TmpDumpInLive}"
+        if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to live database container." }
+
+        $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --clean --if-exists --no-owner --no-privileges $TmpDumpInLive 2>&1
+        [int]$LiveExitCode = $LASTEXITCODE
+        & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
+
+        if ($LiveExitCode -ne 0) {
+            throw "Live Database Promotion (pg_restore) failed with exit code $LiveExitCode: $LiveRestoreOut"
+        }
+
+        # Verify Live DB migration deployment & invariants
+        [string]$LiveMigCountStr = (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>&1).ToString().Trim()
+        [int]$LiveMigCount = 0
+        if (-not [int]::TryParse($LiveMigCountStr, [ref]$LiveMigCount) -or $LiveMigCount -eq 0) {
+            throw "Post-Promotion Live DB Verification Error: _prisma_migrations empty or missing in live database."
+        }
+        Write-Log "  Live Database Promotion verified [PASS] ($LiveMigCount finished migrations)" -Level "SUCCESS"
+    } else {
+        Write-Log "  Target Live PostgreSQL Container [$LiveContainer] not running locally. Skipping container overwrite (Staging verification completed)." -Level "WARN"
+    }
+
+    # 7b. Atomic Directory Swap for Attachments
     [string]$PreRestoreUploadsDir = Join-Path -Path $ProjectRootDir -ChildPath "uploads_pre_restore_${TimestampSuffix}"
     if (Test-Path -Path $UploadDir) {
         Rename-Item -Path $UploadDir -NewName (Split-Path $PreRestoreUploadsDir -Leaf)

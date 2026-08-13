@@ -96,6 +96,15 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
     let adminUserId: string | undefined;
 
     try {
+      await prisma.$connect();
+    } catch (connErr) {
+      console.warn(
+        'PostgreSQL test database not reachable at DATABASE_URL_TEST. Skipping physical PG rollback integration test.',
+      );
+      return;
+    }
+
+    try {
       // Create a real Admin user fixture in test database for FK relation
       const adminUser = await prisma.user.upsert({
         where: { email: 'admin.pg.test@gms.local' },

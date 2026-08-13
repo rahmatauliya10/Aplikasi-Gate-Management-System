@@ -203,4 +203,14 @@ jobs:
           echo "Cross-stack E2E gate passed successfully."
           docker compose down --volumes --remove-orphans
 
+      - name: Upload Release Proof Evidence Artifacts (P0-01, P0-06 Evidence Gate)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-proof-evidence
+          path: |
+            artifacts/release-proof/
+            deploy/release_manifest.json
+          retention-days: 90
+
 
