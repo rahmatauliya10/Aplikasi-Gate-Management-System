@@ -89,7 +89,10 @@ async function main() {
   }
 
   const isTest = environment === 'test';
-  const isDevOrTest = environment === 'development' || environment === 'test' || process.env.SEED_ALL_USERS === 'true';
+  if (environment === 'production' && process.env.SEED_ALL_USERS === 'true' && process.env.ALLOW_PROD_SEED_ALL_USERS !== 'true') {
+    throw new Error('SEED_ALL_USERS=true is prohibited in production environment unless ALLOW_PROD_SEED_ALL_USERS=true is explicitly set.');
+  }
+  const isDevOrTest = environment === 'development' || environment === 'test' || (process.env.SEED_ALL_USERS === 'true' && (environment !== 'production' || process.env.ALLOW_PROD_SEED_ALL_USERS === 'true'));
 
   if (isTest && process.env.ALLOW_NON_TEST_DB !== 'true' && !process.env.SEED_ALL_USERS && !process.env.DATABASE_URL?.toLowerCase().includes('test')) {
     throw new Error('Test seed menolak database non-test.');

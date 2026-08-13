@@ -1,11 +1,18 @@
 # ==============================================================================
 # GMS Automated Actual Restore Drill Protocol (P0-05 / P0-06)
 # ==============================================================================
-# Purpose: Executes an actual physical restore drill into an ephemeral database,
-# verifies data structural integrity via SQL query, reconciles physical attachment
-# files (JSON base64 format) & SHA-256 hashes, reconciles backup manifest record counts,
-# logs result for SLA compliance, and destroys temporary database cleanly.
+# Purpose: Executes an actual physical restore drill into a DEDICATED EPHEMERAL
+# POSTGRES CONTAINER (completely isolated from live production database container).
+# Verifies data structural integrity via SQL query, reconciles physical attachment
+# files & SHA-256 hashes using exact normalized relative paths, reconciles ALL
+# backup manifest record counts in a loop, enforces mandatory SHA-256 checksums,
+# logs results for SLA compliance, and destroys temporary container cleanly.
 # ==============================================================================
+
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$DrillPort = "5434"
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -66,7 +73,7 @@ if ($LatestDump.Name -match "gms_(.+)\.dump") {
     $BackupTimestamp = $Matches[1]
 }
 
-# 1.1 Strict Backup Manifest Location & Pre-Verification (MUST match exact backup timestamp)
+# 1.1 Strict Backup Manifest Location & Mandatory Pre-Verification
 [string]$ManifestCandidatePath = ""
 if ($BackupTimestamp) {
     $foundManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*${BackupTimestamp}*_manifest.json" | Select-Object -First 1
@@ -80,109 +87,114 @@ if (-not $ManifestCandidatePath -or -not (Test-Path -Path $ManifestCandidatePath
 Write-Log "Found exact backup manifest ($ManifestCandidatePath). Pre-verifying checksums..."
 $ManifestData = Get-Content -Path $ManifestCandidatePath -Raw | ConvertFrom-Json
 
-# Pre-verify dump SHA-256 hash BEFORE pg_restore
-if ($ManifestData.checksums -and $ManifestData.checksums.dump) {
-    [string]$ActualDumpHash = (Get-FileHash -Path $LatestDump.FullName -Algorithm SHA256).Hash.ToLower()
-    [string]$ExpectedDumpHash = $ManifestData.checksums.dump.ToLower()
-    if ($ActualDumpHash -ne $ExpectedDumpHash) {
-        throw "Dump SHA-256 Checksum Mismatch against Manifest! Expected: $ExpectedDumpHash, Computed: $ActualDumpHash"
-    }
-    Write-Log "Dump SHA-256 pre-verification PASSED against manifest ($ActualDumpHash)."
+# HARD FAILURE: Missing dump checksum in manifest is prohibited
+if (-not $ManifestData.checksums -or -not $ManifestData.checksums.dump) {
+    throw "Security Exception: Backup manifest ($ManifestCandidatePath) is missing mandatory dump SHA-256 checksum field. Skipping checksum verification is prohibited for production DR drills."
 }
 
-[string]$DrillDbName = "gms_drill_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
-[string]$ContainerName = "gate-system-postgres"
+[string]$ActualDumpHash = (Get-FileHash -Path $LatestDump.FullName -Algorithm SHA256).Hash.ToLower()
+[string]$ExpectedDumpHash = $ManifestData.checksums.dump.ToLower()
+if ($ActualDumpHash -ne $ExpectedDumpHash) {
+    throw "Dump SHA-256 Checksum Mismatch against Manifest! Expected: $ExpectedDumpHash, Computed: $ActualDumpHash"
+}
+Write-Log "Dump SHA-256 pre-verification PASSED against manifest ($ActualDumpHash)."
+
+[string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
+[string]$DrillContainer = "gms-dr-postgres-" + $TimestampSuffix
 [string]$PgUser = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { "postgres" }
+[string]$PgPass = if ($env:POSTGRES_PASSWORD) { $env:POSTGRES_PASSWORD } else { "testpassword" }
+[string]$DrillDbName = "gms_dr_restore"
 
 try {
-    Write-Log "Step 1: Creating ephemeral test database ($DrillDbName)..."
-    & docker exec $ContainerName psql -U $PgUser -d gms -c "CREATE DATABASE $DrillDbName;" 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create ephemeral database inside Docker container."
+    Write-Log "Step 1: Starting dedicated isolated PostgreSQL container ($DrillContainer on port $DrillPort)..."
+    & docker run -d --name $DrillContainer -p "${DrillPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$DrillDbName" postgres:15-alpine 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to start dedicated PostgreSQL DR restore container." }
+
+    # Wait for PostgreSQL container readiness
+    [bool]$ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 1
+        & docker exec $DrillContainer pg_isready -U $PgUser 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
     }
+    if (-not $ready) { throw "Dedicated DR PostgreSQL container failed to become ready within 30 seconds." }
 
-    Write-Log "Step 2: Executing physical pg_restore into $DrillDbName..."
+    Write-Log "Step 2: Executing physical pg_restore into isolated DR container..."
     [string]$TmpDumpPath = "/tmp/$($LatestDump.Name)"
-    & docker cp $LatestDump.FullName "${ContainerName}:${TmpDumpPath}"
-    if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to container." }
+    & docker cp $LatestDump.FullName "${DrillContainer}:${TmpDumpPath}"
+    if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to DR container." }
 
-    $RestoreOut = & docker exec $ContainerName pg_restore --username=$PgUser --dbname=$DrillDbName --no-owner --no-privileges $TmpDumpPath 2>&1
+    $RestoreOut = & docker exec $DrillContainer pg_restore --username=$PgUser --dbname=$DrillDbName --no-owner --no-privileges $TmpDumpPath 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "pg_restore failed with exit code $LASTEXITCODE. Output: $RestoreOut"
     }
 
     # Clean tmp dump in container
-    & docker exec $ContainerName rm -f $TmpDumpPath 2>&1 | Out-Null
+    & docker exec $DrillContainer rm -f $TmpDumpPath 2>&1 | Out-Null
 
     Write-Log "Step 3: Deep Data Integrity & Invariant Verification..."
     
-    # Helper to run query
+    # Helper to run query inside isolated container
     function Exec-Query([string]$sql) {
-        return (& docker exec $ContainerName psql -t -A -U $PgUser -d $DrillDbName -c "$sql" 2>&1).ToString().Trim()
+        return (& docker exec $DrillContainer psql -t -A -U $PgUser -d $DrillDbName -c "$sql" 2>&1).ToString().Trim()
     }
 
-    # Check 1: User table count
-    [string]$UserCountStr = Exec-Query "SELECT COUNT(*) FROM \""User\"";"
-    [int]$UserCount = 0
-    if (-not [int]::TryParse($UserCountStr, [ref]$UserCount) -or $UserCount -eq 0) {
-        throw "User table validation failed. Restored count: $UserCountStr"
+    # Table mapping dictionary between Manifest Record Count key names and SQL table names
+    $EntityTableMap = @{
+        "users" = "User"
+        "userWarehouseAccess" = "UserWarehouseAccess"
+        "transactions" = "Transaction"
+        "transactionStatusHistory" = "TransactionStatusHistory"
+        "weighbridgeRecords" = "WeighbridgeRecord"
+        "warehouseProcesses" = "WarehouseProcess"
+        "qcVehicleChecks" = "QcVehicleCheck"
+        "incomingMaterialChecks" = "IncomingMaterialCheck"
+        "attachments" = "Attachment"
+        "fraudChecks" = "FraudCheck"
+        "activityLogs" = "ActivityLog"
+        "appSettings" = "AppSetting"
+        "announcements" = "Announcement"
+        "systemIssues" = "SystemIssue"
+        "transactionCorrections" = "TransactionCorrection"
+        "transactionCorrectionItems" = "TransactionCorrectionItem"
     }
 
-    # Check 2: Table count check (expect >= 10 tables)
-    [string]$TableCountStr = Exec-Query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';"
-    [int]$TableCount = 0
-    [int]::TryParse($TableCountStr, [ref]$TableCount) | Out-Null
-    if ($TableCount -lt 10) {
-        throw "Database table count verification failed. Found $TableCount tables (expected >= 10)."
+    # Check 1: Record Count Reconciliation across ALL Manifest Entities in a Loop
+    Write-Log "Check 3.1: Validating restored row counts against manifest for ALL entities..."
+    $CountsObj = if ($ManifestData.recordCounts) { $ManifestData.recordCounts } else { $ManifestData.expectedCounts }
+    if (-not $CountsObj) {
+        throw "Manifest Error: recordCounts object is missing in manifest data."
     }
 
-    # Check 3: Prisma Migrations table
+    foreach ($prop in $CountsObj.psobject.Properties) {
+        [string]$entityKey = $prop.Name
+        [int]$expectedCount = [int]$prop.Value
+
+        # Resolve SQL table name
+        [string]$tableName = if ($EntityTableMap.ContainsKey($entityKey)) { $EntityTableMap[$entityKey] } else { $entityKey }
+        
+        [string]$sqlQuery = "SELECT COUNT(*) FROM `"$tableName`";"
+        [string]$actualCountStr = Exec-Query $sqlQuery
+        [int]$actualCount = 0
+        if (-not [int]::TryParse($actualCountStr, [ref]$actualCount)) {
+            throw "Failed querying table '$tableName' for manifest entity '$entityKey'. SQL Output: $actualCountStr"
+        }
+
+        if ($expectedCount -ne $actualCount) {
+            throw "FULL MANIFEST RECONCILIATION FAILED for entity '$entityKey' (table '$tableName'): expected $expectedCount, restored $actualCount"
+        }
+        Write-Log "  Entity '$entityKey' ($tableName): expected $expectedCount === actual $actualCount [OK]"
+    }
+    Write-Log "Full manifest record count reconciliation PASSED with 100% exact match." -Level "SUCCESS"
+
+    # Fetch total user and table count for metrics
+    [int]$UserCount = [int](Exec-Query "SELECT COUNT(*) FROM \"User\";")
+    [int]$TableCount = [int](Exec-Query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';")
+    [int]$TxCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\";")
+    [int]$AttCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\";")
     [string]$MigrationCountStr = Exec-Query "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
 
-    # Check 4: Deep table row counts
-    [int]$TxCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Transaction\";")
-    [int]$TxHistCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionStatusHistory\";")
-    [int]$WbCount = [int](Exec-Query "SELECT COUNT(*) FROM \"WeighbridgeRecord\";")
-    [int]$WhCount = [int](Exec-Query "SELECT COUNT(*) FROM \"WarehouseProcess\";")
-    [int]$QcvCount = [int](Exec-Query "SELECT COUNT(*) FROM \"QcVehicleCheck\";")
-    [int]$ImCount = [int](Exec-Query "SELECT COUNT(*) FROM \"IncomingMaterialCheck\";")
-    [int]$AttCount = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\";")
-    [int]$CorrectionCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrection\";")
-    [int]$CorrectionItemCount = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
-
-    # Check 4.1: Record Count Reconciliation against Pre-Verified Manifest
-    [bool]$ManifestVerified = $false
-    Write-Log "Validating restored row counts against manifest..."
-    
-    # Check recordCounts (GMS format) or expectedCounts (legacy format)
-    $CountsObj = $null
-    if ($ManifestData.recordCounts) {
-        $CountsObj = $ManifestData.recordCounts
-    } elseif ($ManifestData.expectedCounts) {
-        $CountsObj = $ManifestData.expectedCounts
-    }
-
-    if ($CountsObj) {
-        if ($CountsObj.transactions -ne $null -and [int]$CountsObj.transactions -ne $TxCount) {
-            throw "Manifest validation FAILED: expected Transaction count $($CountsObj.transactions) but restored $TxCount"
-        }
-        if ($CountsObj.Transaction -ne $null -and [int]$CountsObj.Transaction -ne $TxCount) {
-            throw "Manifest validation FAILED: expected Transaction count $($CountsObj.Transaction) but restored $TxCount"
-        }
-        if ($CountsObj.attachments -ne $null -and [int]$CountsObj.attachments -ne $AttCount) {
-            throw "Manifest validation FAILED: expected Attachment count $($CountsObj.attachments) but restored $AttCount"
-        }
-        if ($CountsObj.Attachment -ne $null -and [int]$CountsObj.Attachment -ne $AttCount) {
-            throw "Manifest validation FAILED: expected Attachment count $($CountsObj.Attachment) but restored $AttCount"
-        }
-        if ($CountsObj.users -ne $null -and [int]$CountsObj.users -ne $UserCount) {
-            throw "Manifest validation FAILED: expected User count $($CountsObj.users) but restored $UserCount"
-        }
-    }
-    $ManifestVerified = $true
-    Write-Log "Backup manifest record count validation PASSED."
-
-    # Check 5: Invariant checks (Duplicate isCurrent must be 0)
+    # Check 2: Invariant checks (Duplicate isCurrent must be 0)
     [int]$WbDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
     [int]$WhDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
     [int]$QcvDupeCurrent = [int](Exec-Query "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
@@ -192,7 +204,7 @@ try {
         throw "Data Invariant Violation: Found duplicate isCurrent=true records (WB: $WbDupeCurrent, WH: $WhDupeCurrent, QCV: $QcvDupeCurrent, IM: $ImDupeCurrent)."
     }
 
-    # Check 6: FK Orphan Checks (must be 0)
+    # Check 3: FK Orphan Checks (must be 0)
     [int]$OrphanHist = [int](Exec-Query "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
     [int]$OrphanWb = [int](Exec-Query "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
     [int]$OrphanWh = [int](Exec-Query "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
@@ -202,8 +214,8 @@ try {
         throw "Data Integrity Violation: Found orphaned child records (Hist: $OrphanHist, WB: $OrphanWb, WH: $OrphanWh, Att: $OrphanAtt)."
     }
 
-    # Check 7: Physical Attachment Restoration & Reconciliation (gms_<timestamp>_attachments.json)
-    Write-Log "Step 3.5: Physical Attachment Restoration & SHA-256 Hash Reconciliation..."
+    # Check 4: Physical Attachment Restoration & Normalized Relative Path Reconciliation
+    Write-Log "Step 3.5: Physical Attachment Restoration & Full Normalized Relative Path Reconciliation..."
     [bool]$AttachmentPhysicalVerified = $false
     [int]$AttachmentFilesVerified = 0
 
@@ -218,17 +230,18 @@ try {
     }
 
     if ($AttJsonCandidatePath -and (Test-Path -Path $AttJsonCandidatePath)) {
-        # Pre-verify attachment archive SHA-256 against manifest checksum before decoding
-        if ($ManifestData.checksums -and $ManifestData.checksums.attachmentsArchive) {
-            [string]$ActualAttArchiveHash = (Get-FileHash -Path $AttJsonCandidatePath -Algorithm SHA256).Hash.ToLower()
-            [string]$ExpectedAttArchiveHash = $ManifestData.checksums.attachmentsArchive.ToLower()
-            if ($ActualAttArchiveHash -ne $ExpectedAttArchiveHash) {
-                throw "Attachment Archive SHA-256 Checksum Mismatch against Manifest! Expected: $ExpectedAttArchiveHash, Computed: $ActualAttArchiveHash"
-            }
-            Write-Log "Attachment archive SHA-256 pre-verification PASSED against manifest ($ActualAttArchiveHash)."
+        # HARD FAILURE: Missing attachments archive checksum in manifest is prohibited
+        if (-not $ManifestData.checksums -or -not $ManifestData.checksums.attachmentsArchive) {
+            throw "Security Exception: Manifest is missing mandatory attachmentsArchive SHA-256 checksum field. Skipping checksum is prohibited."
         }
+        [string]$ActualAttArchiveHash = (Get-FileHash -Path $AttJsonCandidatePath -Algorithm SHA256).Hash.ToLower()
+        [string]$ExpectedAttArchiveHash = $ManifestData.checksums.attachmentsArchive.ToLower()
+        if ($ActualAttArchiveHash -ne $ExpectedAttArchiveHash) {
+            throw "Attachment Archive SHA-256 Checksum Mismatch against Manifest! Expected: $ExpectedAttArchiveHash, Computed: $ActualAttArchiveHash"
+        }
+        Write-Log "Attachment archive SHA-256 pre-verification PASSED against manifest ($ActualAttArchiveHash)."
 
-        [string]$EphemeralAttDir = Join-Path -Path $env:TEMP -ChildPath ("gms_att_drill_" + (Get-Date).ToString("yyyyMMdd_HHmmss"))
+        [string]$EphemeralAttDir = Join-Path -Path $env:TEMP -ChildPath ("gms_att_drill_" + $TimestampSuffix)
         New-Item -Path $EphemeralAttDir -ItemType Directory -Force | Out-Null
         try {
             Write-Log "Decoding physical attachment archive $($AttJsonCandidatePath)..."
@@ -264,21 +277,24 @@ try {
                 }
             }
 
-            # Reconcile DB Attachment records
+            # Reconcile DB Attachment records using exact normalized relative paths (NOT basename)
             [string]$AttFilesJson = Exec-Query "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', \"filePath\", 'sha256', sha256)), '[]'::json) FROM \"Attachment\";"
             if (-not [string]::IsNullOrWhiteSpace($AttFilesJson) -and $AttFilesJson -ne "[]") {
                 $AttList = $AttFilesJson | ConvertFrom-Json
                 foreach ($att in $AttList) {
                     if ($att.filePath) {
-                        [string]$fileName = [System.IO.Path]::GetFileName($att.filePath)
-                        $foundItem = Get-ChildItem -Path $EphemeralAttDir -Recurse -Filter $fileName | Select-Object -First 1
-                        if (-not $foundItem) {
-                            throw "Physical Attachment File Missing during restore drill: $($att.filePath)"
+                        # Normalize path separators to current platform
+                        [string]$normRelPath = $att.filePath.Replace('/', [System.IO.Path]::DirectorySeparatorChar).Replace('\', [System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::DirectorySeparatorChar)
+                        [string]$expectedPhysicalFile = Join-Path -Path $EphemeralAttDir -ChildPath $normRelPath
+
+                        if (-not (Test-Path -Path $expectedPhysicalFile -PathType Leaf)) {
+                            throw "Physical Attachment File Missing during restore drill at exact relative path: $normRelPath (Full expected: $expectedPhysicalFile)"
                         }
+
                         if ($att.sha256) {
-                            $calcHash = (Get-FileHash -Path $foundItem.FullName -Algorithm SHA256).Hash.ToLower()
+                            $calcHash = (Get-FileHash -Path $expectedPhysicalFile -Algorithm SHA256).Hash.ToLower()
                             if ($calcHash -ne $att.sha256.ToLower()) {
-                                throw "Attachment SHA-256 DB Hash Mismatch for $($att.filePath). Expected DB SHA: $($att.sha256), Physical SHA: $calcHash"
+                                throw "Attachment SHA-256 DB Hash Mismatch for $normRelPath. Expected DB SHA: $($att.sha256), Physical SHA: $calcHash"
                             }
                         }
                     }
@@ -286,7 +302,7 @@ try {
             }
 
             $AttachmentPhysicalVerified = $true
-            Write-Log "Physical Attachment Restoration PASSED ($AttachmentFilesVerified files restored & reconciled with 100% SHA-256 match)." -Level "SUCCESS"
+            Write-Log "Physical Attachment Restoration PASSED ($AttachmentFilesVerified files restored & reconciled using full normalized relative path with 100% SHA-256 match)." -Level "SUCCESS"
         } finally {
             if (Test-Path -Path $EphemeralAttDir) {
                 Remove-Item -Path $EphemeralAttDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -312,15 +328,8 @@ try {
         tableCountVerified = $TableCount
         migrationCountVerified = [int]$MigrationCountStr
         transactionCountVerified = $TxCount
-        historyCountVerified = $TxHistCount
-        weighbridgeCountVerified = $WbCount
-        warehouseCountVerified = $WhCount
-        qcVehicleCountVerified = $QcvCount
-        incomingCheckCountVerified = $ImCount
         attachmentCountVerified = $AttCount
-        correctionCountVerified = $CorrectionCount
-        correctionItemCountVerified = $CorrectionItemCount
-        manifestVerified = $ManifestVerified
+        manifestVerified = $true
         attachmentPhysicalVerified = $AttachmentPhysicalVerified
         attachmentFilesVerifiedCount = $AttachmentFilesVerified
         duplicateIsCurrentViolations = 0
@@ -345,8 +354,8 @@ try {
     Set-Content -Path $RestoreHistoryPath -Value $JsonContent -Encoding utf8
     exit 1
 } finally {
-    Write-Log "Step 5: Tearing down ephemeral test database ($DrillDbName)..."
-    & docker exec $ContainerName psql -U $PgUser -d gms -c "DROP DATABASE IF EXISTS $DrillDbName;" 2>&1 | Out-Null
+    Write-Log "Step 5: Tearing down dedicated isolated DR container ($DrillContainer)..."
+    & docker rm -f $DrillContainer 2>&1 | Out-Null
     Write-Log "Cleanup complete."
 }
 

@@ -1,10 +1,11 @@
 # ==============================================================================
-# GMS Immutable Deployment & Automated Rollback Script (P1-05, P2-04)
+# GMS Immutable Deployment & Automated Rollback Script (P0-05, P1-05, P2-04)
 # ==============================================================================
-# Deploys specified RELEASE_TAG to production using docker-compose.prod.yml.
+# Deploys specified RELEASE_TAG or RELEASE_DIGEST to production using docker-compose.prod.yml.
+# Verifies image availability and digest immutability prior to modifying running stack.
 # Runs automated watchdog verification post-deployment.
 # Upon any healthcheck failure or explicit rollback request, instantly rolls back
-# to prior stable release tag without rebuilding from current working tree.
+# to prior stable release tag/digest without rebuilding from current working tree.
 # ==============================================================================
 
 param(
@@ -13,6 +14,12 @@ param(
 
     [Parameter(Mandatory=$false)]
     [string]$PreviousReleaseTag = "stable",
+
+    [Parameter(Mandatory=$false)]
+    [string]$TargetDigest = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$PreviousDigest = "",
 
     [Parameter(Mandatory=$false)]
     [string]$ComposeFile = "docker-compose.prod.yml",
@@ -31,7 +38,12 @@ $WorkspaceRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $WorkspaceRoot
 
 function Verify-Image-Exists {
-    param([string]$Tag)
+    param([string]$Tag, [string]$Digest = "")
+    if ($Digest) {
+        $backendImg = & docker images --digests --format "{{.Digest}}" "gms-backend" 2>$null | Where-Object { $_ -eq $Digest }
+        $frontendImg = & docker images --digests --format "{{.Digest}}" "gms-frontend" 2>$null | Where-Object { $_ -eq $Digest }
+        if ($backendImg -and $frontendImg) { return $true }
+    }
     $backendImg = & docker images -q "gms-backend:$Tag" 2>$null
     $frontendImg = & docker images -q "gms-frontend:$Tag" 2>$null
     return ((-not [string]::IsNullOrWhiteSpace($backendImg)) -and (-not [string]::IsNullOrWhiteSpace($frontendImg)))
@@ -43,7 +55,7 @@ if ($RollbackOnly) {
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
+        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -Digest $PreviousDigest)) {
             throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist locally. Refusing to build previous tag from working tree."
         }
 
@@ -51,7 +63,7 @@ if ($RollbackOnly) {
         & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
 
-        Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
+        Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery & schema-compatible operation..." -ForegroundColor Magenta
 
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
         & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile
@@ -66,11 +78,12 @@ if ($RollbackOnly) {
 }
 
 Write-Host "[GMS Deploy] Starting immutable deployment for Release Tag: [$TargetReleaseTag]..." -ForegroundColor Cyan
+if ($TargetDigest) { Write-Host "[GMS Deploy] Enforcing Target Image Digest: [$TargetDigest]" -ForegroundColor Cyan }
 Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
 
 # Pre-flight check: Ensure previous release image pair exists BEFORE altering the running stack
 Write-Host "[GMS Pre-flight] Verifying immutability requirement: checking availability of previous image pair [$PreviousReleaseTag]..." -ForegroundColor Cyan
-if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
+if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -Digest $PreviousDigest)) {
     throw "Pre-flight Error: Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] was not found. Runtime docker commit container snapshotting is disabled for release immutability."
 }
 Write-Host "[GMS Pre-flight SUCCESS] Verified presence of immutable rollback image pair [$PreviousReleaseTag]." -ForegroundColor Green
@@ -80,7 +93,7 @@ $env:RELEASE_TAG = $TargetReleaseTag
 
 try {
     # Step 1.2: Verify or build image pair for target release
-    if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag)) {
+    if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag -Digest $TargetDigest)) {
         Write-Host "[GMS Deploy] Pre-built image pair found for [$TargetReleaseTag]. Using immutable pre-built images (--no-build)..." -ForegroundColor Green
     } else {
         if ($UsePrebuiltImages -or ($ComposeFile -like "*prod*")) {
@@ -118,7 +131,7 @@ catch {
 
     $env:RELEASE_TAG = $PreviousReleaseTag
     try {
-        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag)) {
+        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -Digest $PreviousDigest)) {
             throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist. Cannot perform immutable rollback."
         }
 

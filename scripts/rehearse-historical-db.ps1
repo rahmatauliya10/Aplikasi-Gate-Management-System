@@ -2,9 +2,10 @@
 # GMS Historical Database Rehearsal & Preflight Automation Harness (P0-01)
 # ==============================================================================
 # Purpose: Executes historical database migration rehearsal against an actual
-# sanitized database clone. Verifies migration preflight, checksum integrity,
-# schema drift zero, duplicate isCurrent invariant zero, FK orphan zero, and
-# physical attachment reconciliation.
+# sanitized database clone inside a DEDICATED EPHEMERAL POSTGRES CONTAINER.
+# Completely isolated from live production database containers and host port 5432.
+# Verifies migration preflight, checksum integrity, schema drift zero, duplicate
+# isCurrent invariant zero, FK orphan zero, and physical attachment reconciliation.
 # Produces verifiable proof artifacts required for release gate.
 # HARD FAILURE: If no dump file is supplied, rehearsal fails immediately.
 # ==============================================================================
@@ -14,7 +15,10 @@ param(
     [string]$DumpFilePath = "",
 
     [Parameter(Mandatory=$false)]
-    [string]$BackupDir = ""
+    [string]$BackupDir = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$RehearsalPort = "5433"
 )
 
 Set-StrictMode -Version Latest
@@ -69,7 +73,7 @@ if (-not $ActualDumpPath -or -not (Test-Path -Path $ActualDumpPath -PathType Lea
 # GMS Historical Database Rehearsal & Staging Smoke Report
 
 **Date:** $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))
-**Environment:** Rehearsal Sandbox (Sanitized Clone)
+**Environment:** Dedicated Ephemeral Rehearsal Sandbox
 **Verdict:** 🔴 FAILED
 
 ## Summary
@@ -82,38 +86,50 @@ Rehearsal aborted: No historical database dump provided or found. Hard-coded PAS
 
 Write-Log "Using historical dump candidate: $ActualDumpPath"
 
-[string]$ContainerName = "gate-system-postgres"
+[string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
+[string]$RehearsalContainer = "gms-rehearsal-postgres-" + $TimestampSuffix
 [string]$PgUser = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { "postgres" }
 [string]$PgPass = if ($env:POSTGRES_PASSWORD) { $env:POSTGRES_PASSWORD } else { "testpassword" }
-[string]$DrillDbName = "gms_historical_rehearsal_" + (Get-Date).ToString("yyyyMMdd_HHmmss")
+[string]$DrillDbName = "gms_rehearsal"
 [bool]$ExecutionSuccess = $false
 
-# Direct DATABASE_URL to the ephemeral rehearsal database
-[string]$DrillDbUrl = "postgresql://${PgUser}:${PgPass}@localhost:5432/${DrillDbName}?schema=public"
+# Direct DATABASE_URL to dedicated ephemeral rehearsal container on $RehearsalPort
+[string]$DrillDbUrl = "postgresql://${PgUser}:${PgPass}@localhost:${RehearsalPort}/${DrillDbName}?schema=public"
 $env:DATABASE_URL = $DrillDbUrl
 
 try {
-    # 1. Create temporary rehearsal database
-    Write-Log "Step 1: Creating ephemeral rehearsal database ($DrillDbName)..."
-    & docker exec $ContainerName psql -U $PgUser -d gms -c "CREATE DATABASE $DrillDbName;" 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Failed to create ephemeral rehearsal database $DrillDbName." }
+    # 1. Start dedicated isolated PostgreSQL container
+    Write-Log "Step 1: Starting dedicated isolated PostgreSQL container ($RehearsalContainer on port $RehearsalPort)..."
+    & docker run -d --name $RehearsalContainer -p "${RehearsalPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$DrillDbName" postgres:15-alpine 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to start dedicated PostgreSQL rehearsal container." }
 
-    # 2. Restore historical dump into database
-    Write-Log "Step 2: Restoring historical dump into ephemeral database ($DrillDbName)..."
+    # Wait for PostgreSQL container readiness
+    [bool]$ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 1
+        & docker exec $RehearsalContainer pg_isready -U $PgUser 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+    }
+    if (-not $ready) { throw "Dedicated PostgreSQL rehearsal container failed to become ready within 30 seconds." }
+    Write-Log "Dedicated rehearsal PostgreSQL container is ready."
+
+    # 2. Restore historical dump into isolated container
+    Write-Log "Step 2: Restoring historical dump into isolated database..."
     [string]$TmpDumpPath = "/tmp/$([System.IO.Path]::GetFileName($ActualDumpPath))"
-    & docker cp $ActualDumpPath "${ContainerName}:${TmpDumpPath}"
-    if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to container." }
+    & docker cp $ActualDumpPath "${RehearsalContainer}:${TmpDumpPath}"
+    if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to rehearsal container." }
 
-    $RestoreOut = & docker exec $ContainerName pg_restore --username=$PgUser --dbname=$DrillDbName --no-owner --no-privileges $TmpDumpPath 2>&1
+    $RestoreOut = & docker exec $RehearsalContainer pg_restore --username=$PgUser --dbname=$DrillDbName --no-owner --no-privileges $TmpDumpPath 2>&1
     [int]$RestoreExitCode = $LASTEXITCODE
-    & docker exec $ContainerName rm -f $TmpDumpPath 2>&1 | Out-Null
+    & docker exec $RehearsalContainer rm -f $TmpDumpPath 2>&1 | Out-Null
 
     if ($RestoreExitCode -ne 0) {
         throw "Historical pg_restore failed with exit code $RestoreExitCode: $RestoreOut"
     }
+    Write-Log "pg_restore completed with exit code 0 (SUCCESS)."
 
     # 3. Check migration checksums against rehearsal DB
-    Write-Log "Step 3: Computing and verifying migration checksums on rehearsal DB ($DrillDbName)..."
+    Write-Log "Step 3: Computing and verifying migration checksums on rehearsal DB..."
     [string]$ChecksumOut = & node (Join-Path $ProjectRootDir "scripts\check-migration-checksums.js") 2>&1
     Set-Content -Path (Join-Path $ArtifactsDir "migration-checksum.txt") -Value $ChecksumOut -Encoding utf8
     if ($LASTEXITCODE -ne 0) { throw "Migration checksum verification failed: $ChecksumOut" }
@@ -150,9 +166,9 @@ try {
         Pop-Location
     }
 
-    # 4. Helper function to execute queries against rehearsal DB
+    # Helper function to execute queries against isolated rehearsal DB
     function Exec-Query([string]$sql) {
-        return (& docker exec $ContainerName psql -t -A -U $PgUser -d $DrillDbName -c "$sql" 2>&1).ToString().Trim()
+        return (& docker exec $RehearsalContainer psql -t -A -U $PgUser -d $DrillDbName -c "$sql" 2>&1).ToString().Trim()
     }
 
     Write-Log "Step 4: Executing actual preflight audit and invariant queries..."
@@ -196,7 +212,8 @@ try {
     Write-Log "Step 5: Generating historical preflight report artifact..."
     $PreflightObj = @{
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        rehearsalDatabase = $DrillDbName
+        rehearsalContainer = $RehearsalContainer
+        rehearsalPort = $RehearsalPort
         status = $VerdictStatus
         preflightAudit = @{
             duplicateIsCurrentViolations = $TotalDupes
@@ -249,11 +266,12 @@ try {
 # GMS Historical Database Rehearsal & Staging Smoke Report
 
 **Date:** $((Get-Date).ToString("yyyy-MM-dd HH:mm:ss"))
-**Environment:** Rehearsal Sandbox (Sanitized Dump: $(Split-Path $ActualDumpPath -Leaf))
+**Environment:** Dedicated Ephemeral Sandbox Container ($RehearsalContainer on port $RehearsalPort)
+**Dump Candidate:** $(Split-Path $ActualDumpPath -Leaf)
 **Verdict:** $VerdictEmoji
 
 ## Executive Summary
-Restored historical production dump into isolated rehearsal sandbox database ($DrillDbName).
+Restored historical production dump into dedicated isolated rehearsal container ($RehearsalContainer).
 Ran canonical production preflight duplicate audit, verified migration checksums, executed `prisma migrate deploy`, and confirmed zero schema drift.
 
 ## Computed Invariants
@@ -276,15 +294,15 @@ Ran canonical production preflight duplicate audit, verified migration checksums
     }
 
     $ExecutionSuccess = $true
-    Write-Log "SUCCESS: Historical DB rehearsal completed successfully. Proof artifacts saved to $ArtifactsDir." -Level "SUCCESS"
+    Write-Log "SUCCESS: Isolated historical DB rehearsal completed successfully. Proof artifacts saved to $ArtifactsDir." -Level "SUCCESS"
 }
 catch {
     Write-Log "Historical DB rehearsal failed: $_" -Level "ERROR"
     exit 1
 }
 finally {
-    Write-Log "Cleaning up ephemeral database ($DrillDbName)..."
-    & docker exec $ContainerName psql -U $PgUser -d gms -c "DROP DATABASE IF EXISTS $DrillDbName;" 2>&1 | Out-Null
+    Write-Log "Cleaning up dedicated ephemeral rehearsal container ($RehearsalContainer)..."
+    & docker rm -f $RehearsalContainer 2>&1 | Out-Null
 }
 
 exit 0

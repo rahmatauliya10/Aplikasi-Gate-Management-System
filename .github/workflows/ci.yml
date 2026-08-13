@@ -124,8 +124,10 @@ jobs:
     name: Dependency Security & Secret Scan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code Repository
+      - name: Checkout Code Repository (Full History for Secret Scanning)
         uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4.2.0

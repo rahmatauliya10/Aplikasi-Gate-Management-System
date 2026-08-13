@@ -1,9 +1,9 @@
 // ==============================================================================
-// GMS Cross-Stack E2E API & Business Matrix Smoke Verification (P0-07)
+// GMS Cross-Stack E2E API & Complete Business Matrix Verification (P0-07)
 // ==============================================================================
 // Executed in CI to verify backend API health, authentication, full stack communication,
-// real GBB/GSP/GBJ transaction creation, and REOPEN process matrix fail-closed enforcement
-// against the live container stack.
+// COMPLETE GBB/GSP/GBJ transaction lifecycles through COMPLETED state, and REOPEN
+// process matrix fail-closed enforcement (EXACT HTTP 400 on GBJ INCOMING_CHECK_PENDING target).
 // ==============================================================================
 
 const http = require('http');
@@ -89,7 +89,7 @@ async function waitForHealth(maxWaitMs = 60000) {
 }
 
 async function runE2ESmoke() {
-  log('Starting GMS Cross-Stack E2E Business & API Smoke Gate...');
+  log('Starting GMS Cross-Stack E2E Complete Business Lifecycle & API Smoke Gate (P0-07)...');
 
   // Step 1: Health check
   await waitForHealth(60000);
@@ -139,6 +139,8 @@ async function runE2ESmoke() {
     }
   }
 
+  const authHeader = { Authorization: `Bearer ${authToken}` };
+
   // Step 3: Health endpoints deep verification
   log('Verifying Liveness & Dependencies probes...');
   const livenessRes = await request('/api/health/liveness');
@@ -153,12 +155,12 @@ async function runE2ESmoke() {
   }
   log(`Dependencies probe PASSED (${JSON.stringify(depRes.body.data)}).`, 'SUCCESS');
 
-  // Step 4: Real Business Workflow Execution (GBB, GSP, GBJ Gate Check-In)
-  log('Executing real GBB, GSP, and GBJ transaction creation via API...');
+  // Step 4: FULL GBB WORKFLOW (Check-In -> Weigh In -> QC Vehicle -> Warehouse -> QC Incoming -> Weigh Out -> Gate Out -> COMPLETED)
   const timestampSuffix = Date.now().toString().slice(-4);
+  log(`[WORKFLOW 1/3] Executing Complete GBB Lifecycle to COMPLETED...`);
 
-  // 4a. Create GBB Transaction
-  const gbbPayload = {
+  // 4a. Check-In
+  const gbbRes = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
     plateNumber: `B12${timestampSuffix}GB`,
     driverName: 'E2E Driver GBB',
     driverPhone: '081234567890',
@@ -169,21 +171,87 @@ async function runE2ESmoke() {
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-GBB-${timestampSuffix}`,
     poNumber: `PO-GBB-${timestampSuffix}`,
-  };
-
-  const gbbRes = await request('/api/gate/check-in', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${authToken}` },
-  }, gbbPayload);
-
+  });
   if (gbbRes.statusCode !== 201 || !gbbRes.body?.data?.id) {
-    throw new Error(`GBB Transaction creation E2E FAILED: Status ${gbbRes.statusCode}, Body: ${JSON.stringify(gbbRes.body)}`);
+    throw new Error(`GBB Check-In FAILED: Status ${gbbRes.statusCode}, Body: ${JSON.stringify(gbbRes.body)}`);
   }
   const gbbTxId = gbbRes.body.data.id;
-  log(`GBB Transaction created successfully (ID: ${gbbTxId}, Status: ${gbbRes.body.data.status}).`, 'SUCCESS');
+  log(`  1. GBB Check-In SUCCESS (ID: ${gbbTxId}, Status: REGISTERED)`);
 
-  // 4b. Create GSP Transaction
-  const gspPayload = {
+  // 4b. Weigh In
+  const gbbWbIn = await request(`/api/weighbridge/in/${gbbTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 15200,
+    ticketNumber: `WB-IN-GBB-${timestampSuffix}`,
+  });
+  if (gbbWbIn.statusCode !== 200) {
+    throw new Error(`GBB Weigh-In FAILED: Status ${gbbWbIn.statusCode}, Body: ${JSON.stringify(gbbWbIn.body)}`);
+  }
+  log(`  2. GBB Weigh-In SUCCESS (Gross: 15,200 kg, Status: WEIGH_IN_DONE)`);
+
+  // 4c. QC Vehicle Check
+  const gbbQcV = await request(`/api/qc/vehicle-result/${gbbTxId}`, { method: 'POST', headers: authHeader }, {
+    result: 'PASS',
+    vehicleCleanliness: true,
+    vehicleOdor: true,
+    pestEvidence: false,
+    vehicleCondition: true,
+    documentCompleteness: true,
+    sealCondition: true,
+  });
+  if (gbbQcV.statusCode !== 200) {
+    throw new Error(`GBB QC Vehicle Check FAILED: Status ${gbbQcV.statusCode}, Body: ${JSON.stringify(gbbQcV.body)}`);
+  }
+  log(`  3. GBB QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
+
+  // 4d. Warehouse Start & Complete (Unloading)
+  await request(`/api/warehouse/start/${gbbTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GBB unloading' });
+  const gbbWhComp = await request(`/api/warehouse/complete/${gbbTxId}`, { method: 'POST', headers: authHeader }, {
+    actualWeight: 15200,
+    actualQuantity: 250,
+    unit: 'BAG',
+    remarks: 'GBB Unloading finished',
+  });
+  if (gbbWhComp.statusCode !== 200) {
+    throw new Error(`GBB Warehouse Complete FAILED: Status ${gbbWhComp.statusCode}, Body: ${JSON.stringify(gbbWhComp.body)}`);
+  }
+  log(`  4. GBB Warehouse Unload SUCCESS (Status: INCOMING_CHECK_PENDING)`);
+
+  // 4e. QC Incoming Material Check
+  const gbbQcInc = await request(`/api/qc/incoming-result/${gbbTxId}`, { method: 'POST', headers: authHeader }, {
+    result: 'PASS',
+    odor: 'NORMAL',
+    color: 'GOOD',
+    moisture: 12.5,
+    foreignMatter: 0.1,
+  });
+  if (gbbQcInc.statusCode !== 200) {
+    throw new Error(`GBB QC Incoming Check FAILED: Status ${gbbQcInc.statusCode}, Body: ${JSON.stringify(gbbQcInc.body)}`);
+  }
+  log(`  5. GBB QC Incoming Check SUCCESS (Status: INCOMING_CHECK_PASSED)`);
+
+  // 4f. Weigh Out
+  const gbbWbOut = await request(`/api/weighbridge/out/${gbbTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 5200,
+    ticketNumber: `WB-OUT-GBB-${timestampSuffix}`,
+  });
+  if (gbbWbOut.statusCode !== 200) {
+    throw new Error(`GBB Weigh-Out FAILED: Status ${gbbWbOut.statusCode}, Body: ${JSON.stringify(gbbWbOut.body)}`);
+  }
+  log(`  6. GBB Weigh-Out SUCCESS (Tare: 5,200 kg, Net: 10,000 kg, Status: WEIGH_OUT_DONE)`);
+
+  // 4g. Gate Check-Out
+  const gbbCheckOut = await request(`/api/gate/check-out/${gbbTxId}`, { method: 'POST', headers: authHeader });
+  if (gbbCheckOut.statusCode !== 200) {
+    throw new Error(`GBB Gate Check-Out FAILED: Status ${gbbCheckOut.statusCode}, Body: ${JSON.stringify(gbbCheckOut.body)}`);
+  }
+  log(`  7. GBB Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
+
+
+  // Step 5: FULL GSP WORKFLOW (Check-In -> Weigh In -> QC Vehicle -> Warehouse -> Weigh Out -> Gate Out -> COMPLETED)
+  log(`[WORKFLOW 2/3] Executing Complete GSP Lifecycle to COMPLETED...`);
+
+  // 5a. Check-In
+  const gspRes = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
     plateNumber: `B34${timestampSuffix}GS`,
     driverName: 'E2E Driver GSP',
     driverPhone: '081234567891',
@@ -193,21 +261,70 @@ async function runE2ESmoke() {
     cargoType: 'General Cargo Material',
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-GSP-${timestampSuffix}`,
-  };
-
-  const gspRes = await request('/api/gate/check-in', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${authToken}` },
-  }, gspPayload);
-
+  });
   if (gspRes.statusCode !== 201 || !gspRes.body?.data?.id) {
-    throw new Error(`GSP Transaction creation E2E FAILED: Status ${gspRes.statusCode}, Body: ${JSON.stringify(gspRes.body)}`);
+    throw new Error(`GSP Check-In FAILED: Status ${gspRes.statusCode}, Body: ${JSON.stringify(gspRes.body)}`);
   }
   const gspTxId = gspRes.body.data.id;
-  log(`GSP Transaction created successfully (ID: ${gspTxId}, Status: ${gspRes.body.data.status}).`, 'SUCCESS');
+  log(`  1. GSP Check-In SUCCESS (ID: ${gspTxId}, Status: REGISTERED)`);
 
-  // 4c. Create GBJ Transaction
-  const gbjPayload = {
+  // 5b. Weigh In
+  const gspWbIn = await request(`/api/weighbridge/in/${gspTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 12000,
+    ticketNumber: `WB-IN-GSP-${timestampSuffix}`,
+  });
+  if (gspWbIn.statusCode !== 200) {
+    throw new Error(`GSP Weigh-In FAILED: Status ${gspWbIn.statusCode}, Body: ${JSON.stringify(gspWbIn.body)}`);
+  }
+  log(`  2. GSP Weigh-In SUCCESS (Gross: 12,000 kg, Status: WEIGH_IN_DONE)`);
+
+  // 5c. QC Vehicle Check
+  const gspQcV = await request(`/api/qc/vehicle-result/${gspTxId}`, { method: 'POST', headers: authHeader }, {
+    result: 'PASS',
+    vehicleCleanliness: true,
+    vehicleOdor: true,
+  });
+  if (gspQcV.statusCode !== 200) {
+    throw new Error(`GSP QC Vehicle Check FAILED: Status ${gspQcV.statusCode}, Body: ${JSON.stringify(gspQcV.body)}`);
+  }
+  log(`  3. GSP QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
+
+  // 5d. Warehouse Start & Complete
+  await request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GSP unloading' });
+  const gspWhComp = await request(`/api/warehouse/complete/${gspTxId}`, { method: 'POST', headers: authHeader }, {
+    actualWeight: 12000,
+    actualQuantity: 40,
+    unit: 'PALLET',
+    remarks: 'GSP Unloading finished',
+  });
+  if (gspWhComp.statusCode !== 200) {
+    throw new Error(`GSP Warehouse Complete FAILED: Status ${gspWhComp.statusCode}, Body: ${JSON.stringify(gspWhComp.body)}`);
+  }
+  log(`  4. GSP Warehouse Unload SUCCESS (Status: WAREHOUSE_DONE)`);
+
+  // 5e. Weigh Out
+  const gspWbOut = await request(`/api/weighbridge/out/${gspTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 4000,
+    ticketNumber: `WB-OUT-GSP-${timestampSuffix}`,
+  });
+  if (gspWbOut.statusCode !== 200) {
+    throw new Error(`GSP Weigh-Out FAILED: Status ${gspWbOut.statusCode}, Body: ${JSON.stringify(gspWbOut.body)}`);
+  }
+  log(`  5. GSP Weigh-Out SUCCESS (Tare: 4,000 kg, Net: 8,000 kg, Status: WEIGH_OUT_DONE)`);
+
+  // 5f. Gate Check-Out
+  const gspCheckOut = await request(`/api/gate/check-out/${gspTxId}`, { method: 'POST', headers: authHeader });
+  if (gspCheckOut.statusCode !== 200) {
+    throw new Error(`GSP Gate Check-Out FAILED: Status ${gspCheckOut.statusCode}, Body: ${JSON.stringify(gspCheckOut.body)}`);
+  }
+  log(`  6. GSP Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
+
+
+  // Step 6: FULL GBJ WORKFLOW (Check-In -> QC Vehicle -> Warehouse Loading -> Weigh Out -> Gate Out -> COMPLETED)
+  log(`[WORKFLOW 3/3] Executing Complete GBJ Lifecycle to COMPLETED...`);
+
+  // 6a. Check-In
+  const gbjRes = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
     plateNumber: `B56${timestampSuffix}GJ`,
     driverName: 'E2E Driver GBJ',
     driverPhone: '081234567892',
@@ -217,47 +334,81 @@ async function runE2ESmoke() {
     cargoType: 'Finished Product',
     cargoProcessType: 'OUTBOUND',
     suratJalanNumber: `SJ-GBJ-${timestampSuffix}`,
-  };
-
-  const gbjRes = await request('/api/gate/check-in', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${authToken}` },
-  }, gbjPayload);
-
+  });
   if (gbjRes.statusCode !== 201 || !gbjRes.body?.data?.id) {
-    throw new Error(`GBJ Transaction creation E2E FAILED: Status ${gbjRes.statusCode}, Body: ${JSON.stringify(gbjRes.body)}`);
+    throw new Error(`GBJ Check-In FAILED: Status ${gbjRes.statusCode}, Body: ${JSON.stringify(gbjRes.body)}`);
   }
   const gbjTxId = gbjRes.body.data.id;
-  log(`GBJ Transaction created successfully (ID: ${gbjTxId}, Status: ${gbjRes.body.data.status}).`, 'SUCCESS');
+  log(`  1. GBJ Check-In SUCCESS (ID: ${gbjTxId}, Status: REGISTERED)`);
 
-  // Step 5: Test REOPEN Matrix Business Rule Enforcement on Real Transaction
-  log(`Testing REOPEN business matrix rule enforcement on real GBB transaction (${gbbTxId})...`);
+  // 6b. QC Vehicle Check
+  const gbjQcV = await request(`/api/qc/vehicle-result/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
+    result: 'PASS',
+    vehicleCleanliness: true,
+    vehicleOdor: true,
+  });
+  if (gbjQcV.statusCode !== 200) {
+    throw new Error(`GBJ QC Vehicle Check FAILED: Status ${gbjQcV.statusCode}, Body: ${JSON.stringify(gbjQcV.body)}`);
+  }
+  log(`  2. GBJ QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
+
+  // 6c. Warehouse Loading Start & Complete
+  await request(`/api/warehouse/start/${gbjTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GBJ loading' });
+  const gbjWhComp = await request(`/api/warehouse/complete/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
+    actualWeight: 14000,
+    actualQuantity: 500,
+    unit: 'BOX',
+    remarks: 'GBJ Loading finished',
+  });
+  if (gbjWhComp.statusCode !== 200) {
+    throw new Error(`GBJ Warehouse Complete FAILED: Status ${gbjWhComp.statusCode}, Body: ${JSON.stringify(gbjWhComp.body)}`);
+  }
+  log(`  3. GBJ Warehouse Loading SUCCESS (Status: WAREHOUSE_DONE)`);
+
+  // 6d. Weigh Out
+  const gbjWbOut = await request(`/api/weighbridge/out/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 14000,
+    ticketNumber: `WB-OUT-GBJ-${timestampSuffix}`,
+  });
+  if (gbjWbOut.statusCode !== 200) {
+    throw new Error(`GBJ Weigh-Out FAILED: Status ${gbjWbOut.statusCode}, Body: ${JSON.stringify(gbjWbOut.body)}`);
+  }
+  log(`  4. GBJ Weigh-Out SUCCESS (Gross: 14,000 kg, Status: WEIGH_OUT_DONE)`);
+
+  // 6e. Gate Check-Out
+  const gbjCheckOut = await request(`/api/gate/check-out/${gbjTxId}`, { method: 'POST', headers: authHeader });
+  if (gbjCheckOut.statusCode !== 200) {
+    throw new Error(`GBJ Gate Check-Out FAILED: Status ${gbjCheckOut.statusCode}, Body: ${JSON.stringify(gbjCheckOut.body)}`);
+  }
+  log(`  5. GBJ Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
+
+
+  // Step 7: REOPEN Matrix Business Rule Enforcement (GBJ + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400)
+  log(`Testing REOPEN business matrix fail-closed enforcement on real GBJ transaction (${gbjTxId})...`);
   const reopenRes = await request(
-    `/api/transactions/${gbbTxId}/operation-log-corrections`,
+    `/api/transactions/${gbjTxId}/operation-log-corrections`,
     {
       method: 'POST',
-      headers: { Authorization: `Bearer ${authToken}` },
+      headers: authHeader,
     },
     {
       action: 'REOPEN_WORKFLOW',
-      reason: 'E2E Matrix Business Rule Verification',
+      reason: 'E2E Matrix Fail-Closed Business Rule Verification',
       expectedVersion: 1,
       reopenTargetStatus: 'INCOMING_CHECK_PENDING',
     }
   );
 
-  if (reopenRes.statusCode === 500) {
-    throw new Error(`REOPEN matrix test FAILED: Internal Server Error (500) returned.`);
-  }
-
-  if (reopenRes.statusCode === 400 || reopenRes.statusCode === 200) {
-    log(`REOPEN business matrix check passed with expected HTTP status ${reopenRes.statusCode}.`, 'SUCCESS');
+  if (reopenRes.statusCode === 400) {
+    log(`REOPEN fail-closed business matrix check PASSED: Received EXACT HTTP 400 Bad Request as mandated.`, 'SUCCESS');
   } else {
-    throw new Error(`REOPEN business matrix check returned unexpected status code: ${reopenRes.statusCode}, Body: ${JSON.stringify(reopenRes.body)}`);
+    throw new Error(
+      `REOPEN fail-closed business matrix check FAILED! Expected EXACT HTTP 400 for GBJ INCOMING_CHECK_PENDING target, but received HTTP ${reopenRes.statusCode}. Body: ${JSON.stringify(reopenRes.body)}`
+    );
   }
 
   log('==============================================================================', 'SUCCESS');
-  log('Full-Stack Cross-Stack E2E Gate PASSED: Auth, Business Workflows (GBB/GSP/GBJ) & Matrix Verified.', 'SUCCESS');
+  log('Full-Stack Cross-Stack E2E Gate PASSED: Auth, Complete Workflows (GBB/GSP/GBJ to COMPLETED) & Fail-Closed Matrix 400 Verified.', 'SUCCESS');
   log('==============================================================================', 'SUCCESS');
 }
 
@@ -265,4 +416,3 @@ runE2ESmoke().catch((err) => {
   log(`Cross-Stack E2E Smoke Gate FAILED: ${err.message}`, 'ERROR');
   process.exit(1);
 });
-
