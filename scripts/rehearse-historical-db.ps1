@@ -223,9 +223,13 @@ try {
             Write-Log "Processing JSON attachment archive ($AttachmentArchivePath)..."
             $AttJsonData = Get-Content -Path $AttachmentArchivePath -Raw | ConvertFrom-Json
             if ($AttJsonData.files) {
+                [string]$BaseCanonicalDir = [System.IO.Path]::GetFullPath($TmpExtractDir)
                 foreach ($fileObj in $AttJsonData.files) {
                     [string]$relPath = if ($fileObj.relativePath) { $fileObj.relativePath } else { $fileObj.fileName }
-                    [string]$targetFile = Join-Path -Path $TmpExtractDir -ChildPath $relPath
+                    [string]$targetFile = [System.IO.Path]::GetFullPath((Join-Path -Path $BaseCanonicalDir -ChildPath $relPath))
+                    if (-not $targetFile.StartsWith($BaseCanonicalDir + [System.IO.Path]::DirectorySeparatorChar)) {
+                        throw "Security Exception: Path traversal attempt detected in attachment path '$relPath'."
+                    }
                     [string]$targetParent = Split-Path $targetFile -Parent
                     if (-not (Test-Path -Path $targetParent -PathType Container)) {
                         New-Item -Path $targetParent -ItemType Directory -Force | Out-Null
@@ -346,7 +350,7 @@ try {
 
     # 8. Generate smoke-test-report.json artifact
     Write-Log "Step 8: Generating Migration Rehearsal application smoke report..."
-    [bool]$SmokePassed = ($GbbCount -gt 0) -and ($GspCount -gt 0) -and ($GbjCount -gt 0)
+    [bool]$SmokePassed = ($GbbCount -gt 0) -and ($GspCount -gt 0) -and ($GbjCount -gt 0) -and ($GbbCompletedCount -gt 0 -or $GspCompletedCount -gt 0 -or $GbjCompletedCount -gt 0)
     $SmokeObj = @{
         reportTitle = "Migration Rehearsal Application Read Smoke Report"
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
@@ -362,8 +366,8 @@ try {
     }
     Set-Content -Path (Join-Path $ArtifactsDir "smoke-test-report.json") -Value ($SmokeObj | ConvertTo-Json -Depth 5) -Encoding utf8
 
-    if (-not $PassedInvariants) {
-        throw "Invariant checks failed: Duplicate isCurrent = $TotalDupes, Orphan FKs = $TotalOrphans, Schema Drift Exit Code = $SchemaDriftExitCode."
+    if (-not $PassedInvariants -or -not $SmokePassed) {
+        throw "Historical DB rehearsal failed! PassedInvariants=$PassedInvariants, SmokePassed=$SmokePassed (Duplicates=$TotalDupes, Orphans=$TotalOrphans, SchemaDriftCode=$SchemaDriftExitCode, MissingFiles=$MissingPhysicalFiles)."
     }
 
     Write-Log "SUCCESS: Isolated historical DB rehearsal completed successfully. Required 6 evidence artifacts saved to $ArtifactsDir." -Level "SUCCESS"

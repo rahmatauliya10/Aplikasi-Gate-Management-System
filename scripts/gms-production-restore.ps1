@@ -121,11 +121,20 @@ if (-not $PgPass) {
     $PgPass = "gms_ephemeral_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 16)
 }
 
+[string]$PromotionPhase = "BEFORE_LIVE_PROMOTION"
+
 # Step 3: Enter Maintenance Mode / Application Write Freeze
 Write-Log "Step 2: Enabling Maintenance Mode & Application Write Freeze..."
 [string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
 Set-Content -Path $MaintFlagPath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE" -Encoding utf8
-Write-Log "  Maintenance flag created ($MaintFlagPath) [PASS]" -Level "SUCCESS"
+
+[string]$MaintDir = Join-Path -Path $ProjectRootDir -ChildPath "maintenance"
+if (-not (Test-Path -Path $MaintDir -PathType Container)) {
+    New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
+}
+[string]$MaintActivePath = Join-Path -Path $MaintDir -ChildPath "active"
+Set-Content -Path $MaintActivePath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE" -Encoding utf8
+Write-Log "  Maintenance flag created ($MaintFlagPath & $MaintActivePath) [PASS]" -Level "SUCCESS"
 
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
 [string]$StagingContainer = "gms-restore-staging-" + $TimestampSuffix
@@ -260,35 +269,37 @@ try {
     Write-Log "  7a. Promoting Staging Database to Live Production Database ($LiveDbName)..."
     [string]$LiveContainerId = (& docker ps -q -f "name=$LiveContainer" 2>&1).ToString().Trim()
 
-    if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
-        Write-Log "  Live Postgres Container [$LiveContainer] detected. Terminating active client connections..."
-        & docker exec $LiveContainer psql -U $PgUser -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$LiveDbName' AND pid <> pg_backend_pid();" 2>&1 | Out-Null
-
-        Write-Log "  Executing pg_restore directly into Live Production Database ($LiveDbName)..."
-        [string]$TmpDumpInLive = "/tmp/$DumpFileName"
-        & docker cp $DumpFilePath "${LiveContainer}:${TmpDumpInLive}"
-        if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to live database container." }
-
-        $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --clean --if-exists --no-owner --no-privileges $TmpDumpInLive 2>&1
-        [int]$LiveExitCode = $LASTEXITCODE
-        & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
-
-        if ($LiveExitCode -ne 0) {
-            throw "Live Database Promotion (pg_restore) failed with exit code $LiveExitCode: $LiveRestoreOut"
-        }
-
-        # Verify Live DB migration deployment & invariants
-        [string]$LiveMigCountStr = (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>&1).ToString().Trim()
-        [int]$LiveMigCount = 0
-        if (-not [int]::TryParse($LiveMigCountStr, [ref]$LiveMigCount) -or $LiveMigCount -eq 0) {
-            throw "Post-Promotion Live DB Verification Error: _prisma_migrations empty or missing in live database."
-        }
-        Write-Log "  Live Database Promotion verified [PASS] ($LiveMigCount finished migrations)" -Level "SUCCESS"
-    } else {
-        Write-Log "  Target Live PostgreSQL Container [$LiveContainer] not running locally. Skipping container overwrite (Staging verification completed)." -Level "WARN"
+    if ([string]::IsNullOrWhiteSpace($LiveContainerId)) {
+        throw "Live database target container [$LiveContainer] not found or not running. Live database restoration aborted."
     }
 
+    $PromotionPhase = "DURING_DB_PROMOTION"
+    Write-Log "  Live Postgres Container [$LiveContainer] detected. Terminating active client connections..."
+    & docker exec $LiveContainer psql -U $PgUser -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$LiveDbName' AND pid <> pg_backend_pid();" 2>&1 | Out-Null
+
+    Write-Log "  Executing transactional pg_restore directly into Live Production Database ($LiveDbName)..."
+    [string]$TmpDumpInLive = "/tmp/$DumpFileName"
+    & docker cp $DumpFilePath "${LiveContainer}:${TmpDumpInLive}"
+    if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to live database container." }
+
+    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error $TmpDumpInLive 2>&1
+    [int]$LiveExitCode = $LASTEXITCODE
+    & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
+
+    if ($LiveExitCode -ne 0) {
+        throw "Live Database Promotion (pg_restore) failed with exit code $LiveExitCode: $LiveRestoreOut"
+    }
+
+    # Verify Live DB migration deployment & invariants
+    [string]$LiveMigCountStr = (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>&1).ToString().Trim()
+    [int]$LiveMigCount = 0
+    if (-not [int]::TryParse($LiveMigCountStr, [ref]$LiveMigCount) -or $LiveMigCount -eq 0) {
+        throw "Post-Promotion Live DB Verification Error: _prisma_migrations empty or missing in live database."
+    }
+    Write-Log "  Live Database Promotion verified [PASS] ($LiveMigCount finished migrations)" -Level "SUCCESS"
+
     # 7b. Atomic Directory Swap for Attachments
+    $PromotionPhase = "DURING_ATTACHMENT_PROMOTION"
     [string]$PreRestoreUploadsDir = Join-Path -Path $ProjectRootDir -ChildPath "uploads_pre_restore_${TimestampSuffix}"
     if (Test-Path -Path $UploadDir) {
         Rename-Item -Path $UploadDir -NewName (Split-Path $PreRestoreUploadsDir -Leaf)
@@ -331,8 +342,14 @@ try {
 
 } catch {
     Write-Log "=============================================================================="
-    Write-Log "PRODUCTION RESTORE FAILED: $_" -Level "ERROR"
-    Write-Log "FAIL-CLOSED ACTIVE: Live database and live upload files were NOT corrupted." -Level "ERROR"
+    Write-Log "PRODUCTION RESTORE FAILED during phase [$PromotionPhase]: $_" -Level "ERROR"
+    if ($PromotionPhase -eq "BEFORE_LIVE_PROMOTION") {
+        Write-Log "FAIL-CLOSED ACTIVE: Live database and live attachment files were NOT modified." -Level "ERROR"
+    } elseif ($PromotionPhase -eq "DURING_DB_PROMOTION") {
+        Write-Log "CRITICAL PROMOTION FAILURE: Live database promotion failed (single-transaction rollback executed). Attachments were NOT modified." -Level "ERROR"
+    } elseif ($PromotionPhase -eq "DURING_ATTACHMENT_PROMOTION") {
+        Write-Log "CRITICAL PROMOTION FAILURE: Live database promotion succeeded, but attachment promotion failed. Immediate operator intervention required." -Level "ERROR"
+    }
     Write-Log "=============================================================================="
 
     $EvidenceObj = @{
@@ -340,6 +357,7 @@ try {
         backupId = $BackupId
         restoreTimestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
         status = "FAILED"
+        promotionPhase = $PromotionPhase
         error = $_.ToString()
     }
     $EvidenceJson = $EvidenceObj | ConvertTo-Json -Compress
@@ -354,6 +372,9 @@ try {
     # Step 8: Maintenance Mode Teardown & Container Cleanup
     if (Test-Path -Path $MaintFlagPath) {
         Remove-Item -Path $MaintFlagPath -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -Path $MaintActivePath) {
+        Remove-Item -Path $MaintActivePath -Force -ErrorAction SilentlyContinue
     }
     & docker rm -f $StagingContainer 2>&1 | Out-Null
     Write-Log "Maintenance mode released & staging container destroyed."

@@ -95,14 +95,7 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
     let testTxId: string | undefined;
     let adminUserId: string | undefined;
 
-    try {
-      await prisma.$connect();
-    } catch (connErr) {
-      console.warn(
-        'PostgreSQL test database not reachable at DATABASE_URL_TEST. Skipping physical PG rollback integration test.',
-      );
-      return;
-    }
+    await prisma.$connect();
 
     try {
       // Create a real Admin user fixture in test database for FK relation

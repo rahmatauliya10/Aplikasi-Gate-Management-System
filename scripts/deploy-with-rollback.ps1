@@ -72,40 +72,9 @@ function Verify-Image-Exists {
     return ((-not [string]::IsNullOrWhiteSpace($backendImg)) -and (-not [string]::IsNullOrWhiteSpace($frontendImg)))
 }
 
-if ($RollbackOnly) {
-    Write-Host "[GMS AUTOMATED ROLLBACK] Rollback requested. Bypassing build for failed tag [$TargetReleaseTag]..." -ForegroundColor Yellow
-    Write-Host "[GMS AUTOMATED ROLLBACK] Directly restoring previous release tag: [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Magenta
-
-    $env:RELEASE_TAG = $PreviousReleaseTag
-    if ($PreviousBackendDigest) { $env:BACKEND_IMAGE = "gms-backend@$PreviousBackendDigest" }
-    if ($PreviousFrontendDigest) { $env:FRONTEND_IMAGE = "gms-frontend@$PreviousFrontendDigest" }
-
-    try {
-        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -BackendDig $PreviousBackendDigest -FrontendDig $PreviousFrontendDigest)) {
-            throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist locally. Refusing to build previous tag from working tree."
-        }
-
-        Write-Host "[GMS AUTOMATED ROLLBACK] Executing fast rollback using immutable image pair [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Cyan
-        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
-        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
-
-        Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery & schema-compatible operation..." -ForegroundColor Magenta
-
-        $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile
-        if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
-        Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PreviousReleaseTag]." -ForegroundColor Green
-        exit 0
-    }
-    catch {
-        Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover during rollback to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
-        exit 2
-    }
-}
-
 # Auto-resolve digests from release_manifest.json or local docker image inspect if not explicitly provided
 [string]$ManifestPath = Join-Path $WorkspaceRoot "deploy\release_manifest.json"
-if ((-not $BackendDigest -or -not $FrontendDigest) -and (Test-Path -Path $ManifestPath -PathType Leaf)) {
+if (Test-Path -Path $ManifestPath -PathType Leaf) {
     try {
         $ManifestObj = Get-Content -Path $ManifestPath -Raw | ConvertFrom-Json
         if (-not $BackendDigest -and $ManifestObj.backend -and $ManifestObj.backend.digest) {
@@ -114,7 +83,67 @@ if ((-not $BackendDigest -or -not $FrontendDigest) -and (Test-Path -Path $Manife
         if (-not $FrontendDigest -and $ManifestObj.frontend -and $ManifestObj.frontend.digest) {
             $FrontendDigest = $ManifestObj.frontend.digest
         }
+        if (-not $PreviousBackendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.backend -and $ManifestObj.previousRelease.backend.digest) {
+            $PreviousBackendDigest = $ManifestObj.previousRelease.backend.digest
+        }
+        if (-not $PreviousFrontendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.frontend -and $ManifestObj.previousRelease.frontend.digest) {
+            $PreviousFrontendDigest = $ManifestObj.previousRelease.frontend.digest
+        }
+        if (-not $PreviousBackendDigest -and $ManifestObj.backend -and $ManifestObj.backend.digest) {
+            $PreviousBackendDigest = $ManifestObj.backend.digest
+        }
+        if (-not $PreviousFrontendDigest -and $ManifestObj.frontend -and $ManifestObj.frontend.digest) {
+            $PreviousFrontendDigest = $ManifestObj.frontend.digest
+        }
     } catch {}
+}
+
+function Execute-Rollback {
+    param(
+        [string]$PrevTag,
+        [string]$PrevBackendDig,
+        [string]$PrevFrontendDig,
+        [string]$CompFile,
+        [bool]$IsStrictProd
+    )
+    Write-Host "[GMS AUTOMATED ROLLBACK] Initiating rollback sequence to previous stable release tag: [$PrevTag]..." -ForegroundColor Magenta
+
+    if ($IsStrictProd -or $RequireDigest) {
+        if (-not $PrevBackendDig -or -not $PrevFrontendDig) {
+            throw "[GMS IMMUTABILITY VIOLATION] Rollback aborted! Production rollback requires explicit SHA-256 digests for previous images (PreviousBackendDigest and PreviousFrontendDigest). Refusing to fall back to target failed image digests."
+        }
+    }
+
+    $env:RELEASE_TAG = $PrevTag
+    $env:BACKEND_IMAGE = if ($PrevBackendDig) { "gms-backend@$PrevBackendDig" } else { "gms-backend:$PrevTag" }
+    $env:FRONTEND_IMAGE = if ($PrevFrontendDig) { "gms-frontend@$PrevFrontendDig" } else { "gms-frontend:$PrevTag" }
+
+    if (-not (Verify-Image-Exists -Tag $PrevTag -BackendDig $PrevBackendDig -FrontendDig $PrevFrontendDig)) {
+        throw "Previous release image pair [gms-backend:$PrevTag, gms-frontend:$PrevTag] does not exist locally. Cannot perform safe rollback."
+    }
+
+    Write-Host "[GMS AUTOMATED ROLLBACK] Booting previous stable release containers ($env:BACKEND_IMAGE, $env:FRONTEND_IMAGE)..." -ForegroundColor Cyan
+    & docker compose -f $CompFile --env-file backend\.env up -d --no-build --remove-orphans
+    if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+
+    Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
+    $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
+    & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile
+    if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
+    Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PrevTag]." -ForegroundColor Green
+}
+
+[bool]$IsProductionMode = [bool]($RequireDigest -or ($ComposeFile -like "*prod*"))
+
+if ($RollbackOnly) {
+    try {
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode
+        exit 0
+    }
+    catch {
+        Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover during rollback to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
+        exit 2
+    }
 }
 
 # If still missing, inspect local image digest if available
@@ -132,7 +161,7 @@ if (-not $FrontendDigest) {
 }
 
 # Strict Production Immutability Verification Gate
-if ($RequireDigest -or ($ComposeFile -like "*prod*")) {
+if ($IsProductionMode) {
     if (-not $BackendDigest -or -not $FrontendDigest) {
         throw "[GMS IMMUTABILITY VIOLATION] Production deployment strictly requires SHA-256 image digests for gms-backend and gms-frontend. Tag fallbacks are strictly prohibited for Level 9 production readiness."
     }
@@ -153,7 +182,7 @@ try {
     if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest)) {
         Write-Host "[GMS Deploy] Pre-built image pair found for [$TargetReleaseTag]. Using immutable pre-built images (--no-build)..." -ForegroundColor Green
     } else {
-        if ($UsePrebuiltImages -or ($ComposeFile -like "*prod*")) {
+        if ($UsePrebuiltImages -or $IsProductionMode) {
             throw "Production deployment error: Prebuilt immutable image pair [gms-backend:$TargetReleaseTag, gms-frontend:$TargetReleaseTag] was not found in registry/local engine. Building on production server working tree is disabled for release immutability."
         }
         Write-Host "[GMS Deploy] Building image pair for release [$TargetReleaseTag] from local working tree..." -ForegroundColor Cyan
@@ -204,26 +233,8 @@ try {
 }
 catch {
     Write-Host "[GMS DEPLOYMENT FAILED] Error detected: $_" -ForegroundColor Red
-    Write-Host "[GMS AUTOMATED ROLLBACK] Initiating immediate rollback to previous release tag: [$PreviousReleaseTag]..." -ForegroundColor Magenta
-
-    $env:RELEASE_TAG = $PreviousReleaseTag
-    if ($PreviousBackendDigest) { $env:BACKEND_IMAGE = "gms-backend@$PreviousBackendDigest" }
-    if ($PreviousFrontendDigest) { $env:FRONTEND_IMAGE = "gms-frontend@$PreviousFrontendDigest" }
-
     try {
-        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -BackendDig $PreviousBackendDigest -FrontendDig $PreviousFrontendDigest)) {
-            throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist. Cannot perform immutable rollback."
-        }
-
-        & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
-        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
-
-        Write-Host "[GMS AUTOMATED ROLLBACK] Rollback container boot sequence finished. Confirming system recovery..." -ForegroundColor Magenta
-
-        $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile
-        if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
-        Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PreviousReleaseTag]." -ForegroundColor Green
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode
     }
     catch {
         Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover even after rolling back to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red

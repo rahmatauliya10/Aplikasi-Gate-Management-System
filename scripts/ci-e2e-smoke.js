@@ -408,93 +408,111 @@ async function runE2ESmoke() {
   log(`  6. GBJ Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
 
 
+  async function stepOk(reqPromise, stepName) {
+    const res = await reqPromise;
+    if (!isSuccessStatus(res.statusCode)) {
+      throw new Error(`Rerun step '${stepName}' FAILED with status ${res.statusCode}: ${JSON.stringify(res.body)}`);
+    }
+    return res;
+  }
+
   // Helper function to re-run workflow from target status back to COMPLETED
   async function rerunToCompleted(txId, processType, targetStatus, authHeader, suffix) {
     if (targetStatus === 'REGISTERED') {
-      await request(`/api/weighbridge/in/${txId}`, { method: 'POST', headers: authHeader }, {
+      await stepOk(request(`/api/weighbridge/in/${txId}`, { method: 'POST', headers: authHeader }, {
         weight: processType === 'GBJ' ? 4000 : 15000,
         ticketNumber: `WB-IN-${processType}-RERUN-${suffix}`,
-      });
-      await request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, {
+      }), 'Weighbridge In');
+      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, {
         result: 'PASS',
         vehicleCleanliness: true,
         vehicleOdor: true,
-      });
-      await request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' });
-      await request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
+      }), 'QC Vehicle Result');
+      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
+      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
         actualQuantity: 200,
         unit: 'BAG',
         remarks: 'Rerun WH complete',
-      });
+      }), 'Warehouse Complete');
       if (processType === 'GBB' || processType === 'GSP') {
-        await request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
+        await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
           odor: 'NORMAL',
           color: 'GOOD',
-        });
+        }), 'QC Incoming Result');
       }
-      await request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
+      await stepOk(request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
         weight: 5000,
         ticketNumber: `WB-OUT-${processType}-RERUN-${suffix}`,
-      });
-      await request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader });
+      }), 'Weighbridge Out');
+      await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
     } else if (targetStatus === 'QC_VEHICLE_PENDING') {
-      await request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, {
+      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, {
         result: 'PASS',
         vehicleCleanliness: true,
         vehicleOdor: true,
-      });
-      await request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' });
-      await request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
+      }), 'QC Vehicle Result');
+      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
+      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
         actualQuantity: 200,
         unit: 'BAG',
         remarks: 'Rerun WH complete',
-      });
+      }), 'Warehouse Complete');
       if (processType === 'GBB' || processType === 'GSP') {
-        await request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
+        await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
           odor: 'NORMAL',
           color: 'GOOD',
-        });
+        }), 'QC Incoming Result');
       }
-      await request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
+      await stepOk(request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
         weight: 5000,
         ticketNumber: `WB-OUT-${processType}-RERUN-${suffix}`,
-      });
-      await request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader });
+      }), 'Weighbridge Out');
+      await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
     } else if (targetStatus === 'QC_VEHICLE_PASSED') {
-      await request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' });
-      await request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
+      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
+      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
         actualQuantity: 200,
         unit: 'BAG',
         remarks: 'Rerun WH complete',
-      });
+      }), 'Warehouse Complete');
       if (processType === 'GBB' || processType === 'GSP') {
-        await request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
+        await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
           odor: 'NORMAL',
           color: 'GOOD',
-        });
+        }), 'QC Incoming Result');
       }
-      await request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
+      await stepOk(request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
         weight: 5000,
         ticketNumber: `WB-OUT-${processType}-RERUN-${suffix}`,
-      });
-      await request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader });
+      }), 'Weighbridge Out');
+      await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
     } else if (targetStatus === 'INCOMING_CHECK_PENDING') {
-      await request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
+      await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
         result: 'PASS',
         odor: 'NORMAL',
         color: 'GOOD',
-      });
-      await request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
+      }), 'QC Incoming Result');
+      await stepOk(request(`/api/weighbridge/out/${txId}`, { method: 'POST', headers: authHeader }, {
         weight: 5000,
         ticketNumber: `WB-OUT-${processType}-RERUN-${suffix}`,
-      });
-      await request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader });
+      }), 'Weighbridge Out');
+      await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
+    }
+
+    // MANDATORY ASSERTION: Fetch final transaction state and verify it reached COMPLETED
+    const verifyRes = await request(`/api/transactions/${txId}`, { headers: authHeader });
+    if (!isSuccessStatus(verifyRes.statusCode)) {
+      throw new Error(`Rerun transaction verification FAILED! Unable to fetch transaction ${txId}: HTTP ${verifyRes.statusCode}`);
+    }
+    const finalStatus = verifyRes.body?.data?.status;
+    if (finalStatus !== 'COMPLETED') {
+      throw new Error(`Rerun verification FAILED for txId ${txId}! Expected status 'COMPLETED', received '${finalStatus}'.`);
     }
   }
 
