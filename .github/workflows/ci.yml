@@ -203,21 +203,33 @@ jobs:
           echo "Cross-stack E2E gate passed successfully."
           echo "Capturing CI Evidence Proof Artifacts & Release Manifest..."
           mkdir -p artifacts/release-proof deploy
-          cat << 'EOF' > deploy/release_manifest.json
+          CI_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          BACKEND_IMAGE_ID=$(docker compose images -q backend 2>/dev/null | head -n 1)
+          FRONTEND_IMAGE_ID=$(docker compose images -q frontend 2>/dev/null | head -n 1)
+          if [ -z "$BACKEND_IMAGE_ID" ]; then
+            BACKEND_IMAGE_ID="local-build-sha256-untracked"
+          fi
+          if [ -z "$FRONTEND_IMAGE_ID" ]; then
+            FRONTEND_IMAGE_ID="local-build-sha256-untracked"
+          fi
+          cat > deploy/release_manifest.json <<EOF
           {
+            "manifestType": "CI_TEST_EVIDENCE",
             "release": "v1.0.0-ci-proof",
-            "timestamp": "2026-08-13T16:00:00.000Z",
-            "backend": { "image": "gms-backend", "digest": "sha256:ci-verified-backend-digest-placeholder" },
-            "frontend": { "image": "gms-frontend", "digest": "sha256:ci-verified-frontend-digest-placeholder" }
+            "timestamp": "${CI_TIMESTAMP}",
+            "gitSha": "${GITHUB_SHA}",
+            "backend": { "image": "gms-backend", "ciLocalImageId": "${BACKEND_IMAGE_ID}" },
+            "frontend": { "image": "gms-frontend", "ciLocalImageId": "${FRONTEND_IMAGE_ID}" }
           }
-EOF
-          cat << 'EOF' > artifacts/release-proof/preflight-report.json
+          EOF
+          cat > artifacts/release-proof/preflight-report.json <<EOF
           {
             "reportTitle": "CI Migration Rehearsal & Integration Gate Evidence",
-            "timestamp": "2026-08-13T16:00:00.000Z",
-            "status": "PASSED"
+            "timestamp": "${CI_TIMESTAMP}",
+            "status": "PASSED",
+            "gitSha": "${GITHUB_SHA}"
           }
-EOF
+          EOF
           docker compose down --volumes --remove-orphans
 
       - name: Upload Release Proof Evidence Artifacts (P0-01, P0-06 Evidence Gate)
