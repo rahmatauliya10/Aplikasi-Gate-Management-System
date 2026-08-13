@@ -35,6 +35,10 @@ function log(msg, level = 'INFO') {
   console.log(`[${timestamp}] [${level}] ${msg}`);
 }
 
+function isSuccessStatus(code) {
+  return code === 200 || code === 201;
+}
+
 async function request(urlPath, options = {}, body = null) {
   const url = new URL(urlPath, API_BASE_URL);
   return new Promise((resolve, reject) => {
@@ -172,7 +176,7 @@ async function runE2ESmoke() {
     suratJalanNumber: `SJ-GBB-${timestampSuffix}`,
     poNumber: `PO-GBB-${timestampSuffix}`,
   });
-  if (gbbRes.statusCode !== 201 || !gbbRes.body?.data?.id) {
+  if (!isSuccessStatus(gbbRes.statusCode) || !gbbRes.body?.data?.id) {
     throw new Error(`GBB Check-In FAILED: Status ${gbbRes.statusCode}, Body: ${JSON.stringify(gbbRes.body)}`);
   }
   const gbbTxId = gbbRes.body.data.id;
@@ -183,7 +187,7 @@ async function runE2ESmoke() {
     weight: 15200,
     ticketNumber: `WB-IN-GBB-${timestampSuffix}`,
   });
-  if (gbbWbIn.statusCode !== 200) {
+  if (!isSuccessStatus(gbbWbIn.statusCode)) {
     throw new Error(`GBB Weigh-In FAILED: Status ${gbbWbIn.statusCode}, Body: ${JSON.stringify(gbbWbIn.body)}`);
   }
   log(`  2. GBB Weigh-In SUCCESS (Gross: 15,200 kg, Status: WEIGH_IN_DONE)`);
@@ -198,7 +202,7 @@ async function runE2ESmoke() {
     documentCompleteness: true,
     sealCondition: true,
   });
-  if (gbbQcV.statusCode !== 200) {
+  if (!isSuccessStatus(gbbQcV.statusCode)) {
     throw new Error(`GBB QC Vehicle Check FAILED: Status ${gbbQcV.statusCode}, Body: ${JSON.stringify(gbbQcV.body)}`);
   }
   log(`  3. GBB QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
@@ -211,7 +215,7 @@ async function runE2ESmoke() {
     unit: 'BAG',
     remarks: 'GBB Unloading finished',
   });
-  if (gbbWhComp.statusCode !== 200) {
+  if (!isSuccessStatus(gbbWhComp.statusCode)) {
     throw new Error(`GBB Warehouse Complete FAILED: Status ${gbbWhComp.statusCode}, Body: ${JSON.stringify(gbbWhComp.body)}`);
   }
   log(`  4. GBB Warehouse Unload SUCCESS (Status: INCOMING_CHECK_PENDING)`);
@@ -224,7 +228,7 @@ async function runE2ESmoke() {
     moisture: 12.5,
     foreignMatter: 0.1,
   });
-  if (gbbQcInc.statusCode !== 200) {
+  if (!isSuccessStatus(gbbQcInc.statusCode)) {
     throw new Error(`GBB QC Incoming Check FAILED: Status ${gbbQcInc.statusCode}, Body: ${JSON.stringify(gbbQcInc.body)}`);
   }
   log(`  5. GBB QC Incoming Check SUCCESS (Status: INCOMING_CHECK_PASSED)`);
@@ -234,14 +238,14 @@ async function runE2ESmoke() {
     weight: 5200,
     ticketNumber: `WB-OUT-GBB-${timestampSuffix}`,
   });
-  if (gbbWbOut.statusCode !== 200) {
+  if (!isSuccessStatus(gbbWbOut.statusCode)) {
     throw new Error(`GBB Weigh-Out FAILED: Status ${gbbWbOut.statusCode}, Body: ${JSON.stringify(gbbWbOut.body)}`);
   }
   log(`  6. GBB Weigh-Out SUCCESS (Tare: 5,200 kg, Net: 10,000 kg, Status: WEIGH_OUT_DONE)`);
 
   // 4g. Gate Check-Out
   const gbbCheckOut = await request(`/api/gate/check-out/${gbbTxId}`, { method: 'POST', headers: authHeader });
-  if (gbbCheckOut.statusCode !== 200) {
+  if (!isSuccessStatus(gbbCheckOut.statusCode)) {
     throw new Error(`GBB Gate Check-Out FAILED: Status ${gbbCheckOut.statusCode}, Body: ${JSON.stringify(gbbCheckOut.body)}`);
   }
   log(`  7. GBB Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
@@ -262,7 +266,7 @@ async function runE2ESmoke() {
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-GSP-${timestampSuffix}`,
   });
-  if (gspRes.statusCode !== 201 || !gspRes.body?.data?.id) {
+  if (!isSuccessStatus(gspRes.statusCode) || !gspRes.body?.data?.id) {
     throw new Error(`GSP Check-In FAILED: Status ${gspRes.statusCode}, Body: ${JSON.stringify(gspRes.body)}`);
   }
   const gspTxId = gspRes.body.data.id;
@@ -273,7 +277,7 @@ async function runE2ESmoke() {
     weight: 12000,
     ticketNumber: `WB-IN-GSP-${timestampSuffix}`,
   });
-  if (gspWbIn.statusCode !== 200) {
+  if (!isSuccessStatus(gspWbIn.statusCode)) {
     throw new Error(`GSP Weigh-In FAILED: Status ${gspWbIn.statusCode}, Body: ${JSON.stringify(gspWbIn.body)}`);
   }
   log(`  2. GSP Weigh-In SUCCESS (Gross: 12,000 kg, Status: WEIGH_IN_DONE)`);
@@ -284,7 +288,7 @@ async function runE2ESmoke() {
     vehicleCleanliness: true,
     vehicleOdor: true,
   });
-  if (gspQcV.statusCode !== 200) {
+  if (!isSuccessStatus(gspQcV.statusCode)) {
     throw new Error(`GSP QC Vehicle Check FAILED: Status ${gspQcV.statusCode}, Body: ${JSON.stringify(gspQcV.body)}`);
   }
   log(`  3. GSP QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
@@ -297,7 +301,7 @@ async function runE2ESmoke() {
     unit: 'PALLET',
     remarks: 'GSP Unloading finished',
   });
-  if (gspWhComp.statusCode !== 200) {
+  if (!isSuccessStatus(gspWhComp.statusCode)) {
     throw new Error(`GSP Warehouse Complete FAILED: Status ${gspWhComp.statusCode}, Body: ${JSON.stringify(gspWhComp.body)}`);
   }
   log(`  4. GSP Warehouse Unload SUCCESS (Status: WAREHOUSE_DONE)`);
@@ -307,14 +311,14 @@ async function runE2ESmoke() {
     weight: 4000,
     ticketNumber: `WB-OUT-GSP-${timestampSuffix}`,
   });
-  if (gspWbOut.statusCode !== 200) {
+  if (!isSuccessStatus(gspWbOut.statusCode)) {
     throw new Error(`GSP Weigh-Out FAILED: Status ${gspWbOut.statusCode}, Body: ${JSON.stringify(gspWbOut.body)}`);
   }
   log(`  5. GSP Weigh-Out SUCCESS (Tare: 4,000 kg, Net: 8,000 kg, Status: WEIGH_OUT_DONE)`);
 
   // 5f. Gate Check-Out
   const gspCheckOut = await request(`/api/gate/check-out/${gspTxId}`, { method: 'POST', headers: authHeader });
-  if (gspCheckOut.statusCode !== 200) {
+  if (!isSuccessStatus(gspCheckOut.statusCode)) {
     throw new Error(`GSP Gate Check-Out FAILED: Status ${gspCheckOut.statusCode}, Body: ${JSON.stringify(gspCheckOut.body)}`);
   }
   log(`  6. GSP Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
@@ -335,7 +339,7 @@ async function runE2ESmoke() {
     cargoProcessType: 'OUTBOUND',
     suratJalanNumber: `SJ-GBJ-${timestampSuffix}`,
   });
-  if (gbjRes.statusCode !== 201 || !gbjRes.body?.data?.id) {
+  if (!isSuccessStatus(gbjRes.statusCode) || !gbjRes.body?.data?.id) {
     throw new Error(`GBJ Check-In FAILED: Status ${gbjRes.statusCode}, Body: ${JSON.stringify(gbjRes.body)}`);
   }
   const gbjTxId = gbjRes.body.data.id;
@@ -347,7 +351,7 @@ async function runE2ESmoke() {
     vehicleCleanliness: true,
     vehicleOdor: true,
   });
-  if (gbjQcV.statusCode !== 200) {
+  if (!isSuccessStatus(gbjQcV.statusCode)) {
     throw new Error(`GBJ QC Vehicle Check FAILED: Status ${gbjQcV.statusCode}, Body: ${JSON.stringify(gbjQcV.body)}`);
   }
   log(`  2. GBJ QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
@@ -360,7 +364,7 @@ async function runE2ESmoke() {
     unit: 'BOX',
     remarks: 'GBJ Loading finished',
   });
-  if (gbjWhComp.statusCode !== 200) {
+  if (!isSuccessStatus(gbjWhComp.statusCode)) {
     throw new Error(`GBJ Warehouse Complete FAILED: Status ${gbjWhComp.statusCode}, Body: ${JSON.stringify(gbjWhComp.body)}`);
   }
   log(`  3. GBJ Warehouse Loading SUCCESS (Status: WAREHOUSE_DONE)`);
@@ -370,14 +374,14 @@ async function runE2ESmoke() {
     weight: 14000,
     ticketNumber: `WB-OUT-GBJ-${timestampSuffix}`,
   });
-  if (gbjWbOut.statusCode !== 200) {
+  if (!isSuccessStatus(gbjWbOut.statusCode)) {
     throw new Error(`GBJ Weigh-Out FAILED: Status ${gbjWbOut.statusCode}, Body: ${JSON.stringify(gbjWbOut.body)}`);
   }
   log(`  4. GBJ Weigh-Out SUCCESS (Gross: 14,000 kg, Status: WEIGH_OUT_DONE)`);
 
   // 6e. Gate Check-Out
   const gbjCheckOut = await request(`/api/gate/check-out/${gbjTxId}`, { method: 'POST', headers: authHeader });
-  if (gbjCheckOut.statusCode !== 200) {
+  if (!isSuccessStatus(gbjCheckOut.statusCode)) {
     throw new Error(`GBJ Gate Check-Out FAILED: Status ${gbjCheckOut.statusCode}, Body: ${JSON.stringify(gbjCheckOut.body)}`);
   }
   log(`  5. GBJ Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
