@@ -136,13 +136,15 @@ export class CreateOperationLogCorrectionDto {
   @Min(1)
   expectedRevision: number;
 
-  @ApiProperty({
-    description: 'Array of item modifications across modules',
+  @ApiPropertyOptional({
+    description:
+      'Array of item modifications across modules (optional for REOPEN_WORKFLOW)',
     type: [CorrectionItemDto],
   })
+  @IsOptional()
   @IsArray()
   @ArrayMaxSize(25, { message: 'Maksimal 25 item koreksi per transaksi.' })
   @ValidateNested({ each: true })
   @Type(() => CorrectionItemDto)
-  items: CorrectionItemDto[];
+  items?: CorrectionItemDto[];
 }
