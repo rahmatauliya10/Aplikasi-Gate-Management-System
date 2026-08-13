@@ -10,7 +10,8 @@ export function configureApp(app: INestApplication) {
   app.use((req: any, res: any, next: any) => {
     const rootMaintFlag = path.resolve(process.cwd(), '../maintenance.flag');
     const localMaintFlag = path.resolve(process.cwd(), 'maintenance.flag');
-    const isMaintenance = fs.existsSync(rootMaintFlag) || fs.existsSync(localMaintFlag);
+    const isMaintenance =
+      fs.existsSync(rootMaintFlag) || fs.existsSync(localMaintFlag);
 
     if (isMaintenance) {
       const readMethods = ['GET', 'HEAD', 'OPTIONS'];
@@ -18,7 +19,8 @@ export function configureApp(app: INestApplication) {
         return res.status(503).json({
           statusCode: 503,
           error: 'Service Unavailable',
-          message: 'System is currently under maintenance / restore write freeze. Write operations are temporarily suspended.',
+          message:
+            'System is currently under maintenance / restore write freeze. Write operations are temporarily suspended.',
           timestamp: new Date().toISOString(),
         });
       }
