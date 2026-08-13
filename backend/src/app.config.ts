@@ -10,7 +10,10 @@ export function configureApp(app: INestApplication) {
   app.use((req: any, res: any, next: any) => {
     const rootMaintFlag = path.resolve(process.cwd(), '../maintenance.flag');
     const localMaintFlag = path.resolve(process.cwd(), 'maintenance.flag');
-    const rootMaintActive = path.resolve(process.cwd(), '../maintenance/active');
+    const rootMaintActive = path.resolve(
+      process.cwd(),
+      '../maintenance/active',
+    );
     const localMaintActive = path.resolve(process.cwd(), 'maintenance/active');
     const isMaintenance =
       fs.existsSync(rootMaintFlag) ||
