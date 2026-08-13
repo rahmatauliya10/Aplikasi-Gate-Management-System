@@ -126,7 +126,7 @@ async function main() {
         role: Role.ADMIN,
         isActive: true,
         passwordHash: await argon2.hash(tempAdminPassword, hashOptions),
-        mustChangePassword: true,
+        mustChangePassword: isDevOrTest ? false : true,
         passwordChangedAt: new Date(),
       },
     });
@@ -168,7 +168,7 @@ async function main() {
           role: Role.QC,
           isActive: true,
           passwordHash: await argon2.hash(tempQCPassword, hashOptions),
-          mustChangePassword: true,
+          mustChangePassword: false,
           temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
@@ -212,7 +212,7 @@ async function main() {
           role: Role.WAREHOUSE,
           isActive: true,
           passwordHash: await argon2.hash(tempWarehousePassword, hashOptions),
-          mustChangePassword: true,
+          mustChangePassword: false,
           temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
@@ -248,7 +248,7 @@ async function main() {
           role: Role.SECURITY,
           isActive: true,
           passwordHash: await argon2.hash(tempSecurityPassword, hashOptions),
-          mustChangePassword: true,
+          mustChangePassword: false,
           temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });

@@ -107,8 +107,37 @@ async function runE2ESmoke() {
     );
   }
 
-  const authToken = loginRes.body.data.accessToken;
+  let authToken = loginRes.body.data.accessToken;
   log('Admin authentication SUCCESS. Access token obtained.', 'SUCCESS');
+
+  // Handle password change if mustChangePassword is true
+  if (loginRes.body.data.mustChangePassword) {
+    log('Admin mustChangePassword flag is true. Changing password via API...');
+    const changePwdRes = await request(
+      '/api/auth/change-password',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+      },
+      {
+        currentPassword: ADMIN_PASSWORD,
+        newPassword: `${ADMIN_PASSWORD}1!`,
+        confirmPassword: `${ADMIN_PASSWORD}1!`,
+      }
+    );
+
+    if (changePwdRes.statusCode === 200) {
+      log('Password changed successfully. Re-authenticating...', 'SUCCESS');
+      const reloginRes = await request('/api/auth/login', { method: 'POST' }, {
+        identifier: ADMIN_USERNAME,
+        password: `${ADMIN_PASSWORD}1!`,
+      });
+      if (reloginRes.statusCode === 200 && reloginRes.body?.data?.accessToken) {
+        authToken = reloginRes.body.data.accessToken;
+        log('Re-authentication SUCCESS after password change.', 'SUCCESS');
+      }
+    }
+  }
 
   // Step 3: Health endpoints deep verification
   log('Verifying Liveness & Dependencies probes...');
