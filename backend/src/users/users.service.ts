@@ -400,9 +400,8 @@ export class UsersService {
         errors: [],
       });
 
-    const temporaryPassword = require('crypto')
-      .randomBytes(16)
-      .toString('base64url');
+    const temporaryPassword =
+      'Tmp' + require('crypto').randomBytes(8).toString('hex') + '1!';
     const passwordHash = await argon2.hash(temporaryPassword, {
       type: argon2.argon2id,
     });
