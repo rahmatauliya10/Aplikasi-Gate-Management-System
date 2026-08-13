@@ -108,13 +108,22 @@ export class CreateOperationLogCorrectionDto {
   remark: string;
 
   @ApiPropertyOptional({
-    description: 'Supporting evidence document URL or ID (optional)',
+    description: 'Supporting evidence document URL or base64 preview (optional, max 2048 chars)',
   })
   @IsOptional()
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   @MaxLength(2048)
   evidenceUrl?: string;
+
+  @ApiPropertyOptional({
+    description: 'ID of physical evidence attachment uploaded via Attachment module (optional)',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MaxLength(100)
+  evidenceAttachmentId?: string;
 
   @ApiProperty({
     description:

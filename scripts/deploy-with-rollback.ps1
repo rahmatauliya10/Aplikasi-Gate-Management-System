@@ -1,11 +1,13 @@
 # ==============================================================================
 # GMS Immutable Deployment & Automated Rollback Script (P0-05, P1-05, P2-04)
 # ==============================================================================
-# Deploys specified RELEASE_TAG or RELEASE_DIGEST to production using docker-compose.prod.yml.
+# Deploys specified RELEASE_TAG or distinct BackendDigest & FrontendDigest to
+# production using docker-compose.prod.yml.
 # Verifies image availability and digest immutability prior to modifying running stack.
+# NO TAG FALLBACK: If digests are supplied and fail verification, deploy ABORTS.
 # Runs automated watchdog verification post-deployment.
 # Upon any healthcheck failure or explicit rollback request, instantly rolls back
-# to prior stable release tag/digest without rebuilding from current working tree.
+# to prior stable release (PreviousBackendDigest / PreviousFrontendDigest).
 # ==============================================================================
 
 param(
@@ -16,10 +18,16 @@ param(
     [string]$PreviousReleaseTag = "stable",
 
     [Parameter(Mandatory=$false)]
-    [string]$TargetDigest = "",
+    [string]$BackendDigest = "",
 
     [Parameter(Mandatory=$false)]
-    [string]$PreviousDigest = "",
+    [string]$FrontendDigest = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$PreviousBackendDigest = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$PreviousFrontendDigest = "",
 
     [Parameter(Mandatory=$false)]
     [string]$ComposeFile = "docker-compose.prod.yml",
@@ -37,12 +45,24 @@ $ErrorActionPreference = "Stop"
 $WorkspaceRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $WorkspaceRoot
 
+function Verify-Image-Digest {
+    param([string]$ImageName, [string]$ExpectedDigest)
+    if (-not $ExpectedDigest) { return $true }
+    [string]$foundDigest = & docker images --digests --format "{{.Digest}}" $ImageName 2>$null | Where-Object { $_ -eq $ExpectedDigest }
+    if (-not $foundDigest) {
+        # Strict NO TAG FALLBACK rule: Digest mismatch is a hard deployment failure!
+        Write-Host "[GMS IMMUTABILITY FAILURE] Image [$ImageName] digest mismatch! Expected: $ExpectedDigest" -ForegroundColor Red
+        return $false
+    }
+    return $true
+}
+
 function Verify-Image-Exists {
-    param([string]$Tag, [string]$Digest = "")
-    if ($Digest) {
-        $backendImg = & docker images --digests --format "{{.Digest}}" "gms-backend" 2>$null | Where-Object { $_ -eq $Digest }
-        $frontendImg = & docker images --digests --format "{{.Digest}}" "gms-frontend" 2>$null | Where-Object { $_ -eq $Digest }
-        if ($backendImg -and $frontendImg) { return $true }
+    param([string]$Tag, [string]$BackendDig = "", [string]$FrontendDig = "")
+    if ($BackendDig -or $FrontendDig) {
+        $backendOk = Verify-Image-Digest -ImageName "gms-backend" -ExpectedDigest $BackendDig
+        $frontendOk = Verify-Image-Digest -ImageName "gms-frontend" -ExpectedDigest $FrontendDig
+        return ($backendOk -and $frontendOk)
     }
     $backendImg = & docker images -q "gms-backend:$Tag" 2>$null
     $frontendImg = & docker images -q "gms-frontend:$Tag" 2>$null
@@ -54,8 +74,11 @@ if ($RollbackOnly) {
     Write-Host "[GMS AUTOMATED ROLLBACK] Directly restoring previous release tag: [$PreviousReleaseTag] (--no-build)..." -ForegroundColor Magenta
 
     $env:RELEASE_TAG = $PreviousReleaseTag
+    if ($PreviousBackendDigest) { $env:BACKEND_IMAGE = "gms-backend@$PreviousBackendDigest" }
+    if ($PreviousFrontendDigest) { $env:FRONTEND_IMAGE = "gms-frontend@$PreviousFrontendDigest" }
+
     try {
-        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -Digest $PreviousDigest)) {
+        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -BackendDig $PreviousBackendDigest -FrontendDig $PreviousFrontendDigest)) {
             throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist locally. Refusing to build previous tag from working tree."
         }
 
@@ -78,22 +101,25 @@ if ($RollbackOnly) {
 }
 
 Write-Host "[GMS Deploy] Starting immutable deployment for Release Tag: [$TargetReleaseTag]..." -ForegroundColor Cyan
-if ($TargetDigest) { Write-Host "[GMS Deploy] Enforcing Target Image Digest: [$TargetDigest]" -ForegroundColor Cyan }
+if ($BackendDigest) { Write-Host "[GMS Deploy] Enforcing Backend Image Digest: [$BackendDigest]" -ForegroundColor Cyan }
+if ($FrontendDigest) { Write-Host "[GMS Deploy] Enforcing Frontend Image Digest: [$FrontendDigest]" -ForegroundColor Cyan }
 Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
 
 # Pre-flight check: Ensure previous release image pair exists BEFORE altering the running stack
 Write-Host "[GMS Pre-flight] Verifying immutability requirement: checking availability of previous image pair [$PreviousReleaseTag]..." -ForegroundColor Cyan
-if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -Digest $PreviousDigest)) {
+if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -BackendDig $PreviousBackendDigest -FrontendDig $PreviousFrontendDigest)) {
     throw "Pre-flight Error: Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] was not found. Runtime docker commit container snapshotting is disabled for release immutability."
 }
 Write-Host "[GMS Pre-flight SUCCESS] Verified presence of immutable rollback image pair [$PreviousReleaseTag]." -ForegroundColor Green
 
-# Step 1: Export RELEASE_TAG environment variable for Compose
+# Export compose environment variables
 $env:RELEASE_TAG = $TargetReleaseTag
+if ($BackendDigest) { $env:BACKEND_IMAGE = "gms-backend@$BackendDigest" }
+if ($FrontendDigest) { $env:FRONTEND_IMAGE = "gms-frontend@$FrontendDigest" }
 
 try {
     # Step 1.2: Verify or build image pair for target release
-    if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag -Digest $TargetDigest)) {
+    if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest)) {
         Write-Host "[GMS Deploy] Pre-built image pair found for [$TargetReleaseTag]. Using immutable pre-built images (--no-build)..." -ForegroundColor Green
     } else {
         if ($UsePrebuiltImages -or ($ComposeFile -like "*prod*")) {
@@ -121,8 +147,28 @@ try {
 
     Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] successfully deployed and verified healthy." -ForegroundColor Green
 
-    # Record release tag to stable tracking file
+    # Record release tag and manifests
     $TargetReleaseTag | Out-File -FilePath (Join-Path $WorkspaceRoot "deploy\current_release.txt") -Force -Encoding utf8
+    
+    $ReleaseManifest = @{
+        release = $TargetReleaseTag
+        timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        backend = @{
+            image = "gms-backend"
+            digest = $BackendDigest
+        }
+        frontend = @{
+            image = "gms-frontend"
+            digest = $FrontendDigest
+        }
+        previousRelease = @{
+            tag = $PreviousReleaseTag
+            backend = @{ digest = $PreviousBackendDigest }
+            frontend = @{ digest = $PreviousFrontendDigest }
+        }
+    }
+    Set-Content -Path (Join-Path $WorkspaceRoot "deploy\release_manifest.json") -Value ($ReleaseManifest | ConvertTo-Json -Depth 5) -Encoding utf8
+
     exit 0
 }
 catch {
@@ -130,8 +176,11 @@ catch {
     Write-Host "[GMS AUTOMATED ROLLBACK] Initiating immediate rollback to previous release tag: [$PreviousReleaseTag]..." -ForegroundColor Magenta
 
     $env:RELEASE_TAG = $PreviousReleaseTag
+    if ($PreviousBackendDigest) { $env:BACKEND_IMAGE = "gms-backend@$PreviousBackendDigest" }
+    if ($PreviousFrontendDigest) { $env:FRONTEND_IMAGE = "gms-frontend@$PreviousFrontendDigest" }
+
     try {
-        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -Digest $PreviousDigest)) {
+        if (-not (Verify-Image-Exists -Tag $PreviousReleaseTag -BackendDig $PreviousBackendDigest -FrontendDig $PreviousFrontendDigest)) {
             throw "Previous release image pair [gms-backend:$PreviousReleaseTag, gms-frontend:$PreviousReleaseTag] does not exist. Cannot perform immutable rollback."
         }
 

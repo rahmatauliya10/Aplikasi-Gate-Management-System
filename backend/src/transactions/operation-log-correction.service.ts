@@ -120,6 +120,21 @@ const validateDomain = (
       throw new BadRequestException(
         `Field ${fieldName} harus berupa angka positif.`,
       );
+    if (fieldName === 'sampleWeight' && num <= 0) {
+      throw new BadRequestException(
+        `Field sampleWeight harus berupa angka lebih dari 0 gram.`,
+      );
+    }
+  }
+  if (
+    ['moisture', 'foreignMatter', 'goodBeanPercentage'].includes(fieldName)
+  ) {
+    const num = Number(newValue);
+    if (isNaN(num) || num < 0 || num > 100) {
+      throw new BadRequestException(
+        `Field ${fieldName} harus berupa persentase antara 0 dan 100.`,
+      );
+    }
   }
   if (['startAt', 'endAt'].includes(fieldName)) {
     const d = new Date(newValue);
@@ -250,7 +265,10 @@ export class OperationLogCorrectionService {
           reasonCode: dto.reasonCode,
           reason: dto.reasonCode,
           remark: dto.remark,
-          evidenceUrl: dto.evidenceUrl || null,
+          evidenceUrl:
+            dto.evidenceAttachmentId
+              ? `attachment:${dto.evidenceAttachmentId}`
+              : dto.evidenceUrl || null,
           oldValues: {},
           newValues: {},
           expectedRevision: dto.expectedRevision,
@@ -1001,27 +1019,19 @@ export class OperationLogCorrectionService {
         const REOPEN_ALLOWED_TARGETS: Record<string, TransactionStatus[]> = {
           GBB: [
             TransactionStatus.REGISTERED,
-            TransactionStatus.WEIGH_IN_DONE,
             TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.QC_VEHICLE_IN_PROGRESS,
-            TransactionStatus.INCOMING_CHECK_PENDING,
-            TransactionStatus.INCOMING_CHECK_IN_PROGRESS,
             TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            TransactionStatus.INCOMING_CHECK_PENDING,
           ],
           GSP: [
             TransactionStatus.REGISTERED,
-            TransactionStatus.WEIGH_IN_DONE,
             TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.QC_VEHICLE_IN_PROGRESS,
-            TransactionStatus.INCOMING_CHECK_PENDING,
-            TransactionStatus.INCOMING_CHECK_IN_PROGRESS,
             TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            TransactionStatus.INCOMING_CHECK_PENDING,
           ],
           GBJ: [
             TransactionStatus.REGISTERED,
-            TransactionStatus.WEIGH_IN_DONE,
             TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.QC_VEHICLE_IN_PROGRESS,
             TransactionStatus.WAREHOUSE_IN_PROGRESS,
           ],
         };
@@ -1116,9 +1126,7 @@ export class OperationLogCorrectionService {
             },
           });
         } else if (
-          targetReopenStatus === TransactionStatus.WEIGH_IN_DONE ||
-          targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING ||
-          targetReopenStatus === TransactionStatus.QC_VEHICLE_IN_PROGRESS
+          targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING
         ) {
           // Weigh-in completed, reopening to QC Vehicle stage
           txUpdateData.qcEndAt = null;
@@ -1132,23 +1140,16 @@ export class OperationLogCorrectionService {
           txUpdateData.actualWeight = null;
           txUpdateData.actualQuantity = null;
           txUpdateData.warehouseUnit = null;
+          txUpdateData.qcStartAt = null;
 
-          if (targetReopenStatus === TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
-            txUpdateData.qcStartAt = tx.qcStartAt || new Date();
-          } else {
-            txUpdateData.qcStartAt = null;
-          }
-
-          if (targetReopenStatus !== TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
-            await prismaTx.qcVehicleCheck.updateMany({
-              where: { transactionId: id, isCurrent: true },
-              data: {
-                isCurrent: false,
-                supersededAt: new Date(),
-                supersededByCorrectionId: correction.id,
-              },
-            });
-          }
+          await prismaTx.qcVehicleCheck.updateMany({
+            where: { transactionId: id, isCurrent: true },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
           await prismaTx.incomingMaterialCheck.updateMany({
             where: { transactionId: id, isCurrent: true },
             data: {
@@ -1196,17 +1197,7 @@ export class OperationLogCorrectionService {
             },
           });
 
-          // For GBJ, Vehicle QC is downstream, so supersede it; for GBB/GSP, Vehicle QC is upstream, so retain it.
-          if (tx.processType === 'GBJ') {
-            await prismaTx.qcVehicleCheck.updateMany({
-              where: { transactionId: id, isCurrent: true },
-              data: {
-                isCurrent: false,
-                supersededAt: new Date(),
-                supersededByCorrectionId: correction.id,
-              },
-            });
-          }
+          // Upstream checks (Weigh In, QC Vehicle for GBJ/GBB/GSP) are retained!
 
           const latestWh = await prismaTx.warehouseProcess.findFirst({
             where: { transactionId: id },
