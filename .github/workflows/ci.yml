@@ -180,7 +180,7 @@ jobs:
           docker compose -f docker-compose.yml up -d postgres
           sleep 5
           docker compose -f docker-compose.yml run --rm backend npx prisma migrate deploy
-          docker compose -f docker-compose.yml run --rm -e NODE_ENV=test -e SEED_ALL_USERS=true -e DEFAULT_ADMIN_PASSWORD=test-admin-password-12345 -e DEFAULT_QC_PASSWORD=test-qc-password-12345 -e DEFAULT_WAREHOUSE_PASSWORD=test-wh-password-12345 -e DEFAULT_SECURITY_PASSWORD=test-sec-password-12345 backend npx ts-node prisma/seed.ts
+          docker compose -f docker-compose.yml run --rm -e NODE_ENV=test -e SEED_ALL_USERS=true -e DEFAULT_ADMIN_PASSWORD=test-admin-password-12345 -e DEFAULT_QC_PASSWORD=test-qc-password-12345 -e DEFAULT_WAREHOUSE_PASSWORD=test-wh-password-12345 -e DEFAULT_SECURITY_PASSWORD=test-sec-password-12345 backend node dist/prisma/seed.js
           docker compose -f docker-compose.yml up -d --build
           sleep 10
           docker compose ps
