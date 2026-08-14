@@ -80,7 +80,7 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./maintenance:/app/maintenance
-      - backups_local:/app/backups/local
+      - ./backups/local:/app/backups/local
       - audit_logs:/app/logs
       - ${NAS_MOUNT_PATH:?NAS_MOUNT_PATH must be set to a remote offsite/NAS mount directory}:/app/backups/nas
     deploy:

@@ -1110,35 +1110,7 @@ export class DatabaseBackupService
       });
     }
 
-    // 2. Automatically generate a Pre-Restore backup snapshot first (P1-03 Fix)
-    try {
-      this.logger.log('Creating Auto Pre-Restore Backup snapshot...');
-      const preRestoreManifest = await this.runAutomatedScheduledBackup(
-        'AUTO_PRE_RESTORE',
-        user,
-      );
-      if (preRestoreManifest.localStatus !== 'VERIFIED') {
-        throw new Error('Pre-restore backup failed verification.');
-      }
-    } catch (e: any) {
-      this.logger.error(
-        `Auto Pre-Restore Backup failed: ${e.message}. Aborting restore.`,
-      );
-      await this.activityLogsService.logAction({
-        userId: user.id,
-        action: 'DATABASE_RESTORE',
-        module: 'SETTINGS',
-        description: `Database restore blocked: Pre-restore backup failed (${e.message})`,
-        status: 'FAILED',
-        ipAddress,
-      });
-      throw new InternalServerErrorException({
-        success: false,
-        message: `Pemulihan dibatalkan: Backup otomatis pra-pemulihan gagal (${e.message}). Data Anda aman.`,
-      });
-    }
-
-    // 3. Validate backup structure and checksum
+    // 2. Validate backup structure and checksum
     if (
       !backupPayload ||
       !backupPayload.metadata ||

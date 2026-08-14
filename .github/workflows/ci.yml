@@ -211,12 +211,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p artifacts/release-proof
-          echo "Initializing baseline database for historical dump snapshot..."
-          cd backend
-          npx prisma migrate deploy
-          SEED_ALL_USERS=true npx ts-node prisma/seed.ts
-          cd ..
-          echo "Generating authentic historical fixture snapshot & companion manifest..."
+          echo "Generating authentic historical baseline snapshot & companion manifest (migrations 1..6)..."
           node tests/fixtures/historical/generate-test-fixtures.js
 
       - name: Execute Historical Database Rehearsal & Invariant Gate
@@ -263,17 +258,45 @@ jobs:
             console.log('Negative test PASSED: Mismatched checksum is correctly rejected.');
           "
 
-          echo "Step 2: Restoring historical dump into target test database via pg_restore..."
+          echo "Step 2: Restoring historical baseline dump into target test database via pg_restore..."
           PGPASSWORD=testpassword psql -h localhost -p 5432 -U postgres -d postgres -c "DROP DATABASE IF EXISTS gms_rehearsal_db WITH (FORCE);" || true
           PGPASSWORD=testpassword psql -h localhost -p 5432 -U postgres -d postgres -c "CREATE DATABASE gms_rehearsal_db;"
           PGPASSWORD=testpassword pg_restore -h localhost -p 5432 -U postgres -d gms_rehearsal_db --clean --if-exists --no-owner --no-acl tests/fixtures/historical/historical_test.dump
 
+          echo "Step 2.5: Verifying historical baseline migration count (< 18)..."
+          node -e "
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_manifest.json', 'utf8'));
+            const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
+            const baselineCount = parseInt(out, 10);
+            console.log('Restored baseline migration count:', baselineCount, 'Expected:', manifest.sourceMigrationCount);
+            if (baselineCount >= 18 || baselineCount !== manifest.sourceMigrationCount) {
+              console.error('FATAL: Historical dump does not have authentic pre-migration count (found ' + baselineCount + ', expected ' + manifest.sourceMigrationCount + ')');
+              process.exit(1);
+            }
+            console.log('Historical baseline state verified [PASS].');
+          "
+
           echo "Step 3: Running production preflight duplicate audit on rehearsal DB..."
           cd backend
           npm run prisma:preflight -- --report-only --fail-on-duplicates
-          echo "Step 4: Executing Prisma migration deployment on rehearsal DB..."
+          echo "Step 4: Executing Prisma migration deployment on rehearsal DB (upgrading schema 6 -> 18)..."
           npx prisma migrate deploy
           cd ..
+
+          echo "Step 4.5: Verifying upgraded migration count (= 18)..."
+          node -e "
+            const { execSync } = require('child_process');
+            const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
+            const postUpgradeCount = parseInt(out, 10);
+            console.log('Post-upgrade migration count:', postUpgradeCount);
+            if (postUpgradeCount !== 18) {
+              console.error('FATAL: Post-upgrade migration count is not 18! Found: ' + postUpgradeCount);
+              process.exit(1);
+            }
+            console.log('Schema upgrade from historical baseline to 18 migrations succeeded [PASS].');
+          "
 
           echo "Step 5: Verifying migration checksums..."
           DATABASE_URL="postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public" node scripts/check-migration-checksums.js > artifacts/release-proof/migration-checksums.txt
@@ -289,25 +312,54 @@ jobs:
           npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --exit-code > ../artifacts/release-proof/schema-drift.txt
           cd ..
 
-          echo "Step 7: Validating 16-entity counts, invariants & attachments..."
+          echo "Step 7: Validating 16-entity counts, invariants & DB-backed attachments..."
           node -e "
             const { execSync } = require('child_process');
             const fs = require('fs');
             const crypto = require('crypto');
 
+            const manifest = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_manifest.json', 'utf8'));
+
             function q(sql) {
               const cmd = 'psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"' + sql.replace(/\"/g, '\\\\\"') + '\"';
               const out = execSync(cmd, { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
               const num = parseInt(out, 10);
-              if (isNaN(num)) throw new Error('Non-numeric result: ' + out);
+              if (isNaN(num)) throw new Error('Non-numeric result for query [' + sql + ']: ' + out);
               return num;
             }
 
             const tableCount = q(\"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';\");
             const migrationCount = q(\"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\");
-            const userCount = q(\"SELECT COUNT(*) FROM \\\"User\\\";\");
-            const txCount = q(\"SELECT COUNT(*) FROM \\\"Transaction\\\";\");
-            const attCount = q(\"SELECT COUNT(*) FROM \\\"Attachment\\\";\");
+
+            // Query all 16 entities
+            const actualCounts = {
+              users: q(\"SELECT COUNT(*) FROM \\\"User\\\";\"),
+              transactions: q(\"SELECT COUNT(*) FROM \\\"Transaction\\\";\"),
+              weighbridgeRecords: q(\"SELECT COUNT(*) FROM \\\"WeighbridgeRecord\\\";\"),
+              warehouseProcesses: q(\"SELECT COUNT(*) FROM \\\"WarehouseProcess\\\";\"),
+              qcVehicleChecks: q(\"SELECT COUNT(*) FROM \\\"QcVehicleCheck\\\";\"),
+              incomingMaterialChecks: q(\"SELECT COUNT(*) FROM \\\"IncomingMaterialCheck\\\";\"),
+              attachments: q(\"SELECT COUNT(*) FROM \\\"Attachment\\\";\"),
+              fraudChecks: q(\"SELECT COUNT(*) FROM \\\"FraudCheck\\\";\"),
+              activityLogs: q(\"SELECT COUNT(*) FROM \\\"ActivityLog\\\";\"),
+              appSettings: q(\"SELECT COUNT(*) FROM \\\"AppSetting\\\";\"),
+              announcements: q(\"SELECT COUNT(*) FROM \\\"Announcement\\\";\"),
+              systemIssues: q(\"SELECT COUNT(*) FROM \\\"SystemIssue\\\ THREE;\".replace(' THREE', '')),
+              transactionCorrections: q(\"SELECT COUNT(*) FROM \\\"TransactionCorrection\\\";\"),
+              transactionCorrectionItems: q(\"SELECT COUNT(*) FROM \\\"TransactionCorrectionItem\\\";\"),
+              transactionStatusHistory: q(\"SELECT COUNT(*) FROM \\\"TransactionStatusHistory\\\";\"),
+              userWarehouseAccess: q(\"SELECT COUNT(*) FROM \\\"UserWarehouseAccess\\\";\")
+            };
+
+            console.log('16-Entity counts post-migration:', actualCounts);
+            console.log('Expected baseline counts:', manifest.recordCounts);
+
+            // Assert baseline entities retained without data loss
+            for (const [entity, count] of Object.entries(manifest.recordCounts)) {
+              if (actualCounts[entity] < count) {
+                throw new Error('Data loss detected for ' + entity + '! Expected >= ' + count + ', got ' + actualCounts[entity]);
+              }
+            }
 
             const wbDupes = q(\"SELECT COUNT(*) FROM (SELECT \\\"transactionId\\\", \\\"type\\\" FROM \\\"WeighbridgeRecord\\\" WHERE \\\"isCurrent\\\" = true GROUP BY \\\"transactionId\\\", \\\"type\\\" HAVING COUNT(*) > 1) d;\");
             const whDupes = q(\"SELECT COUNT(*) FROM (SELECT \\\"transactionId\\\" FROM \\\"WarehouseProcess\\\" WHERE \\\"isCurrent\\\" = true GROUP BY \\\"transactionId\\\" HAVING COUNT(*) > 1) d;\");
@@ -321,23 +373,58 @@ jobs:
             const orphanAtt = q(\"SELECT COUNT(*) FROM \\\"Attachment\\\" a LEFT JOIN \\\"Transaction\\\" t ON a.\\\"transactionId\\\" = t.id WHERE t.id IS NULL;\");
             const totalOrphans = orphanHist + orphanWb + orphanWh + orphanAtt;
 
-            // Attachment reconciliation
+            const gbbCompleted = q(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GBB' AND \\\"status\\\" = 'COMPLETED';\");
+            const gspCompleted = q(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GSP' AND \\\"status\\\" = 'COMPLETED';\");
+            const gbjCompleted = q(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GBJ' AND \\\"status\\\" = 'COMPLETED';\");
+
+            // Attachment physical reconciliation against database records
             const attArchive = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_attachments.json', 'utf8'));
-            let reconciledFiles = 0;
+            const archiveFileMap = new Map();
             if (attArchive.files && Array.isArray(attArchive.files)) {
               for (const f of attArchive.files) {
-                const buf = Buffer.from(f.base64Content, 'base64');
-                const h = crypto.createHash('sha256').update(buf).digest('hex').toLowerCase();
-                if (f.checksum && h !== f.checksum.toLowerCase()) {
-                  throw new Error('Attachment file checksum mismatch for: ' + f.fileName);
-                }
-                reconciledFiles++;
+                const key = (f.relativePath || f.fileName).replace(/\\\\/g, '/');
+                archiveFileMap.set(key, f);
               }
             }
 
-            console.log('Rehearsal invariants:', { tableCount, migrationCount, userCount, txCount, totalDupes, totalOrphans, reconciledFiles });
+            const dbAttSql = 'psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -F \"|\" -c \"SELECT id, \\\"filePath\\\", sha256 FROM \\\"Attachment\\\";\"';
+            const dbAttRows = execSync(dbAttSql).toString().trim().split('\\n').filter(Boolean);
 
-            const passed = (tableCount >= 10) && (migrationCount >= 1) && (totalDupes === 0) && (totalOrphans === 0);
+            let reconciledFiles = 0;
+            let missingFiles = 0;
+
+            for (const row of dbAttRows) {
+              const [attId, filePath, dbSha] = row.split('|');
+              const normPath = (filePath || '').replace(/\\\\/g, '/');
+              const fileObj = archiveFileMap.get(normPath);
+              if (!fileObj) {
+                console.error('Missing physical file in archive for DB Attachment [' + attId + ']: ' + normPath);
+                missingFiles++;
+                continue;
+              }
+              const buf = Buffer.from(fileObj.base64Content, 'base64');
+              const calcHash = crypto.createHash('sha256').update(buf).digest('hex').toLowerCase();
+              if (dbSha && calcHash !== dbSha.toLowerCase()) {
+                console.error('Attachment hash mismatch for [' + attId + ']: DB=' + dbSha + ', Archive=' + calcHash);
+                missingFiles++;
+                continue;
+              }
+              reconciledFiles++;
+            }
+
+            console.log('Attachment reconciliation summary: DB=' + actualCounts.attachments + ', Reconciled=' + reconciledFiles + ', Missing=' + missingFiles);
+
+            const passed = (tableCount >= 14) &&
+                           (migrationCount === 18) &&
+                           (totalDupes === 0) &&
+                           (totalOrphans === 0) &&
+                           (gbbCompleted > 0) &&
+                           (gspCompleted > 0) &&
+                           (gbjCompleted > 0) &&
+                           (actualCounts.attachments > 0) &&
+                           (actualCounts.attachments === reconciledFiles) &&
+                           (missingFiles === 0);
+
             const verdict = passed ? 'PASSED' : 'FAILED';
 
             const rehearsalReport = {
@@ -345,7 +432,20 @@ jobs:
               timestamp: '$CI_TIMESTAMP',
               status: verdict,
               gitSha: process.env.GITHUB_SHA || 'local-sha',
-              verifiedMetrics: { tableCount, migrationCount, userCount, txCount, attCount, totalDupes, totalOrphans, reconciledFiles },
+              sourceMigrationCount: manifest.sourceMigrationCount,
+              targetMigrationCount: migrationCount,
+              verifiedMetrics: {
+                tableCount,
+                migrationCount,
+                entityCounts: actualCounts,
+                totalDupes,
+                totalOrphans,
+                gbbCompleted,
+                gspCompleted,
+                gbjCompleted,
+                reconciledFiles,
+                missingFiles
+              },
               invariantsPassed: passed
             };
             fs.writeFileSync('artifacts/release-proof/historical-db-rehearsal.json', JSON.stringify(rehearsalReport, null, 2), 'utf8');
@@ -360,10 +460,10 @@ jobs:
 
             const attReconcile = {
               timestamp: '$CI_TIMESTAMP',
-              status: 'PASSED',
-              dbAttachmentCount: attCount,
+              status: verdict,
+              dbAttachmentCount: actualCounts.attachments,
               reconciledCount: reconciledFiles,
-              missingFilesCount: 0
+              missingFilesCount: missingFiles
             };
             fs.writeFileSync('artifacts/release-proof/attachment-reconcile.json', JSON.stringify(attReconcile, null, 2), 'utf8');
 
@@ -380,7 +480,7 @@ jobs:
         with:
           name: historical-rehearsal-evidence
           path: artifacts/release-proof/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90
 
   fullstack-staging-gate:

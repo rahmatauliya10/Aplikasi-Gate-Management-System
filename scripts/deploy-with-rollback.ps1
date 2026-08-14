@@ -121,7 +121,8 @@ function Execute-Rollback {
         [string]$PrevFrontendDig,
         [string]$CompFile,
         [bool]$IsStrictProd,
-        [string]$RollbackManifestPath = ""
+        [string]$RollbackManifestPath = "",
+        [bool]$RequireDbRollback = $false
     )
     Write-Host "[GMS AUTOMATED ROLLBACK] Initiating schema-aware coordinated rollback sequence to previous stable release tag: [$PrevTag]..." -ForegroundColor Magenta
 
@@ -131,21 +132,33 @@ function Execute-Rollback {
         }
     }
 
-    # Freeze traffic / Maintenance Mode during rollback
+    # Freeze traffic / Maintenance Mode during rollback via bind-mounted maintenance directory
     Write-Host "[GMS AUTOMATED ROLLBACK] Freezing traffic and entering maintenance mode..." -ForegroundColor Cyan
-    [string]$MaintFlag = Join-Path $WorkspaceRoot "maintenance.flag"
-    Set-Content -Path $MaintFlag -Value "MAINTENANCE_ACTIVE_ROLLBACK" -Encoding utf8
+    [string]$MaintDir = Join-Path $WorkspaceRoot "maintenance"
+    if (-not (Test-Path -Path $MaintDir -PathType Container)) {
+        New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
+    }
+    [string]$MaintActive = Join-Path $MaintDir "active"
+    Set-Content -Path $MaintActive -Value "MAINTENANCE_ACTIVE_ROLLBACK" -Encoding utf8
+
+    [bool]$RollbackSucceeded = $false
 
     try {
-        # If database was migrated and pre-deploy backup exists, execute coordinated DB rollback
-        if ($RollbackManifestPath -and (Test-Path -Path $RollbackManifestPath -PathType Leaf)) {
+        # If database was migrated or migration was started, execute MANDATORY coordinated DB rollback
+        if ($RequireDbRollback -or ($RollbackManifestPath -and (Test-Path -Path $RollbackManifestPath -PathType Leaf))) {
+            if (-not $RollbackManifestPath -or -not (Test-Path -Path $RollbackManifestPath -PathType Leaf)) {
+                throw "[CRITICAL ROLLBACK FAILURE] Migration was started or completed, but pre-deployment backup manifest ($RollbackManifestPath) was not found on host storage! Cannot perform safe rollback without DB restoration. Traffic remains frozen in maintenance mode."
+            }
+
             Write-Host "[GMS AUTOMATED ROLLBACK] Restoring database to pre-deployment state via operator restore plane ($RollbackManifestPath)..." -ForegroundColor Yellow
             $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
             & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $RollbackManifestPath -Force
             if ($LASTEXITCODE -ne 0) {
-                throw "Coordinated database rollback failed with exit code $LASTEXITCODE."
+                throw "[CRITICAL ROLLBACK FAILURE] Coordinated database restore failed with exit code $LASTEXITCODE during rollback! Refusing to boot old application on unverified schema."
             }
             Write-Host "[GMS AUTOMATED ROLLBACK] Database successfully reverted to pre-migration state." -ForegroundColor Green
+        } else {
+            Write-Host "[GMS AUTOMATED ROLLBACK] Migration was not initiated; proceeding with application container rollback..." -ForegroundColor Cyan
         }
 
         $env:RELEASE_TAG = $PrevTag
@@ -164,10 +177,16 @@ function Execute-Rollback {
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
         & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile
         if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
+        
+        $RollbackSucceeded = $true
         Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PrevTag]." -ForegroundColor Green
     } finally {
-        if (Test-Path -Path $MaintFlag) {
-            Remove-Item -Path $MaintFlag -Force -ErrorAction SilentlyContinue
+        if ($RollbackSucceeded) {
+            if (Test-Path -Path $MaintActive) {
+                Remove-Item -Path $MaintActive -Force -ErrorAction SilentlyContinue
+            }
+        } else {
+            Write-Host "[GMS CRITICAL ALERT] Rollback failed or incomplete! Maintenance flag ($MaintActive) retained to protect system integrity." -ForegroundColor Red
         }
     }
 }
@@ -176,7 +195,7 @@ function Execute-Rollback {
 
 if ($RollbackOnly) {
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RequireDbRollback $false
         exit 0
     }
     catch {
@@ -218,6 +237,13 @@ Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: 
 
 [string]$CapturedPreDeployBackupId = "NONE"
 [string]$CapturedManifestPath = ""
+[bool]$MigrationStarted = $false
+
+# Ensure local backups directory exists on host
+[string]$HostLocalBackupDir = Join-Path $WorkspaceRoot "backups\local"
+if (-not (Test-Path -Path $HostLocalBackupDir -PathType Container)) {
+    New-Item -Path $HostLocalBackupDir -ItemType Directory -Force | Out-Null
+}
 
 try {
     # Step 1.2: Verify or build image pair for target release
@@ -234,15 +260,58 @@ try {
 
     # Step 1.5: Database preflight audit and migration using newly built backend image
     Write-Host "[GMS Preflight & Migration] Running database preflight audit and Prisma migration..." -ForegroundColor Cyan
+    $MigrationStarted = $true
+
     [string]$PreflightLog = (& docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:prepare:prod 2>&1).ToString()
     [int]$PreflightExitCode = $LASTEXITCODE
     Write-Host $PreflightLog
 
-    if ($PreflightLog -match "Backup Created:\s*(BKP-[^\s\r\n]+)") {
+    # Capture manifest from PREDEPLOY_BACKUP_METADATA_JSON or latest-predeploy.json
+    if ($PreflightLog -match "PREDEPLOY_BACKUP_METADATA_JSON:(.+)") {
+        try {
+            $metaObj = $Matches[1].Trim() | ConvertFrom-Json
+            if ($metaObj.manifestFile) {
+                [string]$cand1 = Join-Path $HostLocalBackupDir $metaObj.manifestFile
+                if (Test-Path -Path $cand1 -PathType Leaf) {
+                    $CapturedManifestPath = $cand1
+                    $CapturedPreDeployBackupId = $metaObj.backupId
+                }
+            }
+        } catch {}
+    }
+
+    if (-not $CapturedManifestPath) {
+        [string]$latestPointer = Join-Path $HostLocalBackupDir "latest-predeploy.json"
+        if (Test-Path -Path $latestPointer -PathType Leaf) {
+            try {
+                $ptrObj = Get-Content -Path $latestPointer -Raw | ConvertFrom-Json
+                if ($ptrObj.manifestFile) {
+                    [string]$cand2 = Join-Path $HostLocalBackupDir $ptrObj.manifestFile
+                    if (Test-Path -Path $cand2 -PathType Leaf) {
+                        $CapturedManifestPath = $cand2
+                        $CapturedPreDeployBackupId = $ptrObj.backupId
+                    }
+                }
+            } catch {}
+        }
+    }
+
+    if (-not $CapturedManifestPath -and ($PreflightLog -match "Backup Created:\s*(BKP-[^\s\r\n]+)")) {
         $CapturedPreDeployBackupId = $Matches[1].Trim()
-        [string]$candManifest = Join-Path $WorkspaceRoot "backups\local\gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
+        [string]$candManifest = Join-Path $HostLocalBackupDir "gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
         if (Test-Path -Path $candManifest -PathType Leaf) {
             $CapturedManifestPath = $candManifest
+        }
+    }
+
+    if ($CapturedManifestPath) {
+        Write-Host "[GMS Deploy] Pre-deployment backup manifest confirmed on host: $CapturedManifestPath ($CapturedPreDeployBackupId)" -ForegroundColor Green
+    } else {
+        Write-Host "[GMS Deploy] WARNING: Could not resolve exact host manifest path for pre-deploy backup. Searching latest manifest..." -ForegroundColor Yellow
+        $latestManifest = Get-ChildItem -Path $HostLocalBackupDir -Filter "*_manifest.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($latestManifest) {
+            $CapturedManifestPath = $latestManifest.FullName
+            Write-Host "[GMS Deploy] Resolved latest host backup manifest: $CapturedManifestPath" -ForegroundColor Cyan
         }
     }
 
@@ -323,10 +392,10 @@ try {
 catch {
     Write-Host "[GMS DEPLOYMENT FAILED] Error detected: $_" -ForegroundColor Red
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted
     }
     catch {
-        Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover even after rolling back to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
+        Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover during rollback to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
         exit 2
     }
 

@@ -1,13 +1,16 @@
 /**
- * Mandatory Pre-Deployment Backup Script (P1-16)
+ * Mandatory Pre-Deployment Backup Script (P1-16 / P0-03 Hardening)
  *
  * Runs full DB snapshot & attachment backup before database schema migrations.
+ * Outputs structured JSON metadata and writes latest-predeploy.json pointer.
  * Fails closed (exit 1) if backup generation or verification fails.
  */
 
 const { NestFactory } = require('@nestjs/core');
 const { AppModule } = require('../dist/src/app.module');
 const { DatabaseBackupService } = require('../dist/src/settings/database-backup.service');
+const fs = require('fs');
+const path = require('path');
 
 async function main() {
   console.log('\n=== GMS Pre-Deployment Backup Hard-Gate ===\n');
@@ -47,6 +50,33 @@ async function main() {
       }
     }
 
+    const localBackupDir = process.env.LOCAL_BACKUP_DIR || '/app/backups/local';
+    const predeployInfo = {
+      backupId: manifest.backupId,
+      createdAt: manifest.createdAt,
+      localStatus: manifest.localStatus,
+      offsiteStatus: manifest.offsiteStatus,
+      manifestFile: manifest.artifacts?.manifest || '',
+      dumpFile: manifest.artifacts?.dump || '',
+      attachmentsArchive: manifest.artifacts?.attachmentsArchive || '',
+      checksums: manifest.checksums || {},
+      localBackupDir
+    };
+
+    // Write machine-readable pointer file to localBackupDir
+    try {
+      if (fs.existsSync(localBackupDir)) {
+        fs.writeFileSync(
+          path.join(localBackupDir, 'latest-predeploy.json'),
+          JSON.stringify(predeployInfo, null, 2),
+          'utf8'
+        );
+      }
+    } catch (writeErr) {
+      console.warn('Could not write latest-predeploy.json pointer:', writeErr.message);
+    }
+
+    console.log(`\nPREDEPLOY_BACKUP_METADATA_JSON:${JSON.stringify(predeployInfo)}`);
     console.log('\n✅ Pre-deployment backup verified successfully. Safe to proceed with DB migration.\n');
     await app.close();
     process.exit(0);

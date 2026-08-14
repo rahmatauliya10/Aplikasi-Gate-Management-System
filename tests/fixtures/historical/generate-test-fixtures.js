@@ -1,8 +1,11 @@
 /**
  * Historical Database Rehearsal Test Fixture Generator (P0-01)
  *
- * Generates an authentic pg_dump binary clone, companion physical attachment archive,
- * and signed companion manifest with exact SHA-256 hashes for CI historical rehearsal.
+ * Generates an authentic pg_dump binary clone based on early historical migrations (1..6),
+ * companion physical attachment archive, and companion manifest with exact SHA-256 hashes.
+ *
+ * This ensures that during CI rehearsal, running `prisma migrate deploy` tests upgrading
+ * the schema and data from migration 6 to migration 18 on real historical data.
  */
 
 const { execSync } = require('child_process');
@@ -19,6 +22,19 @@ function computeSha256Buffer(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex').toLowerCase();
 }
 
+function uuid() {
+  return crypto.randomUUID();
+}
+
+const HISTORICAL_MIGRATIONS = [
+  '20260714030729_init',
+  '20260715000000_add_account_password_security',
+  '20260715031355_sync_indices',
+  '20260715034029_add_user_is_deleted',
+  '20260715150000_add_user_profile_fields',
+  '20260716041815_add_system_issue'
+];
+
 async function main() {
   const targetDir = path.resolve(__dirname);
   if (!fs.existsSync(targetDir)) {
@@ -29,37 +45,242 @@ async function main() {
   const manifestPath = path.join(targetDir, 'historical_test_manifest.json');
   const attArchivePath = path.join(targetDir, 'historical_test_attachments.json');
 
-  console.log('Generating historical database dump fixture at:', dumpPath);
+  console.log('Generating authentic historical baseline database fixture at:', dumpPath);
 
-  const dbUrl = process.env.DATABASE_URL || 'postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public';
+  const dbUrl = process.env.DATABASE_URL || 'postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public';
   const urlObj = new URL(dbUrl);
 
   const host = urlObj.hostname || 'localhost';
   const port = urlObj.port || '5432';
-  const dbName = urlObj.pathname.replace(/^\//, '') || 'gms_test_db';
+  const dbName = urlObj.pathname.replace(/^\//, '') || 'gms_rehearsal_db';
   const user = urlObj.username || 'postgres';
   const password = urlObj.password || 'testpassword';
 
-  // 1. Execute pg_dump -Fc (custom binary format)
   const env = { ...process.env, PGPASSWORD: password };
-  const dumpCmd = `pg_dump -h ${host} -p ${port} -U ${user} -d ${dbName} -F c -f "${dumpPath}"`;
-  try {
-    execSync(dumpCmd, { env, stdio: 'inherit' });
-  } catch (err) {
-    console.error('Failed to execute pg_dump:', err.message);
-    process.exit(1);
+  const psql = (sql) => {
+    const cmd = `psql -h ${host} -p ${port} -U ${user} -d ${dbName} -v ON_ERROR_STOP=1 -c "${sql.replace(/"/g, '\\"')}"`;
+    return execSync(cmd, { env, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+  };
+
+  const psqlFile = (filePath) => {
+    const cmd = `psql -h ${host} -p ${port} -U ${user} -d ${dbName} -v ON_ERROR_STOP=1 -f "${filePath}"`;
+    return execSync(cmd, { env, stdio: 'inherit' });
+  };
+
+  // 1. Reset database schema
+  console.log('Resetting schema on target database...');
+  psql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
+
+  // 2. Create _prisma_migrations table
+  psql(`
+    CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+      "id" VARCHAR(36) PRIMARY KEY NOT NULL,
+      "checksum" VARCHAR(64) NOT NULL,
+      "finished_at" TIMESTAMPTZ,
+      "migration_name" VARCHAR(255) NOT NULL,
+      "logs" TEXT,
+      "rolled_back_at" TIMESTAMPTZ,
+      "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "applied_steps_count" INTEGER NOT NULL DEFAULT 1
+    );
+  `);
+
+  // 3. Apply the 6 historical migrations sequentially
+  const migrationsBaseDir = path.resolve(__dirname, '../../../backend/prisma/migrations');
+  console.log(`Applying ${HISTORICAL_MIGRATIONS.length} historical baseline migrations from ${migrationsBaseDir}...`);
+
+  for (const migName of HISTORICAL_MIGRATIONS) {
+    const migSqlFile = path.join(migrationsBaseDir, migName, 'migration.sql');
+    if (!fs.existsSync(migSqlFile)) {
+      throw new Error(`Migration SQL file not found: ${migSqlFile}`);
+    }
+    const sqlContent = fs.readFileSync(migSqlFile, 'utf8');
+    const checksum = crypto.createHash('sha256').update(sqlContent).digest('hex');
+
+    console.log(`  Applying: ${migName} (checksum: ${checksum.substring(0, 16)}...)`);
+    psqlFile(migSqlFile);
+
+    psql(`
+      INSERT INTO "_prisma_migrations" (
+        "id", "checksum", "finished_at", "migration_name", "logs", "rolled_back_at", "started_at", "applied_steps_count"
+      ) VALUES (
+        '${uuid()}', '${checksum}', NOW(), '${migName}', NULL, NULL, NOW(), 1
+      );
+    `);
   }
 
-  const dumpSha256 = computeSha256(dumpPath);
-  console.log(`Generated dump SHA-256: ${dumpSha256}`);
-
-  // 2. Generate companion attachment archive JSON with realistic files
-  const samplePdfContent = Buffer.from('%PDF-1.4 Mock PDF for gate vehicle inspection evidence\n%%EOF');
+  // 4. Generate companion physical files & compute exact hashes
+  const samplePdfContent = Buffer.from('%PDF-1.4 Mock PDF for historical gate inspection evidence\n%%EOF');
   const samplePdfSha256 = computeSha256Buffer(samplePdfContent);
 
   const sampleJpgContent = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xff, 0xd9]);
   const sampleJpgSha256 = computeSha256Buffer(sampleJpgContent);
 
+  // 5. Seed authentic historical data with DB Attachment records referencing the exact physical files
+  console.log('Seeding authentic historical entities and transactions...');
+  const seedSql = `
+    -- Users
+    INSERT INTO "User" ("id", "email", "username", "password", "name", "role", "isActive", "createdAt", "updatedAt")
+    VALUES
+      ('usr-admin-001', 'admin@gms.local', 'admin', '$argon2id$v=19$m=65536,t=3,p=4$qN8kE7zJ41i5fWjY8q6aZw$5F5N1Q5l8z5L5e5G5k5M5a5b5c5d5e5f', 'System Administrator', 'ADMIN', true, NOW(), NOW()),
+      ('usr-qc-001', 'qc@gms.local', 'qc_operator', '$argon2id$v=19$m=65536,t=3,p=4$qN8kE7zJ41i5fWjY8q6aZw$5F5N1Q5l8z5L5e5G5k5M5a5b5c5d5e5f', 'QC Inspector', 'QC', true, NOW(), NOW()),
+      ('usr-wh-001', 'warehouse@gms.local', 'wh_operator', '$argon2id$v=19$m=65536,t=3,p=4$qN8kE7zJ41i5fWjY8q6aZw$5F5N1Q5l8z5L5e5G5k5M5a5b5c5d5e5f', 'Warehouse Officer', 'WAREHOUSE', true, NOW(), NOW()),
+      ('usr-sec-001', 'security@gms.local', 'sec_guard', '$argon2id$v=19$m=65536,t=3,p=4$qN8kE7zJ41i5fWjY8q6aZw$5F5N1Q5l8z5L5e5G5k5M5a5b5c5d5e5f', 'Security Guard', 'SECURITY', true, NOW(), NOW());
+
+    -- User Warehouse Access
+    INSERT INTO "UserWarehouseAccess" ("id", "userId", "processType", "createdAt", "updatedAt")
+    VALUES
+      ('uwa-001', 'usr-wh-001', 'GBB', NOW(), NOW()),
+      ('uwa-002', 'usr-wh-001', 'GSP', NOW(), NOW()),
+      ('uwa-003', 'usr-wh-001', 'GBJ', NOW(), NOW());
+
+    -- App Settings
+    INSERT INTO "AppSetting" ("id", "key", "value", "description", "updatedBy", "updatedAt")
+    VALUES
+      ('set-001', 'AUTO_SYNC_INTERVAL', '300', 'Automated NAS sync interval in seconds', 'usr-admin-001', NOW()),
+      ('set-002', 'MAINTENANCE_MODE', 'false', 'Global maintenance flag', 'usr-admin-001', NOW());
+
+    -- Announcement
+    INSERT INTO "Announcement" ("id", "title", "content", "type", "status", "location", "speed", "priority", "authorId", "createdAt", "updatedAt")
+    VALUES
+      ('ann-001', 'Historical Rehearsal Notice', 'Baseline test announcement for DR validation', 'INFO', 'ACTIVE', 'ALL_PAGES', 'NORMAL', 'MEDIUM', 'usr-admin-001', NOW(), NOW());
+
+    -- System Issue
+    INSERT INTO "SystemIssue" ("id", "issueType", "description", "status", "reporterId", "createdAt", "updatedAt")
+    VALUES
+      ('iss-001', 'WEIGHBRIDGE_SYNC', 'Historical baseline issue record for DR validation', 'OPEN', 'usr-sec-001', NOW(), NOW());
+
+    -- 1. GBB Transaction (Raw Material Inbound - Completed)
+    INSERT INTO "Transaction" (
+      "id", "transactionNumber", "plateNumber", "driverName", "driverPhone", "vendorName", "vehicleType",
+      "processType", "cargoType", "cargoProcessType", "status", "gateInAt", "gateOutAt", "completedAt", "createdAt", "updatedAt"
+    ) VALUES (
+      'trx-gbb-001', 'TRX-GBB-HIST-001', 'B 1234 GBB', 'Driver GBB', '08123456789', 'PT Vendor Raw Material', 'TRUCK',
+      'GBB', 'RAW_MATERIAL', 'INBOUND', 'COMPLETED', NOW() - INTERVAL '3 hours', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '3 hours', NOW()
+    );
+
+    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "weighedAt", "operatorId", "createdAt", "updatedAt")
+    VALUES
+      ('wb-gbb-in', 'trx-gbb-001', 'IN', 25000, NOW() - INTERVAL '2 hours 45 minutes', 'usr-sec-001', NOW(), NOW()),
+      ('wb-gbb-out', 'trx-gbb-001', 'OUT', 10000, NOW() - INTERVAL '45 minutes', 'usr-sec-001', NOW(), NOW());
+
+    INSERT INTO "QcVehicleCheck" ("id", "transactionId", "result", "inspectorId", "checkedAt", "createdAt", "updatedAt")
+    VALUES
+      ('qcv-gbb-001', 'trx-gbb-001', 'PASS', 'usr-qc-001', NOW() - INTERVAL '2 hours 30 minutes', NOW(), NOW());
+
+    INSERT INTO "IncomingMaterialCheck" ("id", "transactionId", "result", "inspectorId", "checkedAt", "moistureLevel", "createdAt", "updatedAt")
+    VALUES
+      ('imc-gbb-001', 'trx-gbb-001', 'PASS', 'usr-qc-001', NOW() - INTERVAL '2 hours 15 minutes', 12.5, NOW(), NOW());
+
+    INSERT INTO "WarehouseProcess" ("id", "transactionId", "unit", "quantity", "condition", "operatorId", "startedAt", "completedAt", "createdAt", "updatedAt")
+    VALUES
+      ('wh-gbb-001', 'trx-gbb-001', 'KG', 15000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour', NOW(), NOW());
+
+    INSERT INTO "Attachment" ("id", "transactionId", "type", "fileName", "filePath", "fileSizeBytes", "mimeType", "uploaderId", "sha256", "createdAt")
+    VALUES
+      ('att-gbb-001', 'trx-gbb-001', 'DOCUMENT', 'vehicle_check_proof.pdf', 'qc/vehicle_check_proof.pdf', ${samplePdfContent.length}, 'application/pdf', 'usr-qc-001', '${samplePdfSha256}', NOW());
+
+    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "fromStatus", "toStatus", "changedById", "createdAt")
+    VALUES
+      ('tsh-gbb-001', 'trx-gbb-001', 'REGISTERED', 'WEIGH_IN_DONE', 'usr-sec-001', NOW() - INTERVAL '2 hours 45 minutes'),
+      ('tsh-gbb-002', 'trx-gbb-001', 'WEIGH_IN_DONE', 'QC_VEHICLE_PASSED', 'usr-qc-001', NOW() - INTERVAL '2 hours 30 minutes'),
+      ('tsh-gbb-003', 'trx-gbb-001', 'QC_VEHICLE_PASSED', 'INCOMING_CHECK_PASSED', 'usr-qc-001', NOW() - INTERVAL '2 hours 15 minutes'),
+      ('tsh-gbb-004', 'trx-gbb-001', 'INCOMING_CHECK_PASSED', 'WAREHOUSE_DONE', 'usr-wh-001', NOW() - INTERVAL '1 hour'),
+      ('tsh-gbb-005', 'trx-gbb-001', 'WAREHOUSE_DONE', 'COMPLETED', 'usr-sec-001', NOW() - INTERVAL '30 minutes');
+
+    -- 2. GSP Transaction (Supporting Goods Inbound - Completed)
+    INSERT INTO "Transaction" (
+      "id", "transactionNumber", "plateNumber", "driverName", "driverPhone", "vendorName", "vehicleType",
+      "processType", "cargoType", "cargoProcessType", "status", "gateInAt", "gateOutAt", "completedAt", "createdAt", "updatedAt"
+    ) VALUES (
+      'trx-gsp-001', 'TRX-GSP-HIST-001', 'B 5678 GSP', 'Driver GSP', '08123456780', 'PT Vendor Supporting Goods', 'TRUCK',
+      'GSP', 'SUPPORTING', 'INBOUND', 'COMPLETED', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '20 minutes', NOW() - INTERVAL '20 minutes', NOW() - INTERVAL '2 hours', NOW()
+    );
+
+    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "weighedAt", "operatorId", "createdAt", "updatedAt")
+    VALUES
+      ('wb-gsp-in', 'trx-gsp-001', 'IN', 18000, NOW() - INTERVAL '1 hour 45 minutes', 'usr-sec-001', NOW(), NOW()),
+      ('wb-gsp-out', 'trx-gsp-001', 'OUT', 13000, NOW() - INTERVAL '30 minutes', 'usr-sec-001', NOW(), NOW());
+
+    INSERT INTO "WarehouseProcess" ("id", "transactionId", "unit", "quantity", "condition", "operatorId", "startedAt", "completedAt", "createdAt", "updatedAt")
+    VALUES
+      ('wh-gsp-001', 'trx-gsp-001', 'KG', 5000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '1 hour 30 minutes', NOW() - INTERVAL '45 minutes', NOW(), NOW());
+
+    INSERT INTO "Attachment" ("id", "transactionId", "type", "fileName", "filePath", "fileSizeBytes", "mimeType", "uploaderId", "sha256", "createdAt")
+    VALUES
+      ('att-gsp-001', 'trx-gsp-001', 'PHOTO', 'weighbridge_ticket.jpg', 'weighbridge/weighbridge_ticket.jpg', ${sampleJpgContent.length}, 'image/jpeg', 'usr-sec-001', '${sampleJpgSha256}', NOW());
+
+    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "fromStatus", "toStatus", "changedById", "createdAt")
+    VALUES
+      ('tsh-gsp-001', 'trx-gsp-001', 'REGISTERED', 'WEIGH_IN_DONE', 'usr-sec-001', NOW() - INTERVAL '1 hour 45 minutes'),
+      ('tsh-gsp-002', 'trx-gsp-001', 'WEIGH_IN_DONE', 'WAREHOUSE_DONE', 'usr-wh-001', NOW() - INTERVAL '45 minutes'),
+      ('tsh-gsp-003', 'trx-gsp-001', 'WAREHOUSE_DONE', 'COMPLETED', 'usr-sec-001', NOW() - INTERVAL '20 minutes');
+
+    -- 3. GBJ Transaction (Finished Goods Outbound - Completed)
+    INSERT INTO "Transaction" (
+      "id", "transactionNumber", "plateNumber", "driverName", "driverPhone", "vendorName", "vehicleType",
+      "processType", "cargoType", "cargoProcessType", "status", "gateInAt", "gateOutAt", "completedAt", "createdAt", "updatedAt"
+    ) VALUES (
+      'trx-gbj-001', 'TRX-GBJ-HIST-001', 'B 9012 GBJ', 'Driver GBJ', '08123456781', 'PT Customer Finished Goods', 'TRUCK',
+      'GBJ', 'FINISHED_GOODS', 'OUTBOUND', 'COMPLETED', NOW() - INTERVAL '1 hour 30 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '1 hour 30 minutes', NOW()
+    );
+
+    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "weighedAt", "operatorId", "createdAt", "updatedAt")
+    VALUES
+      ('wb-gbj-in', 'trx-gbj-001', 'IN', 12000, NOW() - INTERVAL '1 hour 15 minutes', 'usr-sec-001', NOW(), NOW()),
+      ('wb-gbj-out', 'trx-gbj-001', 'OUT', 24000, NOW() - INTERVAL '15 minutes', 'usr-sec-001', NOW(), NOW());
+
+    INSERT INTO "WarehouseProcess" ("id", "transactionId", "unit", "quantity", "condition", "operatorId", "startedAt", "completedAt", "createdAt", "updatedAt")
+    VALUES
+      ('wh-gbj-001', 'trx-gbj-001', 'KG', 12000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '20 minutes', NOW(), NOW());
+
+    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "fromStatus", "toStatus", "changedById", "createdAt")
+    VALUES
+      ('tsh-gbj-001', 'trx-gbj-001', 'REGISTERED', 'WEIGH_IN_DONE', 'usr-sec-001', NOW() - INTERVAL '1 hour 15 minutes'),
+      ('tsh-gbj-002', 'trx-gbj-001', 'WEIGH_IN_DONE', 'WAREHOUSE_DONE', 'usr-wh-001', NOW() - INTERVAL '20 minutes'),
+      ('tsh-gbj-003', 'trx-gbj-001', 'WAREHOUSE_DONE', 'COMPLETED', 'usr-sec-001', NOW() - INTERVAL '10 minutes');
+
+    -- Activity Logs
+    INSERT INTO "ActivityLog" ("id", "userId", "action", "module", "description", "createdAt")
+    VALUES
+      ('act-001', 'usr-admin-001', 'SYSTEM_INITIALIZED', 'SETTINGS', 'Historical baseline database initialized', NOW() - INTERVAL '3 hours'),
+      ('act-002', 'usr-sec-001', 'TRANSACTION_CREATE', 'GATE', 'Created GBB transaction TRX-GBB-HIST-001', NOW() - INTERVAL '3 hours');
+  `;
+
+  psql(seedSql);
+
+  // 6. Query and assert all 16 entity record counts (fail closed if any query fails)
+  const queryCount = (tableName) => {
+    const out = psql(`SELECT COUNT(*) FROM \\"${tableName}\\";`);
+    const num = parseInt(out, 10);
+    if (isNaN(num)) {
+      throw new Error(`Non-numeric result when querying table ${tableName}: ${out}`);
+    }
+    return num;
+  };
+
+  const tableCounts = {
+    users: queryCount('User'),
+    transactions: queryCount('Transaction'),
+    weighbridgeRecords: queryCount('WeighbridgeRecord'),
+    warehouseProcesses: queryCount('WarehouseProcess'),
+    qcVehicleChecks: queryCount('QcVehicleCheck'),
+    incomingMaterialChecks: queryCount('IncomingMaterialCheck'),
+    attachments: queryCount('Attachment'),
+    fraudChecks: queryCount('FraudCheck'),
+    activityLogs: queryCount('ActivityLog'),
+    appSettings: queryCount('AppSetting'),
+    announcements: queryCount('Announcement'),
+    systemIssues: queryCount('SystemIssue'),
+    transactionCorrections: 0, // table created in migration 7
+    transactionCorrectionItems: 0, // table created in migration 8
+    transactionStatusHistory: queryCount('TransactionStatusHistory'),
+    userWarehouseAccess: queryCount('UserWarehouseAccess')
+  };
+
+  console.log('Seeded historical baseline entity counts:', tableCounts);
+
+  // 7. Write companion physical attachment archive JSON
   const attachmentsArchive = {
     archiveType: 'GMS_ATTACHMENT_ARCHIVE_V1',
     createdAt: new Date().toISOString(),
@@ -85,65 +306,23 @@ async function main() {
   const attSha256 = computeSha256(attArchivePath);
   console.log(`Generated attachments archive SHA-256: ${attSha256}`);
 
-  // 3. Query actual table counts for manifest metadata
-  let tableCounts = {
-    users: 1,
-    transactions: 1,
-    weighbridgeRecords: 0,
-    warehouseProcesses: 0,
-    qcVehicleChecks: 0,
-    incomingMaterialChecks: 0,
-    attachments: 0,
-    fraudChecks: 0,
-    activityLogs: 0,
-    appSettings: 0,
-    announcements: 0,
-    systemIssues: 0,
-    transactionCorrections: 0,
-    transactionCorrectionItems: 0,
-    transactionStatusHistory: 0,
-    userWarehouseAccess: 0
-  };
+  // 8. Execute pg_dump -Fc
+  console.log('Exporting PostgreSQL binary dump to:', dumpPath);
+  const dumpCmd = `pg_dump -h ${host} -p ${port} -U ${user} -d ${dbName} -F c -f "${dumpPath}"`;
+  execSync(dumpCmd, { env, stdio: 'inherit' });
 
-  try {
-    const queryCmd = (sql) => `psql -h ${host} -p ${port} -U ${user} -d ${dbName} -t -A -c "${sql}"`;
-    const getCount = (tbl) => {
-      try {
-        const out = execSync(queryCmd(`SELECT COUNT(*) FROM \\"${tbl}\\";`), { env, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
-        return parseInt(out, 10) || 0;
-      } catch {
-        return 0;
-      }
-    };
+  const dumpSha256 = computeSha256(dumpPath);
+  console.log(`Generated dump SHA-256: ${dumpSha256}`);
 
-    tableCounts = {
-      users: getCount('User'),
-      transactions: getCount('Transaction'),
-      weighbridgeRecords: getCount('WeighbridgeRecord'),
-      warehouseProcesses: getCount('WarehouseProcess'),
-      qcVehicleChecks: getCount('QcVehicleCheck'),
-      incomingMaterialChecks: getCount('IncomingMaterialCheck'),
-      attachments: getCount('Attachment'),
-      fraudChecks: getCount('FraudCheck'),
-      activityLogs: getCount('ActivityLog'),
-      appSettings: getCount('AppSetting'),
-      announcements: getCount('Announcement'),
-      systemIssues: getCount('SystemIssue'),
-      transactionCorrections: getCount('TransactionCorrection'),
-      transactionCorrectionItems: getCount('TransactionCorrectionItem'),
-      transactionStatusHistory: getCount('TransactionStatusHistory'),
-      userWarehouseAccess: getCount('UserWarehouseAccess')
-    };
-  } catch (e) {
-    console.warn('Could not query exact table counts:', e.message);
-  }
-
-  // 4. Generate companion manifest
+  // 9. Write companion manifest
   const manifest = {
     manifestType: 'HISTORICAL_REHEARSAL_FIXTURE',
     backupId: 'BKP-HISTORICAL-REHEARSAL-FIXTURE',
+    sourceVersion: '0.5.0-historical',
+    sourceMigrationCount: HISTORICAL_MIGRATIONS.length,
+    targetMigrationCount: 18,
+    sourceMigrations: HISTORICAL_MIGRATIONS,
     createdAt: new Date().toISOString(),
-    schemaVersion: '1.0.0',
     artifacts: {
       dump: 'historical_test.dump',
       attachmentsArchive: 'historical_test_attachments.json'
@@ -157,7 +336,7 @@ async function main() {
 
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
   console.log('Generated companion manifest at:', manifestPath);
-  console.log('✅ Historical rehearsal test fixtures generated successfully.');
+  console.log('✅ Authentic historical rehearsal test fixtures generated successfully.');
 }
 
 main().catch(err => {
