@@ -135,15 +135,15 @@ async function main() {
       ('uwa-003', 'usr-wh-001', 'GBJ', NOW(), NOW());
 
     -- App Settings
-    INSERT INTO "AppSetting" ("id", "key", "value", "description", "updatedBy", "updatedAt")
+    INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt")
     VALUES
-      ('set-001', 'AUTO_SYNC_INTERVAL', '300', 'Automated NAS sync interval in seconds', 'usr-admin-001', NOW()),
-      ('set-002', 'MAINTENANCE_MODE', 'false', 'Global maintenance flag', 'usr-admin-001', NOW());
+      ('set-001', 'AUTO_SYNC_INTERVAL', '300', NOW(), NOW()),
+      ('set-002', 'MAINTENANCE_MODE', 'false', NOW(), NOW());
 
     -- Announcement
-    INSERT INTO "Announcement" ("id", "title", "content", "type", "status", "location", "speed", "priority", "authorId", "createdAt", "updatedAt")
+    INSERT INTO "Announcement" ("id", "title", "message", "type", "status", "location", "speed", "priority", "createdAt", "updatedAt")
     VALUES
-      ('ann-001', 'Historical Rehearsal Notice', 'Baseline test announcement for DR validation', 'INFO', 'ACTIVE', 'ALL_PAGES', 'NORMAL', 'MEDIUM', 'usr-admin-001', NOW(), NOW());
+      ('ann-001', 'Historical Rehearsal Notice', 'Baseline test announcement for DR validation', 'INFO', 'ACTIVE', 'ALL_PAGES', 'NORMAL', 'MEDIUM', NOW(), NOW());
 
     -- System Issue
     INSERT INTO "SystemIssue" ("id", "issueType", "description", "status", "reporterId", "createdAt", "updatedAt")
@@ -159,28 +159,28 @@ async function main() {
       'GBB', 'RAW_MATERIAL', 'INBOUND', 'COMPLETED', NOW() - INTERVAL '3 hours', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '3 hours', NOW()
     );
 
-    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "weighedAt", "operatorId", "createdAt", "updatedAt")
+    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "ticketNumber", "operatorId", "createdAt", "updatedAt")
     VALUES
-      ('wb-gbb-in', 'trx-gbb-001', 'IN', 25000, NOW() - INTERVAL '2 hours 45 minutes', 'usr-sec-001', NOW(), NOW()),
-      ('wb-gbb-out', 'trx-gbb-001', 'OUT', 10000, NOW() - INTERVAL '45 minutes', 'usr-sec-001', NOW(), NOW());
+      ('wb-gbb-in', 'trx-gbb-001', 'IN', 25000, 'TKT-GBB-IN', 'usr-sec-001', NOW(), NOW()),
+      ('wb-gbb-out', 'trx-gbb-001', 'OUT', 10000, 'TKT-GBB-OUT', 'usr-sec-001', NOW(), NOW());
 
-    INSERT INTO "QcVehicleCheck" ("id", "transactionId", "result", "inspectorId", "checkedAt", "createdAt", "updatedAt")
+    INSERT INTO "QcVehicleCheck" ("id", "transactionId", "result", "checkedById", "startedAt", "completedAt", "createdAt", "updatedAt")
     VALUES
-      ('qcv-gbb-001', 'trx-gbb-001', 'PASS', 'usr-qc-001', NOW() - INTERVAL '2 hours 30 minutes', NOW(), NOW());
+      ('qcv-gbb-001', 'trx-gbb-001', 'PASS', 'usr-qc-001', NOW() - INTERVAL '2 hours 30 minutes', NOW() - INTERVAL '2 hours 20 minutes', NOW(), NOW());
 
-    INSERT INTO "IncomingMaterialCheck" ("id", "transactionId", "result", "inspectorId", "checkedAt", "moistureLevel", "createdAt", "updatedAt")
+    INSERT INTO "IncomingMaterialCheck" ("id", "transactionId", "result", "checkedById", "moisture", "startedAt", "completedAt", "createdAt", "updatedAt")
     VALUES
-      ('imc-gbb-001', 'trx-gbb-001', 'PASS', 'usr-qc-001', NOW() - INTERVAL '2 hours 15 minutes', 12.5, NOW(), NOW());
+      ('imc-gbb-001', 'trx-gbb-001', 'PASS', 'usr-qc-001', 12.5, NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', NOW(), NOW());
 
-    INSERT INTO "WarehouseProcess" ("id", "transactionId", "unit", "quantity", "condition", "operatorId", "startedAt", "completedAt", "createdAt", "updatedAt")
+    INSERT INTO "WarehouseProcess" ("id", "transactionId", "processType", "unit", "actualQuantity", "condition", "startById", "startAt", "endAt", "createdAt", "updatedAt")
     VALUES
-      ('wh-gbb-001', 'trx-gbb-001', 'KG', 15000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour', NOW(), NOW());
+      ('wh-gbb-001', 'trx-gbb-001', 'GBB', 'KG', 15000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour', NOW(), NOW());
 
-    INSERT INTO "Attachment" ("id", "transactionId", "type", "fileName", "filePath", "fileSizeBytes", "mimeType", "uploaderId", "sha256", "createdAt")
+    INSERT INTO "Attachment" ("id", "transactionId", "module", "attachmentType", "originalName", "fileName", "filePath", "mimeType", "size", "uploadedById", "createdAt")
     VALUES
-      ('att-gbb-001', 'trx-gbb-001', 'DOCUMENT', 'vehicle_check_proof.pdf', 'qc/vehicle_check_proof.pdf', ${samplePdfContent.length}, 'application/pdf', 'usr-qc-001', '${samplePdfSha256}', NOW());
+      ('att-gbb-001', 'trx-gbb-001', 'QC', 'DOCUMENT', 'vehicle_check_proof.pdf', 'vehicle_check_proof.pdf', 'qc/vehicle_check_proof.pdf', 'application/pdf', ${samplePdfContent.length}, 'usr-qc-001', NOW());
 
-    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "fromStatus", "toStatus", "changedById", "createdAt")
+    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "oldStatus", "newStatus", "changedById", "changedAt")
     VALUES
       ('tsh-gbb-001', 'trx-gbb-001', 'REGISTERED', 'WEIGH_IN_DONE', 'usr-sec-001', NOW() - INTERVAL '2 hours 45 minutes'),
       ('tsh-gbb-002', 'trx-gbb-001', 'WEIGH_IN_DONE', 'QC_VEHICLE_PASSED', 'usr-qc-001', NOW() - INTERVAL '2 hours 30 minutes'),
@@ -197,20 +197,20 @@ async function main() {
       'GSP', 'SUPPORTING', 'INBOUND', 'COMPLETED', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '20 minutes', NOW() - INTERVAL '20 minutes', NOW() - INTERVAL '2 hours', NOW()
     );
 
-    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "weighedAt", "operatorId", "createdAt", "updatedAt")
+    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "ticketNumber", "operatorId", "createdAt", "updatedAt")
     VALUES
-      ('wb-gsp-in', 'trx-gsp-001', 'IN', 18000, NOW() - INTERVAL '1 hour 45 minutes', 'usr-sec-001', NOW(), NOW()),
-      ('wb-gsp-out', 'trx-gsp-001', 'OUT', 13000, NOW() - INTERVAL '30 minutes', 'usr-sec-001', NOW(), NOW());
+      ('wb-gsp-in', 'trx-gsp-001', 'IN', 18000, 'TKT-GSP-IN', 'usr-sec-001', NOW(), NOW()),
+      ('wb-gsp-out', 'trx-gsp-001', 'OUT', 13000, 'TKT-GSP-OUT', 'usr-sec-001', NOW(), NOW());
 
-    INSERT INTO "WarehouseProcess" ("id", "transactionId", "unit", "quantity", "condition", "operatorId", "startedAt", "completedAt", "createdAt", "updatedAt")
+    INSERT INTO "WarehouseProcess" ("id", "transactionId", "processType", "unit", "actualQuantity", "condition", "startById", "startAt", "endAt", "createdAt", "updatedAt")
     VALUES
-      ('wh-gsp-001', 'trx-gsp-001', 'KG', 5000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '1 hour 30 minutes', NOW() - INTERVAL '45 minutes', NOW(), NOW());
+      ('wh-gsp-001', 'trx-gsp-001', 'GSP', 'KG', 5000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '1 hour 30 minutes', NOW() - INTERVAL '45 minutes', NOW(), NOW());
 
-    INSERT INTO "Attachment" ("id", "transactionId", "type", "fileName", "filePath", "fileSizeBytes", "mimeType", "uploaderId", "sha256", "createdAt")
+    INSERT INTO "Attachment" ("id", "transactionId", "module", "attachmentType", "originalName", "fileName", "filePath", "mimeType", "size", "uploadedById", "createdAt")
     VALUES
-      ('att-gsp-001', 'trx-gsp-001', 'PHOTO', 'weighbridge_ticket.jpg', 'weighbridge/weighbridge_ticket.jpg', ${sampleJpgContent.length}, 'image/jpeg', 'usr-sec-001', '${sampleJpgSha256}', NOW());
+      ('att-gsp-001', 'trx-gsp-001', 'WEIGHBRIDGE', 'PHOTO', 'weighbridge_ticket.jpg', 'weighbridge_ticket.jpg', 'weighbridge/weighbridge_ticket.jpg', 'image/jpeg', ${sampleJpgContent.length}, 'usr-sec-001', NOW());
 
-    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "fromStatus", "toStatus", "changedById", "createdAt")
+    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "oldStatus", "newStatus", "changedById", "changedAt")
     VALUES
       ('tsh-gsp-001', 'trx-gsp-001', 'REGISTERED', 'WEIGH_IN_DONE', 'usr-sec-001', NOW() - INTERVAL '1 hour 45 minutes'),
       ('tsh-gsp-002', 'trx-gsp-001', 'WEIGH_IN_DONE', 'WAREHOUSE_DONE', 'usr-wh-001', NOW() - INTERVAL '45 minutes'),
@@ -225,26 +225,26 @@ async function main() {
       'GBJ', 'FINISHED_GOODS', 'OUTBOUND', 'COMPLETED', NOW() - INTERVAL '1 hour 30 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '10 minutes', NOW() - INTERVAL '1 hour 30 minutes', NOW()
     );
 
-    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "weighedAt", "operatorId", "createdAt", "updatedAt")
+    INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "ticketNumber", "operatorId", "createdAt", "updatedAt")
     VALUES
-      ('wb-gbj-in', 'trx-gbj-001', 'IN', 12000, NOW() - INTERVAL '1 hour 15 minutes', 'usr-sec-001', NOW(), NOW()),
-      ('wb-gbj-out', 'trx-gbj-001', 'OUT', 24000, NOW() - INTERVAL '15 minutes', 'usr-sec-001', NOW(), NOW());
+      ('wb-gbj-in', 'trx-gbj-001', 'IN', 12000, 'TKT-GBJ-IN', 'usr-sec-001', NOW(), NOW()),
+      ('wb-gbj-out', 'trx-gbj-001', 'OUT', 24000, 'TKT-GBJ-OUT', 'usr-sec-001', NOW(), NOW());
 
-    INSERT INTO "WarehouseProcess" ("id", "transactionId", "unit", "quantity", "condition", "operatorId", "startedAt", "completedAt", "createdAt", "updatedAt")
+    INSERT INTO "WarehouseProcess" ("id", "transactionId", "processType", "unit", "actualQuantity", "condition", "startById", "startAt", "endAt", "createdAt", "updatedAt")
     VALUES
-      ('wh-gbj-001', 'trx-gbj-001', 'KG', 12000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '20 minutes', NOW(), NOW());
+      ('wh-gbj-001', 'trx-gbj-001', 'GBJ', 'KG', 12000, 'GOOD', 'usr-wh-001', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '20 minutes', NOW(), NOW());
 
-    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "fromStatus", "toStatus", "changedById", "createdAt")
+    INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "oldStatus", "newStatus", "changedById", "changedAt")
     VALUES
       ('tsh-gbj-001', 'trx-gbj-001', 'REGISTERED', 'WEIGH_IN_DONE', 'usr-sec-001', NOW() - INTERVAL '1 hour 15 minutes'),
       ('tsh-gbj-002', 'trx-gbj-001', 'WEIGH_IN_DONE', 'WAREHOUSE_DONE', 'usr-wh-001', NOW() - INTERVAL '20 minutes'),
       ('tsh-gbj-003', 'trx-gbj-001', 'WAREHOUSE_DONE', 'COMPLETED', 'usr-sec-001', NOW() - INTERVAL '10 minutes');
 
     -- Activity Logs
-    INSERT INTO "ActivityLog" ("id", "userId", "action", "module", "description", "createdAt")
+    INSERT INTO "ActivityLog" ("id", "userId", "userName", "role", "action", "module", "description", "status", "createdAt")
     VALUES
-      ('act-001', 'usr-admin-001', 'SYSTEM_INITIALIZED', 'SETTINGS', 'Historical baseline database initialized', NOW() - INTERVAL '3 hours'),
-      ('act-002', 'usr-sec-001', 'TRANSACTION_CREATE', 'GATE', 'Created GBB transaction TRX-GBB-HIST-001', NOW() - INTERVAL '3 hours');
+      ('act-001', 'usr-admin-001', 'System Administrator', 'ADMIN', 'SYSTEM_INITIALIZED', 'SETTINGS', 'Historical baseline database initialized', 'SUCCESS', NOW() - INTERVAL '3 hours'),
+      ('act-002', 'usr-sec-001', 'Security Guard', 'SECURITY', 'TRANSACTION_CREATE', 'GATE', 'Created GBB transaction TRX-GBB-HIST-001', 'SUCCESS', NOW() - INTERVAL '3 hours');
   `;
 
   psql(seedSql);
