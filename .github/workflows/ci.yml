@@ -321,34 +321,34 @@ jobs:
             const manifest = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_manifest.json', 'utf8'));
 
             function q(sql) {
-              const cmd = 'psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"' + sql.replace(/\"/g, '\\\\\"') + '\"';
-              const out = execSync(cmd, { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+              const cmd = 'psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A';
+              const out = execSync(cmd, { input: sql, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
               const num = parseInt(out, 10);
               if (isNaN(num)) throw new Error('Non-numeric result for query [' + sql + ']: ' + out);
               return num;
             }
 
-            const tableCount = q(\"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';\");
-            const migrationCount = q(\"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\");
+            const tableCount = q('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = \'public\' AND table_type = \'BASE TABLE\';');
+            const migrationCount = q('SELECT COUNT(*) FROM "_prisma_migrations" WHERE finished_at IS NOT NULL;');
 
             // Query all 16 entities
             const actualCounts = {
-              users: q(\"SELECT COUNT(*) FROM \\\"User\\\";\"),
-              transactions: q(\"SELECT COUNT(*) FROM \\\"Transaction\\\";\"),
-              weighbridgeRecords: q(\"SELECT COUNT(*) FROM \\\"WeighbridgeRecord\\\";\"),
-              warehouseProcesses: q(\"SELECT COUNT(*) FROM \\\"WarehouseProcess\\\";\"),
-              qcVehicleChecks: q(\"SELECT COUNT(*) FROM \\\"QcVehicleCheck\\\";\"),
-              incomingMaterialChecks: q(\"SELECT COUNT(*) FROM \\\"IncomingMaterialCheck\\\";\"),
-              attachments: q(\"SELECT COUNT(*) FROM \\\"Attachment\\\";\"),
-              fraudChecks: q(\"SELECT COUNT(*) FROM \\\"FraudCheck\\\";\"),
-              activityLogs: q(\"SELECT COUNT(*) FROM \\\"ActivityLog\\\";\"),
-              appSettings: q(\"SELECT COUNT(*) FROM \\\"AppSetting\\\";\"),
-              announcements: q(\"SELECT COUNT(*) FROM \\\"Announcement\\\";\"),
-              systemIssues: q(\"SELECT COUNT(*) FROM \\\"SystemIssue\\\ THREE;\".replace(' THREE', '')),
-              transactionCorrections: q(\"SELECT COUNT(*) FROM \\\"TransactionCorrection\\\";\"),
-              transactionCorrectionItems: q(\"SELECT COUNT(*) FROM \\\"TransactionCorrectionItem\\\";\"),
-              transactionStatusHistory: q(\"SELECT COUNT(*) FROM \\\"TransactionStatusHistory\\\";\"),
-              userWarehouseAccess: q(\"SELECT COUNT(*) FROM \\\"UserWarehouseAccess\\\";\")
+              users: q('SELECT COUNT(*) FROM "User";'),
+              transactions: q('SELECT COUNT(*) FROM "Transaction";'),
+              weighbridgeRecords: q('SELECT COUNT(*) FROM "WeighbridgeRecord";'),
+              warehouseProcesses: q('SELECT COUNT(*) FROM "WarehouseProcess";'),
+              qcVehicleChecks: q('SELECT COUNT(*) FROM "QcVehicleCheck";'),
+              incomingMaterialChecks: q('SELECT COUNT(*) FROM "IncomingMaterialCheck";'),
+              attachments: q('SELECT COUNT(*) FROM "Attachment";'),
+              fraudChecks: q('SELECT COUNT(*) FROM "FraudCheck";'),
+              activityLogs: q('SELECT COUNT(*) FROM "ActivityLog";'),
+              appSettings: q('SELECT COUNT(*) FROM "AppSetting";'),
+              announcements: q('SELECT COUNT(*) FROM "Announcement";'),
+              systemIssues: q('SELECT COUNT(*) FROM "SystemIssue";'),
+              transactionCorrections: q('SELECT COUNT(*) FROM "TransactionCorrection";'),
+              transactionCorrectionItems: q('SELECT COUNT(*) FROM "TransactionCorrectionItem";'),
+              transactionStatusHistory: q('SELECT COUNT(*) FROM "TransactionStatusHistory";'),
+              userWarehouseAccess: q('SELECT COUNT(*) FROM "UserWarehouseAccess";')
             };
 
             console.log('16-Entity counts post-migration:', actualCounts);

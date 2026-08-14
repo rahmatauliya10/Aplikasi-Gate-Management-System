@@ -58,8 +58,8 @@ async function main() {
 
   const env = { ...process.env, PGPASSWORD: password };
   const psql = (sql) => {
-    const cmd = `psql -h ${host} -p ${port} -U ${user} -d ${dbName} -v ON_ERROR_STOP=1 -c "${sql.replace(/"/g, '\\"')}"`;
-    return execSync(cmd, { env, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+    const cmd = `psql -h ${host} -p ${port} -U ${user} -d ${dbName} -v ON_ERROR_STOP=1 -t -A`;
+    return execSync(cmd, { env, input: sql, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
   };
 
   const psqlFile = (filePath) => {
@@ -251,7 +251,7 @@ async function main() {
 
   // 6. Query and assert all 16 entity record counts (fail closed if any query fails)
   const queryCount = (tableName) => {
-    const out = psql(`SELECT COUNT(*) FROM \\"${tableName}\\";`);
+    const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
     const num = parseInt(out, 10);
     if (isNaN(num)) {
       throw new Error(`Non-numeric result when querying table ${tableName}: ${out}`);
