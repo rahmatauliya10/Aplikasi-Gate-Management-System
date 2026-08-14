@@ -169,9 +169,13 @@ export class DatabaseBackupService
   private async performSlaCatchUpCheck() {
     try {
       const status = await this.getSystemStatus();
-      if (status.lastBackupAgeHours >= 6) {
+      if (status.lastBackupAgeHours === null || status.lastBackupAgeHours >= 6) {
+        const ageMsg =
+          status.lastBackupAgeHours !== null
+            ? `${status.lastBackupAgeHours.toFixed(1)}h ago`
+            : 'never';
         this.logger.warn(
-          `SLA Breach detected (Last backup was ${status.lastBackupAgeHours.toFixed(1)}h ago). Triggering catch-up backup...`,
+          `SLA Breach detected (Last backup was ${ageMsg}). Triggering catch-up backup...`,
         );
         await this.runAutomatedScheduledBackup('AUTOMATIC_6HR');
       }
@@ -421,7 +425,9 @@ export class DatabaseBackupService
       }
     }
 
-    const safeFetch = async <T>(fetcher: () => Promise<T[]>): Promise<T[]> => {
+    const safeFetch = async (
+      fetcher: () => Promise<any[]>,
+    ): Promise<any[]> => {
       try {
         return await fetcher();
       } catch (err: any) {
@@ -947,9 +953,7 @@ export class DatabaseBackupService
 
     const isOverallSuccess =
       manifest.localStatus === 'VERIFIED' &&
-      (manifest.offsiteStatus === 'VERIFIED' ||
-        manifest.offsiteStatus === 'PENDING' ||
-        !this.nasBackupDir);
+      manifest.offsiteStatus !== 'FAILED';
 
     await this.activityLogsService.logAction({
       userId: user.id,
