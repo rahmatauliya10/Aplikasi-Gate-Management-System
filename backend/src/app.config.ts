@@ -29,8 +29,7 @@ export function configureApp(app: INestApplication) {
           statusCode: 503,
           code: 'MAINTENANCE_MODE',
           error: 'Service Unavailable',
-          message:
-            'System is temporarily unavailable due to maintenance.',
+          message: 'System is temporarily unavailable due to maintenance.',
           timestamp: new Date().toISOString(),
         });
       }

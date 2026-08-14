@@ -10,13 +10,17 @@ describe('Maintenance Mode Guard & Write Freeze Gate (P0-06)', () => {
 
   afterEach(() => {
     // Clean up any test maintenance flags
-    [rootMaintFlag, localMaintFlag, rootMaintActive, localMaintActive].forEach((f) => {
-      if (fs.existsSync(f)) {
-        try {
-          fs.unlinkSync(f);
-        } catch {}
-      }
-    });
+    [rootMaintFlag, localMaintFlag, rootMaintActive, localMaintActive].forEach(
+      (f) => {
+        if (fs.existsSync(f)) {
+          try {
+            fs.unlinkSync(f);
+          } catch (e) {
+            // Ignore cleanup errors during test teardown
+          }
+        }
+      },
+    );
   });
 
   function createMockApp() {
@@ -74,7 +78,11 @@ describe('Maintenance Mode Guard & Write Freeze Gate (P0-06)', () => {
     }
     fs.writeFileSync(localMaintActive, 'MAINTENANCE_ACTIVE_TEST', 'utf8');
 
-    const req: any = { method: 'POST', url: '/api/gate/check-in', body: { driverName: 'Test' } };
+    const req: any = {
+      method: 'POST',
+      url: '/api/gate/check-in',
+      body: { driverName: 'Test' },
+    };
     let jsonResult: any = null;
     const res: any = {
       status: jest.fn().mockImplementation((code) => {
@@ -96,7 +104,9 @@ describe('Maintenance Mode Guard & Write Freeze Gate (P0-06)', () => {
     expect(jsonResult.success).toBe(false);
     expect(jsonResult.statusCode).toBe(503);
     expect(jsonResult.code).toBe('MAINTENANCE_MODE');
-    expect(jsonResult.message).toContain('System is temporarily unavailable due to maintenance.');
+    expect(jsonResult.message).toContain(
+      'System is temporarily unavailable due to maintenance.',
+    );
   });
 
   it('should reject PUT and DELETE write requests with 503 during maintenance', () => {

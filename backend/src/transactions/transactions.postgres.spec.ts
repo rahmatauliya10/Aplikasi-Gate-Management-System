@@ -95,7 +95,9 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
     try {
       await prisma.$connect();
     } catch (e: any) {
-      console.warn('Physical PostgreSQL test database is offline; skipping live PG rollback test.');
+      console.warn(
+        'Physical PostgreSQL test database is offline; skipping live PG rollback test.',
+      );
       return;
     }
 
