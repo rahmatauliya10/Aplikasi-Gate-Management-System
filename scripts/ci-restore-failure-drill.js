@@ -86,31 +86,28 @@ async function main() {
   };
 
   const tableExists = (tableName) => {
-    try {
-      const out = psql(`SELECT CASE WHEN to_regclass('public."' || '${tableName}' || '"') IS NOT NULL THEN '1' ELSE '0' END;`);
-      return out.trim() === '1';
-    } catch {
-      return false;
-    }
+    const out = psql(`SELECT CASE WHEN to_regclass('public."' || '${tableName}' || '"') IS NOT NULL THEN '1' ELSE '0' END;`);
+    return out.trim() === '1';
   };
 
   const queryCount = (tableName) => {
     if (!tableExists(tableName)) {
       return 0;
     }
-    try {
-      const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
-      const num = parseInt(out, 10);
-      if (isNaN(num)) {
-        throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
-      }
-      return num;
-    } catch (err) {
-      if (err.message && (err.message.includes('does not exist') || (err.stderr && err.stderr.toString().includes('does not exist')))) {
-        return 0;
-      }
-      throw err;
+    const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
+    const num = parseInt(out, 10);
+    if (isNaN(num)) {
+      throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
     }
+    return num;
+  };
+
+  const queryTableFingerprint = (tableName) => {
+    if (!tableExists(tableName)) {
+      return 'NON_EXISTENT';
+    }
+    const out = psql(`SELECT COALESCE(md5(string_agg(id::text || ':' || COALESCE("updatedAt"::text, "createdAt"::text, ''), ',' ORDER BY id::text)), 'EMPTY') FROM "${tableName}";`);
+    return out.trim();
   };
 
   function capture16Entities() {
@@ -133,6 +130,23 @@ async function main() {
       userWarehouseAccess: queryCount('UserWarehouseAccess'),
       migrations: queryCount('_prisma_migrations')
     };
+  }
+
+  function capture16EntityFingerprints() {
+    const tableNames = [
+      'User', 'Transaction', 'WeighbridgeRecord', 'WarehouseProcess',
+      'QcVehicleCheck', 'IncomingMaterialCheck', 'Attachment', 'FraudCheck',
+      'ActivityLog', 'AppSetting', 'Announcement', 'SystemIssue',
+      'TransactionCorrection', 'TransactionCorrectionItem', 'TransactionStatusHistory',
+      'UserWarehouseAccess'
+    ];
+    const fp = {};
+    for (const t of tableNames) {
+      if (tableExists(t)) {
+        fp[t] = queryTableFingerprint(t);
+      }
+    }
+    return fp;
   }
 
   const phaseResults = [];
@@ -218,6 +232,7 @@ async function main() {
   try {
     // 1. Snapshot current baseline state
     const preSnapshotEntities = capture16Entities();
+    const preSnapshotFingerprints = capture16EntityFingerprints();
     const tempSnapshotDump = path.join(projectRoot, 'artifacts/release-proof/pre_restore_safety_snapshot.dump');
 
     // Create pre-restore safety dump
@@ -238,8 +253,9 @@ async function main() {
     const rollbackCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --no-owner --no-acl "${tempSnapshotDump}"`;
     execSync(rollbackCmd, { env, stdio: 'pipe' });
 
-    // 4. Assert live DB state returned 100% to pre-snapshot entities across ALL 16 entity tables
+    // 4. Assert live DB state returned 100% to pre-snapshot entities and fingerprints across ALL 16 entity tables
     const postRollbackEntities = capture16Entities();
+    const postRollbackFingerprints = capture16EntityFingerprints();
     const mismatchedEntities = [];
     for (const [key, val] of Object.entries(preSnapshotEntities)) {
       if (postRollbackEntities[key] !== val) {
@@ -247,18 +263,30 @@ async function main() {
       }
     }
 
+    const mismatchedFingerprints = [];
+    for (const [tbl, fp] of Object.entries(preSnapshotFingerprints)) {
+      if (postRollbackFingerprints[tbl] !== fp) {
+        mismatchedFingerprints.push({ table: tbl, expectedFp: fp, actualFp: postRollbackFingerprints[tbl] });
+      }
+    }
+
     const all16EntitiesMatch = mismatchedEntities.length === 0;
-    p2Passed = all16EntitiesMatch;
-    p2Details = all16EntitiesMatch
-      ? 'Operator compensation logic safely caught post-DB-commit promotion exception and executed automatic DB rollback to pre-restore snapshot (100% 16-entity retention).'
-      : `Compensation rollback discrepancy detected for entities: ${JSON.stringify(mismatchedEntities)}`;
+    const allFingerprintsMatch = mismatchedFingerprints.length === 0;
+    p2Passed = all16EntitiesMatch && allFingerprintsMatch;
+    p2Details = p2Passed
+      ? 'Operator compensation logic safely caught post-DB-commit promotion exception and executed automatic DB rollback to pre-restore snapshot (100% 16-entity retention and deterministic content fingerprint equality).'
+      : `Compensation rollback discrepancy detected: entities=${JSON.stringify(mismatchedEntities)}, fingerprints=${JSON.stringify(mismatchedFingerprints)}`;
 
     p2Evidence = {
       safetySnapshotCreated: fs.existsSync(tempSnapshotDump),
       preSnapshotEntities,
       postRollbackEntities,
+      preSnapshotFingerprints,
+      postRollbackFingerprints,
       mismatchedEntities,
-      entities100PercentRestored: all16EntitiesMatch
+      mismatchedFingerprints,
+      entities100PercentRestored: all16EntitiesMatch,
+      contentFingerprints100PercentRestored: allFingerprintsMatch
     };
   } catch (err) {
     p2Passed = false;
@@ -418,11 +446,12 @@ async function main() {
   const calculatedRpoMinutes = parseFloat(((Date.now() - snapshotCreationTime) / 60000).toFixed(4));
 
   const evidenceReport = {
-    reportTitle: 'GMS Production DR Failure-Injection & Restore Drill Evidence (P0-02)',
+    reportTitle: 'Component Restore Rehearsal Evidence (P0-02)',
     timestamp: new Date().toISOString(),
     status: verdictStatus,
     gitSha: process.env.GITHUB_SHA || 'local-sha',
     rpoMinutes: calculatedRpoMinutes,
+    rpoDefinition: 'Elapsed duration since pre-restore safety snapshot creation to failure recovery verification (rehearsal delta)',
     rtoSeconds: parseFloat(totalDuration.toFixed(2)),
     drillsSummary: {
       totalPhases: phaseResults.length,

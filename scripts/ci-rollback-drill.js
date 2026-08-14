@@ -61,31 +61,28 @@ async function main() {
   };
 
   const tableExists = (tableName) => {
-    try {
-      const out = psql(`SELECT CASE WHEN to_regclass('public."' || '${tableName}' || '"') IS NOT NULL THEN '1' ELSE '0' END;`);
-      return out.trim() === '1';
-    } catch {
-      return false;
-    }
+    const out = psql(`SELECT CASE WHEN to_regclass('public."' || '${tableName}' || '"') IS NOT NULL THEN '1' ELSE '0' END;`);
+    return out.trim() === '1';
   };
 
   const queryCount = (tableName) => {
     if (!tableExists(tableName)) {
       return 0;
     }
-    try {
-      const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
-      const num = parseInt(out, 10);
-      if (isNaN(num)) {
-        throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
-      }
-      return num;
-    } catch (err) {
-      if (err.message && (err.message.includes('does not exist') || (err.stderr && err.stderr.toString().includes('does not exist')))) {
-        return 0;
-      }
-      throw err;
+    const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
+    const num = parseInt(out, 10);
+    if (isNaN(num)) {
+      throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
     }
+    return num;
+  };
+
+  const queryTableFingerprint = (tableName) => {
+    if (!tableExists(tableName)) {
+      return 'NON_EXISTENT';
+    }
+    const out = psql(`SELECT COALESCE(md5(string_agg(id::text || ':' || COALESCE("updatedAt"::text, "createdAt"::text, ''), ',' ORDER BY id::text)), 'EMPTY') FROM "${tableName}";`);
+    return out.trim();
   };
 
   function capture16Entities() {
@@ -110,6 +107,23 @@ async function main() {
     };
   }
 
+  function capture16EntityFingerprints() {
+    const tableNames = [
+      'User', 'Transaction', 'WeighbridgeRecord', 'WarehouseProcess',
+      'QcVehicleCheck', 'IncomingMaterialCheck', 'Attachment', 'FraudCheck',
+      'ActivityLog', 'AppSetting', 'Announcement', 'SystemIssue',
+      'TransactionCorrection', 'TransactionCorrectionItem', 'TransactionStatusHistory',
+      'UserWarehouseAccess'
+    ];
+    const fp = {};
+    for (const t of tableNames) {
+      if (tableExists(t)) {
+        fp[t] = queryTableFingerprint(t);
+      }
+    }
+    return fp;
+  }
+
   // ------------------------------------------------------------------------------
   // Step 1: Ensure baseline historical database (6 migrations) is restored
   // ------------------------------------------------------------------------------
@@ -123,6 +137,7 @@ async function main() {
   execSync(restoreBaselineCmd, { env, stdio: 'pipe' });
 
   const preDeployEntities = capture16Entities();
+  const preDeployFingerprints = capture16EntityFingerprints();
   console.log('Pre-deployment baseline state (16 Entities):', preDeployEntities);
 
   // ------------------------------------------------------------------------------
@@ -200,8 +215,9 @@ async function main() {
   // ------------------------------------------------------------------------------
   // Step 5: Verify Post-Rollback Invariants & Database Integrity
   // ------------------------------------------------------------------------------
-  console.log('\nStep 5: Verifying post-rollback schema state and 100% 16-entity retention...');
+  console.log('\nStep 5: Verifying post-rollback schema state, 100% 16-entity retention & deterministic content equality...');
   const postRollbackEntities = capture16Entities();
+  const postRollbackFingerprints = capture16EntityFingerprints();
   console.log('Post-rollback restored state:', postRollbackEntities);
 
   const migrationReverted = (postRollbackEntities.migrations === preDeployEntities.migrations);
@@ -219,6 +235,22 @@ async function main() {
     };
     if (!match) {
       all16EntitiesRetained = false;
+    }
+  }
+
+  // Validate content fingerprints match 100%
+  const fingerprintAssertions = {};
+  let allFingerprintsMatch = true;
+  for (const [tbl, fp] of Object.entries(preDeployFingerprints)) {
+    const restoredFp = postRollbackFingerprints[tbl];
+    const match = (restoredFp === fp);
+    fingerprintAssertions[tbl] = {
+      pass: match,
+      expected: fp,
+      actual: restoredFp
+    };
+    if (!match) {
+      allFingerprintsMatch = false;
     }
   }
 
@@ -241,6 +273,7 @@ async function main() {
 
   const rollbackPassed = migrationReverted &&
                          all16EntitiesRetained &&
+                         allFingerprintsMatch &&
                          (totalDupes === 0) &&
                          (totalOrphans === 0);
 
@@ -266,6 +299,7 @@ async function main() {
     preDeployBackupId: backupId,
     verifiedPreDeployDumpHash: dumpSha256,
     rpoMinutes: rpoMinutes,
+    rpoDefinition: 'Elapsed duration since pre-deployment backup manifest creation to post-rollback recovery verification (rehearsal delta)',
     rtoSeconds: parseFloat(totalDurationSec.toFixed(2)),
     preDeployState: preDeployEntities,
     targetPostMigrationState: postMigrationEntities,
@@ -273,7 +307,9 @@ async function main() {
     assertions: {
       migrationCountReverted: { pass: migrationReverted, baseline: preDeployEntities.migrations, restored: postRollbackEntities.migrations },
       all16EntitiesRetained: { pass: all16EntitiesRetained },
+      allContentFingerprintsMatch: { pass: allFingerprintsMatch },
       entityDetails: entityAssertions,
+      fingerprintDetails: fingerprintAssertions,
       zeroDuplicateIsCurrent: { pass: totalDupes === 0, violations: totalDupes },
       zeroForeignOrphans: { pass: totalOrphans === 0, violations: totalOrphans }
     }

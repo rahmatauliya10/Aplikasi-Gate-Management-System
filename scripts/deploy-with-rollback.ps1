@@ -131,7 +131,8 @@ function Execute-Rollback {
         [string]$CompFile,
         [bool]$IsStrictProd,
         [string]$RollbackManifestPath = "",
-        [bool]$RequireDbRollback = $false
+        [bool]$RequireDbRollback = $false,
+        [bool]$EnforceNginx = $false
     )
     Write-Host "[GMS AUTOMATED ROLLBACK] Initiating schema-aware coordinated rollback sequence to previous stable release tag: [$PrevTag]..." -ForegroundColor Magenta
 
@@ -184,7 +185,7 @@ function Execute-Rollback {
 
         Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$RequireNginx
+        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$EnforceNginx
         if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
 
         $RollbackSucceeded = $true
@@ -201,6 +202,7 @@ function Execute-Rollback {
 }
 
 [bool]$IsProductionMode = [bool]($RequireDigest -or ($ComposeFile -like "*prod*"))
+[bool]$EffectiveRequireNginx = if ($PSBoundParameters.ContainsKey('RequireNginx')) { [bool]$RequireNginx } else { $IsProductionMode }
 
 if ($RollbackOnly) {
     if (-not $RollbackManifestPath -and -not $NoSchemaChangeVerified) {
@@ -208,7 +210,7 @@ if ($RollbackOnly) {
     }
     [bool]$dbRollbackRequired = [bool](-not [string]::IsNullOrWhiteSpace($RollbackManifestPath))
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $RollbackManifestPath -RequireDbRollback $dbRollbackRequired
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $RollbackManifestPath -RequireDbRollback $dbRollbackRequired -EnforceNginx $EffectiveRequireNginx
         exit 0
     }
     catch {
@@ -353,7 +355,7 @@ try {
     # Step 2: Execute automated health watchdog check
     Write-Host "[GMS Deploy] Verifying post-deployment service health via watchdog..." -ForegroundColor Cyan
     $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-    & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$RequireNginx
+    & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$EffectiveRequireNginx
     if ($LASTEXITCODE -ne 0) { throw "Health check verification failed during post-deploy watchdog test." }
 
     Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] successfully deployed and verified healthy." -ForegroundColor Green
@@ -419,7 +421,7 @@ try {
 catch {
     Write-Host "[GMS DEPLOYMENT FAILED] Error detected: $_" -ForegroundColor Red
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted -EnforceNginx $EffectiveRequireNginx
     }
     catch {
         Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover during rollback to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red

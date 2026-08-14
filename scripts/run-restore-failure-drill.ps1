@@ -276,10 +276,11 @@ if (Test-Path -Path $FixtureManifest) {
 }
 
 $DrillEvidenceObj = @{
-    reportTitle = "GMS Production DR Failure-Injection & Restore Drill Evidence (P0-02)"
+    reportTitle = "Component Restore Rehearsal Evidence (P0-02)"
     timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
     status = if ($AllDrillsPassed) { "PASSED" } else { "FAILED" }
     rpoMinutes = $CalculatedRpoMinutes
+    rpoDefinition = "Elapsed duration since fixture manifest creation to drill completion (rehearsal delta)"
     rtoSeconds = [math]::Round($TotalDuration, 2)
     drillsSummary = @{
         totalPhases = $script:TestResults.Count
