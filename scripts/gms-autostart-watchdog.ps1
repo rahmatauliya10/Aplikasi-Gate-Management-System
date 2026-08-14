@@ -227,7 +227,10 @@ try {
         throw "GMS Frontend service container was not found in compose stack."
     }
 
-    [string]$NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
+    [string]$NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx-proxy 2>&1).ToString().Trim()
+    if (-not $NginxContainerId) {
+        $NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
+    }
     if ($NginxContainerId) {
         [string]$ngStatus = (& docker inspect --format="{{.State.Status}}" $NginxContainerId 2>&1).ToString().Trim()
         if ($ngStatus -eq "running") {

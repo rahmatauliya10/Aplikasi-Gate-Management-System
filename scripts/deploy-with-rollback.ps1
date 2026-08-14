@@ -258,16 +258,20 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Docker compose build failed with exit code $LASTEXITCODE." }
     }
 
-    # Step 1.5: Database preflight audit and migration using newly built backend image
-    Write-Host "[GMS Preflight & Migration] Running database preflight audit and Prisma migration..." -ForegroundColor Cyan
-    $MigrationStarted = $true
+    # Step 1.4: Verify migration checksums
+    Write-Host "[GMS Preflight] Verifying database migration checksums..." -ForegroundColor Cyan
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:verify:checksums
+    if ($LASTEXITCODE -ne 0) { throw "Migration checksums verification failed with exit code $LASTEXITCODE." }
 
-    [string]$PreflightLog = (& docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:prepare:prod 2>&1).ToString()
-    [int]$PreflightExitCode = $LASTEXITCODE
-    Write-Host $PreflightLog
+    # Step 1.5: Create mandatory pre-deployment backup
+    Write-Host "[GMS Preflight] Creating mandatory pre-deployment database & attachment backup..." -ForegroundColor Cyan
+    [string]$PredeployBackupLog = (& docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:backup:pre-deploy 2>&1).ToString()
+    [int]$BackupExitCode = $LASTEXITCODE
+    Write-Host $PredeployBackupLog
+    if ($BackupExitCode -ne 0) { throw "Pre-deployment backup creation failed with exit code $BackupExitCode." }
 
     # Capture manifest from PREDEPLOY_BACKUP_METADATA_JSON or latest-predeploy.json
-    if ($PreflightLog -match "PREDEPLOY_BACKUP_METADATA_JSON:(.+)") {
+    if ($PredeployBackupLog -match "PREDEPLOY_BACKUP_METADATA_JSON:(.+)") {
         try {
             $metaObj = $Matches[1].Trim() | ConvertFrom-Json
             if ($metaObj.manifestFile) {
@@ -296,7 +300,7 @@ try {
         }
     }
 
-    if (-not $CapturedManifestPath -and ($PreflightLog -match "Backup Created:\s*(BKP-[^\s\r\n]+)")) {
+    if (-not $CapturedManifestPath -and ($PredeployBackupLog -match "Backup Created:\s*(BKP-[^\s\r\n]+)")) {
         $CapturedPreDeployBackupId = $Matches[1].Trim()
         [string]$candManifest = Join-Path $HostLocalBackupDir "gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
         if (Test-Path -Path $candManifest -PathType Leaf) {
@@ -304,20 +308,35 @@ try {
         }
     }
 
-    if ($CapturedManifestPath) {
-        Write-Host "[GMS Deploy] Pre-deployment backup manifest confirmed on host: $CapturedManifestPath ($CapturedPreDeployBackupId)" -ForegroundColor Green
-    } else {
-        Write-Host "[GMS Deploy] WARNING: Could not resolve exact host manifest path for pre-deploy backup. Searching latest manifest..." -ForegroundColor Yellow
-        $latestManifest = Get-ChildItem -Path $HostLocalBackupDir -Filter "*_manifest.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($latestManifest) {
-            $CapturedManifestPath = $latestManifest.FullName
-            Write-Host "[GMS Deploy] Resolved latest host backup manifest: $CapturedManifestPath" -ForegroundColor Cyan
+    if ($CapturedManifestPath -and (Test-Path -Path $CapturedManifestPath -PathType Leaf)) {
+        # Strict validation: verify manifest backupId matches captured ID
+        try {
+            $parsedMan = Get-Content -Path $CapturedManifestPath -Raw | ConvertFrom-Json
+            if ($parsedMan.backupId -ne $CapturedPreDeployBackupId) {
+                throw "Pre-deployment manifest backupId mismatch! Expected: $CapturedPreDeployBackupId, Found: $($parsedMan.backupId)"
+            }
+        } catch {
+            throw "Failed parsing pre-deployment backup manifest: $_"
         }
+        Write-Host "[GMS Deploy] Pre-deployment backup manifest bound and confirmed on host: $CapturedManifestPath ($CapturedPreDeployBackupId)" -ForegroundColor Green
+    } else {
+        throw "CRITICAL PREFLIGHT FAILURE: Pre-deployment backup was created, but manifest file ($CapturedManifestPath) could not be bound/located on host storage ($HostLocalBackupDir). Aborting deployment before migration."
     }
 
-    if ($PreflightExitCode -ne 0) {
-        throw "Database preflight duplicate audit or Prisma migration failed with exit code $PreflightExitCode."
+    # Step 1.6: Run database preflight duplicate audit
+    Write-Host "[GMS Preflight] Running database preflight duplicate audit..." -ForegroundColor Cyan
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run prisma:preflight -- --report-only --fail-on-duplicates
+    if ($LASTEXITCODE -ne 0) { throw "Database preflight duplicate audit failed with exit code $LASTEXITCODE." }
+
+    # Step 1.7: Execute forward database migration (Setting MigrationStarted = true right here)
+    Write-Host "[GMS Migration] Applying Prisma database migrations forward (Target Release: $TargetReleaseTag)..." -ForegroundColor Cyan
+    $MigrationStarted = $true
+
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npx prisma migrate deploy
+    if ($LASTEXITCODE -ne 0) {
+        throw "Prisma database migration deployment failed with exit code $LASTEXITCODE."
     }
+    Write-Host "[GMS Migration] Database migrations deployed successfully." -ForegroundColor Green
 
     Write-Host "[GMS Deploy] Booting containers for release [$TargetReleaseTag] (--no-build)..." -ForegroundColor Cyan
     & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans

@@ -339,10 +339,156 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  restore-failure-drill-gate:
+    name: Production Restore DR Failure-Injection Gate (P0-02)
+    runs-on: ubuntu-latest
+    needs: [historical-migration-rehearsal-gate]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: gms_rehearsal_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d gms_rehearsal_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install PostgreSQL Client Tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+
+      - name: Seed Baseline Historical Database
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
+          DEFAULT_QC_PASSWORD: test-qc-password-12345
+          DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
+          DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof
+          node tests/fixtures/historical/generate-test-fixtures.js
+
+      - name: Execute 4-Phase DR Failure-Injection & Operator Restore Drill
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          PGPASSWORD: testpassword
+        run: |
+          set -Eeuo pipefail
+          node scripts/ci-restore-failure-drill.js
+
+      - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-failure-drill-evidence
+          path: artifacts/release-proof/restore-failure-drill-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+  post-migration-rollback-drill-gate:
+    name: Post-Migration Coordinated Rollback Drill Gate (P0-03)
+    runs-on: ubuntu-latest
+    needs: [historical-migration-rehearsal-gate]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: gms_rehearsal_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d gms_rehearsal_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install PostgreSQL Client Tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+
+      - name: Seed Baseline Historical Database
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
+          DEFAULT_QC_PASSWORD: test-qc-password-12345
+          DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
+          DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof backups/local
+          node tests/fixtures/historical/generate-test-fixtures.js
+
+      - name: Execute Post-Migration Coordinated Rollback Drill
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          PGPASSWORD: testpassword
+        run: |
+          set -Eeuo pipefail
+          node scripts/ci-rollback-drill.js
+
+      - name: Upload Post-Migration Rollback Proof Artifacts (P0-03 Evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-migration-rollback-evidence
+          path: artifacts/release-proof/post-migration-rollback-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
   fullstack-staging-gate:
     name: Full-Stack Staging Stack & Cross-Stack E2E Gate (GBB / GSP / GBJ)
     runs-on: ubuntu-latest
-    needs: [backend-verification, frontend-verification, historical-migration-rehearsal-gate]
+    needs: [backend-verification, frontend-verification, historical-migration-rehearsal-gate, restore-failure-drill-gate, post-migration-rollback-drill-gate]
     steps:
       - name: Checkout Code Repository
         uses: actions/checkout@v4.2.2

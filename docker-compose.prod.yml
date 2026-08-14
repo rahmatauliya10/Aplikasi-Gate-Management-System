@@ -136,6 +136,4 @@ services:
 
 volumes:
   pgdata:
-  uploads:
-  backups_local:
   audit_logs:

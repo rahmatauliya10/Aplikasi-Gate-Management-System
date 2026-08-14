@@ -33,6 +33,9 @@ param(
     [string]$LiveContainer = "gate-system-postgres",
 
     [Parameter(Mandatory=$false)]
+    [string]$FaultInjectionPhase = "",
+
+    [Parameter(Mandatory=$false)]
     [switch]$Force
 )
 
@@ -353,6 +356,10 @@ try {
     $PromotionPhase = "DB_COMMITTED_PENDING_ATTACHMENT"
     Write-Log "  Live Database pg_restore committed into [$LiveDbName] [PASS]" -Level "SUCCESS"
 
+    if ($FaultInjectionPhase -eq "POST_DB_COMMIT" -or $env:GMS_FAULT_INJECTION_PHASE -eq "POST_DB_COMMIT") {
+        throw "INJECTED_FAULT: Simulated post-DB-commit promotion failure for DR drill validation."
+    }
+
     # Helper for live database verification query
     function Exec-LiveDbQuery([string]$sql) {
         return (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1).ToString().Trim()
@@ -375,9 +382,17 @@ try {
     Rename-Item -Path $StagingUploadDir -NewName (Split-Path $UploadDir -Leaf)
     Write-Log "  Physical attachments directory atomically swapped [PASS]" -Level "SUCCESS"
 
+    if ($FaultInjectionPhase -eq "ATTACHMENT_SWAP" -or $env:GMS_FAULT_INJECTION_PHASE -eq "ATTACHMENT_SWAP") {
+        throw "INJECTED_FAULT: Simulated attachment promotion failure for DR drill validation."
+    }
+
     # Step 7: Comprehensive 16-Entity, Invariant, and Attachment Integrity Verification against LIVE target
     $PromotionPhase = "DURING_LIVE_VERIFICATION"
     Write-Log "  Executing full 16-entity manifest and invariant verification against live target..."
+
+    if ($FaultInjectionPhase -eq "LIVE_VERIFICATION" -or $env:GMS_FAULT_INJECTION_PHASE -eq "LIVE_VERIFICATION") {
+        throw "INJECTED_FAULT: Simulated live verification discrepancy for DR drill validation."
+    }
 
     [int]$LiveUserCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"User\";")
     [int]$LiveTxCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Transaction\";")
