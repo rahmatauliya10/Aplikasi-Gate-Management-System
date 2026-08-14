@@ -92,6 +92,9 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
   });
 
   it('should verify physical PostgreSQL rollback on audit failure', async () => {
+    let testTxId: string | undefined;
+    let adminUserId: string | undefined;
+
     try {
       await prisma.$connect();
     } catch (e: any) {
