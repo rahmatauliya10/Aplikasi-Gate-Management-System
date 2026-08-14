@@ -120,9 +120,10 @@ function Execute-Rollback {
         [string]$PrevBackendDig,
         [string]$PrevFrontendDig,
         [string]$CompFile,
-        [bool]$IsStrictProd
+        [bool]$IsStrictProd,
+        [string]$RollbackManifestPath = ""
     )
-    Write-Host "[GMS AUTOMATED ROLLBACK] Initiating rollback sequence to previous stable release tag: [$PrevTag]..." -ForegroundColor Magenta
+    Write-Host "[GMS AUTOMATED ROLLBACK] Initiating schema-aware coordinated rollback sequence to previous stable release tag: [$PrevTag]..." -ForegroundColor Magenta
 
     if ($IsStrictProd -or $RequireDigest) {
         if (-not $PrevBackendDig -or -not $PrevFrontendDig) {
@@ -130,23 +131,45 @@ function Execute-Rollback {
         }
     }
 
-    $env:RELEASE_TAG = $PrevTag
-    $env:BACKEND_IMAGE = if ($PrevBackendDig) { "gms-backend@$PrevBackendDig" } else { "gms-backend:$PrevTag" }
-    $env:FRONTEND_IMAGE = if ($PrevFrontendDig) { "gms-frontend@$PrevFrontendDig" } else { "gms-frontend:$PrevTag" }
+    # Freeze traffic / Maintenance Mode during rollback
+    Write-Host "[GMS AUTOMATED ROLLBACK] Freezing traffic and entering maintenance mode..." -ForegroundColor Cyan
+    [string]$MaintFlag = Join-Path $WorkspaceRoot "maintenance.flag"
+    Set-Content -Path $MaintFlag -Value "MAINTENANCE_ACTIVE_ROLLBACK" -Encoding utf8
 
-    if (-not (Verify-Image-Exists -Tag $PrevTag -BackendDig $PrevBackendDig -FrontendDig $PrevFrontendDig)) {
-        throw "Previous release image pair [gms-backend:$PrevTag, gms-frontend:$PrevTag] does not exist locally. Cannot perform safe rollback."
+    try {
+        # If database was migrated and pre-deploy backup exists, execute coordinated DB rollback
+        if ($RollbackManifestPath -and (Test-Path -Path $RollbackManifestPath -PathType Leaf)) {
+            Write-Host "[GMS AUTOMATED ROLLBACK] Restoring database to pre-deployment state via operator restore plane ($RollbackManifestPath)..." -ForegroundColor Yellow
+            $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
+            & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $RollbackManifestPath -Force
+            if ($LASTEXITCODE -ne 0) {
+                throw "Coordinated database rollback failed with exit code $LASTEXITCODE."
+            }
+            Write-Host "[GMS AUTOMATED ROLLBACK] Database successfully reverted to pre-migration state." -ForegroundColor Green
+        }
+
+        $env:RELEASE_TAG = $PrevTag
+        $env:BACKEND_IMAGE = if ($PrevBackendDig) { "gms-backend@$PrevBackendDig" } else { "gms-backend:$PrevTag" }
+        $env:FRONTEND_IMAGE = if ($PrevFrontendDig) { "gms-frontend@$PrevFrontendDig" } else { "gms-frontend:$PrevTag" }
+
+        if (-not (Verify-Image-Exists -Tag $PrevTag -BackendDig $PrevBackendDig -FrontendDig $PrevFrontendDig)) {
+            throw "Previous release image pair [gms-backend:$PrevTag, gms-frontend:$PrevTag] does not exist locally. Cannot perform safe rollback."
+        }
+
+        Write-Host "[GMS AUTOMATED ROLLBACK] Booting previous stable release containers ($env:BACKEND_IMAGE, $env:FRONTEND_IMAGE)..." -ForegroundColor Cyan
+        & docker compose -f $CompFile --env-file backend\.env up -d --no-build --remove-orphans
+        if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
+
+        Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
+        $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
+        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile
+        if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
+        Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PrevTag]." -ForegroundColor Green
+    } finally {
+        if (Test-Path -Path $MaintFlag) {
+            Remove-Item -Path $MaintFlag -Force -ErrorAction SilentlyContinue
+        }
     }
-
-    Write-Host "[GMS AUTOMATED ROLLBACK] Booting previous stable release containers ($env:BACKEND_IMAGE, $env:FRONTEND_IMAGE)..." -ForegroundColor Cyan
-    & docker compose -f $CompFile --env-file backend\.env up -d --no-build --remove-orphans
-    if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
-
-    Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
-    $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-    & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile
-    if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
-    Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PrevTag]." -ForegroundColor Green
 }
 
 [bool]$IsProductionMode = [bool]($RequireDigest -or ($ComposeFile -like "*prod*"))
@@ -193,6 +216,9 @@ if ($BackendDigest) { Write-Host "[GMS Deploy] Enforcing Backend Image Digest: [
 if ($FrontendDigest) { Write-Host "[GMS Deploy] Enforcing Frontend Image Digest: [$FrontendDigest]" -ForegroundColor Cyan }
 Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
 
+[string]$CapturedPreDeployBackupId = "NONE"
+[string]$CapturedManifestPath = ""
+
 try {
     # Step 1.2: Verify or build image pair for target release
     if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest)) {
@@ -208,8 +234,21 @@ try {
 
     # Step 1.5: Database preflight audit and migration using newly built backend image
     Write-Host "[GMS Preflight & Migration] Running database preflight audit and Prisma migration..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:prepare:prod
-    if ($LASTEXITCODE -ne 0) { throw "Database preflight duplicate audit or Prisma migration failed with exit code $LASTEXITCODE." }
+    [string]$PreflightLog = (& docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:prepare:prod 2>&1).ToString()
+    [int]$PreflightExitCode = $LASTEXITCODE
+    Write-Host $PreflightLog
+
+    if ($PreflightLog -match "Backup Created:\s*(BKP-[^\s\r\n]+)") {
+        $CapturedPreDeployBackupId = $Matches[1].Trim()
+        [string]$candManifest = Join-Path $WorkspaceRoot "backups\local\gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
+        if (Test-Path -Path $candManifest -PathType Leaf) {
+            $CapturedManifestPath = $candManifest
+        }
+    }
+
+    if ($PreflightExitCode -ne 0) {
+        throw "Database preflight duplicate audit or Prisma migration failed with exit code $PreflightExitCode."
+    }
 
     Write-Host "[GMS Deploy] Booting containers for release [$TargetReleaseTag] (--no-build)..." -ForegroundColor Cyan
     & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
@@ -231,24 +270,28 @@ try {
         New-Item -Path $ReleasesDir -ItemType Directory -Force | Out-Null
     }
 
-    [string[]]$BackupSearchDirs = @(
-        (Join-Path $WorkspaceRoot "backups\local"),
-        (Join-Path $WorkspaceRoot "deploy\backups"),
-        (Join-Path $WorkspaceRoot "backups")
-    )
-    [string]$LatestBackupManifest = $null
-    foreach ($bDir in $BackupSearchDirs) {
-        if (Test-Path -Path $bDir -PathType Container) {
-            $manifestCandidate = Get-ChildItem -Path $bDir -Filter "*_manifest.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
-            if ($manifestCandidate) {
-                $LatestBackupManifest = $manifestCandidate
-                break
+    [string]$PreDeployBackupId = if ($CapturedPreDeployBackupId -ne "NONE") {
+        $CapturedPreDeployBackupId
+    } else {
+        [string[]]$BackupSearchDirs = @(
+            (Join-Path $WorkspaceRoot "backups\local"),
+            (Join-Path $WorkspaceRoot "deploy\backups"),
+            (Join-Path $WorkspaceRoot "backups")
+        )
+        [string]$LatestBackupManifest = $null
+        foreach ($bDir in $BackupSearchDirs) {
+            if (Test-Path -Path $bDir -PathType Container) {
+                $manifestCandidate = Get-ChildItem -Path $bDir -Filter "*_manifest.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+                if ($manifestCandidate) {
+                    $LatestBackupManifest = $manifestCandidate
+                    break
+                }
             }
         }
+        if ($LatestBackupManifest) {
+            try { (Get-Content -Path $LatestBackupManifest -Raw | ConvertFrom-Json).backupId } catch { "UNKNOWN" }
+        } else { "NONE" }
     }
-    [string]$PreDeployBackupId = if ($LatestBackupManifest) {
-        try { (Get-Content -Path $LatestBackupManifest -Raw | ConvertFrom-Json).backupId } catch { "UNKNOWN" }
-    } else { "NONE" }
 
     $ReleaseManifest = @{
         release = $TargetReleaseTag
@@ -280,7 +323,7 @@ try {
 catch {
     Write-Host "[GMS DEPLOYMENT FAILED] Error detected: $_" -ForegroundColor Red
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath
     }
     catch {
         Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover even after rolling back to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red

@@ -416,12 +416,50 @@ try {
         throw "Post-Promotion Live DB Verification Error: Foreign key orphan violations detected on live target ($LiveTotalOrphans)."
     }
 
-    # Physical attachment reconciliation on live uploads
+    # Physical attachment reconciliation on live uploads (Hard-Fail Enforced)
     if ($LiveAttCount -gt 0 -and $AttArchivePath) {
         if ($RestoredPhysicalCount -lt $LiveAttCount) {
-            Write-Log "  Warning: Physical attachments ($RestoredPhysicalCount) is less than DB attachment records ($LiveAttCount)." -Level "WARN"
+            throw "Post-Promotion Live Verification Error: Restored physical attachments count ($RestoredPhysicalCount) is less than database attachment records ($LiveAttCount). Hard failure enforced."
         }
     }
+
+    # Assert all 16 live entity counts against manifest
+    if ($ManifestData.recordCounts) {
+        Write-Log "  Asserting 16-entity manifest counts directly against live target..."
+        $CountsObj = $ManifestData.recordCounts
+        $LiveEntityMap = @{
+            "users" = $LiveUserCount
+            "userWarehouseAccess" = $LiveWhAccessCount
+            "transactions" = $LiveTxCount
+            "transactionStatusHistory" = $LiveStatusHistCount
+            "weighbridgeRecords" = $LiveWbCount
+            "warehouseProcesses" = $LiveWhCount
+            "qcVehicleChecks" = $LiveQcvCount
+            "incomingMaterialChecks" = $LiveImCount
+            "attachments" = $LiveAttCount
+            "fraudChecks" = $LiveFraudCount
+            "activityLogs" = $LiveActCount
+            "appSettings" = $LiveSettingCount
+            "announcements" = $LiveAnnounceCount
+            "systemIssues" = $LiveIssueCount
+            "transactionCorrections" = $LiveCorrectionCount
+            "transactionCorrectionItems" = $LiveCorrectionItemCount
+        }
+        foreach ($prop in $CountsObj.psobject.Properties) {
+            [string]$entityKey = $prop.Name
+            [int]$expectedCount = [int]$prop.Value
+            if ($LiveEntityMap.ContainsKey($entityKey)) {
+                [int]$actualLiveCount = [int]$LiveEntityMap[$entityKey]
+                if ($expectedCount -ne $actualLiveCount) {
+                    throw "Post-Promotion Live DB Verification Error: Record count mismatch for '$entityKey'. Expected: $expectedCount, Live: $actualLiveCount."
+                }
+            }
+        }
+        Write-Log "  Live 16-entity manifest assertions PASSED [PASS]" -Level "SUCCESS"
+    }
+
+    [bool]$PassedLiveAssertions = ($LiveTotalDupes -eq 0) -and ($LiveTotalOrphans -eq 0) -and (-not ($LiveAttCount -gt 0 -and $AttArchivePath -and ($RestoredPhysicalCount -lt $LiveAttCount)))
+    [string]$VerdictStatus = if ($PassedLiveAssertions) { "PASSED" } else { "FAILED" }
 
     [datetime]$RestoreEndTime = Get-Date
     [double]$RtoSeconds = [math]::Round(($RestoreEndTime - $RestoreStartTime).TotalSeconds, 2)
@@ -430,7 +468,7 @@ try {
         restoreId = "RESTORE-" + $TimestampSuffix
         backupId = $BackupId
         restoreTimestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        status = "PASSED"
+        status = $VerdictStatus
         verifiedDumpHash = $ActualDumpHash
         verifiedAttachmentArchiveHash = if ($AttArchivePath) { (Get-FileHash -Path $AttArchivePath -Algorithm SHA256).Hash.ToLower() } else { null }
         recordCountsVerified = @{

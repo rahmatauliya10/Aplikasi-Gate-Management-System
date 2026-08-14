@@ -9,6 +9,7 @@ import {
   Res,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -112,6 +113,14 @@ export class DatabaseBackupController {
     @Body('adminPassword') adminPasswordConfirm: string,
     @Req() req: Request,
   ) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Akses pemulihan langsung melalui HTTP API dinonaktifkan di lingkungan produksi untuk menjamin atomisitas dan konsistensi data. Silakan gunakan operator control plane resmi: scripts/gms-production-restore.ps1.',
+      });
+    }
+
     const ipAddress =
       (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
 
@@ -178,6 +187,14 @@ export class DatabaseBackupController {
     @Body('adminPassword') adminPasswordConfirm: string,
     @Req() req: Request,
   ) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Akses pemulihan langsung melalui HTTP API dinonaktifkan di lingkungan produksi untuk menjamin atomisitas dan konsistensi data. Silakan gunakan operator control plane resmi: scripts/gms-production-restore.ps1.',
+      });
+    }
+
     const ipAddress =
       (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
 

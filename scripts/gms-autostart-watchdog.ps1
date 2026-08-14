@@ -10,13 +10,31 @@
 # - Strictly Non-Destructive Recovery
 # ==============================================================================
 
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$ComposeFilePath = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$EnvFilePath = "",
+
+    [Parameter(Mandatory=$false)]
+    [bool]$RequireFrontend = $true,
+
+    [Parameter(Mandatory=$false)]
+    [bool]$RequireNginx = $false
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # --- Parameters & Canonical Absolute Paths ---
 [string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
-[string]$ComposeFilePath = Join-Path -Path $ProjectRootDir -ChildPath "docker-compose.prod.yml"
-[string]$EnvFilePath     = Join-Path -Path $ProjectRootDir -ChildPath "backend\.env"
+if (-not $ComposeFilePath) {
+    $ComposeFilePath = Join-Path -Path $ProjectRootDir -ChildPath "docker-compose.prod.yml"
+}
+if (-not $EnvFilePath) {
+    $EnvFilePath = Join-Path -Path $ProjectRootDir -ChildPath "backend\.env"
+}
 [string]$LogDir           = "C:\GMS_Logs"
 [string]$LogFilePath      = Join-Path -Path $LogDir -ChildPath "autostart.log"
 [string]$EventLogSource   = "GMS_Watchdog"
@@ -205,7 +223,10 @@ try {
         } else {
             throw "GMS Frontend service container is not running (State: $feStatus)."
         }
+    } elseif ($RequireFrontend) {
+        throw "GMS Frontend service container was not found in compose stack."
     }
+
     [string]$NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
     if ($NginxContainerId) {
         [string]$ngStatus = (& docker inspect --format="{{.State.Status}}" $NginxContainerId 2>&1).ToString().Trim()
@@ -214,6 +235,8 @@ try {
         } else {
             throw "GMS Nginx reverse proxy container is not running (State: $ngStatus)."
         }
+    } elseif ($RequireNginx) {
+        throw "GMS Nginx reverse proxy container was not found in compose stack."
     }
 
     # --- Step 7c: Backend /api/health HTTP Smoke Check ---
@@ -223,9 +246,9 @@ try {
         const port = process.env.PORT || 3001;
         const req = http.get('http://127.0.0.1:' + port + '/api/health', (res) => {
             if (res.statusCode === 200) { process.exit(0); }
-            else { 
+            else {
                 console.error('HTTP Health Check returned status: ' + res.statusCode);
-                process.exit(1); 
+                process.exit(1);
             }
         });
         req.on('error', (err) => {

@@ -138,23 +138,34 @@ Write-Log "Historical dump SHA-256 checksum verified against companion manifest 
 
 # Validate companion manifest overall attachment archive checksum (P0-01 Hardening)
 if ($AttachmentArchivePath -and (Test-Path -Path $AttachmentArchivePath -PathType Leaf)) {
-    if ($ManifestData.checksums -and $ManifestData.checksums.attachmentsArchive) {
-        [string]$calcAttHash = (Get-FileHash -Path $AttachmentArchivePath -Algorithm SHA256).Hash.ToLower()
-        [string]$expAttHash = $ManifestData.checksums.attachmentsArchive.ToLower()
-        if ($calcAttHash -ne $expAttHash) {
-            Write-Log "HARD FAIL: Attachment Archive Checksum Mismatch! Expected: $expAttHash, Calculated: $calcAttHash" -Level "ERROR"
-            $FailObj = @{
-                timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-                status = "FAILED"
-                error = "Attachment archive SHA-256 checksum mismatch (Calculated=$calcAttHash, Expected=$expAttHash)."
-            }
-            Set-Content -Path (Join-Path $ArtifactsDir "historical-db-rehearsal.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
-            Set-Content -Path (Join-Path $ArtifactsDir "preflight-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
-            Set-Content -Path (Join-Path $ArtifactsDir "smoke-test-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
-            exit 1
+    if (-not $ManifestData.checksums -or -not $ManifestData.checksums.attachmentsArchive) {
+        Write-Log "HARD FAIL: Attachment archive was provided ($AttachmentArchivePath), but companion manifest is missing required checksums.attachmentsArchive field." -Level "ERROR"
+        $FailObj = @{
+            timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+            status = "FAILED"
+            error = "Manifest missing checksums.attachmentsArchive for supplied attachment archive."
         }
-        Write-Log "Attachment archive SHA-256 checksum verified against companion manifest [PASS] ($calcAttHash)" -Level "SUCCESS"
+        Set-Content -Path (Join-Path $ArtifactsDir "historical-db-rehearsal.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+        Set-Content -Path (Join-Path $ArtifactsDir "preflight-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+        Set-Content -Path (Join-Path $ArtifactsDir "smoke-test-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+        exit 1
     }
+
+    [string]$calcAttHash = (Get-FileHash -Path $AttachmentArchivePath -Algorithm SHA256).Hash.ToLower()
+    [string]$expAttHash = $ManifestData.checksums.attachmentsArchive.ToLower()
+    if ($calcAttHash -ne $expAttHash) {
+        Write-Log "HARD FAIL: Attachment Archive Checksum Mismatch! Expected: $expAttHash, Calculated: $calcAttHash" -Level "ERROR"
+        $FailObj = @{
+            timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+            status = "FAILED"
+            error = "Attachment archive SHA-256 checksum mismatch (Calculated=$calcAttHash, Expected=$expAttHash)."
+        }
+        Set-Content -Path (Join-Path $ArtifactsDir "historical-db-rehearsal.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+        Set-Content -Path (Join-Path $ArtifactsDir "preflight-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+        Set-Content -Path (Join-Path $ArtifactsDir "smoke-test-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+        exit 1
+    }
+    Write-Log "Attachment archive SHA-256 checksum verified against companion manifest [PASS] ($calcAttHash)" -Level "SUCCESS"
 }
 
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")

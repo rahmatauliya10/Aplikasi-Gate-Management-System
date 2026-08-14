@@ -430,10 +430,15 @@ export class DatabaseBackupService
 
     const isMissingTableError = (err: any): boolean => {
       if (!err) return false;
+      // Exact error codes: PostgreSQL 42P01 (undefined_table) or Prisma P2021 (table does not exist in current DB)
       if (err.code === 'P2021' || err.code === '42P01') return true;
+      // Strict rule: missing column (P2022 / 42703) is a schema bug and must NEVER be treated as missing table
+      if (err.code === 'P2022' || err.code === '42703') return false;
       const msg = (err.message || '').toLowerCase();
+      if (msg.includes('column') || msg.includes('undefined_column')) {
+        return false;
+      }
       if (
-        msg.includes('does not exist') ||
         msg.includes('undefined_table') ||
         (msg.includes('relation') && msg.includes('does not exist')) ||
         (msg.includes('table') && msg.includes('does not exist'))
@@ -1216,72 +1221,109 @@ export class DatabaseBackupService
     let stagingDir = '';
     const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
 
-    if (matchedManifest.artifacts.attachmentsArchive) {
-      const archivePath = path.join(
+    if (matchedManifest.artifacts?.attachmentsArchive) {
+      let archivePath = path.join(
         this.localBackupDir,
         matchedManifest.artifacts.attachmentsArchive,
       );
-      if (fs.existsSync(archivePath)) {
-        try {
-          archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
-        } catch (e: any) {
-          throw new BadRequestException({
-            success: false,
-            message: `Berkas arsip lampiran tidak dapat dibaca (${e.message}). Pemulihan dibatalkan (Fail-Closed).`,
-          });
-        }
+      if (!fs.existsSync(archivePath)) {
+        archivePath = path.join(
+          this.offsiteBackupDir,
+          matchedManifest.artifacts.attachmentsArchive,
+        );
+      }
+      if (!fs.existsSync(archivePath)) {
+        archivePath = path.join(
+          this.uploadBackupDir,
+          matchedManifest.artifacts.attachmentsArchive,
+        );
+      }
 
-        if (archiveContent.files && Array.isArray(archiveContent.files)) {
-          stagingDir = path.join(uploadDir, `_staging_restore_${Date.now()}`);
+      if (!fs.existsSync(archivePath)) {
+        throw new BadRequestException({
+          success: false,
+          message: `Berkas arsip lampiran (${matchedManifest.artifacts.attachmentsArchive}) terdaftar pada manifest tetapi tidak ditemukan di penyimpanan server. Pemulihan dibatalkan (Fail-Closed).`,
+        });
+      }
+
+      try {
+        archiveContent = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+      } catch (e: any) {
+        throw new BadRequestException({
+          success: false,
+          message: `Berkas arsip lampiran tidak dapat dibaca (${e.message}). Pemulihan dibatalkan (Fail-Closed).`,
+        });
+      }
+
+      if (archiveContent.files && Array.isArray(archiveContent.files)) {
+        stagingDir = path.join(uploadDir, `_staging_restore_${Date.now()}`);
+        if (fs.existsSync(stagingDir)) {
+          fs.rmSync(stagingDir, { recursive: true, force: true });
+        }
+        fs.mkdirSync(stagingDir, { recursive: true });
+
+        try {
+          for (const file of archiveContent.files) {
+            const relPath = file.relativePath || file.fileName;
+            if (relPath && file.base64Content) {
+              const root = path.resolve(stagingDir);
+              const targetPath = path.resolve(root, relPath);
+              const relative = path.relative(root, targetPath);
+              if (relative.startsWith('..') || path.isAbsolute(relative)) {
+                throw new BadRequestException({
+                  success: false,
+                  message: `Deteksi jalur berkas tidak valid (${relPath}). Pemulihan dibatalkan.`,
+                });
+              }
+              const targetDir = path.dirname(targetPath);
+              if (!fs.existsSync(targetDir)) {
+                fs.mkdirSync(targetDir, { recursive: true });
+              }
+              const buffer = Buffer.from(file.base64Content, 'base64');
+              fs.writeFileSync(targetPath, buffer);
+              const restoredChecksum =
+                this.calculateChecksumForBuffer(buffer);
+              if (
+                file.checksum &&
+                restoredChecksum.toLowerCase() !== file.checksum.toLowerCase()
+              ) {
+                throw new BadRequestException({
+                  success: false,
+                  message: `Integritas berkas lampiran gagal! Checksum mismatch pada berkas ${relPath}. Pemulihan dibatalkan (Fail-Closed).`,
+                });
+              }
+              restoredAttachmentsCount++;
+            }
+          }
+        } catch (err: any) {
           if (fs.existsSync(stagingDir)) {
             fs.rmSync(stagingDir, { recursive: true, force: true });
           }
-          fs.mkdirSync(stagingDir, { recursive: true });
-
-          try {
-            for (const file of archiveContent.files) {
-              const relPath = file.relativePath || file.fileName;
-              if (relPath && file.base64Content) {
-                const root = path.resolve(stagingDir);
-                const targetPath = path.resolve(root, relPath);
-                const relative = path.relative(root, targetPath);
-                if (relative.startsWith('..') || path.isAbsolute(relative)) {
-                  throw new BadRequestException({
-                    success: false,
-                    message: `Deteksi jalur berkas tidak valid (${relPath}). Pemulihan dibatalkan.`,
-                  });
-                }
-                const targetDir = path.dirname(targetPath);
-                if (!fs.existsSync(targetDir)) {
-                  fs.mkdirSync(targetDir, { recursive: true });
-                }
-                const buffer = Buffer.from(file.base64Content, 'base64');
-                fs.writeFileSync(targetPath, buffer);
-                const restoredChecksum =
-                  this.calculateChecksumForBuffer(buffer);
-                if (
-                  file.checksum &&
-                  restoredChecksum.toLowerCase() !== file.checksum.toLowerCase()
-                ) {
-                  throw new BadRequestException({
-                    success: false,
-                    message: `Integritas berkas lampiran gagal! Checksum mismatch pada berkas ${relPath}. Pemulihan dibatalkan (Fail-Closed).`,
-                  });
-                }
-                restoredAttachmentsCount++;
-              }
-            }
-          } catch (err: any) {
-            if (fs.existsSync(stagingDir)) {
-              fs.rmSync(stagingDir, { recursive: true, force: true });
-            }
-            throw err;
-          }
+          throw err;
         }
       }
     }
 
+    // 5.5 Create Mandatory Pre-Restore Safety Snapshot before modifying database
+    const preRestoreManifest = await this.runAutomatedScheduledBackup(
+      'AUTO_PRE_RESTORE',
+      user,
+    );
+    if (preRestoreManifest.localStatus !== 'VERIFIED') {
+      if (stagingDir && fs.existsSync(stagingDir)) {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      }
+      throw new InternalServerErrorException(
+        'Snapshot pra-pemulihan otomatis gagal diverifikasi. Pemulihan dibatalkan.',
+      );
+    }
+
+    const preRestoreDumpPath = preRestoreManifest.artifacts?.dump
+      ? path.join(this.localBackupDir, preRestoreManifest.artifacts.dump)
+      : '';
+
     // 6. Perform pg_restore execution with --single-transaction and --exit-on-error
+    let dbCommitted = false;
     try {
       this.logger.log(`Starting pg_restore for ${dumpFilePath}...`);
       const dbUrl = process.env.DATABASE_URL;
@@ -1331,6 +1373,7 @@ export class DatabaseBackupService
           timeout: 10 * 60 * 1000,
         },
       );
+      dbCommitted = true;
       this.logger.log(`pg_restore completed successfully.`);
 
       // Re-establish Prisma connection pool after database drop/restore
@@ -1388,14 +1431,52 @@ export class DatabaseBackupService
       };
     } catch (error: any) {
       this.logger.error(
-        `Database restore failed during transaction: ${error.message}`,
+        `Database restore failed: ${error.message}`,
         error.stack,
       );
+
+      // Clean staging dir if exists
+      if (stagingDir && fs.existsSync(stagingDir)) {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      }
+
+      // Compensating DB rollback if DB was modified/committed and error happened during promotion
+      if (dbCommitted && preRestoreDumpPath && fs.existsSync(preRestoreDumpPath)) {
+        try {
+          this.logger.warn('Triggering compensating database rollback to pre-restore snapshot...');
+          const parsedUrl = new URL(process.env.DATABASE_URL!);
+          await execFileAsync(
+            'pg_restore',
+            [
+              '--clean',
+              '--if-exists',
+              '--single-transaction',
+              '--exit-on-error',
+              '--no-owner',
+              '--no-acl',
+              '--host=' + (parsedUrl.hostname || 'postgres'),
+              '--port=' + (parsedUrl.port || '5432'),
+              '--username=' + (parsedUrl.username || 'postgres'),
+              '--dbname=' + (parsedUrl.pathname.replace(/^\//, '') || 'gms'),
+              preRestoreDumpPath,
+            ],
+            {
+              shell: false,
+              env: { ...process.env, PGPASSWORD: parsedUrl.password || 'postgres' },
+              timeout: 10 * 60 * 1000,
+            },
+          );
+          this.logger.log('Compensating database rollback succeeded.');
+        } catch (rollbackErr: any) {
+          this.logger.error(`CRITICAL: Compensating DB rollback failed: ${rollbackErr.message}`);
+        }
+      }
+
       await this.activityLogsService.logAction({
         userId: user.id,
         action: 'DATABASE_RESTORE',
         module: 'SETTINGS',
-        description: `Database restore transaction failed: ${error.message}`,
+        description: `Database restore failed: ${error.message}`,
         status: 'FAILED',
         ipAddress,
       });
@@ -1693,17 +1774,16 @@ export class DatabaseBackupService
         }
       }
 
-      // Restore attachments
+      // Stage and verify attachments in isolated directory before promoting to live
       let restoredAttachmentsCount = 0;
+      const stagingAttDir = path.join(stagingDir, 'attachments');
       if (
         bundlePayload.attachmentsContent &&
         Array.isArray(bundlePayload.attachmentsContent.files)
       ) {
-        const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
-        if (!fs.existsSync(uploadDir))
-          fs.mkdirSync(uploadDir, { recursive: true });
+        fs.mkdirSync(stagingAttDir, { recursive: true });
+        const root = path.resolve(stagingAttDir);
 
-        const root = path.resolve(uploadDir);
         for (const file of bundlePayload.attachmentsContent.files) {
           const relPath = file.relativePath || file.fileName;
           if (relPath && file.base64Content) {
@@ -1728,7 +1808,7 @@ export class DatabaseBackupService
             if (file.checksum) {
               const actualChecksum =
                 this.calculateChecksumForBuffer(fileBuffer);
-              if (actualChecksum !== file.checksum) {
+              if (actualChecksum.toLowerCase() !== file.checksum.toLowerCase()) {
                 this.logger.error(
                   `Attachment checksum mismatch for file: ${relPath}`,
                 );
@@ -1740,6 +1820,23 @@ export class DatabaseBackupService
             }
             fs.writeFileSync(targetPath, fileBuffer);
             restoredAttachmentsCount++;
+          }
+        }
+
+        // All staged files verified; promote to live uploadDir
+        const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
+        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+        for (const file of bundlePayload.attachmentsContent.files) {
+          const relPath = file.relativePath || file.fileName;
+          if (relPath) {
+            const stagedFilePath = path.join(stagingAttDir, relPath);
+            const finalFilePath = path.join(uploadDir, relPath);
+            const finalParent = path.dirname(finalFilePath);
+            if (!fs.existsSync(finalParent)) fs.mkdirSync(finalParent, { recursive: true });
+            if (fs.existsSync(stagedFilePath)) {
+              fs.renameSync(stagedFilePath, finalFilePath);
+            }
           }
         }
       }
@@ -1761,6 +1858,43 @@ export class DatabaseBackupService
           restoredAttachmentsCount,
         },
       };
+    } catch (error: any) {
+      // Compensating DB rollback to pre-restore snapshot if available
+      const preRestoreDumpPath = preRestoreManifest?.artifacts?.dump
+        ? path.join(this.localBackupDir, preRestoreManifest.artifacts.dump)
+        : '';
+      if (preRestoreDumpPath && fs.existsSync(preRestoreDumpPath)) {
+        try {
+          this.logger.warn('Triggering compensating database rollback for failed portable bundle restore...');
+          const parsedUrl = new URL(process.env.DATABASE_URL!);
+          await execFileAsync(
+            'pg_restore',
+            [
+              '--clean',
+              '--if-exists',
+              '--single-transaction',
+              '--exit-on-error',
+              '--no-owner',
+              '--no-acl',
+              '--host=' + (parsedUrl.hostname || 'postgres'),
+              '--port=' + (parsedUrl.port || '5432'),
+              '--username=' + (parsedUrl.username || 'postgres'),
+              '--dbname=' + (parsedUrl.pathname.replace(/^\//, '') || 'gms'),
+              preRestoreDumpPath,
+            ],
+            {
+              shell: false,
+              env: { ...process.env, PGPASSWORD: parsedUrl.password || 'postgres' },
+              timeout: 10 * 60 * 1000,
+            },
+          );
+          this.logger.log('Compensating database rollback succeeded for portable bundle.');
+        } catch (rbErr: any) {
+          this.logger.error(`CRITICAL: Compensating rollback failed on portable restore: ${rbErr.message}`);
+        }
+      }
+
+      throw error;
     } finally {
       if (fs.existsSync(stagingDir)) {
         fs.rmSync(stagingDir, { recursive: true, force: true });

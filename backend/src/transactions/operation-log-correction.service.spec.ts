@@ -1194,7 +1194,55 @@ describe('OperationLogCorrectionService', () => {
         items: [
           {
             targetModule: CorrectionTargetModule.WEIGHBRIDGE,
-            targetField: 'grossWeight',
+            fieldName: 'grossWeight',
+            newValue: 15000,
+            targetRecordId: 'wb-1',
+          },
+        ],
+      };
+
+      await expect(
+        service.correctOperationLog('tx-1', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject correction if evidence attachment is not current (isCurrent=false) (P1-08)', async () => {
+      const mockTx = {
+        id: 'tx-1',
+        status: 'COMPLETED',
+        revision: 1,
+        commodityType: 'GBB',
+      };
+      const mockTxClient = createMockTxClient(mockTx);
+      // findFirst returns null because query filters for isCurrent: true
+      mockTxClient.attachment.findFirst = jest.fn().mockImplementation(({ where }) => {
+        if (where?.isCurrent === true) return Promise.resolve(null);
+        return Promise.resolve({
+          id: 'att-stale',
+          transactionId: 'tx-1',
+          isCurrent: false,
+          sha256: 'some-hash',
+        });
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT_ANGKA',
+        remark: 'Evidence test stale attachment',
+        expectedRevision: 1,
+        evidenceAttachmentId: 'att-stale',
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WEIGHBRIDGE,
+            fieldName: 'grossWeight',
             newValue: 15000,
             targetRecordId: 'wb-1',
           },
@@ -1237,7 +1285,7 @@ describe('OperationLogCorrectionService', () => {
         items: [
           {
             targetModule: CorrectionTargetModule.WEIGHBRIDGE,
-            targetField: 'grossWeight',
+            fieldName: 'grossWeight',
             newValue: 15000,
             targetRecordId: 'wb-1',
           },

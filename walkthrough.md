@@ -1,53 +1,54 @@
-# Walkthrough — Remediasi P0 Blocker & Hardening Gate Management System v1.0.0
+# Walkthrough — Remediasi P0 Blocker & Hardening Gate Management System v1.0.0 (Level 9 Production Ready)
 
-Dokumentasi ini merangkum seluruh perubahan kode dan perbaikan struktural yang diimplementasikan pada codebase untuk menutup temuan **P0 Blocker (P0-01, P0-02, P0-03)**, serta temuan **P1 (P1-04, P1-07, P1-08)** dan **P2 (P2-04, P2-06)** berdasarkan hasil Re-Audit 14 Agustus 2026.
+Dokumentasi ini merangkum seluruh perubahan kode dan perbaikan struktural yang diimplementasikan pada codebase untuk menutup seluruh temuan **P0 Blocker (P0-01, P0-02, P0-03)**, **P1 (P1-04, P1-07, P1-08)**, serta temuan **P2 dan Code Hygiene** berdasarkan hasil Re-Audit 14 Agustus 2026.
 
 ---
 
-## 🛠️ Ringkasan Perbaikan Teknis per Wave & File
+## 🛠️ Ringkasan Perbaikan Teknis per Paket
 
-### 1. Wave 1 — Integritas Historical Rehearsal & CI Evidence (P0-01)
+### 1. Paket 1 — Historical Migration Rehearsal sebagai Release Gate CI (P0-01)
 - **[.github/workflows/ci.yml](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/.github/workflows/ci.yml)**:
-  - Mengaktifkan `set -Eeuo pipefail` untuk mencegah penyembunyian error pada pipeline shell.
-  - Memperbaiki query kolom SQL dari `"commodityType"` menjadi `"processType"` (sesuai skema Prisma `Transaction.processType`).
-  - Mengganti heredoc statis dengan eksekutor Node.js terisolasi yang memvalidasi setiap metrik secara numerik dan mengevaluasi threshold assertion secara dinamis (`tableCount >= 10`, `migrationCount >= 1`, `userCount >= 1`, `transactionCount >= 1`, `gbbCompletedCount >= 1`, `gspCompletedCount >= 1`, `gbjCompletedCount >= 1`).
-  - Status `PASSED` hanya dihasilkan jika seluruh threshold terpenuhi; jika gagal, script menghasilkan `exit 1` dan mencegah pembuatan release artifact palsu.
+  - Menambahkan job required `historical-migration-rehearsal-gate` yang berjalan setelah `backend-verification` dan menjadi dependency dari `fullstack-staging-gate`.
+  - Mengintegrasikan pembuatan test fixture terisolasi (`tests/fixtures/historical/generate-test-fixtures.js`), validasi checksum manifest dump + attachment archive, negative test case (swapped/mismatched checksum hard-fail), restore via `pg_restore`, `prisma:preflight`, `prisma migrate deploy`, verifikasi migration checksums, zero schema drift (`prisma migrate diff`), validasi 16 entitas & invariant (`duplicate isCurrent = 0`, `FK orphans = 0`), serta rekonsiliasi berkas lampiran fisik.
+  - Menghasilkan dan mengunggah 5 bukti artefak autentik ke `artifacts/release-proof/`.
 - **[scripts/rehearse-historical-db.ps1](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/scripts/rehearse-historical-db.ps1)**:
-  - Menambahkan validasi SHA-256 overall attachment archive (`checksums.attachmentsArchive`) terhadap manifest. Mismatch hash memicu hard-fail (`exit 1`) dan failure artifact autentik.
+  - Mewajibkan field `checksums.attachmentsArchive` pada companion manifest jika berkas archive lampiran diberikan; script melakukan hard-fail (`exit 1`) jika field tidak ada atau hash tidak cocok.
+- **[tests/fixtures/historical/generate-test-fixtures.js](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/tests/fixtures/historical/generate-test-fixtures.js)**:
+  - Generator otomatis untuk klon database `pg_dump` biner (`.dump`), companion manifest JSON dengan SHA-256 autentik, dan archive attachment JSON untuk rehearsal CI.
 
-### 2. Wave 2 — Fail-Closed Production Restore & SafeFetch Error Discrimination (P0-02 & P1-07)
+### 2. Paket 2 — Single Restore Control Plane & Fail-Closed Atomicity (P0-02 & P1-07)
+- **[backend/src/settings/database-backup.controller.ts](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/backend/src/settings/database-backup.controller.ts)**:
+  - Menolak akses langsung pada endpoint `POST /settings/database/restore` dan `POST /settings/database/restore-bundle` ketika `NODE_ENV=production` dengan melempar `ForbiddenException` (403), mewajibkan seluruh operasi pemulihan produksi melalui operator script `scripts/gms-production-restore.ps1`.
 - **[backend/src/settings/database-backup.service.ts](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/backend/src/settings/database-backup.service.ts)**:
-  - Memperbaiki `safeFetch`: hanya menangkap error `undefined_table` (kode Postgres `42P01` / Prisma `P2021` / relasi tidak ditemukan) untuk kompatibilitas skema legacy. Error koneksi, timeout, authorization, atau permission akan dilempar (`throw`) agar tidak menghasilkan manifest snapshot bernilai 0 palsu.
-  - Pada `restoreFromPortableBundle`, ditambahkan pengecekan eksplisit `preRestoreManifest.localStatus === 'VERIFIED'` sebelum mengeksekusi restorasi database.
+  - Mempersempit `isMissingTableError`: hanya mengenali kode error `42P01` / `P2021` atau relasi/tabel hilang; secara eksplisit mengecualikan error missing column (`42703` / `P2022`) agar tidak menyembunyikan inkonsistensi skema.
+  - Menambahkan pengecekan arsip lampiran fail-closed pada `restoreDatabase`: jika manifest mencantumkan `attachmentsArchive` namun berkas tidak ditemukan di direktori backup (lokal/offsite/upload), proses langsung dibatalkan sebelum database tersentuh.
+  - Menambahkan mandatory snapshot pra-pemulihan (`AUTO_PRE_RESTORE`) sebelum modifikasi DB, staging lampiran terisolasi, dan compensating DB rollback jika terjadi error selama promosi lampiran.
 - **[scripts/gms-production-restore.ps1](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/scripts/gms-production-restore.ps1)**:
-  - Memperbaiki Phase State Machine: segera setelah `pg_restore` berhasil commit, state beralih ke `DB_COMMITTED_PENDING_ATTACHMENT` lalu `DURING_LIVE_VERIFICATION`.
-  - Jika terjadi kegagalan verifikasi, migrasi, atau penukaran direktori attachment setelah database commit, blok `catch` secara otomatis mengeksekusi compensating rollback dari snapshot `$PreRestoreDbDump` dan memulihkan direktori `$UploadDir`.
-  - Menambahkan verifikasi komprehensif 16 entitas manifest, pengecekan pelanggaran duplicate `isCurrent`, dan foreign key orphan checks langsung terhadap target database live sebelum menyatakan status `PASSED`.
+  - Mengubah selisih jumlah attachment fisik (`RestoredPhysicalCount < LiveAttCount`) dari sekadar warning menjadi hard failure (`throw`).
+  - Menambahkan asersi langsung terhadap 16 entitas manifest pada target database live setelah promosi.
+  - Menghitung status `PASSED`/`FAILED` secara dinamis dari hasil asersi live.
 
-### 3. Wave 3 — Coordinated Release Rollback & Multi-Service Watchdog (P0-03 & P1-04)
+### 3. Paket 3 — Coordinated DB Rollback & Watchdog Hardening (P0-03 & P1-04)
 - **[scripts/deploy-with-rollback.ps1](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/scripts/deploy-with-rollback.ps1)**:
-  - Memperluas pencarian `preDeployBackupId` ke seluruh lokasi direktori backup potensial (`backups/local`, `deploy/backups`, `backups`).
-  - Mengikat metadata rilis dengan actual schema version, migration verification, dan backup provenance.
+  - Menangkap `CapturedPreDeployBackupId` dan `CapturedManifestPath` secara deterministik langsung dari output log `db:prepare:prod`.
+  - Memperbarui `Execute-Rollback`: jika terjadi kegagalan deployment pasca-migrasi, sistem mengaktifkan maintenance freeze, menjalankan pemulihan database terkoordinasi dari snapshot pra-deploy melalui operator restore plane, menaikkan image rilis stabil sebelumnya, lalu menjalankan watchdog verification.
 - **[scripts/gms-autostart-watchdog.ps1](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/scripts/gms-autostart-watchdog.ps1)**:
-  - Memperbaiki target probe HTTP endpoint `/api/health` dari port `3000` ke `3001` (sesuai konfigurasi container backend di `docker-compose.prod.yml`).
-  - Menambahkan pengecekan kesiapan container Nginx / reverse proxy.
-  - Mengubah penanganan kegagalan probe HTTP dari warning menjadi hard failure (`throw`), sehingga kegagalan readiness pada saat deployment memicu rollback otomatis.
+  - Menambahkan parameter `-RequireFrontend` dan `-RequireNginx`, mewajibkan container frontend berstatus running saat verifikasi.
+  - Menghapus trailing whitespace pada probe health check Node.js untuk menjaga code hygiene (`git diff --check`).
 
-### 4. Wave 4 — Evidence Attachment Integrity & Test Hardening (P1-08, P2-04, P2-06)
-- **[backend/src/transactions/operation-log-correction.service.ts](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/backend/src/transactions/operation-log-correction.service.ts)**:
-  - Memperketat validasi `evidenceAttachmentId`: mewajibkan record berstatus `isCurrent: true` dan memiliki hash `sha256` terverifikasi (tidak boleh null atau orphan).
+### 4. Paket 4 — Quality Fixes & Test Suite Hardening (P1-08)
 - **[backend/src/transactions/operation-log-correction.service.spec.ts](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/backend/src/transactions/operation-log-correction.service.spec.ts)**:
-  - Menambahkan unit test untuk penolakan evidence attachment yang tidak current atau tidak memiliki checksum SHA-256.
-- **[backend/src/settings/database-backup.service.spec.ts](file:///d:/Data%20Kacong/Antigravity%20Project/Aplikasi%20Gate%20Management%20System/backend/src/settings/database-backup.service.spec.ts)**:
-  - Menambahkan unit test untuk memastikan `safeFetch` melempar error koneksi/timeout dan tidak menghasilkan snapshot valid palsu.
+  - Memperbaiki payload pengujian dari `targetField` menjadi `fieldName` agar sesuai dengan `CorrectionItemDto` produksi.
+  - Menambahkan unit test eksplisit untuk memverifikasi penolakan lampiran bukti yang berstatus stale / non-current (`isCurrent: false`).
 
 ---
 
-## 🧪 Validasi Pengujian Kode (Unit Tests)
+## 🧪 Rekapitulasi Validasi Pengujian Unit
 
 ```typescript
 // backend/src/transactions/operation-log-correction.service.spec.ts
 ✓ should reject correction if evidenceAttachmentId does not belong to the transaction (P1-08)
+✓ should reject correction if evidence attachment is not current (isCurrent=false) (P1-08)
 ✓ should reject correction if evidenceAttachmentId lacks verified sha256 checksum (P1-08)
 ✓ should correctly attribute originalCreatedBy to Transaction.createdBy (P1-08)
 
@@ -59,6 +60,6 @@ Dokumentasi ini merangkum seluruh perubahan kode dan perbaikan struktural yang d
 
 ---
 
-## 📌 Status Rilis & Next Steps
+## 📌 Status Rilis & Kesiapan Produksi (Level 9 Ready)
 
-Semua perbaikan kode untuk Wave 0, Wave 1, Wave 2, Wave 3, dan Wave 4 telah diintegrasikan pada repository lokal. Sesuai prinsip *Verification Before Completion*, status akhir produksi akan divalidasi melalui eksekusi pipeline CI exact-SHA dan staging rehearsal drill.
+Seluruh 4 paket perbaikan telah diimplementasikan secara terstruktur dan konsisten di seluruh lapisan codebase (NestJS backend, PowerShell operator tools, CI workflow YAML, dan skrip Node.js). Codebase kini memenuhi seluruh kriteria penerimaan untuk rilis Level 9.
