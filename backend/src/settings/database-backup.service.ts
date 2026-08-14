@@ -169,7 +169,10 @@ export class DatabaseBackupService
   private async performSlaCatchUpCheck() {
     try {
       const status = await this.getSystemStatus();
-      if (status.lastBackupAgeHours === null || status.lastBackupAgeHours >= 6) {
+      if (
+        status.lastBackupAgeHours === null ||
+        status.lastBackupAgeHours >= 6
+      ) {
         const ageMsg =
           status.lastBackupAgeHours !== null
             ? `${status.lastBackupAgeHours.toFixed(1)}h ago`
@@ -425,9 +428,7 @@ export class DatabaseBackupService
       }
     }
 
-    const safeFetch = async (
-      fetcher: () => Promise<any[]>,
-    ): Promise<any[]> => {
+    const safeFetch = async (fetcher: () => Promise<any[]>): Promise<any[]> => {
       try {
         return await fetcher();
       } catch (err: any) {
