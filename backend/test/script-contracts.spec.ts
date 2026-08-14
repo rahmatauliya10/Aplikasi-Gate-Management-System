@@ -3,7 +3,10 @@ import * as path from 'path';
 
 describe('Production Deployment & Script Contracts Gate (P0-04)', () => {
   const backendPackageJsonPath = path.resolve(__dirname, '../package.json');
-  const deployScriptPath = path.resolve(__dirname, '../../scripts/deploy-with-rollback.ps1');
+  const deployScriptPath = path.resolve(
+    __dirname,
+    '../../scripts/deploy-with-rollback.ps1',
+  );
 
   it('should ensure backend/package.json exists and defines required deployment scripts', () => {
     expect(fs.existsSync(backendPackageJsonPath)).toBe(true);
