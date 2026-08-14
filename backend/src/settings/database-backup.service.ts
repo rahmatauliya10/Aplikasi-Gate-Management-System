@@ -1281,8 +1281,7 @@ export class DatabaseBackupService
               }
               const buffer = Buffer.from(file.base64Content, 'base64');
               fs.writeFileSync(targetPath, buffer);
-              const restoredChecksum =
-                this.calculateChecksumForBuffer(buffer);
+              const restoredChecksum = this.calculateChecksumForBuffer(buffer);
               if (
                 file.checksum &&
                 restoredChecksum.toLowerCase() !== file.checksum.toLowerCase()
@@ -1441,9 +1440,15 @@ export class DatabaseBackupService
       }
 
       // Compensating DB rollback if DB was modified/committed and error happened during promotion
-      if (dbCommitted && preRestoreDumpPath && fs.existsSync(preRestoreDumpPath)) {
+      if (
+        dbCommitted &&
+        preRestoreDumpPath &&
+        fs.existsSync(preRestoreDumpPath)
+      ) {
         try {
-          this.logger.warn('Triggering compensating database rollback to pre-restore snapshot...');
+          this.logger.warn(
+            'Triggering compensating database rollback to pre-restore snapshot...',
+          );
           const parsedUrl = new URL(process.env.DATABASE_URL!);
           await execFileAsync(
             'pg_restore',
@@ -1462,13 +1467,18 @@ export class DatabaseBackupService
             ],
             {
               shell: false,
-              env: { ...process.env, PGPASSWORD: parsedUrl.password || 'postgres' },
+              env: {
+                ...process.env,
+                PGPASSWORD: parsedUrl.password || 'postgres',
+              },
               timeout: 10 * 60 * 1000,
             },
           );
           this.logger.log('Compensating database rollback succeeded.');
         } catch (rollbackErr: any) {
-          this.logger.error(`CRITICAL: Compensating DB rollback failed: ${rollbackErr.message}`);
+          this.logger.error(
+            `CRITICAL: Compensating DB rollback failed: ${rollbackErr.message}`,
+          );
         }
       }
 
@@ -1808,7 +1818,9 @@ export class DatabaseBackupService
             if (file.checksum) {
               const actualChecksum =
                 this.calculateChecksumForBuffer(fileBuffer);
-              if (actualChecksum.toLowerCase() !== file.checksum.toLowerCase()) {
+              if (
+                actualChecksum.toLowerCase() !== file.checksum.toLowerCase()
+              ) {
                 this.logger.error(
                   `Attachment checksum mismatch for file: ${relPath}`,
                 );
@@ -1825,7 +1837,9 @@ export class DatabaseBackupService
 
         // All staged files verified; promote to live uploadDir
         const uploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
-        if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
 
         for (const file of bundlePayload.attachmentsContent.files) {
           const relPath = file.relativePath || file.fileName;
@@ -1833,7 +1847,9 @@ export class DatabaseBackupService
             const stagedFilePath = path.join(stagingAttDir, relPath);
             const finalFilePath = path.join(uploadDir, relPath);
             const finalParent = path.dirname(finalFilePath);
-            if (!fs.existsSync(finalParent)) fs.mkdirSync(finalParent, { recursive: true });
+            if (!fs.existsSync(finalParent)) {
+              fs.mkdirSync(finalParent, { recursive: true });
+            }
             if (fs.existsSync(stagedFilePath)) {
               fs.renameSync(stagedFilePath, finalFilePath);
             }
@@ -1865,7 +1881,9 @@ export class DatabaseBackupService
         : '';
       if (preRestoreDumpPath && fs.existsSync(preRestoreDumpPath)) {
         try {
-          this.logger.warn('Triggering compensating database rollback for failed portable bundle restore...');
+          this.logger.warn(
+            'Triggering compensating database rollback for failed portable bundle restore...',
+          );
           const parsedUrl = new URL(process.env.DATABASE_URL!);
           await execFileAsync(
             'pg_restore',
@@ -1884,13 +1902,20 @@ export class DatabaseBackupService
             ],
             {
               shell: false,
-              env: { ...process.env, PGPASSWORD: parsedUrl.password || 'postgres' },
+              env: {
+                ...process.env,
+                PGPASSWORD: parsedUrl.password || 'postgres',
+              },
               timeout: 10 * 60 * 1000,
             },
           );
-          this.logger.log('Compensating database rollback succeeded for portable bundle.');
+          this.logger.log(
+            'Compensating database rollback succeeded for portable bundle.',
+          );
         } catch (rbErr: any) {
-          this.logger.error(`CRITICAL: Compensating rollback failed on portable restore: ${rbErr.message}`);
+          this.logger.error(
+            `CRITICAL: Compensating rollback failed on portable restore: ${rbErr.message}`,
+          );
         }
       }
 

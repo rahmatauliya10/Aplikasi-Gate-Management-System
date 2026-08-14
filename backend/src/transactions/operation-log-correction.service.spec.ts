@@ -1219,15 +1219,17 @@ describe('OperationLogCorrectionService', () => {
       };
       const mockTxClient = createMockTxClient(mockTx);
       // findFirst returns null because query filters for isCurrent: true
-      mockTxClient.attachment.findFirst = jest.fn().mockImplementation(({ where }) => {
-        if (where?.isCurrent === true) return Promise.resolve(null);
-        return Promise.resolve({
-          id: 'att-stale',
-          transactionId: 'tx-1',
-          isCurrent: false,
-          sha256: 'some-hash',
+      mockTxClient.attachment.findFirst = jest
+        .fn()
+        .mockImplementation(({ where }) => {
+          if (where?.isCurrent === true) return Promise.resolve(null);
+          return Promise.resolve({
+            id: 'att-stale',
+            transactionId: 'tx-1',
+            isCurrent: false,
+            sha256: 'some-hash',
+          });
         });
-      });
 
       mockPrismaService.$transaction.mockImplementation((cb: any) =>
         cb(mockTxClient),
