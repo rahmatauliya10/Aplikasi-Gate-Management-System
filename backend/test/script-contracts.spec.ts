@@ -15,7 +15,8 @@ describe('Production Deployment & Script Contracts Gate (P0-04)', () => {
     expect(pkg.scripts).toBeDefined();
     expect(pkg.scripts['test:drift']).toBeDefined();
     expect(pkg.scripts['test:drift']).toContain('db:verify:checksums');
-    expect(pkg.scripts['test:drift']).toContain('prisma migrate diff');
+    expect(pkg.scripts['db:drift:check']).toBeDefined();
+    expect(pkg.scripts['db:drift:check']).toContain('prisma migrate diff');
     expect(pkg.scripts['db:verify:checksums']).toBeDefined();
     expect(pkg.scripts['db:backup:pre-deploy']).toBeDefined();
     expect(pkg.scripts['prisma:preflight']).toBeDefined();
