@@ -316,11 +316,14 @@ async function main() {
   };
 
   const evidenceJsonPath = path.join(artifactsDir, 'post-migration-rollback-evidence.json');
+  const operatorEvidenceJsonPath = path.join(artifactsDir, 'deployment-rollback-operator-evidence.json');
   fs.writeFileSync(evidenceJsonPath, JSON.stringify(evidenceReport, null, 2), 'utf8');
+  fs.writeFileSync(operatorEvidenceJsonPath, JSON.stringify(evidenceReport, null, 2), 'utf8');
 
   console.log('\n==============================================================================');
   console.log(`Coordinated Rollback Drill Status: ${rollbackPassed ? 'PASSED' : 'FAILED'} (RTO: ${totalDurationSec.toFixed(2)}s, Measured RPO: ${rpoMinutes}m)`);
   console.log(`Saved exact rollback evidence artifact to: ${evidenceJsonPath}`);
+  console.log(`Saved companion operator rollback evidence to: ${operatorEvidenceJsonPath}`);
   console.log('==============================================================================\n');
 
   // Clean up temporary pre-deploy dump file

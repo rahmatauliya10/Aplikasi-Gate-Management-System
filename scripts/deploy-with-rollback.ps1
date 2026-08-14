@@ -51,7 +51,17 @@ param(
     [switch]$RequireDigest,
 
     [Parameter(Mandatory=$false)]
-    [switch]$RequireNginx
+    [switch]$RequireNginx,
+
+    [Parameter(Mandatory=$false)]
+    [ValidateSet(
+        "",
+        "AFTER_BACKUP",
+        "AFTER_MIGRATION",
+        "AFTER_CONTAINER_SWITCH",
+        "BEFORE_WATCHDOG"
+    )]
+    [string]$FaultInjectionPhase = ""
 )
 
 Set-StrictMode -Version Latest
@@ -59,6 +69,7 @@ $ErrorActionPreference = "Stop"
 
 $WorkspaceRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $WorkspaceRoot
+$PsExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { "pwsh.exe" } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell.exe" }
 
 function Verify-Image-Digest {
     param([string]$ImageName, [string]$ExpectedDigest)
@@ -162,7 +173,7 @@ function Execute-Rollback {
 
             Write-Host "[GMS AUTOMATED ROLLBACK] Restoring database to pre-deployment state via operator restore plane ($RollbackManifestPath)..." -ForegroundColor Yellow
             $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
-            & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $RollbackManifestPath -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $RollbackManifestPath -Force
             if ($LASTEXITCODE -ne 0) {
                 throw "[CRITICAL ROLLBACK FAILURE] Coordinated database restore failed with exit code $LASTEXITCODE during rollback! Refusing to boot old application on unverified schema."
             }
@@ -185,7 +196,7 @@ function Execute-Rollback {
 
         Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$EnforceNginx
+        & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$EnforceNginx
         if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
 
         $RollbackSucceeded = $true
@@ -333,6 +344,10 @@ try {
         throw "CRITICAL PREFLIGHT FAILURE: Pre-deployment backup was created, but manifest file ($CapturedManifestPath) could not be bound/located on host storage ($HostLocalBackupDir). Aborting deployment before migration."
     }
 
+    if ($FaultInjectionPhase -eq "AFTER_BACKUP" -or $env:GMS_FAULT_INJECTION_PHASE -eq "AFTER_BACKUP") {
+        throw "INJECTED_FAULT_AFTER_BACKUP: Simulated failure immediately after backup creation."
+    }
+
     # Step 1.6: Run database preflight duplicate audit
     Write-Host "[GMS Preflight] Running database preflight duplicate audit..." -ForegroundColor Cyan
     & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run prisma:preflight -- --report-only --fail-on-duplicates
@@ -348,14 +363,26 @@ try {
     }
     Write-Host "[GMS Migration] Database migrations deployed successfully." -ForegroundColor Green
 
+    if ($FaultInjectionPhase -eq "AFTER_MIGRATION" -or $env:GMS_FAULT_INJECTION_PHASE -eq "AFTER_MIGRATION") {
+        throw "INJECTED_FAULT_AFTER_MIGRATION: Simulated failure immediately after forward database migration."
+    }
+
     Write-Host "[GMS Deploy] Booting containers for release [$TargetReleaseTag] (--no-build)..." -ForegroundColor Cyan
     & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
     if ($LASTEXITCODE -ne 0) { throw "Docker compose up terminated with error code $LASTEXITCODE." }
 
+    if ($FaultInjectionPhase -eq "AFTER_CONTAINER_SWITCH" -or $env:GMS_FAULT_INJECTION_PHASE -eq "AFTER_CONTAINER_SWITCH") {
+        throw "INJECTED_FAULT_AFTER_CONTAINER_SWITCH: Simulated failure immediately after container switch."
+    }
+
+    if ($FaultInjectionPhase -eq "BEFORE_WATCHDOG" -or $env:GMS_FAULT_INJECTION_PHASE -eq "BEFORE_WATCHDOG") {
+        throw "INJECTED_FAULT_BEFORE_WATCHDOG: Simulated failure before healthcheck watchdog execution."
+    }
+
     # Step 2: Execute automated health watchdog check
     Write-Host "[GMS Deploy] Verifying post-deployment service health via watchdog..." -ForegroundColor Cyan
     $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-    & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$EffectiveRequireNginx
+    & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$EffectiveRequireNginx
     if ($LASTEXITCODE -ne 0) { throw "Health check verification failed during post-deploy watchdog test." }
 
     Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] successfully deployed and verified healthy." -ForegroundColor Green

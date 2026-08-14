@@ -25,10 +25,12 @@ export function configureApp(app: INestApplication) {
       const readMethods = ['GET', 'HEAD', 'OPTIONS'];
       if (!readMethods.includes(req.method.toUpperCase())) {
         return res.status(503).json({
+          success: false,
           statusCode: 503,
+          code: 'MAINTENANCE_MODE',
           error: 'Service Unavailable',
           message:
-            'System is currently under maintenance / restore write freeze. Write operations are temporarily suspended.',
+            'System is temporarily unavailable due to maintenance.',
           timestamp: new Date().toISOString(),
         });
       }
