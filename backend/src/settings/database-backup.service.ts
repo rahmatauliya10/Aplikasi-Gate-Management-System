@@ -451,21 +451,71 @@ export class DatabaseBackupService
       transactionCorrectionItems,
     ] = await Promise.all([
       safeFetch(() => this.prisma.user.findMany()),
-      safeFetch(() => (this.prisma as any).userWarehouseAccess?.findMany() || Promise.resolve([])),
+      safeFetch(
+        () =>
+          (this.prisma as any).userWarehouseAccess?.findMany() ||
+          Promise.resolve([]),
+      ),
       safeFetch(() => this.prisma.transaction.findMany()),
-      safeFetch(() => (this.prisma as any).transactionStatusHistory?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).weighbridgeRecord?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).warehouseProcess?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).qcVehicleCheck?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).incomingMaterialCheck?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).attachment?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).fraudCheck?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).activityLog?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).appSetting?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).announcement?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).systemIssue?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).transactionCorrection?.findMany() || Promise.resolve([])),
-      safeFetch(() => (this.prisma as any).transactionCorrectionItem?.findMany() || Promise.resolve([])),
+      safeFetch(
+        () =>
+          (this.prisma as any).transactionStatusHistory?.findMany() ||
+          Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).weighbridgeRecord?.findMany() ||
+          Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).warehouseProcess?.findMany() ||
+          Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).qcVehicleCheck?.findMany() ||
+          Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).incomingMaterialCheck?.findMany() ||
+          Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).attachment?.findMany() || Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).fraudCheck?.findMany() || Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).activityLog?.findMany() || Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).appSetting?.findMany() || Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).announcement?.findMany() || Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).systemIssue?.findMany() || Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).transactionCorrection?.findMany() ||
+          Promise.resolve([]),
+      ),
+      safeFetch(
+        () =>
+          (this.prisma as any).transactionCorrectionItem?.findMany() ||
+          Promise.resolve([]),
+      ),
     ]);
 
     const recordCounts = {

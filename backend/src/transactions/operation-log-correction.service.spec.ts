@@ -1211,14 +1211,18 @@ describe('OperationLogCorrectionService', () => {
     });
 
     it('should correctly attribute originalCreatedBy to Transaction.createdBy (P1-08)', async () => {
-      (mockPrismaService.transaction.findUnique as any) = jest.fn().mockResolvedValue({
-        id: 'tx-1',
-        createdBy: { id: 'u-1', name: 'John Doe', role: 'SECURITY' },
-        weighInBy: { id: 'u-2', name: 'Weigh Operator', role: 'TIMBANGAN' },
-        warehouseStartBy: null,
-        qcVehicleChecks: [],
-      });
-      (mockPrismaService.transactionCorrection.findMany as any) = jest.fn().mockResolvedValue([]);
+      (mockPrismaService.transaction.findUnique as any) = jest
+        .fn()
+        .mockResolvedValue({
+          id: 'tx-1',
+          createdBy: { id: 'u-1', name: 'John Doe', role: 'SECURITY' },
+          weighInBy: { id: 'u-2', name: 'Weigh Operator', role: 'TIMBANGAN' },
+          warehouseStartBy: null,
+          qcVehicleChecks: [],
+        });
+      (mockPrismaService.transactionCorrection.findMany as any) = jest
+        .fn()
+        .mockResolvedValue([]);
 
       const result = await service.getOperationLogCorrections('tx-1');
       expect(result.success).toBe(true);
