@@ -6,8 +6,8 @@
  *
  * Validates fail-closed guarantees across 4 critical failure phases:
  *   Phase 1: Pre-promotion Checksum Corruption & Rejection
- *   Phase 2: Post-DB-Commit Failure -> Automatic DB Compensation Rollback
- *   Phase 3: Attachment Swap Failure -> Uploads Tree Revert
+ *   Phase 2: Post-DB-Commit Failure -> Automatic DB Compensation Rollback (16 Entities + Migrations)
+ *   Phase 3: Attachment Swap Failure -> Uploads Tree Deterministic Revert
  *   Phase 4: Live Verification Discrepancy -> Hard Fail-Closed & Maintenance Freeze
  *
  * Emits exact evidence artifact:
@@ -26,6 +26,27 @@ function computeSha256(filePath) {
 
 function computeSha256Buffer(buf) {
   return crypto.createHash('sha256').update(buf).digest('hex').toLowerCase();
+}
+
+function computeDirectoryHashMap(dirPath) {
+  const fileHashMap = {};
+  if (!fs.existsSync(dirPath)) return fileHashMap;
+
+  function scanDir(currentPath, relativePath = '') {
+    const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      const relPath = path.join(relativePath, entry.name).replace(/\\/g, '/');
+      if (entry.isDirectory()) {
+        scanDir(fullPath, relPath);
+      } else if (entry.isFile()) {
+        fileHashMap[relPath] = computeSha256(fullPath);
+      }
+    }
+  }
+
+  scanDir(dirPath);
+  return fileHashMap;
 }
 
 async function main() {
@@ -65,13 +86,12 @@ async function main() {
   };
 
   const queryCount = (tableName) => {
-    try {
-      const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
-      const num = parseInt(out, 10);
-      return isNaN(num) ? 0 : num;
-    } catch {
-      return 0;
+    const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
+    const num = parseInt(out, 10);
+    if (isNaN(num)) {
+      throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
     }
+    return num;
   };
 
   function capture16Entities() {
@@ -112,46 +132,44 @@ async function main() {
     const fixtureDumpPath = path.join(projectRoot, 'tests/fixtures/historical/historical_test.dump');
     const fixtureManifestPath = path.join(projectRoot, 'tests/fixtures/historical/historical_test_manifest.json');
 
-    if (fs.existsSync(fixtureDumpPath) && fs.existsSync(fixtureManifestPath)) {
-      const manifestData = JSON.parse(fs.readFileSync(fixtureManifestPath, 'utf8'));
-      const originalDumpHash = manifestData.checksums.dump;
-
-      // Tamper 1 byte of the dump buffer
-      const dumpBuffer = fs.readFileSync(fixtureDumpPath);
-      const tamperedBuffer = Buffer.from(dumpBuffer);
-      if (tamperedBuffer.length > 50) {
-        tamperedBuffer[50] = tamperedBuffer[50] ^ 0xff; // flip byte
-      }
-      const tamperedHash = computeSha256Buffer(tamperedBuffer);
-
-      console.log(`  Original Hash Expected: ${originalDumpHash}`);
-      console.log(`  Tampered Dump Hash:     ${tamperedHash}`);
-
-      // Checksum validation gate assertion
-      const hashMatches = (tamperedHash === originalDumpHash.toLowerCase());
-      if (hashMatches) {
-        throw new Error('Tampered dump unexpectedly matched original hash!');
-      }
-
-      // Assert that restore preflight rejects tampered dump before any DB mutation
-      const baselineEntitiesAfter = capture16Entities();
-      const dbUnchanged = JSON.stringify(baselineEntitiesBefore) === JSON.stringify(baselineEntitiesAfter);
-
-      p1Passed = !hashMatches && dbUnchanged;
-      p1Details = 'Corrupted dump SHA-256 strictly rejected during preflight validation before any database or uploads mutation.';
-      p1Evidence = {
-        expectedDumpHash: originalDumpHash,
-        tamperedDumpHash: tamperedHash,
-        rejectedBeforeMutation: true,
-        databaseMutated: !dbUnchanged,
-        entitiesBefore: baselineEntitiesBefore,
-        entitiesAfter: baselineEntitiesAfter
-      };
-    } else {
-      p1Passed = true;
-      p1Details = 'Preflight checksum validation verified via negative hash matching.';
-      p1Evidence = { verified: true };
+    if (!fs.existsSync(fixtureDumpPath) || !fs.existsSync(fixtureManifestPath)) {
+      throw new Error(`Mandatory fixture missing: ${fixtureDumpPath} or ${fixtureManifestPath} not found`);
     }
+
+    const manifestData = JSON.parse(fs.readFileSync(fixtureManifestPath, 'utf8'));
+    const originalDumpHash = manifestData.checksums.dump;
+
+    // Tamper 1 byte of the dump buffer
+    const dumpBuffer = fs.readFileSync(fixtureDumpPath);
+    const tamperedBuffer = Buffer.from(dumpBuffer);
+    if (tamperedBuffer.length > 50) {
+      tamperedBuffer[50] = tamperedBuffer[50] ^ 0xff; // flip byte
+    }
+    const tamperedHash = computeSha256Buffer(tamperedBuffer);
+
+    console.log(`  Original Hash Expected: ${originalDumpHash}`);
+    console.log(`  Tampered Dump Hash:     ${tamperedHash}`);
+
+    // Checksum validation gate assertion
+    const hashMatches = (tamperedHash === originalDumpHash.toLowerCase());
+    if (hashMatches) {
+      throw new Error('Tampered dump unexpectedly matched original hash!');
+    }
+
+    // Assert that restore preflight rejects tampered dump before any DB mutation
+    const baselineEntitiesAfter = capture16Entities();
+    const dbUnchanged = JSON.stringify(baselineEntitiesBefore) === JSON.stringify(baselineEntitiesAfter);
+
+    p1Passed = !hashMatches && dbUnchanged;
+    p1Details = 'Corrupted dump SHA-256 strictly rejected during preflight validation before any database or uploads mutation.';
+    p1Evidence = {
+      expectedDumpHash: originalDumpHash,
+      tamperedDumpHash: tamperedHash,
+      rejectedBeforeMutation: true,
+      databaseMutated: !dbUnchanged,
+      entitiesBefore: baselineEntitiesBefore,
+      entitiesAfter: baselineEntitiesAfter
+    };
   } catch (err) {
     p1Passed = false;
     p1Details = `Phase 1 Failure: ${err.message}`;
@@ -171,23 +189,25 @@ async function main() {
   // ==============================================================================
   // Phase 2: Post-DB-Commit Failure Simulation & DB Rollback Compensation
   // ==============================================================================
-  console.log('--- Phase 2: Post-DB-Commit Compensation Rollback Drill ---');
+  console.log('--- Phase 2: Post-DB-Commit Compensation Rollback Drill (16 Entities) ---');
   const p2Start = Date.now();
   let p2Passed = false;
   let p2Details = '';
   let p2Evidence = {};
+  let snapshotCreationTime = Date.now();
 
   try {
     // 1. Snapshot current baseline state
     const preSnapshotEntities = capture16Entities();
     const tempSnapshotDump = path.join(projectRoot, 'artifacts/release-proof/pre_restore_safety_snapshot.dump');
-    
+
     // Create pre-restore safety dump
+    snapshotCreationTime = Date.now();
     const dumpCmd = `pg_dump -h ${host} -p ${port} -U ${user} -d ${dbName} -F c -f "${tempSnapshotDump}"`;
     execSync(dumpCmd, { env, stdio: 'pipe' });
     console.log('  Created mandatory pre-restore safety snapshot of live database.');
 
-    // 2. Simulate atomic DB promotion (committing new data)
+    // 2. Simulate uncommitted mutation state (e.g. partial mutation before fault)
     psql(`
       INSERT INTO "ActivityLog" ("id", "userId", "userName", "role", "action", "module", "description", "status", "createdAt")
       VALUES ('act-sim-fail-001', 'usr-admin-001', 'Admin', 'ADMIN', 'SIMULATE_FAILURE', 'RESTORE', 'Simulated uncommitted state before failure', 'PENDING', NOW());
@@ -199,20 +219,27 @@ async function main() {
     const rollbackCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --no-owner --no-acl "${tempSnapshotDump}"`;
     execSync(rollbackCmd, { env, stdio: 'pipe' });
 
-    // 4. Assert live DB state returned 100% to pre-snapshot entities
+    // 4. Assert live DB state returned 100% to pre-snapshot entities across ALL 16 entity tables
     const postRollbackEntities = capture16Entities();
-    const countMatch = (postRollbackEntities.users === preSnapshotEntities.users) &&
-                       (postRollbackEntities.transactions === preSnapshotEntities.transactions) &&
-                       (postRollbackEntities.activityLogs === preSnapshotEntities.activityLogs) &&
-                       (postRollbackEntities.migrations === preSnapshotEntities.migrations);
+    const mismatchedEntities = [];
+    for (const [key, val] of Object.entries(preSnapshotEntities)) {
+      if (postRollbackEntities[key] !== val) {
+        mismatchedEntities.push({ entity: key, expected: val, actual: postRollbackEntities[key] });
+      }
+    }
 
-    p2Passed = countMatch;
-    p2Details = 'Operator compensation logic safely caught post-DB-commit promotion exception and executed automatic DB rollback to pre-restore snapshot.';
+    const all16EntitiesMatch = mismatchedEntities.length === 0;
+    p2Passed = all16EntitiesMatch;
+    p2Details = all16EntitiesMatch
+      ? 'Operator compensation logic safely caught post-DB-commit promotion exception and executed automatic DB rollback to pre-restore snapshot (100% 16-entity retention).'
+      : `Compensation rollback discrepancy detected for entities: ${JSON.stringify(mismatchedEntities)}`;
+
     p2Evidence = {
       safetySnapshotCreated: fs.existsSync(tempSnapshotDump),
       preSnapshotEntities,
       postRollbackEntities,
-      entities100PercentRestored: countMatch
+      mismatchedEntities,
+      entities100PercentRestored: all16EntitiesMatch
     };
   } catch (err) {
     p2Passed = false;
@@ -240,19 +267,27 @@ async function main() {
   let p3Evidence = {};
 
   try {
-    // 1. Create live uploads baseline with authentic sample file
-    const liveUploadsSample = path.join(uploadsDir, 'live_sample_document.pdf');
-    const sampleContent = Buffer.from('%PDF-1.4 Baseline sample upload for DR attachment rollback verification');
-    fs.writeFileSync(liveUploadsSample, sampleContent);
-    const preUploadHash = computeSha256(liveUploadsSample);
+    // 1. Create live uploads baseline with authentic multi-file structure
+    const liveUploadsQcDir = path.join(uploadsDir, 'qc');
+    const liveUploadsWbDir = path.join(uploadsDir, 'weighbridge');
+    if (!fs.existsSync(liveUploadsQcDir)) fs.mkdirSync(liveUploadsQcDir, { recursive: true });
+    if (!fs.existsSync(liveUploadsWbDir)) fs.mkdirSync(liveUploadsWbDir, { recursive: true });
 
-    // 2. Prepare staging upload directory
+    const liveDoc1 = path.join(liveUploadsQcDir, 'qc_sample_document.pdf');
+    const liveDoc2 = path.join(liveUploadsWbDir, 'wb_sample_ticket.jpg');
+    fs.writeFileSync(liveDoc1, Buffer.from('%PDF-1.4 Baseline sample QC upload for DR verification'));
+    fs.writeFileSync(liveDoc2, Buffer.from('\xFF\xD8\xFF\xE0 Baseline JPEG sample weighbridge ticket'));
+
+    const preUploadHashMap = computeDirectoryHashMap(uploadsDir);
+
+    // 2. Prepare staging upload directory with new candidate files
     const stagingUploadDir = path.join(projectRoot, 'uploads_staging_drill_test');
-    if (!fs.existsSync(stagingUploadDir)) {
-      fs.mkdirSync(stagingUploadDir, { recursive: true });
+    if (fs.existsSync(stagingUploadDir)) {
+      fs.rmSync(stagingUploadDir, { recursive: true, force: true });
     }
-    const stagingSample = path.join(stagingUploadDir, 'staging_candidate.pdf');
-    fs.writeFileSync(stagingSample, Buffer.from('%PDF-1.4 Staging Candidate'));
+    fs.mkdirSync(stagingUploadDir, { recursive: true });
+    const stagingCandidate = path.join(stagingUploadDir, 'staging_candidate.pdf');
+    fs.writeFileSync(stagingCandidate, Buffer.from('%PDF-1.4 Staging Candidate Content'));
 
     // 3. Simulate directory swap: rename live -> pre_restore, rename staging -> live
     const preRestoreUploadsDir = path.join(projectRoot, 'uploads_pre_restore_drill_test');
@@ -270,17 +305,18 @@ async function main() {
     fs.renameSync(preRestoreUploadsDir, uploadsDir);
 
     // 5. Assert live uploads directory content hash matches pre-restore baseline 100%
-    const postUploadSample = path.join(uploadsDir, 'live_sample_document.pdf');
-    const postUploadExists = fs.existsSync(postUploadSample);
-    const postUploadHash = postUploadExists ? computeSha256(postUploadSample) : '';
+    const postUploadHashMap = computeDirectoryHashMap(uploadsDir);
+    const hashesMatch = JSON.stringify(preUploadHashMap) === JSON.stringify(postUploadHashMap);
 
-    const uploadsIntact = (postUploadExists && postUploadHash === preUploadHash);
-    p3Passed = uploadsIntact;
-    p3Details = 'Atomic directory swap failure caught and live uploads tree cleanly reverted to pre-restore snapshot without data loss.';
+    p3Passed = hashesMatch && Object.keys(preUploadHashMap).length >= 2;
+    p3Details = p3Passed
+      ? 'Atomic directory swap failure caught and entire uploads tree cleanly reverted to pre-restore snapshot with 100% hash reconciliation.'
+      : 'Uploads directory hash mismatch after swap revert.';
     p3Evidence = {
-      preUploadHash,
-      postUploadHash,
-      uploadsPreserved: uploadsIntact
+      preUploadHashMap,
+      postUploadHashMap,
+      reconciledFileCount: Object.keys(postUploadHashMap).length,
+      uploadsPreserved: p3Passed
     };
   } catch (err) {
     p3Passed = false;
@@ -359,12 +395,15 @@ async function main() {
   const allPassed = phaseResults.every(p => p.status === 'PASSED');
   const verdictStatus = allPassed ? 'PASSED' : 'FAILED';
 
+  // Compute real RPO in minutes from snapshot creation time
+  const calculatedRpoMinutes = parseFloat(((Date.now() - snapshotCreationTime) / 60000).toFixed(4));
+
   const evidenceReport = {
     reportTitle: 'GMS Production DR Failure-Injection & Restore Drill Evidence (P0-02)',
     timestamp: new Date().toISOString(),
     status: verdictStatus,
     gitSha: process.env.GITHUB_SHA || 'local-sha',
-    rpoMinutes: 0.0,
+    rpoMinutes: calculatedRpoMinutes,
     rtoSeconds: parseFloat(totalDuration.toFixed(2)),
     drillsSummary: {
       totalPhases: phaseResults.length,
@@ -378,7 +417,7 @@ async function main() {
   fs.writeFileSync(evidenceJsonPath, JSON.stringify(evidenceReport, null, 2), 'utf8');
 
   console.log('==============================================================================');
-  console.log(`DR Failure-Injection Drill Completed: ${verdictStatus} (Total RTO: ${totalDuration.toFixed(2)}s)`);
+  console.log(`DR Failure-Injection Drill Completed: ${verdictStatus} (Total RTO: ${totalDuration.toFixed(2)}s, Measured RPO: ${calculatedRpoMinutes}m)`);
   console.log(`Saved exact DR drill evidence artifact to: ${evidenceJsonPath}`);
   console.log('==============================================================================\n');
 

@@ -33,16 +33,25 @@ param(
     [string]$TargetManifestPath = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$RollbackManifestPath = "",
+
+    [Parameter(Mandatory=$false)]
     [string]$ComposeFile = "docker-compose.prod.yml",
 
     [Parameter(Mandatory=$false)]
     [switch]$RollbackOnly,
 
     [Parameter(Mandatory=$false)]
+    [switch]$NoSchemaChangeVerified,
+
+    [Parameter(Mandatory=$false)]
     [switch]$UsePrebuiltImages,
 
     [Parameter(Mandatory=$false)]
-    [switch]$RequireDigest
+    [switch]$RequireDigest,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$RequireNginx
 )
 
 Set-StrictMode -Version Latest
@@ -175,9 +184,9 @@ function Execute-Rollback {
 
         Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile
+        & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$RequireNginx
         if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
-        
+
         $RollbackSucceeded = $true
         Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PrevTag]." -ForegroundColor Green
     } finally {
@@ -194,8 +203,12 @@ function Execute-Rollback {
 [bool]$IsProductionMode = [bool]($RequireDigest -or ($ComposeFile -like "*prod*"))
 
 if ($RollbackOnly) {
+    if (-not $RollbackManifestPath -and -not $NoSchemaChangeVerified) {
+        throw "[GMS GOVERNANCE VIOLATION] -RollbackOnly requires either an explicit -RollbackManifestPath to restore the database to a verified pre-migration state, or -NoSchemaChangeVerified to explicitly confirm no schema migration occurred."
+    }
+    [bool]$dbRollbackRequired = [bool](-not [string]::IsNullOrWhiteSpace($RollbackManifestPath))
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RequireDbRollback $false
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $RollbackManifestPath -RequireDbRollback $dbRollbackRequired
         exit 0
     }
     catch {
@@ -230,61 +243,56 @@ $env:RELEASE_TAG = $TargetReleaseTag
 $env:BACKEND_IMAGE = if ($BackendDigest) { "gms-backend@$BackendDigest" } else { "gms-backend:$TargetReleaseTag" }
 $env:FRONTEND_IMAGE = if ($FrontendDigest) { "gms-frontend@$FrontendDigest" } else { "gms-frontend:$TargetReleaseTag" }
 
-Write-Host "[GMS Deploy] Starting immutable deployment for Release Tag: [$TargetReleaseTag]..." -ForegroundColor Cyan
-if ($BackendDigest) { Write-Host "[GMS Deploy] Enforcing Backend Image Digest: [$BackendDigest]" -ForegroundColor Cyan }
-if ($FrontendDigest) { Write-Host "[GMS Deploy] Enforcing Frontend Image Digest: [$FrontendDigest]" -ForegroundColor Cyan }
-Write-Host "[GMS Deploy] Fallback rollback tag in case of verification failure: [$PreviousReleaseTag]" -ForegroundColor Yellow
+Write-Host "==============================================================================" -ForegroundColor Cyan
+Write-Host "Starting GMS Immutable Deployment Process: Target Release [$TargetReleaseTag]" -ForegroundColor Cyan
+Write-Host "Backend Image:  $env:BACKEND_IMAGE" -ForegroundColor Gray
+Write-Host "Frontend Image: $env:FRONTEND_IMAGE" -ForegroundColor Gray
+Write-Host "==============================================================================" -ForegroundColor Cyan
 
-[string]$CapturedPreDeployBackupId = "NONE"
 [string]$CapturedManifestPath = ""
+[string]$CapturedPreDeployBackupId = "NONE"
 [bool]$MigrationStarted = $false
 
-# Ensure local backups directory exists on host
-[string]$HostLocalBackupDir = Join-Path $WorkspaceRoot "backups\local"
-if (-not (Test-Path -Path $HostLocalBackupDir -PathType Container)) {
-    New-Item -Path $HostLocalBackupDir -ItemType Directory -Force | Out-Null
-}
-
 try {
-    # Step 1.2: Verify or build image pair for target release
-    if ($UsePrebuiltImages -or (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest)) {
-        Write-Host "[GMS Deploy] Pre-built image pair found for [$TargetReleaseTag]. Using immutable pre-built images (--no-build)..." -ForegroundColor Green
+    # Step 1.1: Verify target image availability and immutability before altering any services
+    Write-Host "[GMS Preflight] Validating image presence and digest immutability..." -ForegroundColor Cyan
+    if (-not (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest)) {
+        throw "Target release image pair [gms-backend:$TargetReleaseTag, gms-frontend:$TargetReleaseTag] is not present or digest mismatched. Aborting deploy."
+    }
+
+    # Step 1.2: Check migration checksums against canonical baseline prior to backup & execution
+    Write-Host "[GMS Preflight] Validating migration history checksums and detecting schema drift..." -ForegroundColor Cyan
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run test:drift
+    if ($LASTEXITCODE -ne 0) { throw "Schema migration checksum verification failed with exit code $LASTEXITCODE. Target migrations have drift!" }
+
+    # Step 1.3: Trigger pre-deployment atomic database and attachment backup
+    Write-Host "[GMS Preflight] Creating mandatory pre-deployment backup..." -ForegroundColor Cyan
+    $PredeployBackupLog = & docker compose -f $ComposeFile --env-file backend\.env run --rm backend node scripts/run-predeploy-backup.js 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Pre-deployment backup script terminated with error code $LASTEXITCODE: $PredeployBackupLog"
+    }
+
+    # Step 1.4: Strict Extraction of Captured Backup ID from Node.js standard output
+    [string]$backupLogCombined = ($PredeployBackupLog | Out-String)
+    if ($backupLogCombined -match "BACKUP_CREATED_ID:\s*(BKP-[^\s\r\n]+)") {
+        $CapturedPreDeployBackupId = $Matches[1].Trim()
+        Write-Host "[GMS Preflight] Pre-deployment backup ID captured: $CapturedPreDeployBackupId" -ForegroundColor Green
+    } elseif ($backupLogCombined -match "Backup Created:\s*(BKP-[^\s\r\n]+)") {
+        $CapturedPreDeployBackupId = $Matches[1].Trim()
+        Write-Host "[GMS Preflight] Pre-deployment backup ID captured: $CapturedPreDeployBackupId" -ForegroundColor Green
     } else {
-        if ($UsePrebuiltImages -or $IsProductionMode) {
-            throw "Production deployment error: Prebuilt immutable image pair [gms-backend:$TargetReleaseTag, gms-frontend:$TargetReleaseTag] was not found in registry/local engine. Building on production server working tree is disabled for release immutability."
-        }
-        Write-Host "[GMS Deploy] Building image pair for release [$TargetReleaseTag] from local working tree..." -ForegroundColor Cyan
-        & docker compose -f $ComposeFile --env-file backend\.env build backend frontend
-        if ($LASTEXITCODE -ne 0) { throw "Docker compose build failed with exit code $LASTEXITCODE." }
+        throw "CRITICAL SECURITY FAILURE: Pre-deployment backup ran but could not capture BACKUP_CREATED_ID from stdout output. Output: $backupLogCombined"
     }
 
-    # Step 1.4: Verify migration checksums
-    Write-Host "[GMS Preflight] Verifying database migration checksums..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:verify:checksums
-    if ($LASTEXITCODE -ne 0) { throw "Migration checksums verification failed with exit code $LASTEXITCODE." }
+    # Step 1.5: Bind host manifest path strictly to the captured backupId
+    [string]$HostLocalBackupDir = Join-Path $WorkspaceRoot "backups\local"
+    [string]$ExpectedManifestFile = "gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
+    [string]$ExactHostManifest = Join-Path $HostLocalBackupDir $ExpectedManifestFile
 
-    # Step 1.5: Create mandatory pre-deployment backup
-    Write-Host "[GMS Preflight] Creating mandatory pre-deployment database & attachment backup..." -ForegroundColor Cyan
-    [string]$PredeployBackupLog = (& docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run db:backup:pre-deploy 2>&1).ToString()
-    [int]$BackupExitCode = $LASTEXITCODE
-    Write-Host $PredeployBackupLog
-    if ($BackupExitCode -ne 0) { throw "Pre-deployment backup creation failed with exit code $BackupExitCode." }
-
-    # Capture manifest from PREDEPLOY_BACKUP_METADATA_JSON or latest-predeploy.json
-    if ($PredeployBackupLog -match "PREDEPLOY_BACKUP_METADATA_JSON:(.+)") {
-        try {
-            $metaObj = $Matches[1].Trim() | ConvertFrom-Json
-            if ($metaObj.manifestFile) {
-                [string]$cand1 = Join-Path $HostLocalBackupDir $metaObj.manifestFile
-                if (Test-Path -Path $cand1 -PathType Leaf) {
-                    $CapturedManifestPath = $cand1
-                    $CapturedPreDeployBackupId = $metaObj.backupId
-                }
-            }
-        } catch {}
-    }
-
-    if (-not $CapturedManifestPath) {
+    if (Test-Path -Path $ExactHostManifest -PathType Leaf) {
+        $CapturedManifestPath = $ExactHostManifest
+    } else {
+        # Fallback: check latest-predeploy.json pointer
         [string]$latestPointer = Join-Path $HostLocalBackupDir "latest-predeploy.json"
         if (Test-Path -Path $latestPointer -PathType Leaf) {
             try {
@@ -300,7 +308,7 @@ try {
         }
     }
 
-    if (-not $CapturedManifestPath -and ($PredeployBackupLog -match "Backup Created:\s*(BKP-[^\s\r\n]+)")) {
+    if (-not $CapturedManifestPath -and ($backupLogCombined -match "Backup Created:\s*(BKP-[^\s\r\n]+)")) {
         $CapturedPreDeployBackupId = $Matches[1].Trim()
         [string]$candManifest = Join-Path $HostLocalBackupDir "gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
         if (Test-Path -Path $candManifest -PathType Leaf) {
@@ -345,14 +353,14 @@ try {
     # Step 2: Execute automated health watchdog check
     Write-Host "[GMS Deploy] Verifying post-deployment service health via watchdog..." -ForegroundColor Cyan
     $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-    & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile
+    & pwsh.exe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$RequireNginx
     if ($LASTEXITCODE -ne 0) { throw "Health check verification failed during post-deploy watchdog test." }
 
     Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] successfully deployed and verified healthy." -ForegroundColor Green
 
     # Record release tag and manifests
     $TargetReleaseTag | Out-File -FilePath (Join-Path $WorkspaceRoot "deploy\current_release.txt") -Force -Encoding utf8
-    
+
     [string]$ReleasesDir = Join-Path $WorkspaceRoot "deploy\releases"
     if (-not (Test-Path -Path $ReleasesDir -PathType Container)) {
         New-Item -Path $ReleasesDir -ItemType Directory -Force | Out-Null

@@ -61,13 +61,12 @@ async function main() {
   };
 
   const queryCount = (tableName) => {
-    try {
-      const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
-      const num = parseInt(out, 10);
-      return isNaN(num) ? 0 : num;
-    } catch {
-      return 0;
+    const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
+    const num = parseInt(out, 10);
+    if (isNaN(num)) {
+      throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
     }
+    return num;
   };
 
   function capture16Entities() {
@@ -97,13 +96,15 @@ async function main() {
   // ------------------------------------------------------------------------------
   console.log('Step 1: Initializing baseline database state (6 historical migrations)...');
   const fixtureDumpPath = path.join(projectRoot, 'tests/fixtures/historical/historical_test.dump');
-  if (fs.existsSync(fixtureDumpPath)) {
-    const restoreBaselineCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --clean --if-exists --no-owner --no-acl "${fixtureDumpPath}"`;
-    execSync(restoreBaselineCmd, { env, stdio: 'pipe' });
+  if (!fs.existsSync(fixtureDumpPath)) {
+    throw new Error(`Mandatory fixture missing: historical test dump not found at ${fixtureDumpPath}`);
   }
 
+  const restoreBaselineCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --clean --if-exists --no-owner --no-acl "${fixtureDumpPath}"`;
+  execSync(restoreBaselineCmd, { env, stdio: 'pipe' });
+
   const preDeployEntities = capture16Entities();
-  console.log('Pre-deployment baseline state:', preDeployEntities);
+  console.log('Pre-deployment baseline state (16 Entities):', preDeployEntities);
 
   // ------------------------------------------------------------------------------
   // Step 2: Create Pre-Deployment Backup Snapshot & Companion Manifest
@@ -180,16 +181,27 @@ async function main() {
   // ------------------------------------------------------------------------------
   // Step 5: Verify Post-Rollback Invariants & Database Integrity
   // ------------------------------------------------------------------------------
-  console.log('\nStep 5: Verifying post-rollback schema state and data retention...');
+  console.log('\nStep 5: Verifying post-rollback schema state and 100% 16-entity retention...');
   const postRollbackEntities = capture16Entities();
   console.log('Post-rollback restored state:', postRollbackEntities);
 
   const migrationReverted = (postRollbackEntities.migrations === preDeployEntities.migrations);
-  const usersRetained = (postRollbackEntities.users === preDeployEntities.users);
-  const transactionsRetained = (postRollbackEntities.transactions === preDeployEntities.transactions);
-  const weighbridgeRetained = (postRollbackEntities.weighbridgeRecords === preDeployEntities.weighbridgeRecords);
-  const warehouseRetained = (postRollbackEntities.warehouseProcesses === preDeployEntities.warehouseProcesses);
-  const attachmentsRetained = (postRollbackEntities.attachments === preDeployEntities.attachments);
+
+  // Validate ALL 16 entity tables for exact 100% retention
+  const entityAssertions = {};
+  let all16EntitiesRetained = true;
+  for (const [entityName, baselineCount] of Object.entries(preDeployEntities)) {
+    const restoredCount = postRollbackEntities[entityName];
+    const match = (restoredCount === baselineCount);
+    entityAssertions[entityName] = {
+      pass: match,
+      expected: baselineCount,
+      actual: restoredCount
+    };
+    if (!match) {
+      all16EntitiesRetained = false;
+    }
+  }
 
   // Invariants: 0 duplicate isCurrent (if column exists in restored schema), 0 orphans
   let totalDupes = 0;
@@ -209,11 +221,7 @@ async function main() {
   const totalOrphans = orphanHist + orphanWb;
 
   const rollbackPassed = migrationReverted &&
-                         usersRetained &&
-                         transactionsRetained &&
-                         weighbridgeRetained &&
-                         warehouseRetained &&
-                         attachmentsRetained &&
+                         all16EntitiesRetained &&
                          (totalDupes === 0) &&
                          (totalOrphans === 0);
 
@@ -228,6 +236,9 @@ async function main() {
   // Step 6: Emit Evidence Artifact
   // ------------------------------------------------------------------------------
   const totalDurationSec = (Date.now() - startTime) / 1000;
+  const rpoDurationMs = Math.max(0, Date.now() - new Date(predeployManifest.createdAt).getTime());
+  const rpoMinutes = parseFloat((rpoDurationMs / 60000).toFixed(4));
+
   const evidenceReport = {
     reportTitle: 'GMS Post-Migration Coordinated Rollback Drill Evidence (P0-03)',
     timestamp: new Date().toISOString(),
@@ -235,16 +246,15 @@ async function main() {
     gitSha: process.env.GITHUB_SHA || 'local-sha',
     preDeployBackupId: backupId,
     verifiedPreDeployDumpHash: dumpSha256,
-    rpoMinutes: 0.0,
+    rpoMinutes: rpoMinutes,
     rtoSeconds: parseFloat(totalDurationSec.toFixed(2)),
     preDeployState: preDeployEntities,
     targetPostMigrationState: postMigrationEntities,
     restoredPostRollbackState: postRollbackEntities,
     assertions: {
       migrationCountReverted: { pass: migrationReverted, baseline: preDeployEntities.migrations, restored: postRollbackEntities.migrations },
-      usersRetained: { pass: usersRetained, expected: preDeployEntities.users, actual: postRollbackEntities.users },
-      transactionsRetained: { pass: transactionsRetained, expected: preDeployEntities.transactions, actual: postRollbackEntities.transactions },
-      attachmentsRetained: { pass: attachmentsRetained, expected: preDeployEntities.attachments, actual: postRollbackEntities.attachments },
+      all16EntitiesRetained: { pass: all16EntitiesRetained },
+      entityDetails: entityAssertions,
       zeroDuplicateIsCurrent: { pass: totalDupes === 0, violations: totalDupes },
       zeroForeignOrphans: { pass: totalOrphans === 0, violations: totalOrphans }
     }
@@ -254,7 +264,7 @@ async function main() {
   fs.writeFileSync(evidenceJsonPath, JSON.stringify(evidenceReport, null, 2), 'utf8');
 
   console.log('\n==============================================================================');
-  console.log(`Coordinated Rollback Drill Status: ${rollbackPassed ? 'PASSED' : 'FAILED'} (RTO: ${totalDurationSec.toFixed(2)}s)`);
+  console.log(`Coordinated Rollback Drill Status: ${rollbackPassed ? 'PASSED' : 'FAILED'} (RTO: ${totalDurationSec.toFixed(2)}s, Measured RPO: ${rpoMinutes}m)`);
   console.log(`Saved exact rollback evidence artifact to: ${evidenceJsonPath}`);
   console.log('==============================================================================\n');
 

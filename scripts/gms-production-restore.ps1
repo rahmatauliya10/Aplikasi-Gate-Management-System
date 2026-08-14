@@ -1,10 +1,12 @@
 # ==============================================================================
-# GMS Production DR Control Plane & Staged Atomic Restore Operator Tool (P0-06)
+# GMS Production DR Control Plane & Staged Compensating Restore Operator Tool (P0-06)
 # ==============================================================================
 # Purpose: Executes production database & attachment restores via an ISOLATED STAGING
-# PIPELINE. Ensures 100% atomic switch-over: live database & live uploads are NEVER
-# modified until checksums, schema migrations, business invariants, and physical
-# attachment SHA-256 relative path reconciliations pass 100% verification.
+# PIPELINE with Compensating Safety Rollback and Fail-Closed Maintenance Freeze.
+# Checksums, schema migrations, business invariants, and physical attachment SHA-256
+# relative path reconciliations are validated in staging prior to promotion.
+# In the event of promotion failure, pre-restore safety snapshot compensation reverts
+# live database state while traffic remains frozen in maintenance mode.
 # ==============================================================================
 
 param(

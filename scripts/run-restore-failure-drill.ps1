@@ -101,48 +101,46 @@ try {
     [string]$CorruptDumpPath = Join-Path $TempCorruptDir "corrupted_test.dump"
     [string]$CorruptManifestPath = Join-Path $TempCorruptDir "corrupt_manifest.json"
 
-    if (Test-Path -Path $RealDumpPath) {
-        [byte[]]$dumpBytes = [System.IO.File]::ReadAllBytes($RealDumpPath)
-        [string]$originalHash = (Get-FileHash -Path $RealDumpPath -Algorithm SHA256).Hash.ToLower()
-        if ($dumpBytes.Length -gt 100) {
-            $dumpBytes[50] = [byte]($dumpBytes[50] -bxor 0xFF) # tamper single byte
-        }
-        [System.IO.File]::WriteAllBytes($CorruptDumpPath, $dumpBytes)
-
-        $CorruptManifestObj = @{
-            manifestType = "HISTORICAL_REHEARSAL_FIXTURE"
-            backupId = "BKP-DRILL-CORRUPT-TAMPERED-BYTE"
-            createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-            artifacts = @{
-                dump = "corrupted_test.dump"
-            }
-            checksums = @{
-                dump = $originalHash # Original hash does not match tampered bytes
-            }
-        }
-        Set-Content -Path $CorruptManifestPath -Value ($CorruptManifestObj | ConvertTo-Json -Depth 5) -Encoding utf8
-
-        [int]$p1Exit = 0
-        try {
-            & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -Force 2>&1 | Out-Null
-            $p1Exit = $LASTEXITCODE
-        } catch {
-            $p1Exit = 1
-        }
-
-        [bool]$p1Passed = ($p1Exit -ne 0)
-        [string]$p1Details = if ($p1Passed) {
-            "Mismatched/corrupt dump checksum strictly rejected before DB or uploads mutation (ExitCode=$p1Exit)."
-        } else {
-            "Security vulnerability: Corrupted dump was not rejected by restore preflight check."
-        }
-
-        Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details $p1Details -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds -EvidenceData @{ exitCode = $p1Exit; rejectedBeforeMutation = $true }
-    } else {
-        # Fallback assertion if fixture dump not yet built
-        [bool]$p1Passed = $true
-        Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details "Preflight checksum mismatch guard strictly enforced." -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds
+    if (-not (Test-Path -Path $RealDumpPath)) {
+        throw "MANDATORY FIXTURE MISSING: Real dump path not found ($RealDumpPath). Rehearsal drill cannot proceed."
     }
+
+    [byte[]]$dumpBytes = [System.IO.File]::ReadAllBytes($RealDumpPath)
+    [string]$originalHash = (Get-FileHash -Path $RealDumpPath -Algorithm SHA256).Hash.ToLower()
+    if ($dumpBytes.Length -gt 100) {
+        $dumpBytes[50] = [byte]($dumpBytes[50] -bxor 0xFF) # tamper single byte
+    }
+    [System.IO.File]::WriteAllBytes($CorruptDumpPath, $dumpBytes)
+
+    $CorruptManifestObj = @{
+        manifestType = "HISTORICAL_REHEARSAL_FIXTURE"
+        backupId = "BKP-DRILL-CORRUPT-TAMPERED-BYTE"
+        createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        artifacts = @{
+            dump = "corrupted_test.dump"
+        }
+        checksums = @{
+            dump = $originalHash # Original hash does not match tampered bytes
+        }
+    }
+    Set-Content -Path $CorruptManifestPath -Value ($CorruptManifestObj | ConvertTo-Json -Depth 5) -Encoding utf8
+
+    [int]$p1Exit = 0
+    try {
+        & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -Force 2>&1 | Out-Null
+        $p1Exit = $LASTEXITCODE
+    } catch {
+        $p1Exit = 1
+    }
+
+    [bool]$p1Passed = ($p1Exit -ne 0)
+    [string]$p1Details = if ($p1Passed) {
+        "Mismatched/corrupt dump checksum strictly rejected before DB or uploads mutation (ExitCode=$p1Exit)."
+    } else {
+        "Security vulnerability: Corrupted dump was not rejected by restore preflight check."
+    }
+
+    Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details $p1Details -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds -EvidenceData @{ exitCode = $p1Exit; rejectedBeforeMutation = $true }
 } catch {
     Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds
 } finally {
@@ -161,27 +159,26 @@ try {
     [bool]$p2Passed = $false
     [string]$p2Details = ""
 
-    if (Test-Path -Path $FixtureManifest) {
-        try {
-            $env:GMS_FAULT_INJECTION_PHASE = "POST_DB_COMMIT"
-            & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "POST_DB_COMMIT" -Force 2>&1 | Out-Null
-            $p2Exit = $LASTEXITCODE
-        } catch {
-            $p2Exit = 1
-        } finally {
-            $env:GMS_FAULT_INJECTION_PHASE = ""
-        }
+    if (-not (Test-Path -Path $FixtureManifest)) {
+        throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
+    }
 
-        # Must fail promotion and execute compensating DB rollback
-        $p2Passed = ($p2Exit -ne 0)
-        $p2Details = if ($p2Passed) {
-            "Operator control plane caught post-DB-commit fault and executed automatic compensating DB rollback to pre-restore snapshot (ExitCode=$p2Exit)."
-        } else {
-            "Failure: Fault injection did not trigger expected error during post-commit phase."
-        }
+    try {
+        $env:GMS_FAULT_INJECTION_PHASE = "POST_DB_COMMIT"
+        & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "POST_DB_COMMIT" -Force 2>&1 | Out-Null
+        $p2Exit = $LASTEXITCODE
+    } catch {
+        $p2Exit = 1
+    } finally {
+        $env:GMS_FAULT_INJECTION_PHASE = ""
+    }
+
+    # Must fail promotion and execute compensating DB rollback
+    $p2Passed = ($p2Exit -ne 0)
+    $p2Details = if ($p2Passed) {
+        "Operator control plane caught post-DB-commit fault and executed automatic compensating DB rollback to pre-restore snapshot (ExitCode=$p2Exit)."
     } else {
-        $p2Passed = $true
-        $p2Details = "Operator control plane verifies pre-restore safety dump creation before live database mutation and reverts to snapshot on promotion failure."
+        "Failure: Fault injection did not trigger expected error during post-commit phase."
     }
 
     Record-Drill-Phase -PhaseName "Phase 2: Post-DB-Commit Compensation" -Passed $p2Passed -Details $p2Details -DurationSeconds ((Get-Date) - $p2Start).TotalSeconds -EvidenceData @{ exitCode = $p2Exit; compensationTriggered = $true }
@@ -199,26 +196,25 @@ try {
     [bool]$p3Passed = $false
     [string]$p3Details = ""
 
-    if (Test-Path -Path $FixtureManifest) {
-        try {
-            $env:GMS_FAULT_INJECTION_PHASE = "ATTACHMENT_SWAP"
-            & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -Force 2>&1 | Out-Null
-            $p3Exit = $LASTEXITCODE
-        } catch {
-            $p3Exit = 1
-        } finally {
-            $env:GMS_FAULT_INJECTION_PHASE = ""
-        }
+    if (-not (Test-Path -Path $FixtureManifest)) {
+        throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
+    }
 
-        $p3Passed = ($p3Exit -ne 0)
-        $p3Details = if ($p3Passed) {
-            "Atomic rename and staging upload rollback verified: live uploads tree preserved and reverted upon attachment promotion exception (ExitCode=$p3Exit)."
-        } else {
-            "Failure: Attachment promotion fault was not handled fail-closed."
-        }
+    try {
+        $env:GMS_FAULT_INJECTION_PHASE = "ATTACHMENT_SWAP"
+        & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -Force 2>&1 | Out-Null
+        $p3Exit = $LASTEXITCODE
+    } catch {
+        $p3Exit = 1
+    } finally {
+        $env:GMS_FAULT_INJECTION_PHASE = ""
+    }
+
+    $p3Passed = ($p3Exit -ne 0)
+    $p3Details = if ($p3Passed) {
+        "Atomic rename and staging upload rollback verified: live uploads tree preserved and reverted upon attachment promotion exception (ExitCode=$p3Exit)."
     } else {
-        $p3Passed = $true
-        $p3Details = "Atomic rename and staging upload rollback verified: live uploads tree preserved and reverted upon attachment promotion exception."
+        "Failure: Attachment promotion fault was not handled fail-closed."
     }
 
     Record-Drill-Phase -PhaseName "Phase 3: Attachment Swap Rollback" -Passed $p3Passed -Details $p3Details -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds -EvidenceData @{ exitCode = $p3Exit; uploadsPreserved = $true }
@@ -236,26 +232,25 @@ try {
     [bool]$p4Passed = $false
     [string]$p4Details = ""
 
-    if (Test-Path -Path $FixtureManifest) {
-        try {
-            $env:GMS_FAULT_INJECTION_PHASE = "LIVE_VERIFICATION"
-            & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "LIVE_VERIFICATION" -Force 2>&1 | Out-Null
-            $p4Exit = $LASTEXITCODE
-        } catch {
-            $p4Exit = 1
-        } finally {
-            $env:GMS_FAULT_INJECTION_PHASE = ""
-        }
+    if (-not (Test-Path -Path $FixtureManifest)) {
+        throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
+    }
 
-        $p4Passed = ($p4Exit -ne 0)
-        $p4Details = if ($p4Passed) {
-            "Maintenance flag (/maintenance/active) strictly maintained upon live count/hash discrepancy to freeze write traffic in inconsistent state (ExitCode=$p4Exit)."
-        } else {
-            "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze."
-        }
+    try {
+        $env:GMS_FAULT_INJECTION_PHASE = "LIVE_VERIFICATION"
+        & pwsh.exe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "LIVE_VERIFICATION" -Force 2>&1 | Out-Null
+        $p4Exit = $LASTEXITCODE
+    } catch {
+        $p4Exit = 1
+    } finally {
+        $env:GMS_FAULT_INJECTION_PHASE = ""
+    }
+
+    $p4Passed = ($p4Exit -ne 0)
+    $p4Details = if ($p4Passed) {
+        "Maintenance flag (/maintenance/active) strictly maintained upon live count/hash discrepancy to freeze write traffic in inconsistent state (ExitCode=$p4Exit)."
     } else {
-        $p4Passed = $true
-        $p4Details = "Maintenance flag (/maintenance/active) strictly maintained upon live count/hash mismatch to prevent accepting write traffic in inconsistent state."
+        "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze."
     }
 
     Record-Drill-Phase -PhaseName "Phase 4: Maintenance Freeze on Discrepancy" -Passed $p4Passed -Details $p4Details -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds -EvidenceData @{ exitCode = $p4Exit; maintenanceFreezeActive = $true }
@@ -269,11 +264,22 @@ try {
 [bool]$AllDrillsPassed = ($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count -eq 0
 [double]$TotalDuration = ((Get-Date) - $DrillStartTime).TotalSeconds
 
+[double]$CalculatedRpoMinutes = 0.0
+if (Test-Path -Path $FixtureManifest) {
+    try {
+        $manObj = Get-Content -Path $FixtureManifest -Raw | ConvertFrom-Json
+        if ($manObj.createdAt) {
+            $createdDate = [datetime]::Parse($manObj.createdAt)
+            $CalculatedRpoMinutes = [math]::Round([math]::Max(0.0, ((Get-Date).ToUniversalTime() - $createdDate.ToUniversalTime()).TotalMinutes), 4)
+        }
+    } catch {}
+}
+
 $DrillEvidenceObj = @{
     reportTitle = "GMS Production DR Failure-Injection & Restore Drill Evidence (P0-02)"
     timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
     status = if ($AllDrillsPassed) { "PASSED" } else { "FAILED" }
-    rpoMinutes = 0.0
+    rpoMinutes = $CalculatedRpoMinutes
     rtoSeconds = [math]::Round($TotalDuration, 2)
     drillsSummary = @{
         totalPhases = $script:TestResults.Count
