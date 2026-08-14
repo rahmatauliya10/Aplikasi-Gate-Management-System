@@ -86,21 +86,31 @@ async function main() {
   };
 
   const tableExists = (tableName) => {
-    const out = psql(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${tableName}';`);
-    const num = parseInt(out, 10);
-    return !isNaN(num) && num > 0;
+    try {
+      const out = psql(`SELECT CASE WHEN to_regclass('public."' || '${tableName}' || '"') IS NOT NULL THEN '1' ELSE '0' END;`);
+      return out.trim() === '1';
+    } catch {
+      return false;
+    }
   };
 
   const queryCount = (tableName) => {
     if (!tableExists(tableName)) {
       return 0;
     }
-    const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
-    const num = parseInt(out, 10);
-    if (isNaN(num)) {
-      throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
+    try {
+      const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
+      const num = parseInt(out, 10);
+      if (isNaN(num)) {
+        throw new Error(`Failed to parse numeric count for table [${tableName}]: ${out}`);
+      }
+      return num;
+    } catch (err) {
+      if (err.message && (err.message.includes('does not exist') || (err.stderr && err.stderr.toString().includes('does not exist')))) {
+        return 0;
+      }
+      throw err;
     }
-    return num;
   };
 
   function capture16Entities() {
