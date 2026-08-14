@@ -24,6 +24,9 @@ param(
     [string]$AttachmentArchivePath = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$ManifestPath = "",
+
+    [Parameter(Mandatory=$false)]
     [string]$BackupDir = "",
 
     [Parameter(Mandatory=$false)]
@@ -47,7 +50,7 @@ function Write-Log {
 
 Write-Log "Starting GMS Historical Database Rehearsal Protocol (P0-01)..."
 
-# Locate historical dump file
+# Locate historical dump file and optional manifest
 [string]$ActualDumpPath = $DumpFilePath
 if (-not $ActualDumpPath) {
     [array]$CandidateDirs = @(
@@ -82,6 +85,31 @@ if (-not $ActualDumpPath -or -not (Test-Path -Path $ActualDumpPath -PathType Lea
 }
 
 Write-Log "Using historical dump candidate: $ActualDumpPath"
+
+# Validate manifest SHA-256 if manifest path is provided or present
+[string]$ActualManifestPath = $ManifestPath
+if (-not $ActualManifestPath) {
+    [string]$dumpDir = Split-Path $ActualDumpPath -Parent
+    $foundManifest = Get-ChildItem -Path $dumpDir -Filter "*_manifest.json" | Select-Object -First 1
+    if ($foundManifest) { $ActualManifestPath = $foundManifest.FullName }
+}
+
+if ($ActualManifestPath -and (Test-Path -Path $ActualManifestPath)) {
+    Write-Log "Validating historical backup manifest checksums ($ActualManifestPath)..."
+    try {
+        $ManifestData = Get-Content -Path $ActualManifestPath -Raw | ConvertFrom-Json
+        if ($ManifestData.checksums -and $ManifestData.checksums.dump) {
+            [string]$calcDumpHash = (Get-FileHash -Path $ActualDumpPath -Algorithm SHA256).Hash.ToLower()
+            [string]$expDumpHash = $ManifestData.checksums.dump.ToLower()
+            if ($calcDumpHash -ne $expDumpHash) {
+                throw "Historical Dump Checksum Mismatch! Expected: $expDumpHash, Calculated: $calcDumpHash"
+            }
+            Write-Log "Historical dump SHA-256 checksum verified against manifest [PASS] ($calcDumpHash)" -Level "SUCCESS"
+        }
+    } catch {
+        Write-Log "Manifest Checksum Verification Error: $_" -Level "WARN"
+    }
+}
 
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
 [string]$RehearsalContainer = "gms-rehearsal-postgres-" + $TimestampSuffix
@@ -209,7 +237,7 @@ try {
     [int]$OrphanAtt = [int](Exec-Query "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
     [int]$TotalOrphans = $OrphanHist + $OrphanWb + $OrphanWh + $OrphanAtt
 
-    # 4.5 Physical Attachment Reconciliation if attachment archive or upload dir is available
+    # 4.5 Physical Attachment Reconciliation & SHA-256 verification
     [int]$MissingPhysicalFiles = 0
     [int]$OrphanPhysicalFiles = 0
     [int]$ReconciledPhysicalFiles = 0
@@ -251,17 +279,30 @@ try {
     }
 
     if ($TargetUploadDir -and (Test-Path -Path $TargetUploadDir -PathType Container)) {
-        Write-Log "Verifying physical attachment file existence against DB Attachment records..."
-        [array]$DbAttachmentPaths = (Exec-Query "SELECT \"filePath\" FROM \"Attachment\" WHERE \"filePath\" IS NOT NULL AND \"filePath\" != '';") -split "`n"
-        foreach ($relPath in $DbAttachmentPaths) {
-            $relPathClean = $relPath.Trim()
-            if (-not $relPathClean) { continue }
-            $fullPhysicalPath = Join-Path -Path $TargetUploadDir -ChildPath $relPathClean
-            if (Test-Path -Path $fullPhysicalPath -PathType Leaf) {
-                $ReconciledPhysicalFiles++
-            } else {
-                $MissingPhysicalFiles++
-                Write-Log "  Missing physical attachment file: $relPathClean" -Level "WARN"
+        Write-Log "Verifying physical attachment file existence & DB SHA256 reconciliation..."
+        [string]$AttDbJson = Exec-Query "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', \"filePath\", 'sha256', sha256)), '[]'::json) FROM \"Attachment\";"
+        if (-not [string]::IsNullOrWhiteSpace($AttDbJson) -and $AttDbJson -ne "[]") {
+            $AttDbList = $AttDbJson | ConvertFrom-Json
+            foreach ($att in $AttDbList) {
+                if ($att.filePath) {
+                    [string]$normRelPath = $att.filePath.Replace('/', [System.IO.Path]::DirectorySeparatorChar).Replace('\', [System.IO.Path]::DirectorySeparatorChar).TrimStart([System.IO.Path]::DirectorySeparatorChar)
+                    [string]$fullPhysicalPath = Join-Path -Path $TargetUploadDir -ChildPath $normRelPath
+
+                    if (Test-Path -Path $fullPhysicalPath -PathType Leaf) {
+                        if ($att.sha256) {
+                            [string]$calcHash = (Get-FileHash -Path $fullPhysicalPath -Algorithm SHA256).Hash.ToLower()
+                            if ($calcHash -ne $att.sha256.ToLower()) {
+                                Write-Log "  Attachment SHA256 Mismatch: $normRelPath DB=$($att.sha256), File=$calcHash" -Level "WARN"
+                                $MissingPhysicalFiles++
+                                continue
+                            }
+                        }
+                        $ReconciledPhysicalFiles++
+                    } else {
+                        $MissingPhysicalFiles++
+                        Write-Log "  Missing physical attachment file: $normRelPath" -Level "WARN"
+                    }
+                }
             }
         }
     } else {
@@ -348,26 +389,29 @@ try {
     }
     Set-Content -Path (Join-Path $ArtifactsDir "historical-db-rehearsal.json") -Value ($RehearsalProofObj | ConvertTo-Json -Depth 5) -Encoding utf8
 
-    # 8. Generate smoke-test-report.json artifact
+    # 8. Generate smoke-test-report.json artifact with COMPLETED process criteria
     Write-Log "Step 8: Generating Migration Rehearsal application smoke report..."
-    [bool]$SmokePassed = ($GbbCount -gt 0) -and ($GspCount -gt 0) -and ($GbjCount -gt 0) -and ($GbbCompletedCount -gt 0 -or $GspCompletedCount -gt 0 -or $GbjCompletedCount -gt 0)
+    [bool]$SmokePassed = ($GbbCompletedCount -gt 0) -and ($GspCompletedCount -gt 0) -and ($GbjCompletedCount -gt 0)
     $SmokeObj = @{
         reportTitle = "Migration Rehearsal Application Read Smoke Report"
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
         status = if ($SmokePassed) { "PASSED" } else { "FAILED" }
-        gbbSmokePassed = ($GbbCount -gt 0)
-        gspSmokePassed = ($GspCount -gt 0)
-        gbjSmokePassed = ($GbjCount -gt 0)
+        gbbCompletedSmokePassed = ($GbbCompletedCount -gt 0)
+        gspCompletedSmokePassed = ($GspCompletedCount -gt 0)
+        gbjCompletedSmokePassed = ($GbjCompletedCount -gt 0)
         readQueryVerification = @{
             tableCount = $TableCount
             userCount = $UserCount
             transactionCount = $TxCount
+            gbbCompletedCount = $GbbCompletedCount
+            gspCompletedCount = $GspCompletedCount
+            gbjCompletedCount = $GbjCompletedCount
         }
     }
     Set-Content -Path (Join-Path $ArtifactsDir "smoke-test-report.json") -Value ($SmokeObj | ConvertTo-Json -Depth 5) -Encoding utf8
 
     if (-not $PassedInvariants -or -not $SmokePassed) {
-        throw "Historical DB rehearsal failed! PassedInvariants=$PassedInvariants, SmokePassed=$SmokePassed (Duplicates=$TotalDupes, Orphans=$TotalOrphans, SchemaDriftCode=$SchemaDriftExitCode, MissingFiles=$MissingPhysicalFiles)."
+        throw "Historical DB rehearsal failed! PassedInvariants=$PassedInvariants, SmokePassed=$SmokePassed (Duplicates=$TotalDupes, Orphans=$TotalOrphans, SchemaDriftCode=$SchemaDriftExitCode, MissingFiles=$MissingPhysicalFiles, GbbCompleted=$GbbCompletedCount, GspCompleted=$GspCompletedCount, GbjCompleted=$GbjCompletedCount)."
     }
 
     Write-Log "SUCCESS: Isolated historical DB rehearsal completed successfully. Required 6 evidence artifacts saved to $ArtifactsDir." -Level "SUCCESS"

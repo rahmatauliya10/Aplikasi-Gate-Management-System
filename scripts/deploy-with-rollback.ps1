@@ -30,6 +30,9 @@ param(
     [string]$PreviousFrontendDigest = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$TargetManifestPath = "",
+
+    [Parameter(Mandatory=$false)]
     [string]$ComposeFile = "docker-compose.prod.yml",
 
     [Parameter(Mandatory=$false)]
@@ -72,11 +75,30 @@ function Verify-Image-Exists {
     return ((-not [string]::IsNullOrWhiteSpace($backendImg)) -and (-not [string]::IsNullOrWhiteSpace($frontendImg)))
 }
 
-# Auto-resolve digests from release_manifest.json or local docker image inspect if not explicitly provided
-[string]$ManifestPath = Join-Path $WorkspaceRoot "deploy\release_manifest.json"
-if (Test-Path -Path $ManifestPath -PathType Leaf) {
+# Auto-resolve digests from target release manifest or local docker image inspect if not explicitly provided
+[string]$ResolvedTargetManifest = ""
+if ($TargetManifestPath -and (Test-Path -Path $TargetManifestPath -PathType Leaf)) {
+    $ResolvedTargetManifest = $TargetManifestPath
+} else {
+    [string]$VersionedManifest = Join-Path $WorkspaceRoot "deploy\releases\${TargetReleaseTag}.json"
+    if (Test-Path -Path $VersionedManifest -PathType Leaf) {
+        $ResolvedTargetManifest = $VersionedManifest
+    } else {
+        [string]$DefaultManifest = Join-Path $WorkspaceRoot "deploy\release_manifest.json"
+        if (Test-Path -Path $DefaultManifest -PathType Leaf) {
+            try {
+                $TmpObj = Get-Content -Path $DefaultManifest -Raw | ConvertFrom-Json
+                if (($TmpObj.gitSha -and $TmpObj.gitSha -eq $TargetReleaseTag) -or ($TmpObj.release -and $TmpObj.release -eq $TargetReleaseTag)) {
+                    $ResolvedTargetManifest = $DefaultManifest
+                }
+            } catch {}
+        }
+    }
+}
+
+if ($ResolvedTargetManifest) {
     try {
-        $ManifestObj = Get-Content -Path $ManifestPath -Raw | ConvertFrom-Json
+        $ManifestObj = Get-Content -Path $ResolvedTargetManifest -Raw | ConvertFrom-Json
         if (-not $BackendDigest -and $ManifestObj.backend -and $ManifestObj.backend.digest) {
             $BackendDigest = $ManifestObj.backend.digest
         }
@@ -88,12 +110,6 @@ if (Test-Path -Path $ManifestPath -PathType Leaf) {
         }
         if (-not $PreviousFrontendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.frontend -and $ManifestObj.previousRelease.frontend.digest) {
             $PreviousFrontendDigest = $ManifestObj.previousRelease.frontend.digest
-        }
-        if (-not $PreviousBackendDigest -and $ManifestObj.backend -and $ManifestObj.backend.digest) {
-            $PreviousBackendDigest = $ManifestObj.backend.digest
-        }
-        if (-not $PreviousFrontendDigest -and $ManifestObj.frontend -and $ManifestObj.frontend.digest) {
-            $PreviousFrontendDigest = $ManifestObj.frontend.digest
         }
     } catch {}
 }
@@ -210,8 +226,14 @@ try {
     # Record release tag and manifests
     $TargetReleaseTag | Out-File -FilePath (Join-Path $WorkspaceRoot "deploy\current_release.txt") -Force -Encoding utf8
     
+    [string]$ReleasesDir = Join-Path $WorkspaceRoot "deploy\releases"
+    if (-not (Test-Path -Path $ReleasesDir -PathType Container)) {
+        New-Item -Path $ReleasesDir -ItemType Directory -Force | Out-Null
+    }
+
     $ReleaseManifest = @{
         release = $TargetReleaseTag
+        gitSha = $TargetReleaseTag
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
         backend = @{
             image = "gms-backend"
@@ -227,7 +249,9 @@ try {
             frontend = @{ digest = $PreviousFrontendDigest }
         }
     }
-    Set-Content -Path (Join-Path $WorkspaceRoot "deploy\release_manifest.json") -Value ($ReleaseManifest | ConvertTo-Json -Depth 5) -Encoding utf8
+    [string]$ManifestJson = $ReleaseManifest | ConvertTo-Json -Depth 5
+    Set-Content -Path (Join-Path $WorkspaceRoot "deploy\release_manifest.json") -Value $ManifestJson -Encoding utf8
+    Set-Content -Path (Join-Path $ReleasesDir "${TargetReleaseTag}.json") -Value $ManifestJson -Encoding utf8
 
     exit 0
 }

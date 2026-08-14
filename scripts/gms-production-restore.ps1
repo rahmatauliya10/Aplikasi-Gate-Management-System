@@ -122,6 +122,8 @@ if (-not $PgPass) {
 }
 
 [string]$PromotionPhase = "BEFORE_LIVE_PROMOTION"
+[bool]$RestoreSucceeded = $false
+[string]$PreRestoreDbDump = ""
 
 # Step 3: Enter Maintenance Mode / Application Write Freeze
 Write-Log "Step 2: Enabling Maintenance Mode & Application Write Freeze..."
@@ -177,6 +179,41 @@ try {
         throw "Migration Check Failed: _prisma_migrations table missing or has 0 finished migrations."
     }
     Write-Log "  _prisma_migrations valid count: $MigrationCount [PASS]" -Level "SUCCESS"
+
+    # Full Manifest Record Counts Verification
+    if ($ManifestData.recordCounts) {
+        Write-Log "  Verifying full manifest recordCounts in Staging DB..."
+        $CountsObj = $ManifestData.recordCounts
+        $EntityTableMap = @{
+            "users" = "User"
+            "transactions" = "Transaction"
+            "weighbridgeRecords" = "WeighbridgeRecord"
+            "warehouseProcesses" = "WarehouseProcess"
+            "qcVehicleChecks" = "QcVehicleCheck"
+            "incomingMaterialChecks" = "IncomingMaterialCheck"
+            "attachments" = "Attachment"
+            "transactionCorrections" = "TransactionCorrection"
+        }
+        foreach ($prop in $CountsObj.psobject.Properties) {
+            [string]$entityKey = $prop.Name
+            [int]$expectedCount = [int]$prop.Value
+            [string]$tableName = if ($EntityTableMap.ContainsKey($entityKey)) { $EntityTableMap[$entityKey] } else { $entityKey }
+            [string]$actualCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM `"$tableName`";"
+            [int]$actualCount = 0
+            if ([int]::TryParse($actualCountStr, [ref]$actualCount)) {
+                if ($expectedCount -ne $actualCount) {
+                    throw "Manifest Record Count Mismatch for entity '$entityKey' (table '$tableName'): expected $expectedCount, restored $actualCount"
+                }
+            }
+        }
+        Write-Log "  Full manifest record counts reconciliation [PASS]" -Level "SUCCESS"
+    }
+
+    # Hard Guard: DB Attachment count > 0 requires physical attachment archive
+    [int]$StagingAttCount = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Attachment\";")
+    if ($StagingAttCount -gt 0 -and (-not $AttArchivePath -or -not (Test-Path -Path $AttArchivePath))) {
+        throw "HARD FAIL: Restored staging database contains $StagingAttCount Attachment records, but physical attachment archive is missing."
+    }
 
     # Check Invariants
     [int]$WbDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
@@ -273,6 +310,17 @@ try {
         throw "Live database target container [$LiveContainer] not found or not running. Live database restoration aborted."
     }
 
+    $PreRestoreDbDump = Join-Path -Path $LocalBackupDir -ChildPath "pre_restore_live_db_${TimestampSuffix}.dump"
+    Write-Log "  Creating pre-restore safety dump of Live Production Database ($LiveDbName)..."
+    & docker exec $LiveContainer pg_dump -U $PgUser -d $LiveDbName -F c -f "/tmp/pre_restore_live_db.dump" 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        & docker cp "${LiveContainer}:/tmp/pre_restore_live_db.dump" $PreRestoreDbDump 2>&1 | Out-Null
+        & docker exec $LiveContainer rm -f "/tmp/pre_restore_live_db.dump" 2>&1 | Out-Null
+        Write-Log "  Pre-restore live database snapshot created: $PreRestoreDbDump" -Level "SUCCESS"
+    } else {
+        Write-Log "  Warning: Failed creating pre-restore snapshot of live database." -Level "WARN"
+    }
+
     $PromotionPhase = "DURING_DB_PROMOTION"
     Write-Log "  Live Postgres Container [$LiveContainer] detected. Terminating active client connections..."
     & docker exec $LiveContainer psql -U $PgUser -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$LiveDbName' AND pid <> pg_backend_pid();" 2>&1 | Out-Null
@@ -340,6 +388,8 @@ try {
     Write-Log "PRODUCTION RESTORE COMPLETED SUCCESSFULLY! RTO: $RtoSeconds seconds." -Level "SUCCESS"
     Write-Log "=============================================================================="
 
+    $RestoreSucceeded = $true
+
 } catch {
     Write-Log "=============================================================================="
     Write-Log "PRODUCTION RESTORE FAILED during phase [$PromotionPhase]: $_" -Level "ERROR"
@@ -348,7 +398,26 @@ try {
     } elseif ($PromotionPhase -eq "DURING_DB_PROMOTION") {
         Write-Log "CRITICAL PROMOTION FAILURE: Live database promotion failed (single-transaction rollback executed). Attachments were NOT modified." -Level "ERROR"
     } elseif ($PromotionPhase -eq "DURING_ATTACHMENT_PROMOTION") {
-        Write-Log "CRITICAL PROMOTION FAILURE: Live database promotion succeeded, but attachment promotion failed. Immediate operator intervention required." -Level "ERROR"
+        Write-Log "CRITICAL PROMOTION FAILURE: Live database promotion succeeded, but attachment promotion failed. Attempting automatic rollback of Live DB..." -Level "ERROR"
+        if ($PreRestoreDbDump -and (Test-Path -Path $PreRestoreDbDump)) {
+            try {
+                Write-Log "  Attempting automatic live database rollback to pre-restore snapshot ($PreRestoreDbDump)..." -Level "WARN"
+                [string]$TmpRollbackInLive = "/tmp/rollback_$DumpFileName"
+                & docker cp $PreRestoreDbDump "${LiveContainer}:${TmpRollbackInLive}"
+                & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error $TmpRollbackInLive 2>&1 | Out-Null
+                & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
+                Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
+            } catch {
+                Write-Log "  CRITICAL ROLLBACK ERROR: Automatic live DB rollback failed: $_" -Level "ERROR"
+            }
+        }
+        if (Test-Path -Path $PreRestoreUploadsDir) {
+            try {
+                if (Test-Path -Path $UploadDir) { Remove-Item -Path $UploadDir -Recurse -Force -ErrorAction SilentlyContinue }
+                Rename-Item -Path $PreRestoreUploadsDir -NewName (Split-Path $UploadDir -Leaf)
+                Write-Log "  Uploads directory successfully reverted to pre-restore snapshot." -Level "SUCCESS"
+            } catch {}
+        }
     }
     Write-Log "=============================================================================="
 
@@ -369,15 +438,20 @@ try {
     }
     exit 1
 } finally {
-    # Step 8: Maintenance Mode Teardown & Container Cleanup
-    if (Test-Path -Path $MaintFlagPath) {
-        Remove-Item -Path $MaintFlagPath -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -Path $MaintActivePath) {
-        Remove-Item -Path $MaintActivePath -Force -ErrorAction SilentlyContinue
+    # Step 8: Maintenance Mode Teardown & Container Cleanup (Fail-Closed)
+    if ($RestoreSucceeded) {
+        if (Test-Path -Path $MaintFlagPath) {
+            Remove-Item -Path $MaintFlagPath -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -Path $MaintActivePath) {
+            Remove-Item -Path $MaintActivePath -Force -ErrorAction SilentlyContinue
+        }
+        Write-Log "Maintenance mode released & staging container destroyed."
+    } else {
+        Write-Log "RESTORE FAILED OR INCOMPLETE! MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY." -Level "WARN"
+        Write-Log "Maintenance flags ($MaintFlagPath & $MaintActivePath) have been preserved." -Level "WARN"
     }
     & docker rm -f $StagingContainer 2>&1 | Out-Null
-    Write-Log "Maintenance mode released & staging container destroyed."
 }
 
 exit 0
