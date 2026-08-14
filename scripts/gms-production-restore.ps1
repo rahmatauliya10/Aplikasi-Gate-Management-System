@@ -349,18 +349,22 @@ try {
         throw "Live Database Promotion (pg_restore) failed with exit code $LiveExitCode: $LiveRestoreOut"
     }
 
+    # DB pg_restore committed into live target; transition phase immediately to guarantee DB rollback on any subsequent error
+    $PromotionPhase = "DB_COMMITTED_PENDING_ATTACHMENT"
+    Write-Log "  Live Database pg_restore committed into [$LiveDbName] [PASS]" -Level "SUCCESS"
+
     # Helper for live database verification query
     function Exec-LiveDbQuery([string]$sql) {
         return (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1).ToString().Trim()
     }
 
-    # Verify Live DB migration deployment & invariants
+    # Verify Live DB migration deployment
     [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
     [int]$LiveMigCount = 0
     if (-not [int]::TryParse($LiveMigCountStr, [ref]$LiveMigCount) -or $LiveMigCount -eq 0) {
         throw "Post-Promotion Live DB Verification Error: _prisma_migrations empty or missing in live database."
     }
-    Write-Log "  Live Database Promotion verified [PASS] ($LiveMigCount finished migrations)" -Level "SUCCESS"
+    Write-Log "  Live Database Migration verified ($LiveMigCount finished migrations) [PASS]" -Level "SUCCESS"
 
     # 7b. Atomic Directory Swap for Attachments
     $PromotionPhase = "DURING_ATTACHMENT_PROMOTION"
@@ -371,14 +375,56 @@ try {
     Rename-Item -Path $StagingUploadDir -NewName (Split-Path $UploadDir -Leaf)
     Write-Log "  Physical attachments directory atomically swapped [PASS]" -Level "SUCCESS"
 
-    # Step 7: Record Audit Evidence Proof directly against LIVE database
+    # Step 7: Comprehensive 16-Entity, Invariant, and Attachment Integrity Verification against LIVE target
+    $PromotionPhase = "DURING_LIVE_VERIFICATION"
+    Write-Log "  Executing full 16-entity manifest and invariant verification against live target..."
+
+    [int]$LiveUserCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"User\";")
+    [int]$LiveTxCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Transaction\";")
+    [int]$LiveAttCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\";")
+    [int]$LiveCorrectionCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrection\";")
+    [int]$LiveCorrectionItemCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
+    [int]$LiveWbCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\";")
+    [int]$LiveWhCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\";")
+    [int]$LiveQcvCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"QcVehicleCheck\";")
+    [int]$LiveImCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"IncomingMaterialCheck\";")
+    [int]$LiveFraudCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"FraudCheck\";")
+    [int]$LiveActCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"ActivityLog\";")
+    [int]$LiveSettingCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"AppSetting\";")
+    [int]$LiveAnnounceCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Announcement\";")
+    [int]$LiveIssueCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"SystemIssue\";")
+    [int]$LiveStatusHistCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\";")
+    [int]$LiveWhAccessCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"UserWarehouseAccess\";")
+
+    # Invariant checks on live database
+    [int]$LiveWbDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
+    [int]$LiveWhDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    [int]$LiveQcvDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    [int]$LiveImDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    [int]$LiveTotalDupes = $LiveWbDupeCurrent + $LiveWhDupeCurrent + $LiveQcvDupeCurrent + $LiveImDupeCurrent
+
+    [int]$LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$LiveOrphanWb = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$LiveOrphanWh = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$LiveOrphanAtt = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$LiveTotalOrphans = $LiveOrphanHist + $LiveOrphanWb + $LiveOrphanWh + $LiveOrphanAtt
+
+    if ($LiveTotalDupes -gt 0) {
+        throw "Post-Promotion Live DB Verification Error: Duplicate isCurrent violations detected on live target ($LiveTotalDupes)."
+    }
+    if ($LiveTotalOrphans -gt 0) {
+        throw "Post-Promotion Live DB Verification Error: Foreign key orphan violations detected on live target ($LiveTotalOrphans)."
+    }
+
+    # Physical attachment reconciliation on live uploads
+    if ($LiveAttCount -gt 0 -and $AttArchivePath) {
+        if ($RestoredPhysicalCount -lt $LiveAttCount) {
+            Write-Log "  Warning: Physical attachments ($RestoredPhysicalCount) is less than DB attachment records ($LiveAttCount)." -Level "WARN"
+        }
+    }
+
     [datetime]$RestoreEndTime = Get-Date
     [double]$RtoSeconds = [math]::Round(($RestoreEndTime - $RestoreStartTime).TotalSeconds, 2)
-
-    [int]$TxCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Transaction\";")
-    [int]$UserCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"User\";")
-    [int]$AttDbCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\";")
-    [int]$CorrectionCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrection\";")
 
     $EvidenceObj = @{
         restoreId = "RESTORE-" + $TimestampSuffix
@@ -388,18 +434,31 @@ try {
         verifiedDumpHash = $ActualDumpHash
         verifiedAttachmentArchiveHash = if ($AttArchivePath) { (Get-FileHash -Path $AttArchivePath -Algorithm SHA256).Hash.ToLower() } else { null }
         recordCountsVerified = @{
-            users = $UserCount
-            transactions = $TxCount
+            users = $LiveUserCount
+            userWarehouseAccess = $LiveWhAccessCount
+            transactions = $LiveTxCount
+            transactionStatusHistory = $LiveStatusHistCount
+            weighbridgeRecords = $LiveWbCount
+            warehouseProcesses = $LiveWhCount
+            qcVehicleChecks = $LiveQcvCount
+            incomingMaterialChecks = $LiveImCount
+            attachments = $LiveAttCount
+            restoredPhysicalAttachments = $RestoredPhysicalCount
+            fraudChecks = $LiveFraudCount
+            activityLogs = $LiveActCount
+            appSettings = $LiveSettingCount
+            announcements = $LiveAnnounceCount
+            systemIssues = $LiveIssueCount
+            transactionCorrections = $LiveCorrectionCount
+            transactionCorrectionItems = $LiveCorrectionItemCount
             migrations = $LiveMigCount
-            attachments = $RestoredPhysicalCount
-            corrections = $CorrectionCount
         }
-        duplicateIsCurrentViolations = 0
-        fkOrphanViolations = 0
+        duplicateIsCurrentViolations = $LiveTotalDupes
+        fkOrphanViolations = $LiveTotalOrphans
         rtoSeconds = $RtoSeconds
     }
 
-    $EvidenceJson = $EvidenceObj | ConvertTo-Json -Compress
+    $EvidenceJson = $EvidenceObj | ConvertTo-Json -Depth 5 -Compress
     Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
     Write-Log "Restore Evidence Proof written to $RestoreEvidencePath [PASS]" -Level "SUCCESS"
 
@@ -414,10 +473,8 @@ try {
     Write-Log "PRODUCTION RESTORE FAILED during phase [$PromotionPhase]: $_" -Level "ERROR"
     if ($PromotionPhase -eq "BEFORE_LIVE_PROMOTION") {
         Write-Log "FAIL-CLOSED ACTIVE: Live database and live attachment files were NOT modified." -Level "ERROR"
-    } elseif ($PromotionPhase -eq "DURING_DB_PROMOTION") {
-        Write-Log "CRITICAL PROMOTION FAILURE: Live database promotion failed (single-transaction rollback executed). Attachments were NOT modified." -Level "ERROR"
-    } elseif ($PromotionPhase -eq "DURING_ATTACHMENT_PROMOTION") {
-        Write-Log "CRITICAL PROMOTION FAILURE: Live database promotion succeeded, but attachment promotion failed. Attempting automatic rollback of Live DB..." -Level "ERROR"
+    } elseif ($PromotionPhase -in @("DURING_DB_PROMOTION", "DB_COMMITTED_PENDING_ATTACHMENT", "DURING_ATTACHMENT_PROMOTION", "DURING_LIVE_VERIFICATION")) {
+        Write-Log "CRITICAL PROMOTION FAILURE: Live database was affected or committed. Attempting automatic compensating rollback of Live DB..." -Level "ERROR"
         if ($PreRestoreDbDump -and (Test-Path -Path $PreRestoreDbDump)) {
             try {
                 Write-Log "  Attempting automatic live database rollback to pre-restore snapshot ($PreRestoreDbDump)..." -Level "WARN"

@@ -1210,6 +1210,49 @@ describe('OperationLogCorrectionService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('should reject correction if evidenceAttachmentId lacks verified sha256 checksum (P1-08)', async () => {
+      const mockTx = {
+        id: 'tx-1',
+        status: 'COMPLETED',
+        revision: 1,
+      };
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.attachment.findFirst = jest.fn().mockResolvedValue({
+        id: 'att-no-hash',
+        transactionId: 'tx-1',
+        isCurrent: true,
+        sha256: null,
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT_ANGKA',
+        remark: 'Evidence test no hash',
+        expectedRevision: 1,
+        evidenceAttachmentId: 'att-no-hash',
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WEIGHBRIDGE,
+            targetField: 'grossWeight',
+            newValue: 15000,
+            targetRecordId: 'wb-1',
+          },
+        ],
+      };
+
+      await expect(
+        service.correctOperationLog('tx-1', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('should correctly attribute originalCreatedBy to Transaction.createdBy (P1-08)', async () => {
       (mockPrismaService.transaction.findUnique as any) = jest
         .fn()

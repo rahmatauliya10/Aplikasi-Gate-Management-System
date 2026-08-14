@@ -258,11 +258,17 @@ export class OperationLogCorrectionService {
           where: {
             id: dto.evidenceAttachmentId,
             transactionId: id,
+            isCurrent: true,
           },
         });
         if (!validAttachment) {
           throw new BadRequestException(
-            'Lampiran bukti koreksi (evidenceAttachmentId) tidak ditemukan atau tidak terkait dengan transaksi ini.',
+            'Lampiran bukti koreksi (evidenceAttachmentId) tidak ditemukan, tidak berstatus current (isCurrent=true), atau tidak terkait dengan transaksi ini.',
+          );
+        }
+        if (!validAttachment.sha256) {
+          throw new BadRequestException(
+            'Lampiran bukti koreksi (evidenceAttachmentId) tidak memiliki checksum SHA-256 yang terverifikasi.',
           );
         }
       }

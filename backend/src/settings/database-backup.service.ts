@@ -428,14 +428,38 @@ export class DatabaseBackupService
       }
     }
 
-    const safeFetch = async (fetcher: () => Promise<any[]>): Promise<any[]> => {
+    const isMissingTableError = (err: any): boolean => {
+      if (!err) return false;
+      if (err.code === 'P2021' || err.code === '42P01') return true;
+      const msg = (err.message || '').toLowerCase();
+      if (
+        msg.includes('does not exist') ||
+        msg.includes('undefined_table') ||
+        (msg.includes('relation') && msg.includes('does not exist')) ||
+        (msg.includes('table') && msg.includes('does not exist'))
+      ) {
+        return true;
+      }
+      return false;
+    };
+
+    const safeFetch = async (
+      tableName: string,
+      fetcher: () => Promise<any[]>,
+    ): Promise<any[]> => {
       try {
         return await fetcher();
       } catch (err: any) {
-        this.logger.warn(
-          `Non-critical snapshot table fetch skipped (e.g. legacy schema): ${err.message}`,
+        if (isMissingTableError(err)) {
+          this.logger.warn(
+            `Non-critical snapshot table [${tableName}] fetch skipped (e.g. legacy schema table missing): ${err.message}`,
+          );
+          return [];
+        }
+        this.logger.error(
+          `Critical error fetching table [${tableName}] during backup snapshot: ${err.message}`,
         );
-        return [];
+        throw err;
       }
     };
 
@@ -457,68 +481,82 @@ export class DatabaseBackupService
       transactionCorrections,
       transactionCorrectionItems,
     ] = await Promise.all([
-      safeFetch(() => this.prisma.user.findMany()),
+      safeFetch('User', () => this.prisma.user.findMany()),
       safeFetch(
+        'UserWarehouseAccess',
         () =>
           (this.prisma as any).userWarehouseAccess?.findMany() ||
           Promise.resolve([]),
       ),
-      safeFetch(() => this.prisma.transaction.findMany()),
+      safeFetch('Transaction', () => this.prisma.transaction.findMany()),
       safeFetch(
+        'TransactionStatusHistory',
         () =>
           (this.prisma as any).transactionStatusHistory?.findMany() ||
           Promise.resolve([]),
       ),
       safeFetch(
+        'WeighbridgeRecord',
         () =>
           (this.prisma as any).weighbridgeRecord?.findMany() ||
           Promise.resolve([]),
       ),
       safeFetch(
+        'WarehouseProcess',
         () =>
           (this.prisma as any).warehouseProcess?.findMany() ||
           Promise.resolve([]),
       ),
       safeFetch(
+        'QcVehicleCheck',
         () =>
           (this.prisma as any).qcVehicleCheck?.findMany() ||
           Promise.resolve([]),
       ),
       safeFetch(
+        'IncomingMaterialCheck',
         () =>
           (this.prisma as any).incomingMaterialCheck?.findMany() ||
           Promise.resolve([]),
       ),
       safeFetch(
+        'Attachment',
         () =>
           (this.prisma as any).attachment?.findMany() || Promise.resolve([]),
       ),
       safeFetch(
+        'FraudCheck',
         () =>
           (this.prisma as any).fraudCheck?.findMany() || Promise.resolve([]),
       ),
       safeFetch(
+        'ActivityLog',
         () =>
           (this.prisma as any).activityLog?.findMany() || Promise.resolve([]),
       ),
       safeFetch(
+        'AppSetting',
         () =>
           (this.prisma as any).appSetting?.findMany() || Promise.resolve([]),
       ),
       safeFetch(
+        'Announcement',
         () =>
           (this.prisma as any).announcement?.findMany() || Promise.resolve([]),
       ),
       safeFetch(
+        'SystemIssue',
         () =>
           (this.prisma as any).systemIssue?.findMany() || Promise.resolve([]),
       ),
       safeFetch(
+        'TransactionCorrection',
         () =>
           (this.prisma as any).transactionCorrection?.findMany() ||
           Promise.resolve([]),
       ),
       safeFetch(
+        'TransactionCorrectionItem',
         () =>
           (this.prisma as any).transactionCorrectionItem?.findMany() ||
           Promise.resolve([]),
@@ -1580,7 +1618,15 @@ export class DatabaseBackupService
       }
 
       // Create Pre-Restore backup snapshot
-      await this.runAutomatedScheduledBackup('AUTO_PRE_RESTORE', user);
+      const preRestoreManifest = await this.runAutomatedScheduledBackup(
+        'AUTO_PRE_RESTORE',
+        user,
+      );
+      if (preRestoreManifest.localStatus !== 'VERIFIED') {
+        throw new InternalServerErrorException(
+          'Snapshot pra-pemulihan otomatis gagal diverifikasi. Pemulihan dibatalkan.',
+        );
+      }
 
       // Perform pg_restore
       const dbUrl = process.env.DATABASE_URL;

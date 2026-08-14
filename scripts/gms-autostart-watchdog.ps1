@@ -206,26 +206,37 @@ try {
             throw "GMS Frontend service container is not running (State: $feStatus)."
         }
     }
+    [string]$NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
+    if ($NginxContainerId) {
+        [string]$ngStatus = (& docker inspect --format="{{.State.Status}}" $NginxContainerId 2>&1).ToString().Trim()
+        if ($ngStatus -eq "running") {
+            Write-SanitizedLog -Message "GMS Nginx reverse proxy service is RUNNING." -Level "INFO"
+        } else {
+            throw "GMS Nginx reverse proxy container is not running (State: $ngStatus)."
+        }
+    }
 
     # --- Step 7c: Backend /api/health HTTP Smoke Check ---
     Write-SanitizedLog -Message "Performing application HTTP readiness check on /api/health..." -Level "INFO"
-    try {
-        [string]$HealthResp = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
-            const http = require('http');
-            const req = http.get('http://localhost:3000/api/health', (res) => {
-                if (res.statusCode === 200) { process.exit(0); }
-                else { process.exit(1); }
-            });
-            req.on('error', () => process.exit(1));
-        " 2>&1).ToString()
-        if ($LASTEXITCODE -eq 0) {
-            Write-SanitizedLog -Message "Backend /api/health HTTP probe responded 200 OK [PASS]." -Level "SUCCESS"
-        } else {
-            Write-SanitizedLog -Message "Backend /api/health HTTP probe failed with exit code $LASTEXITCODE." -Level "WARN"
-        }
-    } catch {
-        Write-SanitizedLog -Message "Backend /api/health HTTP probe skipped: $_" -Level "WARN"
+    [string]$HealthResp = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
+        const http = require('http');
+        const port = process.env.PORT || 3001;
+        const req = http.get('http://127.0.0.1:' + port + '/api/health', (res) => {
+            if (res.statusCode === 200) { process.exit(0); }
+            else { 
+                console.error('HTTP Health Check returned status: ' + res.statusCode);
+                process.exit(1); 
+            }
+        });
+        req.on('error', (err) => {
+            console.error('HTTP Health Check connection error: ' + err.message);
+            process.exit(1);
+        });
+    " 2>&1).ToString()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend /api/health HTTP readiness probe failed: $HealthResp"
     }
+    Write-SanitizedLog -Message "Backend /api/health HTTP probe responded 200 OK [PASS]." -Level "SUCCESS"
 
     # --- Step 8: Final Summary & Verification Report ---
     Write-SanitizedLog -Message "GMS Production Auto-Recovery Watchdog completed SUCCESSFULLY in $($OverallTimer.Elapsed.TotalSeconds) seconds." -Level "SUCCESS"

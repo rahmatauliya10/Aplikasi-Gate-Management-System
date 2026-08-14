@@ -185,6 +185,7 @@ jobs:
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
           E2E_API_URL: http://localhost:3001
         run: |
+          set -Eeuo pipefail
           echo "Initializing full-stack staging gate environment..."
           cp backend/.env.example backend/.env 2>/dev/null || touch backend/.env
           echo "JWT_ACCESS_SECRET=test-jwt-access-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
@@ -214,45 +215,86 @@ jobs:
           fi
           
           # 1. Versioned Release Manifest with actual image digests/IDs
-          cat > deploy/release_manifest.json <<EOF
-          {
-            "manifestType": "CI_TEST_EVIDENCE",
-            "release": "${GITHUB_SHA}",
-            "gitSha": "${GITHUB_SHA}",
-            "timestamp": "${CI_TIMESTAMP}",
-            "backend": { "image": "gms-backend", "digest": "${BACKEND_IMAGE_ID}", "ciLocalImageId": "${BACKEND_IMAGE_ID}" },
-            "frontend": { "image": "gms-frontend", "digest": "${FRONTEND_IMAGE_ID}", "ciLocalImageId": "${FRONTEND_IMAGE_ID}" }
-          }
-          EOF
-          cp deploy/release_manifest.json deploy/releases/${GITHUB_SHA}.json
-
-          # 2. Extract Authentic Database Migration & Invariant Metrics from Live Staging Container
-          TABLE_COUNT=$(docker compose exec -T postgres psql -U postgres -d gms -t -A -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';" 2>/dev/null | tr -d '\r\n' || echo "0")
-          MIGRATION_COUNT=$(docker compose exec -T postgres psql -U postgres -d gms -t -A -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>/dev/null | tr -d '\r\n' || echo "0")
-          TX_COUNT=$(docker compose exec -T postgres psql -U postgres -d gms -t -A -c "SELECT COUNT(*) FROM \"Transaction\";" 2>/dev/null | tr -d '\r\n' || echo "0")
-          USER_COUNT=$(docker compose exec -T postgres psql -U postgres -d gms -t -A -c "SELECT COUNT(*) FROM \"User\";" 2>/dev/null | tr -d '\r\n' || echo "0")
-          GBB_COMPLETED=$(docker compose exec -T postgres psql -U postgres -d gms -t -A -c "SELECT COUNT(*) FROM \"Transaction\" WHERE \"commodityType\" = 'GBB' AND status = 'COMPLETED';" 2>/dev/null | tr -d '\r\n' || echo "0")
-          GSP_COMPLETED=$(docker compose exec -T postgres psql -U postgres -d gms -t -A -c "SELECT COUNT(*) FROM \"Transaction\" WHERE \"commodityType\" = 'GSP' AND status = 'COMPLETED';" 2>/dev/null | tr -d '\r\n' || echo "0")
-          GBJ_COMPLETED=$(docker compose exec -T postgres psql -U postgres -d gms -t -A -c "SELECT COUNT(*) FROM \"Transaction\" WHERE \"commodityType\" = 'GBJ' AND status = 'COMPLETED';" 2>/dev/null | tr -d '\r\n' || echo "0")
-
-          # 3. Dynamic E2E Smoke & Read Path Verification Proof
-          cat > artifacts/release-proof/smoke-test-report.json <<EOF
-          {
-            "reportTitle": "Cross-Stack CI E2E & Business Smoke Verification Report",
-            "timestamp": "${CI_TIMESTAMP}",
-            "status": "PASSED",
-            "gitSha": "${GITHUB_SHA}",
-            "verifiedMetrics": {
-              "tableCount": ${TABLE_COUNT},
-              "migrationCount": ${MIGRATION_COUNT},
-              "userCount": ${USER_COUNT},
-              "transactionCount": ${TX_COUNT},
-              "gbbCompletedCount": ${GBB_COMPLETED},
-              "gspCompletedCount": ${GSP_COMPLETED},
-              "gbjCompletedCount": ${GBJ_COMPLETED}
+          node -e "
+            const fs = require('fs');
+            const manifest = {
+              manifestType: 'CI_TEST_EVIDENCE',
+              release: process.env.GITHUB_SHA || 'local-sha',
+              gitSha: process.env.GITHUB_SHA || 'local-sha',
+              timestamp: '$CI_TIMESTAMP',
+              backend: { image: 'gms-backend', digest: '$BACKEND_IMAGE_ID', ciLocalImageId: '$BACKEND_IMAGE_ID' },
+              frontend: { image: 'gms-frontend', digest: '$FRONTEND_IMAGE_ID', ciLocalImageId: '$FRONTEND_IMAGE_ID' }
+            };
+            fs.writeFileSync('deploy/release_manifest.json', JSON.stringify(manifest, null, 2), 'utf8');
+            if (process.env.GITHUB_SHA) {
+              fs.writeFileSync('deploy/releases/' + process.env.GITHUB_SHA + '.json', JSON.stringify(manifest, null, 2), 'utf8');
             }
-          }
-          EOF
+          "
+
+          # 2. Extract Authentic Database Migration & Invariant Metrics directly from Staging Container via Node
+          node -e "
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+
+            function queryPostgres(sql) {
+              const cmd = 'docker compose exec -T postgres psql -U postgres -d gms -t -A -c \"' + sql.replace(/\"/g, '\\\\\"') + '\"';
+              const out = execSync(cmd, { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+              const num = parseInt(out, 10);
+              if (isNaN(num)) {
+                throw new Error('Query returned non-numeric result for [' + sql + ']: ' + out);
+              }
+              return num;
+            }
+
+            console.log('Querying staging database metrics for release proof...');
+            const tableCount = queryPostgres(\"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';\");
+            const migrationCount = queryPostgres(\"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\");
+            const userCount = queryPostgres(\"SELECT COUNT(*) FROM \\\"User\\\";\");
+            const txCount = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\";\");
+            const gbbCompleted = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GBB' AND status = 'COMPLETED';\");
+            const gspCompleted = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GSP' AND status = 'COMPLETED';\");
+            const gbjCompleted = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GBJ' AND status = 'COMPLETED';\");
+
+            console.log('Metrics retrieved:', { tableCount, migrationCount, userCount, txCount, gbbCompleted, gspCompleted, gbjCompleted });
+
+            const assertions = [
+              { name: 'tableCount >= 10', pass: tableCount >= 10, val: tableCount },
+              { name: 'migrationCount >= 1', pass: migrationCount >= 1, val: migrationCount },
+              { name: 'userCount >= 1', pass: userCount >= 1, val: userCount },
+              { name: 'transactionCount >= 1', pass: txCount >= 1, val: txCount },
+              { name: 'gbbCompleted >= 1', pass: gbbCompleted >= 1, val: gbbCompleted },
+              { name: 'gspCompleted >= 1', pass: gspCompleted >= 1, val: gspCompleted },
+              { name: 'gbjCompleted >= 1', pass: gbjCompleted >= 1, val: gbjCompleted }
+            ];
+
+            const allPassed = assertions.every(a => a.pass);
+            const verdictStatus = allPassed ? 'PASSED' : 'FAILED';
+
+            const report = {
+              reportTitle: 'Cross-Stack CI E2E & Business Smoke Verification Report',
+              timestamp: '$CI_TIMESTAMP',
+              status: verdictStatus,
+              gitSha: process.env.GITHUB_SHA || 'local-sha',
+              verifiedMetrics: {
+                tableCount,
+                migrationCount,
+                userCount,
+                transactionCount: txCount,
+                gbbCompletedCount: gbbCompleted,
+                gspCompletedCount: gspCompleted,
+                gbjCompletedCount: gbjCompleted
+              },
+              assertions
+            };
+
+            fs.writeFileSync('artifacts/release-proof/smoke-test-report.json', JSON.stringify(report, null, 2), 'utf8');
+
+            if (!allPassed) {
+              console.error('FATAL: One or more release metric assertions failed!', assertions);
+              process.exit(1);
+            }
+            console.log('All release metric assertions PASSED with valid evidence.');
+          "
 
           docker compose down --volumes --remove-orphans
 

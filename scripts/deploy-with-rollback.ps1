@@ -231,7 +231,21 @@ try {
         New-Item -Path $ReleasesDir -ItemType Directory -Force | Out-Null
     }
 
-    [string]$LatestBackupManifest = (Get-ChildItem -Path (Join-Path $WorkspaceRoot "deploy\backups") -Filter "*_manifest.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName)
+    [string[]]$BackupSearchDirs = @(
+        (Join-Path $WorkspaceRoot "backups\local"),
+        (Join-Path $WorkspaceRoot "deploy\backups"),
+        (Join-Path $WorkspaceRoot "backups")
+    )
+    [string]$LatestBackupManifest = $null
+    foreach ($bDir in $BackupSearchDirs) {
+        if (Test-Path -Path $bDir -PathType Container) {
+            $manifestCandidate = Get-ChildItem -Path $bDir -Filter "*_manifest.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+            if ($manifestCandidate) {
+                $LatestBackupManifest = $manifestCandidate
+                break
+            }
+        }
+    }
     [string]$PreDeployBackupId = if ($LatestBackupManifest) {
         try { (Get-Content -Path $LatestBackupManifest -Raw | ConvertFrom-Json).backupId } catch { "UNKNOWN" }
     } else { "NONE" }
