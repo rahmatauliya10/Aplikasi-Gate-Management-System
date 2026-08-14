@@ -484,5 +484,24 @@ describe('DatabaseBackupService', () => {
         }
       }
     });
+
+    it('should return null for lastBackupAgeHours when no verified backup exists (P2-06)', async () => {
+      jest.spyOn(service, 'getBackupHistory').mockResolvedValue([]);
+      const status = await service.getSystemStatus();
+      expect(status.status).toBe('CRITICAL');
+      expect(status.lastBackupAgeHours).toBeNull();
+    });
+
+    it('should create native pg_dump backup even if legacy schema tables are missing (P0-02)', async () => {
+      prismaService.transactionCorrection = {
+        findMany: jest.fn().mockRejectedValue(new Error('Table not found')),
+      };
+      const manifest = await service.runAutomatedScheduledBackup(
+        'MANUAL_PRE_UPDATE',
+        mockAdminUser,
+      );
+      expect(manifest.backupId).toBeDefined();
+      expect(manifest.localStatus).toBe('VERIFIED');
+    });
   });
 });

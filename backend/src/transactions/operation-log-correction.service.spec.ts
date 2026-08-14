@@ -83,6 +83,9 @@ describe('OperationLogCorrectionService', () => {
       update: jest.fn().mockResolvedValue({ id: 'inc-1' }),
     },
     attachment: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'att-1', transactionId: 'tx-1' }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       create: jest
         .fn()
@@ -1166,6 +1169,60 @@ describe('OperationLogCorrectionService', () => {
           data: expect.objectContaining({ status: 'QC_VEHICLE_PASSED' }),
         }),
       );
+    });
+
+    it('should reject correction if evidenceAttachmentId does not belong to the transaction (P1-08)', async () => {
+      const mockTx = {
+        id: 'tx-1',
+        status: 'COMPLETED',
+        revision: 1,
+        commodityType: 'GBB',
+      };
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.attachment.findFirst = jest.fn().mockResolvedValue(null);
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT_ANGKA',
+        remark: 'Evidence test',
+        expectedRevision: 1,
+        evidenceAttachmentId: 'invalid-or-cross-tx-att-id',
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WEIGHBRIDGE,
+            targetField: 'grossWeight',
+            newValue: 15000,
+            targetRecordId: 'wb-1',
+          },
+        ],
+      };
+
+      await expect(
+        service.correctOperationLog('tx-1', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should correctly attribute originalCreatedBy to Transaction.createdBy (P1-08)', async () => {
+      (mockPrismaService.transaction.findUnique as any) = jest.fn().mockResolvedValue({
+        id: 'tx-1',
+        createdBy: { id: 'u-1', name: 'John Doe', role: 'SECURITY' },
+        weighInBy: { id: 'u-2', name: 'Weigh Operator', role: 'TIMBANGAN' },
+        warehouseStartBy: null,
+        qcVehicleChecks: [],
+      });
+      (mockPrismaService.transactionCorrection.findMany as any) = jest.fn().mockResolvedValue([]);
+
+      const result = await service.getOperationLogCorrections('tx-1');
+      expect(result.success).toBe(true);
+      expect(result.attribution.originalCreatedBy).toBe('SECURITY — John Doe');
     });
   });
 });

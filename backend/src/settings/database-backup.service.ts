@@ -66,7 +66,7 @@ export interface BackupManifest {
 export interface BackupSystemStatus {
   status: 'PROTECTED' | 'DEGRADED' | 'CRITICAL';
   targetRpoHours: number;
-  lastBackupAgeHours: number;
+  lastBackupAgeHours: number | null;
   lastBackupTimestamp: string | null;
   localBackupStatus: 'VERIFIED' | 'FAILED' | 'NONE';
   offsiteBackupStatus: 'VERIFIED' | 'PENDING' | 'FAILED' | 'NONE';
@@ -310,7 +310,7 @@ export class DatabaseBackupService
     return {
       status,
       targetRpoHours: 6,
-      lastBackupAgeHours: lastBackupAgeHours === 999 ? 0 : lastBackupAgeHours,
+      lastBackupAgeHours: latestVerified ? lastBackupAgeHours : null,
       lastBackupTimestamp,
       localBackupStatus,
       offsiteBackupStatus,
@@ -421,6 +421,17 @@ export class DatabaseBackupService
       }
     }
 
+    const safeFetch = async <T>(fetcher: () => Promise<T[]>): Promise<T[]> => {
+      try {
+        return await fetcher();
+      } catch (err: any) {
+        this.logger.warn(
+          `Non-critical snapshot table fetch skipped (e.g. legacy schema): ${err.message}`,
+        );
+        return [];
+      }
+    };
+
     const [
       users,
       userWarehouseAccess,
@@ -439,22 +450,22 @@ export class DatabaseBackupService
       transactionCorrections,
       transactionCorrectionItems,
     ] = await Promise.all([
-      this.prisma.user.findMany(),
-      this.prisma.userWarehouseAccess.findMany(),
-      this.prisma.transaction.findMany(),
-      this.prisma.transactionStatusHistory.findMany(),
-      this.prisma.weighbridgeRecord.findMany(),
-      this.prisma.warehouseProcess.findMany(),
-      this.prisma.qcVehicleCheck.findMany(),
-      this.prisma.incomingMaterialCheck.findMany(),
-      this.prisma.attachment.findMany(),
-      this.prisma.fraudCheck.findMany(),
-      this.prisma.activityLog.findMany(),
-      this.prisma.appSetting.findMany(),
-      this.prisma.announcement.findMany(),
-      this.prisma.systemIssue.findMany(),
-      this.prisma.transactionCorrection.findMany(),
-      this.prisma.transactionCorrectionItem.findMany(),
+      safeFetch(() => this.prisma.user.findMany()),
+      safeFetch(() => (this.prisma as any).userWarehouseAccess?.findMany() || Promise.resolve([])),
+      safeFetch(() => this.prisma.transaction.findMany()),
+      safeFetch(() => (this.prisma as any).transactionStatusHistory?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).weighbridgeRecord?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).warehouseProcess?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).qcVehicleCheck?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).incomingMaterialCheck?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).attachment?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).fraudCheck?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).activityLog?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).appSetting?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).announcement?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).systemIssue?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).transactionCorrection?.findMany() || Promise.resolve([])),
+      safeFetch(() => (this.prisma as any).transactionCorrectionItem?.findMany() || Promise.resolve([])),
     ]);
 
     const recordCounts = {
@@ -884,12 +895,18 @@ export class DatabaseBackupService
       this.logger.warn(`Copy to offsite NAS failed: ${e.message}`);
     }
 
+    const isOverallSuccess =
+      manifest.localStatus === 'VERIFIED' &&
+      (manifest.offsiteStatus === 'VERIFIED' ||
+        manifest.offsiteStatus === 'PENDING' ||
+        !this.nasBackupDir);
+
     await this.activityLogsService.logAction({
       userId: user.id,
       action: 'DATABASE_BACKUP',
       module: 'SETTINGS',
       description: `Created backup ${backupId} (${type}, Local: ${manifest.localStatus}, Offsite: ${manifest.offsiteStatus})`,
-      status: 'SUCCESS',
+      status: isOverallSuccess ? 'SUCCESS' : 'FAILED',
     });
 
     return manifest;

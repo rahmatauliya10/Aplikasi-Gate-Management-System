@@ -99,17 +99,17 @@ if ($TargetManifestPath -and (Test-Path -Path $TargetManifestPath -PathType Leaf
 if ($ResolvedTargetManifest) {
     try {
         $ManifestObj = Get-Content -Path $ResolvedTargetManifest -Raw | ConvertFrom-Json
-        if (-not $BackendDigest -and $ManifestObj.backend -and $ManifestObj.backend.digest) {
-            $BackendDigest = $ManifestObj.backend.digest
+        if (-not $BackendDigest -and $ManifestObj.backend) {
+            $BackendDigest = if ($ManifestObj.backend.digest) { $ManifestObj.backend.digest } else { $ManifestObj.backend.ciLocalImageId }
         }
-        if (-not $FrontendDigest -and $ManifestObj.frontend -and $ManifestObj.frontend.digest) {
-            $FrontendDigest = $ManifestObj.frontend.digest
+        if (-not $FrontendDigest -and $ManifestObj.frontend) {
+            $FrontendDigest = if ($ManifestObj.frontend.digest) { $ManifestObj.frontend.digest } else { $ManifestObj.frontend.ciLocalImageId }
         }
-        if (-not $PreviousBackendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.backend -and $ManifestObj.previousRelease.backend.digest) {
-            $PreviousBackendDigest = $ManifestObj.previousRelease.backend.digest
+        if (-not $PreviousBackendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.backend) {
+            $PreviousBackendDigest = if ($ManifestObj.previousRelease.backend.digest) { $ManifestObj.previousRelease.backend.digest } else { $ManifestObj.previousRelease.backend.ciLocalImageId }
         }
-        if (-not $PreviousFrontendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.frontend -and $ManifestObj.previousRelease.frontend.digest) {
-            $PreviousFrontendDigest = $ManifestObj.previousRelease.frontend.digest
+        if (-not $PreviousFrontendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.frontend) {
+            $PreviousFrontendDigest = if ($ManifestObj.previousRelease.frontend.digest) { $ManifestObj.previousRelease.frontend.digest } else { $ManifestObj.previousRelease.frontend.ciLocalImageId }
         }
     } catch {}
 }
@@ -231,9 +231,17 @@ try {
         New-Item -Path $ReleasesDir -ItemType Directory -Force | Out-Null
     }
 
+    [string]$LatestBackupManifest = (Get-ChildItem -Path (Join-Path $WorkspaceRoot "deploy\backups") -Filter "*_manifest.json" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName)
+    [string]$PreDeployBackupId = if ($LatestBackupManifest) {
+        try { (Get-Content -Path $LatestBackupManifest -Raw | ConvertFrom-Json).backupId } catch { "UNKNOWN" }
+    } else { "NONE" }
+
     $ReleaseManifest = @{
         release = $TargetReleaseTag
         gitSha = $TargetReleaseTag
+        schemaVersion = "1.0.0"
+        migrationChecksumsVerified = $true
+        preDeployBackupId = $PreDeployBackupId
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
         backend = @{
             image = "gms-backend"

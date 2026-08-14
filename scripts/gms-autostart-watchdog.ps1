@@ -195,6 +195,38 @@ try {
         throw "GMS Backend NestJS service failed to reach healthy state after retries."
     }
 
+    # --- Step 7b: Verify Frontend and Reverse Proxy Container Status ---
+    Write-SanitizedLog -Message "Verifying Frontend and Web Gateway container health readiness..." -Level "INFO"
+    [string]$FrontendContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q frontend 2>&1).ToString().Trim()
+    if ($FrontendContainerId) {
+        [string]$feStatus = (& docker inspect --format="{{.State.Status}}" $FrontendContainerId 2>&1).ToString().Trim()
+        if ($feStatus -eq "running") {
+            Write-SanitizedLog -Message "GMS Frontend service is RUNNING." -Level "INFO"
+        } else {
+            throw "GMS Frontend service container is not running (State: $feStatus)."
+        }
+    }
+
+    # --- Step 7c: Backend /api/health HTTP Smoke Check ---
+    Write-SanitizedLog -Message "Performing application HTTP readiness check on /api/health..." -Level "INFO"
+    try {
+        [string]$HealthResp = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
+            const http = require('http');
+            const req = http.get('http://localhost:3000/api/health', (res) => {
+                if (res.statusCode === 200) { process.exit(0); }
+                else { process.exit(1); }
+            });
+            req.on('error', () => process.exit(1));
+        " 2>&1).ToString()
+        if ($LASTEXITCODE -eq 0) {
+            Write-SanitizedLog -Message "Backend /api/health HTTP probe responded 200 OK [PASS]." -Level "SUCCESS"
+        } else {
+            Write-SanitizedLog -Message "Backend /api/health HTTP probe failed with exit code $LASTEXITCODE." -Level "WARN"
+        }
+    } catch {
+        Write-SanitizedLog -Message "Backend /api/health HTTP probe skipped: $_" -Level "WARN"
+    }
+
     # --- Step 8: Final Summary & Verification Report ---
     Write-SanitizedLog -Message "GMS Production Auto-Recovery Watchdog completed SUCCESSFULLY in $($OverallTimer.Elapsed.TotalSeconds) seconds." -Level "SUCCESS"
     exit 0

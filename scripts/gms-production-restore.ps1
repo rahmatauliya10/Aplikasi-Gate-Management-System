@@ -180,19 +180,27 @@ try {
     }
     Write-Log "  _prisma_migrations valid count: $MigrationCount [PASS]" -Level "SUCCESS"
 
-    # Full Manifest Record Counts Verification
+    # Full Manifest Record Counts Verification (P0-02 Complete Mapping)
     if ($ManifestData.recordCounts) {
         Write-Log "  Verifying full manifest recordCounts in Staging DB..."
         $CountsObj = $ManifestData.recordCounts
         $EntityTableMap = @{
             "users" = "User"
+            "userWarehouseAccess" = "UserWarehouseAccess"
             "transactions" = "Transaction"
+            "transactionStatusHistory" = "TransactionStatusHistory"
             "weighbridgeRecords" = "WeighbridgeRecord"
             "warehouseProcesses" = "WarehouseProcess"
             "qcVehicleChecks" = "QcVehicleCheck"
             "incomingMaterialChecks" = "IncomingMaterialCheck"
             "attachments" = "Attachment"
+            "fraudChecks" = "FraudCheck"
+            "activityLogs" = "ActivityLog"
+            "appSettings" = "AppSetting"
+            "announcements" = "Announcement"
+            "systemIssues" = "SystemIssue"
             "transactionCorrections" = "TransactionCorrection"
+            "transactionCorrectionItems" = "TransactionCorrectionItem"
         }
         foreach ($prop in $CountsObj.psobject.Properties) {
             [string]$entityKey = $prop.Name
@@ -200,13 +208,14 @@ try {
             [string]$tableName = if ($EntityTableMap.ContainsKey($entityKey)) { $EntityTableMap[$entityKey] } else { $entityKey }
             [string]$actualCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM `"$tableName`";"
             [int]$actualCount = 0
-            if ([int]::TryParse($actualCountStr, [ref]$actualCount)) {
-                if ($expectedCount -ne $actualCount) {
-                    throw "Manifest Record Count Mismatch for entity '$entityKey' (table '$tableName'): expected $expectedCount, restored $actualCount"
-                }
+            if (-not [int]::TryParse($actualCountStr, [ref]$actualCount)) {
+                throw "HARD FAIL: Database count query failed for entity '$entityKey' (table '$tableName'). Output: $actualCountStr"
+            }
+            if ($expectedCount -ne $actualCount) {
+                throw "Manifest Record Count Mismatch for entity '$entityKey' (table '$tableName'): expected $expectedCount, restored $actualCount"
             }
         }
-        Write-Log "  Full manifest record counts reconciliation [PASS]" -Level "SUCCESS"
+        Write-Log "  Full manifest record counts reconciliation [PASS] (16 entities verified)" -Level "SUCCESS"
     }
 
     # Hard Guard: DB Attachment count > 0 requires physical attachment archive
@@ -311,15 +320,17 @@ try {
     }
 
     $PreRestoreDbDump = Join-Path -Path $LocalBackupDir -ChildPath "pre_restore_live_db_${TimestampSuffix}.dump"
-    Write-Log "  Creating pre-restore safety dump of Live Production Database ($LiveDbName)..."
+    Write-Log "  Creating mandatory pre-restore safety dump of Live Production Database ($LiveDbName)..."
     & docker exec $LiveContainer pg_dump -U $PgUser -d $LiveDbName -F c -f "/tmp/pre_restore_live_db.dump" 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        & docker cp "${LiveContainer}:/tmp/pre_restore_live_db.dump" $PreRestoreDbDump 2>&1 | Out-Null
-        & docker exec $LiveContainer rm -f "/tmp/pre_restore_live_db.dump" 2>&1 | Out-Null
-        Write-Log "  Pre-restore live database snapshot created: $PreRestoreDbDump" -Level "SUCCESS"
-    } else {
-        Write-Log "  Warning: Failed creating pre-restore snapshot of live database." -Level "WARN"
+    if ($LASTEXITCODE -ne 0) {
+        throw "MANDATORY PRE-RESTORE SNAPSHOT FAILED: pg_dump exited with error code $LASTEXITCODE. Live promotion aborted."
     }
+    & docker cp "${LiveContainer}:/tmp/pre_restore_live_db.dump" $PreRestoreDbDump 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -Path $PreRestoreDbDump -PathType Leaf)) {
+        throw "MANDATORY PRE-RESTORE SNAPSHOT FAILED: Failed copying snapshot to host path $PreRestoreDbDump."
+    }
+    & docker exec $LiveContainer rm -f "/tmp/pre_restore_live_db.dump" 2>&1 | Out-Null
+    Write-Log "  Mandatory pre-restore live database snapshot created & verified: $PreRestoreDbDump" -Level "SUCCESS"
 
     $PromotionPhase = "DURING_DB_PROMOTION"
     Write-Log "  Live Postgres Container [$LiveContainer] detected. Terminating active client connections..."
@@ -338,8 +349,13 @@ try {
         throw "Live Database Promotion (pg_restore) failed with exit code $LiveExitCode: $LiveRestoreOut"
     }
 
+    # Helper for live database verification query
+    function Exec-LiveDbQuery([string]$sql) {
+        return (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1).ToString().Trim()
+    }
+
     # Verify Live DB migration deployment & invariants
-    [string]$LiveMigCountStr = (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>&1).ToString().Trim()
+    [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
     [int]$LiveMigCount = 0
     if (-not [int]::TryParse($LiveMigCountStr, [ref]$LiveMigCount) -or $LiveMigCount -eq 0) {
         throw "Post-Promotion Live DB Verification Error: _prisma_migrations empty or missing in live database."
@@ -355,12 +371,14 @@ try {
     Rename-Item -Path $StagingUploadDir -NewName (Split-Path $UploadDir -Leaf)
     Write-Log "  Physical attachments directory atomically swapped [PASS]" -Level "SUCCESS"
 
-    # Step 7: Record Audit Evidence Proof
+    # Step 7: Record Audit Evidence Proof directly against LIVE database
     [datetime]$RestoreEndTime = Get-Date
     [double]$RtoSeconds = [math]::Round(($RestoreEndTime - $RestoreStartTime).TotalSeconds, 2)
 
-    [int]$TxCount = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Transaction\";")
-    [int]$UserCount = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"User\";")
+    [int]$TxCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Transaction\";")
+    [int]$UserCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"User\";")
+    [int]$AttDbCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\";")
+    [int]$CorrectionCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrection\";")
 
     $EvidenceObj = @{
         restoreId = "RESTORE-" + $TimestampSuffix
@@ -372,8 +390,9 @@ try {
         recordCountsVerified = @{
             users = $UserCount
             transactions = $TxCount
-            migrations = $MigrationCount
+            migrations = $LiveMigCount
             attachments = $RestoredPhysicalCount
+            corrections = $CorrectionCount
         }
         duplicateIsCurrentViolations = 0
         fkOrphanViolations = 0
@@ -404,7 +423,9 @@ try {
                 Write-Log "  Attempting automatic live database rollback to pre-restore snapshot ($PreRestoreDbDump)..." -Level "WARN"
                 [string]$TmpRollbackInLive = "/tmp/rollback_$DumpFileName"
                 & docker cp $PreRestoreDbDump "${LiveContainer}:${TmpRollbackInLive}"
+                if ($LASTEXITCODE -ne 0) { throw "Failed copying rollback snapshot to live container." }
                 & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error $TmpRollbackInLive 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Rollback pg_restore exited with error code $LASTEXITCODE." }
                 & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
                 Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
             } catch {
@@ -416,7 +437,9 @@ try {
                 if (Test-Path -Path $UploadDir) { Remove-Item -Path $UploadDir -Recurse -Force -ErrorAction SilentlyContinue }
                 Rename-Item -Path $PreRestoreUploadsDir -NewName (Split-Path $UploadDir -Leaf)
                 Write-Log "  Uploads directory successfully reverted to pre-restore snapshot." -Level "SUCCESS"
-            } catch {}
+            } catch {
+                Write-Log "  CRITICAL ROLLBACK ERROR: Uploads directory rollback failed: $_" -Level "ERROR"
+            }
         }
     }
     Write-Log "=============================================================================="

@@ -213,7 +213,11 @@ export class OperationLogCorrectionService {
       );
     }
 
-    const cleanIp = ipAddress ? ipAddress.replace(/^.*:/, '') : null;
+    const cleanIp = ipAddress
+      ? ipAddress.startsWith('::ffff:')
+        ? ipAddress.substring(7)
+        : ipAddress.trim()
+      : null;
     const correctionNumber = `COR-${new Date().getFullYear()}-${crypto
       .randomBytes(4)
       .toString('hex')
@@ -246,6 +250,21 @@ export class OperationLogCorrectionService {
         throw new ConflictException(
           'Data transaksi telah diperbarui oleh pengguna lain (Revisi Tidak Cocok). Silakan muat ulang data terbaru sebelum melakukan koreksi.',
         );
+      }
+
+      // Step 3.5: Validate evidence attachment integrity (P1-08 Hardening)
+      if (dto.evidenceAttachmentId) {
+        const validAttachment = await prismaTx.attachment.findFirst({
+          where: {
+            id: dto.evidenceAttachmentId,
+            transactionId: id,
+          },
+        });
+        if (!validAttachment) {
+          throw new BadRequestException(
+            'Lampiran bukti koreksi (evidenceAttachmentId) tidak ditemukan atau tidak terkait dengan transaksi ini.',
+          );
+        }
       }
 
       // Step 4: Create TransactionCorrection Header first to obtain correction ID
@@ -1319,6 +1338,9 @@ export class OperationLogCorrectionService {
     const tx = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
       include: {
+        createdBy: {
+          select: { id: true, name: true, role: true },
+        },
         weighInBy: {
           select: { id: true, name: true, role: true },
         },
@@ -1363,7 +1385,9 @@ export class OperationLogCorrectionService {
       });
 
       let origCreator = 'Operator Awal / QC Lapangan';
-      if (tx.weighInBy) {
+      if (tx.createdBy) {
+        origCreator = `${tx.createdBy.role} — ${tx.createdBy.name}`;
+      } else if (tx.weighInBy) {
         origCreator = `${tx.weighInBy.role} — ${tx.weighInBy.name}`;
       } else if (tx.warehouseStartBy) {
         origCreator = `${tx.warehouseStartBy.role} — ${tx.warehouseStartBy.name}`;

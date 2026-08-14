@@ -86,30 +86,55 @@ if (-not $ActualDumpPath -or -not (Test-Path -Path $ActualDumpPath -PathType Lea
 
 Write-Log "Using historical dump candidate: $ActualDumpPath"
 
-# Validate manifest SHA-256 if manifest path is provided or present
+# Validate companion manifest SHA-256 (P0-01 Hardening)
 [string]$ActualManifestPath = $ManifestPath
 if (-not $ActualManifestPath) {
     [string]$dumpDir = Split-Path $ActualDumpPath -Parent
-    $foundManifest = Get-ChildItem -Path $dumpDir -Filter "*_manifest.json" | Select-Object -First 1
-    if ($foundManifest) { $ActualManifestPath = $foundManifest.FullName }
-}
-
-if ($ActualManifestPath -and (Test-Path -Path $ActualManifestPath)) {
-    Write-Log "Validating historical backup manifest checksums ($ActualManifestPath)..."
-    try {
-        $ManifestData = Get-Content -Path $ActualManifestPath -Raw | ConvertFrom-Json
-        if ($ManifestData.checksums -and $ManifestData.checksums.dump) {
-            [string]$calcDumpHash = (Get-FileHash -Path $ActualDumpPath -Algorithm SHA256).Hash.ToLower()
-            [string]$expDumpHash = $ManifestData.checksums.dump.ToLower()
-            if ($calcDumpHash -ne $expDumpHash) {
-                throw "Historical Dump Checksum Mismatch! Expected: $expDumpHash, Calculated: $calcDumpHash"
-            }
-            Write-Log "Historical dump SHA-256 checksum verified against manifest [PASS] ($calcDumpHash)" -Level "SUCCESS"
-        }
-    } catch {
-        Write-Log "Manifest Checksum Verification Error: $_" -Level "WARN"
+    [string]$dumpBase = [System.IO.Path]::GetFileNameWithoutExtension($ActualDumpPath)
+    [string]$exactCandidate1 = Join-Path $dumpDir "${dumpBase}_manifest.json"
+    [string]$exactCandidate2 = Join-Path $dumpDir "${dumpBase}.manifest.json"
+    if (Test-Path -Path $exactCandidate1 -PathType Leaf) {
+        $ActualManifestPath = $exactCandidate1
+    } elseif (Test-Path -Path $exactCandidate2 -PathType Leaf) {
+        $ActualManifestPath = $exactCandidate2
     }
 }
+
+if (-not $ActualManifestPath -or -not (Test-Path -Path $ActualManifestPath -PathType Leaf)) {
+    Write-Log "HARD FAIL: Historical DB rehearsal requires a companion manifest matching the exact dump file ($ActualDumpPath). No companion manifest found." -Level "ERROR"
+    $FailObj = @{
+        timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        status = "FAILED"
+        error = "Companion manifest not found for historical dump. Exact companion manifest pairing is mandatory."
+    }
+    Set-Content -Path (Join-Path $ArtifactsDir "historical-db-rehearsal.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+    Set-Content -Path (Join-Path $ArtifactsDir "preflight-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+    Set-Content -Path (Join-Path $ArtifactsDir "smoke-test-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+    exit 1
+}
+
+Write-Log "Validating historical backup companion manifest checksums ($ActualManifestPath)..."
+$ManifestData = Get-Content -Path $ActualManifestPath -Raw | ConvertFrom-Json
+if (-not $ManifestData.checksums -or -not $ManifestData.checksums.dump) {
+    Write-Log "HARD FAIL: Manifest at $ActualManifestPath does not contain required checksums.dump field." -Level "ERROR"
+    exit 1
+}
+
+[string]$calcDumpHash = (Get-FileHash -Path $ActualDumpPath -Algorithm SHA256).Hash.ToLower()
+[string]$expDumpHash = $ManifestData.checksums.dump.ToLower()
+if ($calcDumpHash -ne $expDumpHash) {
+    Write-Log "HARD FAIL: Historical Dump Checksum Mismatch! Expected: $expDumpHash, Calculated: $calcDumpHash" -Level "ERROR"
+    $FailObj = @{
+        timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        status = "FAILED"
+        error = "Historical dump SHA-256 checksum mismatch (Calculated=$calcDumpHash, Expected=$expDumpHash)."
+    }
+    Set-Content -Path (Join-Path $ArtifactsDir "historical-db-rehearsal.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+    Set-Content -Path (Join-Path $ArtifactsDir "preflight-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+    Set-Content -Path (Join-Path $ArtifactsDir "smoke-test-report.json") -Value ($FailObj | ConvertTo-Json -Depth 5) -Encoding utf8
+    exit 1
+}
+Write-Log "Historical dump SHA-256 checksum verified against companion manifest [PASS] ($calcDumpHash)" -Level "SUCCESS"
 
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
 [string]$RehearsalContainer = "gms-rehearsal-postgres-" + $TimestampSuffix
