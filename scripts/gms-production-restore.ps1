@@ -228,10 +228,17 @@ try {
     }
 
     # Check Invariants
-    [int]$WbDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
-    [int]$WhDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-    [int]$QcvDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-    [int]$ImDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    [int]$WbDupeCurrent = 0
+    [int]$WhDupeCurrent = 0
+    [int]$QcvDupeCurrent = 0
+    [int]$ImDupeCurrent = 0
+    [string]$hasIsCurrentStaging = Exec-StagingQuery "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'WeighbridgeRecord' AND column_name = 'isCurrent';"
+    if ($hasIsCurrentStaging -eq "1") {
+        $WbDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
+        $WhDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+        $QcvDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+        $ImDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    }
 
     if (($WbDupeCurrent + $WhDupeCurrent + $QcvDupeCurrent + $ImDupeCurrent) -gt 0) {
         throw "Invariant Check Failed: Duplicate isCurrent=true records present in restored database."
@@ -413,10 +420,17 @@ try {
     [int]$LiveWhAccessCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"UserWarehouseAccess\";")
 
     # Invariant checks on live database
-    [int]$LiveWbDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
-    [int]$LiveWhDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-    [int]$LiveQcvDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-    [int]$LiveImDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    [int]$LiveWbDupeCurrent = 0
+    [int]$LiveWhDupeCurrent = 0
+    [int]$LiveQcvDupeCurrent = 0
+    [int]$LiveImDupeCurrent = 0
+    [string]$hasIsCurrentLive = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'WeighbridgeRecord' AND column_name = 'isCurrent';"
+    if ($hasIsCurrentLive -eq "1") {
+        $LiveWbDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
+        $LiveWhDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+        $LiveQcvDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+        $LiveImDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+    }
     [int]$LiveTotalDupes = $LiveWbDupeCurrent + $LiveWhDupeCurrent + $LiveQcvDupeCurrent + $LiveImDupeCurrent
 
     [int]$LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")

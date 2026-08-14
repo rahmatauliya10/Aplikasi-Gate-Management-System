@@ -191,10 +191,18 @@ async function main() {
   const warehouseRetained = (postRollbackEntities.warehouseProcesses === preDeployEntities.warehouseProcesses);
   const attachmentsRetained = (postRollbackEntities.attachments === preDeployEntities.attachments);
 
-  // Invariants: 0 duplicate isCurrent, 0 orphans
-  const wbDupes = parseInt(psql('SELECT COUNT(*) FROM (SELECT "transactionId", "type" FROM "WeighbridgeRecord" WHERE "isCurrent" = true GROUP BY "transactionId", "type" HAVING COUNT(*) > 1) d;') || '0', 10);
-  const whDupes = parseInt(psql('SELECT COUNT(*) FROM (SELECT "transactionId" FROM "WarehouseProcess" WHERE "isCurrent" = true GROUP BY "transactionId" HAVING COUNT(*) > 1) d;') || '0', 10);
-  const totalDupes = wbDupes + whDupes;
+  // Invariants: 0 duplicate isCurrent (if column exists in restored schema), 0 orphans
+  let totalDupes = 0;
+  const hasIsCurrent = parseInt(psql(`
+    SELECT COUNT(*) FROM information_schema.columns 
+    WHERE table_schema = 'public' AND table_name = 'WeighbridgeRecord' AND column_name = 'isCurrent';
+  `) || '0', 10) > 0;
+
+  if (hasIsCurrent) {
+    const wbDupes = parseInt(psql('SELECT COUNT(*) FROM (SELECT "transactionId", "type" FROM "WeighbridgeRecord" WHERE "isCurrent" = true GROUP BY "transactionId", "type" HAVING COUNT(*) > 1) d;') || '0', 10);
+    const whDupes = parseInt(psql('SELECT COUNT(*) FROM (SELECT "transactionId" FROM "WarehouseProcess" WHERE "isCurrent" = true GROUP BY "transactionId" HAVING COUNT(*) > 1) d;') || '0', 10);
+    totalDupes = wbDupes + whDupes;
+  }
 
   const orphanHist = parseInt(psql('SELECT COUNT(*) FROM "TransactionStatusHistory" h LEFT JOIN "Transaction" t ON h."transactionId" = t.id WHERE t.id IS NULL;') || '0', 10);
   const orphanWb = parseInt(psql('SELECT COUNT(*) FROM "WeighbridgeRecord" r LEFT JOIN "Transaction" t ON r."transactionId" = t.id WHERE t.id IS NULL;') || '0', 10);
