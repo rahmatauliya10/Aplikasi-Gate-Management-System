@@ -195,7 +195,8 @@ async function main() {
 
     // 3. Inject failure: Trigger automatic compensating DB rollback to pre-restore safety dump
     console.log('  Injected post-DB-commit exception. Executing compensating rollback from safety snapshot...');
-    const rollbackCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --clean --if-exists --no-owner --no-acl "${tempSnapshotDump}"`;
+    psql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
+    const rollbackCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --no-owner --no-acl "${tempSnapshotDump}"`;
     execSync(rollbackCmd, { env, stdio: 'pipe' });
 
     // 4. Assert live DB state returned 100% to pre-snapshot entities

@@ -344,7 +344,8 @@ try {
     & docker cp $DumpFilePath "${LiveContainer}:${TmpDumpInLive}"
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to live database container." }
 
-    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error $TmpDumpInLive 2>&1
+    & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
+    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges --single-transaction --exit-on-error $TmpDumpInLive 2>&1
     [int]$LiveExitCode = $LASTEXITCODE
     & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
 
@@ -534,7 +535,8 @@ try {
                 [string]$TmpRollbackInLive = "/tmp/rollback_$DumpFileName"
                 & docker cp $PreRestoreDbDump "${LiveContainer}:${TmpRollbackInLive}"
                 if ($LASTEXITCODE -ne 0) { throw "Failed copying rollback snapshot to live container." }
-                & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error $TmpRollbackInLive 2>&1 | Out-Null
+                & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
+                & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges --single-transaction --exit-on-error $TmpRollbackInLive 2>&1 | Out-Null
                 if ($LASTEXITCODE -ne 0) { throw "Rollback pg_restore exited with error code $LASTEXITCODE." }
                 & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
                 Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"

@@ -173,7 +173,8 @@ async function main() {
 
   // Rollback database using the pre-deploy backup
   console.log('  Executing atomic database restoration to pre-deploy backup snapshot...');
-  const rollbackRestoreCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --clean --if-exists --no-owner --no-acl --single-transaction "${predeployDumpPath}"`;
+  psql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
+  const rollbackRestoreCmd = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --no-owner --no-acl --single-transaction "${predeployDumpPath}"`;
   execSync(rollbackRestoreCmd, { env, stdio: 'pipe' });
 
   // ------------------------------------------------------------------------------
