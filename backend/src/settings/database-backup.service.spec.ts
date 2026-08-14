@@ -494,7 +494,13 @@ describe('DatabaseBackupService', () => {
 
     it('should create native pg_dump backup even if legacy schema tables are missing (P0-02)', async () => {
       prismaService.transactionCorrection = {
-        findMany: jest.fn().mockRejectedValue(new Error('Table not found: relation TransactionCorrection does not exist')),
+        findMany: jest
+          .fn()
+          .mockRejectedValue(
+            new Error(
+              'Table not found: relation TransactionCorrection does not exist',
+            ),
+          ),
       };
       const manifest = await service.runAutomatedScheduledBackup(
         'MANUAL_PRE_UPDATE',
@@ -506,13 +512,12 @@ describe('DatabaseBackupService', () => {
 
     it('should throw error and fail backup if snapshot error is a transient connection error rather than missing table (P0-02)', async () => {
       prismaService.transaction = {
-        findMany: jest.fn().mockRejectedValue(new Error('Connection timeout to PostgreSQL')),
+        findMany: jest
+          .fn()
+          .mockRejectedValue(new Error('Connection timeout to PostgreSQL')),
       } as any;
       await expect(
-        service.runAutomatedScheduledBackup(
-          'MANUAL_PRE_UPDATE',
-          mockAdminUser,
-        ),
+        service.runAutomatedScheduledBackup('MANUAL_PRE_UPDATE', mockAdminUser),
       ).rejects.toThrow('Connection timeout to PostgreSQL');
     });
   });
