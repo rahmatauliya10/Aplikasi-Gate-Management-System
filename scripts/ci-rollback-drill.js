@@ -60,7 +60,16 @@ async function main() {
     return execSync(cmd, { env, input: sql, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
   };
 
+  const tableExists = (tableName) => {
+    const out = psql(`SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${tableName}';`);
+    const num = parseInt(out, 10);
+    return !isNaN(num) && num > 0;
+  };
+
   const queryCount = (tableName) => {
+    if (!tableExists(tableName)) {
+      return 0;
+    }
     const out = psql(`SELECT COUNT(*) FROM "${tableName}";`);
     const num = parseInt(out, 10);
     if (isNaN(num)) {
