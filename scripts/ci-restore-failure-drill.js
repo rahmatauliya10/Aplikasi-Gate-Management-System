@@ -106,7 +106,7 @@ async function main() {
     if (!tableExists(tableName)) {
       return 'NON_EXISTENT';
     }
-    const out = psql(`SELECT COALESCE(md5(string_agg(id::text || ':' || COALESCE("updatedAt"::text, "createdAt"::text, ''), ',' ORDER BY id::text)), 'EMPTY') FROM "${tableName}";`);
+    const out = psql(`SELECT COALESCE(md5(string_agg(md5(row_to_json(t)::text), ',' ORDER BY md5(row_to_json(t)::text))), 'EMPTY') FROM "${tableName}" t;`);
     return out.trim();
   };
 
