@@ -278,6 +278,21 @@ jobs:
             console.log('Historical baseline state verified [PASS].');
           "
 
+          echo "Step 2.8: Unpacking physical attachment files for preflight integrity verification..."
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const attArchive = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_attachments.json', 'utf8'));
+            for (const f of attArchive.files) {
+              for (const baseDir of ['uploads', 'backend/uploads']) {
+                const dest = path.join(baseDir, f.relativePath);
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                fs.writeFileSync(dest, Buffer.from(f.base64Content, 'base64'));
+              }
+            }
+            console.log('Historical attachment physical files unpacked [PASS].');
+          "
+
           echo "Step 3: Running production preflight duplicate audit on rehearsal DB..."
           cd backend
           npm run prisma:preflight -- --report-only --fail-on-duplicates

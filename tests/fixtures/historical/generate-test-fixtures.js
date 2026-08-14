@@ -306,6 +306,18 @@ async function main() {
   const attSha256 = computeSha256(attArchivePath);
   console.log(`Generated attachments archive SHA-256: ${attSha256}`);
 
+  // Write sample physical files to uploads and backend/uploads directories for preflight checks
+  const uploadDirs = [
+    path.resolve(targetDir, '../../../uploads'),
+    path.resolve(targetDir, '../../../backend/uploads')
+  ];
+  for (const upDir of uploadDirs) {
+    fs.mkdirSync(path.join(upDir, 'qc'), { recursive: true });
+    fs.mkdirSync(path.join(upDir, 'weighbridge'), { recursive: true });
+    fs.writeFileSync(path.join(upDir, 'qc', 'vehicle_check_proof.pdf'), samplePdfContent);
+    fs.writeFileSync(path.join(upDir, 'weighbridge', 'weighbridge_ticket.jpg'), sampleJpgContent);
+  }
+
   // 8. Execute pg_dump -Fc
   console.log('Exporting PostgreSQL binary dump to:', dumpPath);
   const dumpCmd = `pg_dump -h ${host} -p ${port} -U ${user} -d ${dbName} -F c -f "${dumpPath}"`;
