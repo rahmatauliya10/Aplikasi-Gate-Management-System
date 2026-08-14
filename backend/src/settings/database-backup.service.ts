@@ -1690,6 +1690,8 @@ export class DatabaseBackupService
     }
     fs.mkdirSync(stagingDir, { recursive: true });
 
+    let preRestoreManifest: BackupManifest | null = null;
+
     try {
       const dumpBuffer = Buffer.from(bundlePayload.dumpBase64, 'base64');
       const stagingDumpPath = path.join(stagingDir, 'restored_portable.dump');
@@ -1709,7 +1711,7 @@ export class DatabaseBackupService
       }
 
       // Create Pre-Restore backup snapshot
-      const preRestoreManifest = await this.runAutomatedScheduledBackup(
+      preRestoreManifest = await this.runAutomatedScheduledBackup(
         'AUTO_PRE_RESTORE',
         user,
       );
