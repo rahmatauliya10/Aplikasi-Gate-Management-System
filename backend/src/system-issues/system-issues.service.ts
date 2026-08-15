@@ -10,7 +10,9 @@ export class SystemIssuesService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateSystemIssueDto, user: JwtPayloadUser) {
-    this.logger.log(`Creating new system issue: ${dto.issueType} by ${user.email}`);
+    this.logger.log(
+      `Creating new system issue: ${dto.issueType} by ${user.email}`,
+    );
 
     const issue = await this.prisma.systemIssue.create({
       data: {

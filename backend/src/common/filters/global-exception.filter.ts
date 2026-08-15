@@ -29,8 +29,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       // Extract custom error code and message if provided
       if (exceptionResponse && typeof exceptionResponse === 'object') {
         if (exceptionResponse.code) errorCode = exceptionResponse.code;
-        if (exceptionResponse.errorCode) errorCode = exceptionResponse.errorCode;
-        if (exceptionResponse.message && typeof exceptionResponse.message === 'string') {
+        if (exceptionResponse.errorCode)
+          errorCode = exceptionResponse.errorCode;
+        if (
+          exceptionResponse.message &&
+          typeof exceptionResponse.message === 'string'
+        ) {
           message = exceptionResponse.message;
         }
       }
@@ -46,35 +50,48 @@ export class GlobalExceptionFilter implements ExceptionFilter {
             message = 'Validasi data gagal. Periksa field yang wajib diisi.';
             errorCode = 'VALIDATION_ERROR';
             details = exceptionResponse.message;
-          } else if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
+          } else if (
+            message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+          ) {
             message = exceptionResponse.message;
           }
         }
       } else if (statusCode === HttpStatus.UNAUTHORIZED) {
-        if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
+        if (
+          message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+        ) {
           message = 'Sesi login sudah habis. Silakan login ulang.';
         }
         if (errorCode === 'INTERNAL_SERVER_ERROR') errorCode = 'UNAUTHORIZED';
       } else if (statusCode === HttpStatus.FORBIDDEN) {
-        if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
+        if (
+          message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+        ) {
           message = 'Anda tidak memiliki akses ke halaman ini.';
         }
         if (errorCode === 'INTERNAL_SERVER_ERROR') errorCode = 'FORBIDDEN';
       } else if (statusCode === HttpStatus.NOT_FOUND) {
-        if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
+        if (
+          message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+        ) {
           message = 'Data atau halaman tidak ditemukan.';
         }
         if (errorCode === 'INTERNAL_SERVER_ERROR') errorCode = 'NOT_FOUND';
       } else if (statusCode === HttpStatus.CONFLICT) {
-        if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
+        if (
+          message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+        ) {
           message = 'Data sudah ada atau terjadi duplikasi.';
         }
         if (errorCode === 'INTERNAL_SERVER_ERROR') errorCode = 'CONFLICT';
       } else if (statusCode === HttpStatus.UNPROCESSABLE_ENTITY) {
-        if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
+        if (
+          message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+        ) {
           message = 'Validasi data gagal. Periksa field yang wajib diisi.';
         }
-        if (errorCode === 'INTERNAL_SERVER_ERROR') errorCode = 'UNPROCESSABLE_ENTITY';
+        if (errorCode === 'INTERNAL_SERVER_ERROR')
+          errorCode = 'UNPROCESSABLE_ENTITY';
         if (
           typeof exceptionResponse === 'object' &&
           exceptionResponse.message
@@ -82,12 +99,17 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           details = exceptionResponse.message;
         }
       } else if (statusCode === HttpStatus.BAD_GATEWAY) {
-        if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
-          message = 'Server backend tidak merespons. Pastikan backend aktif dan port API benar.';
+        if (
+          message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+        ) {
+          message =
+            'Server backend tidak merespons. Pastikan backend aktif dan port API benar.';
         }
         if (errorCode === 'INTERNAL_SERVER_ERROR') errorCode = 'BAD_GATEWAY';
       } else {
-        if (message === 'Terjadi kesalahan pada server. Hubungi administrator.') {
+        if (
+          message === 'Terjadi kesalahan pada server. Hubungi administrator.'
+        ) {
           if (
             typeof exceptionResponse === 'object' &&
             exceptionResponse.message

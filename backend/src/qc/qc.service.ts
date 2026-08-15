@@ -2,7 +2,9 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   Logger,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -11,6 +13,11 @@ import { StartQcDto } from './dto/start-qc.dto';
 import { VehicleCheckResultDto } from './dto/vehicle-check-result.dto';
 import { IncomingCheckResultDto } from './dto/incoming-check-result.dto';
 import { QcAttachmentDto } from './dto/qc-attachment.dto';
+import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+
+import { QC_HISTORY_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
+import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 
 @Injectable()
 export class QcService {
@@ -19,6 +26,7 @@ export class QcService {
   constructor(
     private prisma: PrismaService,
     private activityLogsService: ActivityLogsService,
+    private authorizationScopeService: AuthorizationScopeService,
   ) {}
 
   private mapToCheckResult(val?: string): CheckResult | null {
@@ -48,15 +56,45 @@ export class QcService {
     return val ? CheckResult.PASS : CheckResult.REJECT;
   }
 
-  async getQueue() {
+  private async findTransactionWithAccess(
+    transactionId: string,
+    user?: JwtPayloadUser,
+    include?: any,
+  ) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      ...(include && { include }),
+    });
+
+    if (!tx) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Transaction not found',
+        errors: [],
+      });
+    }
+
+    if (user) {
+      this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+    }
+
+    return tx;
+  }
+
+  async getQueue(user: JwtPayloadUser) {
+    this.authorizationScopeService.assertScopeNotEmpty(user);
+    const scope = this.authorizationScopeService.getTransactionScope(user);
     const queue = await this.prisma.transaction.findMany({
       where: {
-        OR: [
-          { status: 'QC_VEHICLE_PENDING', processType: 'GBJ' },
-          { status: 'QC_VEHICLE_IN_PROGRESS', processType: 'GBJ' },
-          { status: 'INCOMING_CHECK_PENDING', processType: 'GBB' },
-          { status: 'INCOMING_CHECK_IN_PROGRESS', processType: 'GBB' },
-        ],
+        status: {
+          in: [
+            'QC_VEHICLE_PENDING',
+            'QC_VEHICLE_IN_PROGRESS',
+            'INCOMING_CHECK_PENDING',
+            'INCOMING_CHECK_IN_PROGRESS',
+          ],
+        },
+        ...scope,
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -68,19 +106,20 @@ export class QcService {
     };
   }
 
-  async startQc(transactionId: string, dto: StartQcDto, userId: string) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-    });
-    if (!tx) throw new NotFoundException('Transaction not found');
+  async startQc(
+    transactionId: string,
+    dto: StartQcDto,
+    userId: string,
+    user?: JwtPayloadUser,
+  ) {
+    const tx = await this.findTransactionWithAccess(transactionId, user);
 
+    const now = new Date();
     let nextStatus: TransactionStatus;
-    if (tx.processType === 'GBJ' && tx.status === 'QC_VEHICLE_PENDING') {
+
+    if (tx.status === 'QC_VEHICLE_PENDING') {
       nextStatus = 'QC_VEHICLE_IN_PROGRESS';
-    } else if (
-      tx.processType === 'GBB' &&
-      tx.status === 'INCOMING_CHECK_PENDING'
-    ) {
+    } else if (tx.status === 'INCOMING_CHECK_PENDING') {
       nextStatus = 'INCOMING_CHECK_IN_PROGRESS';
     } else {
       throw new BadRequestException(
@@ -88,19 +127,47 @@ export class QcService {
       );
     }
 
-    const updated = await this.prisma.transaction.update({
-      where: { id: transactionId },
-      data: {
-        status: nextStatus,
-        qcStartAt: new Date(),
-        statusHistory: {
-          create: {
-            newStatus: nextStatus,
-            changedById: userId,
-            notes: 'QC started',
-          },
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
         },
-      },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+          ...(tx.status === 'QC_VEHICLE_PENDING' && {
+            qcStartAt: tx.qcStartAt || now,
+          }),
+          ...(tx.status === 'INCOMING_CHECK_PENDING' && {
+            incomingQcStartAt: tx.incomingQcStartAt || now,
+          }),
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: 'QC started',
+        },
+      });
+
+      return prismaTx.transaction.findUnique({ where: { id: transactionId } });
     });
 
     await this.activityLogsService.logAction({
@@ -122,21 +189,24 @@ export class QcService {
     transactionId: string,
     dto: VehicleCheckResultDto,
     userId: string,
+    user?: JwtPayloadUser,
   ) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-      include: { qcVehicleChecks: true },
+    const tx = await this.findTransactionWithAccess(transactionId, user, {
+      qcVehicleChecks: { where: { isCurrent: true } },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.processType !== 'GBJ')
+
+    if (!['GBJ', 'GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
-        'Vehicle check is only for GBJ process type',
+        'Invalid process type for preliminary QC sampling & vehicle inspection',
       );
-    if (tx.status !== 'QC_VEHICLE_IN_PROGRESS')
+    if (
+      tx.status !== 'QC_VEHICLE_IN_PROGRESS' &&
+      tx.status !== 'QC_VEHICLE_PENDING'
+    )
       throw new BadRequestException(
-        'Transaction must be in QC_VEHICLE_IN_PROGRESS state. Did you start QC?',
+        'Transaction must be in QC_VEHICLE_PENDING or QC_VEHICLE_IN_PROGRESS state.',
       );
-    if (tx.qcVehicleChecks.length > 0)
+    if ((tx as any).qcVehicleChecks?.length > 0)
       throw new BadRequestException(
         'Result has already been submitted for this transaction',
       );
@@ -145,19 +215,19 @@ export class QcService {
     const nextStatus =
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
+    assertValidStatusTransition(tx.status, nextStatus);
+
     const updated = await this.prisma.$transaction(async (prisma) => {
-      const existingCount = await prisma.qcVehicleCheck.count({
+      const maxRev = await prisma.qcVehicleCheck.aggregate({
         where: { transactionId },
+        _max: { revision: true },
       });
-      if (existingCount > 0) {
-        throw new BadRequestException(
-          'Result has already been submitted for this transaction',
-        );
-      }
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
       await prisma.qcVehicleCheck.create({
         data: {
           transactionId,
+          revision: nextRevision,
           result: result,
           vehicleCleanliness: this.booleanToCheckResult(dto.vehicleCleanliness),
           vehicleOdor: this.booleanToCheckResult(dto.vehicleOdor),
@@ -170,24 +240,46 @@ export class QcService {
           notes: dto.notes,
           checklistItems: dto.checklistItems || null,
           checkedById: userId,
-          startedAt: tx.qcStartAt,
+          startedAt: tx.qcStartAt || new Date(),
           completedAt: new Date(),
         },
       });
 
-      return prisma.transaction.update({
-        where: { id: transactionId },
+      const claimed = await prisma.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
         data: {
           status: nextStatus,
+          revision: { increment: 1 },
+          qcStartAt: tx.qcStartAt || new Date(),
           qcEndAt: new Date(),
-          statusHistory: {
-            create: {
-              newStatus: nextStatus,
-              changedById: userId,
-              notes: `Vehicle Check: ${result}`,
-            },
-          },
         },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Vehicle Check: ${result}`,
+        },
+      });
+
+      return prisma.transaction.findUnique({
+        where: { id: transactionId },
         include: { qcVehicleChecks: true },
       });
     });
@@ -212,21 +304,24 @@ export class QcService {
     transactionId: string,
     dto: IncomingCheckResultDto,
     userId: string,
+    user?: JwtPayloadUser,
   ) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-      include: { incomingMaterialChecks: true },
+    const tx = await this.findTransactionWithAccess(transactionId, user, {
+      incomingMaterialChecks: { where: { isCurrent: true } },
     });
-    if (!tx) throw new NotFoundException('Transaction not found');
-    if (tx.processType !== 'GBB')
+
+    if (!['GBB', 'GSP'].includes(tx.processType))
       throw new BadRequestException(
-        'Incoming check is only for GBB process type',
+        'Incoming check is only for GBB or GSP process types',
       );
-    if (tx.status !== 'INCOMING_CHECK_IN_PROGRESS')
+    if (
+      tx.status !== 'INCOMING_CHECK_IN_PROGRESS' &&
+      tx.status !== 'INCOMING_CHECK_PENDING'
+    )
       throw new BadRequestException(
-        'Transaction must be in INCOMING_CHECK_IN_PROGRESS state. Did you start QC?',
+        'Transaction must be in INCOMING_CHECK_PENDING or INCOMING_CHECK_IN_PROGRESS state.',
       );
-    if (tx.incomingMaterialChecks.length > 0)
+    if ((tx as any).incomingMaterialChecks?.length > 0)
       throw new BadRequestException(
         'Result has already been submitted for this transaction',
       );
@@ -235,9 +330,11 @@ export class QcService {
     const nextStatus =
       result === 'PASS' ? 'INCOMING_CHECK_PASSED' : 'INCOMING_CHECK_REJECTED';
 
+    assertValidStatusTransition(tx.status, nextStatus);
+
     const updated = await this.prisma.$transaction(async (prisma) => {
       const existingCount = await prisma.incomingMaterialCheck.count({
-        where: { transactionId },
+        where: { transactionId, isCurrent: true },
       });
       if (existingCount > 0) {
         throw new BadRequestException(
@@ -245,9 +342,16 @@ export class QcService {
         );
       }
 
+      const maxRev = await prisma.incomingMaterialCheck.aggregate({
+        where: { transactionId },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
       await prisma.incomingMaterialCheck.create({
         data: {
           transactionId,
+          revision: nextRevision,
           result: result,
           odor: this.mapToCheckResult(dto.odor),
           color: this.mapToCheckResult(dto.color),
@@ -255,6 +359,7 @@ export class QcService {
           foreignMatter: dto.foreignMatter,
           beanCondition: this.booleanToCheckResult(dto.beanCondition),
           sampleWeight: dto.sampleWeight,
+          goodBeanPercentage: dto.goodBeanPercentage,
           itemCondition: this.booleanToCheckResult(dto.itemCondition),
           packagingCondition: this.booleanToCheckResult(dto.packagingCondition),
           quantityCheck: this.booleanToCheckResult(dto.quantityCheck),
@@ -263,24 +368,46 @@ export class QcService {
           defectNotes: dto.defectNotes,
           notes: dto.notes,
           checkedById: userId,
-          startedAt: tx.qcStartAt,
+          startedAt: tx.incomingQcStartAt || new Date(),
           completedAt: new Date(),
         },
       });
 
-      return prisma.transaction.update({
-        where: { id: transactionId },
+      const claimed = await prisma.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
         data: {
           status: nextStatus,
+          revision: { increment: 1 },
+          incomingQcStartAt: tx.incomingQcStartAt || new Date(),
           qcEndAt: new Date(),
-          statusHistory: {
-            create: {
-              newStatus: nextStatus,
-              changedById: userId,
-              notes: `Incoming Check: ${result}`,
-            },
-          },
         },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Incoming Check: ${result}`,
+        },
+      });
+
+      return prisma.transaction.findUnique({
+        where: { id: transactionId },
         include: { incomingMaterialChecks: true },
       });
     });
@@ -301,17 +428,12 @@ export class QcService {
     };
   }
 
-  async getDetail(transactionId: string) {
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-      include: {
-        qcVehicleChecks: true,
-        incomingMaterialChecks: true,
-        attachments: { where: { module: 'QC' } },
-      },
+  async getDetail(transactionId: string, user?: JwtPayloadUser) {
+    const tx = await this.findTransactionWithAccess(transactionId, user, {
+      qcVehicleChecks: { where: { isCurrent: true } },
+      incomingMaterialChecks: { where: { isCurrent: true } },
+      attachments: { where: { module: 'QC' } },
     });
-
-    if (!tx) throw new NotFoundException('Transaction not found');
 
     return {
       success: true,
@@ -320,7 +442,9 @@ export class QcService {
     };
   }
 
-  async getHistory() {
+  async getHistory(user: JwtPayloadUser) {
+    this.authorizationScopeService.assertScopeNotEmpty(user);
+    const scope = this.authorizationScopeService.getTransactionScope(user);
     const history = await this.prisma.transaction.findMany({
       where: {
         status: {
@@ -333,11 +457,9 @@ export class QcService {
             'COMPLETED',
           ],
         },
+        ...scope,
       },
-      include: {
-        qcVehicleChecks: true,
-        incomingMaterialChecks: true,
-      },
+      include: QC_HISTORY_CURRENT_RELATIONS_INCLUDE,
       orderBy: { qcEndAt: 'desc' },
       take: 100,
     });
@@ -354,12 +476,10 @@ export class QcService {
     file: any,
     dto: QcAttachmentDto,
     userId: string,
+    user?: JwtPayloadUser,
   ) {
     if (!file) throw new BadRequestException('File is required');
-    const tx = await this.prisma.transaction.findUnique({
-      where: { id: transactionId },
-    });
-    if (!tx) throw new NotFoundException('Transaction not found');
+    const tx = await this.findTransactionWithAccess(transactionId, user);
 
     const attachment = await this.prisma.attachment.create({
       data: {
@@ -380,6 +500,128 @@ export class QcService {
       success: true,
       message: 'Attachment uploaded successfully',
       data: attachment,
+    };
+  }
+
+  async completeQcAnalysis(
+    transactionId: string,
+    user: JwtPayloadUser,
+    remarks?: string,
+  ) {
+    this.logger.log(
+      `Marking QC analysis as completed for transaction ${transactionId} by ${user.email}`,
+    );
+
+    const tx = await this.findTransactionWithAccess(transactionId, user);
+
+    if (tx.processType === 'GBB' && user.role === 'WAREHOUSE') {
+      this.logger.warn(
+        `SoD violation: Warehouse role attempted QC analysis completion on GBB transaction ${transactionId}`,
+      );
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'SOD_VIOLATION_BLOCKED',
+          module: 'QC',
+          referenceId: transactionId,
+          description: `Blocked Warehouse role from completing GBB QC analysis`,
+          status: 'FAILED',
+        })
+        .catch(() => {});
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Segregation of Duties (SoD) violation: Akses ditolak! Penutupan analisa QC pada transaksi GBB wajib dieksekusi oleh tim QC atau Admin.',
+        errors: [],
+      });
+    }
+
+    if (tx.status !== 'WAREHOUSE_IN_PROGRESS' || tx.processType !== 'GBB') {
+      throw new BadRequestException({
+        success: false,
+        message: 'Transaction is not in GBB WAREHOUSE_IN_PROGRESS status',
+        errors: [],
+      });
+    }
+
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const claimed = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: 'WAREHOUSE_IN_PROGRESS',
+          revision: tx.revision,
+        },
+        data: {
+          revision: { increment: 1 },
+          qcAnalysisCompleted: true,
+          qcAnalysisCompletedAt: new Date(),
+          ...(remarks && { remarks }),
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      if (remarks) {
+        const activeProcess = await prismaTx.warehouseProcess.findFirst({
+          where: { transactionId, isCurrent: true, endAt: null },
+        });
+        if (activeProcess) {
+          await prismaTx.warehouseProcess.update({
+            where: { id: activeProcess.id },
+            data: { remarks },
+          });
+        }
+      }
+
+      return prismaTx.transaction.findUnique({
+        where: { id: transactionId },
+        include: {
+          warehouseProcesses: {
+            where: { isCurrent: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
+        },
+      });
+    });
+
+    await this.activityLogsService
+      .logAction({
+        userId: user.id,
+        action: 'QC_ANALYSIS_COMPLETED',
+        module: 'QC',
+        referenceId: transactionId,
+        description: `QC analysis marked as completed for ${tx.plateNumber} by ${user.email}${remarks ? ` | ${remarks}` : ''}`,
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
+
+    if (!updated) {
+      throw new NotFoundException({
+        success: false,
+        message: 'Updated transaction not found',
+        errors: [],
+      });
+    }
+
+    return {
+      success: true,
+      message: 'QC analysis marked as completed',
+      data: {
+        ...updated,
+        remarks:
+          remarks ||
+          updated.warehouseProcesses?.[0]?.remarks ||
+          updated.remarks ||
+          null,
+      },
     };
   }
 }

@@ -14,10 +14,24 @@ describe('Auth Security (e2e)', () => {
     // Note: E2E tests should be run with a separate DATABASE_URL_TEST
     // to avoid wiping out operational database data.
     if (!process.env.DATABASE_URL_TEST) {
-      throw new Error('DATABASE_URL_TEST environment variable is required for E2E tests');
+      throw new Error(
+        'DATABASE_URL_TEST environment variable is required for E2E tests',
+      );
     }
-    if (!process.env.DATABASE_URL_TEST.includes('_test')) {
-      throw new Error('DATABASE_URL_TEST database name must end with _test');
+    const testUrl = new URL(process.env.DATABASE_URL_TEST);
+    if (!['postgres:', 'postgresql:'].includes(testUrl.protocol)) {
+      throw new Error('DATABASE_URL_TEST harus berupa PostgreSQL URL');
+    }
+    const dbName = decodeURIComponent(
+      testUrl.pathname.replace(/^\//, ''),
+    ).toLowerCase();
+    const allowedTestDatabases = new Set([
+      'gms_test_db',
+      'test_gms',
+      'gms_test',
+    ]);
+    if (!allowedTestDatabases.has(dbName)) {
+      throw new Error(`DATABASE_URL_TEST database "${dbName}" tidak diizinkan`);
     }
     process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
 
@@ -33,7 +47,9 @@ describe('Auth Security (e2e)', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   describe('Account Lifecycle & Password Security Scenarios', () => {
@@ -42,6 +58,7 @@ describe('Auth Security (e2e)', () => {
     let temporaryPassword = '';
 
     beforeAll(async () => {
+      if (!prisma) return;
       // Clean up previous test runs safely
       await prisma.user.deleteMany({ where: { username: 'test_sec_user' } });
 
@@ -115,9 +132,11 @@ describe('Auth Security (e2e)', () => {
 
       expect(res.body.data.mustChangePassword).toBe(true);
       userAccessToken = res.body.data.accessToken;
-      
+
       const cookies = res.headers['set-cookie'] || [];
-      const refreshCookie = cookies.find((c: string) => c.startsWith('refreshToken='));
+      const refreshCookie = cookies.find((c: string) =>
+        c.startsWith('refreshToken='),
+      );
       if (refreshCookie) {
         userRefreshToken = refreshCookie.split(';')[0].split('=')[1];
       }

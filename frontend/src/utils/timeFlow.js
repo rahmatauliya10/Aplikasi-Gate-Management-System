@@ -26,6 +26,9 @@ export const updateTimestampsByStatus = (truck, newStatus, warehouseCode) => {
     case 'QC_VEHICLE_PENDING':
       if (!truck.timestamps.weighInAt) truck.timestamps.weighInAt = now;
       break;
+    case 'QC_VEHICLE_IN_PROGRESS':
+      if (!truck.timestamps.qcVehicleStartAt) truck.timestamps.qcVehicleStartAt = now;
+      break;
     case 'QC_VEHICLE_PASSED':
     case 'QC_VEHICLE_HOLD':
     case 'QC_VEHICLE_REJECTED':

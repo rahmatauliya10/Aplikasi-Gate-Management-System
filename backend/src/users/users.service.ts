@@ -12,6 +12,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class UsersService {
@@ -47,13 +48,14 @@ export class UsersService {
         errors: [],
       });
 
-    // Validate warehouse role constraints
-    if (dto.role === 'WAREHOUSE') {
+    // Validate warehouse and QC role process scope constraints
+    if (dto.role === 'WAREHOUSE' || dto.role === 'QC') {
       if (!dto.warehouseAccess || dto.warehouseAccess.length === 0) {
         throw new BadRequestException({
           success: false,
-          message:
-            'Warehouse role requires at least 1 warehouse access selection',
+          message: `${
+            dto.role === 'WAREHOUSE' ? 'Warehouse' : 'QC'
+          } role requires at least 1 process scope selection`,
           errors: [],
         });
       }
@@ -238,23 +240,35 @@ export class UsersService {
       data.role = dto.role;
     }
 
+    // Revoke sessions if role, status, or process scope privilege changes
+    if (
+      dto.role !== undefined ||
+      dto.warehouseAccess !== undefined ||
+      dto.isActive !== undefined
+    ) {
+      data.tokenVersion = { increment: 1 };
+      data.refreshTokenHash = null;
+    }
+
     // Determine warehouseAccess logic based on final role
     let updatedAccess = dto.warehouseAccess;
-    if (targetRole === 'WAREHOUSE') {
+    if (targetRole === 'WAREHOUSE' || targetRole === 'QC') {
       if (dto.warehouseAccess) {
         if (dto.warehouseAccess.length === 0) {
           throw new BadRequestException({
             success: false,
-            message:
-              'Warehouse role requires at least 1 warehouse access selection',
+            message: `${
+              targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'
+            } role requires at least 1 process scope selection`,
             errors: [],
           });
         }
       } else if (user.warehouseAccess.length === 0) {
         throw new BadRequestException({
           success: false,
-          message:
-              'Warehouse role requires at least 1 warehouse access selection',
+          message: `${
+            targetRole === 'WAREHOUSE' ? 'Warehouse' : 'QC'
+          } role requires at least 1 process scope selection`,
           errors: [],
         });
       }
@@ -262,30 +276,51 @@ export class UsersService {
       updatedAccess = [];
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data,
-      include: { warehouseAccess: true },
-    });
+    const { updated, finalAccess } = await this.prisma.$transaction(
+      async (prismaTx) => {
+        // Invariant Guard: System must always retain at least one active, non-deleted ADMIN
+        if (
+          user.role === 'ADMIN' &&
+          ((dto.role && dto.role !== 'ADMIN') || dto.isActive === false)
+        ) {
+          const activeAdminCount = await prismaTx.user.count({
+            where: { role: 'ADMIN', isActive: true, isDeleted: false },
+          });
+          if (activeAdminCount <= 1) {
+            throw new BadRequestException(
+              'Perubahan ditolak: Sistem harus selalu memiliki minimal satu ADMIN aktif.',
+            );
+          }
+        }
 
-    if (updatedAccess !== undefined) {
-      await this.prisma.userWarehouseAccess.deleteMany({
-        where: { userId: id },
-      });
-      if (updatedAccess.length > 0) {
-        await this.prisma.userWarehouseAccess.createMany({
-          data: updatedAccess.map((wh) => ({
-            userId: id,
-            processType: wh as any,
-          })),
+        const resUser = await prismaTx.user.update({
+          where: { id },
+          data,
+          include: { warehouseAccess: true },
         });
-      }
-    }
 
-    const finalAccess =
-      updatedAccess !== undefined
-        ? updatedAccess
-        : updated.warehouseAccess.map((wa) => wa.processType);
+        if (updatedAccess !== undefined) {
+          await prismaTx.userWarehouseAccess.deleteMany({
+            where: { userId: id },
+          });
+          if (updatedAccess.length > 0) {
+            await prismaTx.userWarehouseAccess.createMany({
+              data: updatedAccess.map((wh) => ({
+                userId: id,
+                processType: wh as any,
+              })),
+            });
+          }
+        }
+
+        const accessList =
+          updatedAccess !== undefined
+            ? updatedAccess
+            : resUser.warehouseAccess.map((wa) => wa.processType);
+
+        return { updated: resUser, finalAccess: accessList };
+      },
+    );
 
     return {
       success: true,
@@ -320,26 +355,33 @@ export class UsersService {
         errors: [],
       });
 
-    // Prevent deleting the main admin user (to avoid locking out)
-    if (user.email === 'admin@gms.local' || user.username === 'admin') {
-      throw new BadRequestException({
-        success: false,
-        message: 'Cannot delete the primary administrator account',
-        errors: [],
-      });
-    }
+    await this.prisma.$transaction(async (prismaTx) => {
+      // Invariant Guard: Prevent deleting the last active ADMIN
+      if (user.role === 'ADMIN') {
+        const activeAdminCount = await prismaTx.user.count({
+          where: { role: 'ADMIN', isActive: true, isDeleted: false },
+        });
+        if (activeAdminCount <= 1) {
+          throw new BadRequestException(
+            'Penghapusan ditolak: Sistem harus selalu memiliki minimal satu ADMIN aktif.',
+          );
+        }
+      }
 
-    const timestamp = Date.now();
-    await this.prisma.user.update({
-      where: { id },
-      data: {
-        isDeleted: true,
-        isActive: false,
-        email: `${user.email}_deleted_${timestamp}`,
-        username: `${user.username}_deleted_${timestamp}`,
-        refreshTokenHash: null,
-      },
+      const timestamp = Date.now();
+      await prismaTx.user.update({
+        where: { id },
+        data: {
+          isDeleted: true,
+          isActive: false,
+          email: `${user.email}_deleted_${timestamp}`,
+          username: `${user.username}_deleted_${timestamp}`,
+          tokenVersion: { increment: 1 },
+          refreshTokenHash: null,
+        },
+      });
     });
+
     return {
       success: true,
       message: 'User deleted successfully',
@@ -358,18 +400,8 @@ export class UsersService {
         errors: [],
       });
 
-    // Prevent resetting the main admin user's password to avoid accidental lockout
-    if (user.email === 'admin@gms.local' || user.username === 'admin') {
-      throw new BadRequestException({
-        success: false,
-        message: 'Cannot reset the primary administrator account password',
-        errors: [],
-      });
-    }
-
-    const temporaryPassword = require('crypto')
-      .randomBytes(16)
-      .toString('base64url');
+    const temporaryPassword =
+      'Tmp' + require('crypto').randomBytes(8).toString('hex') + '1!';
     const passwordHash = await argon2.hash(temporaryPassword, {
       type: argon2.argon2id,
     });
@@ -413,7 +445,7 @@ export class UsersService {
         errors: [],
       });
 
-    // Prevent deactivating the main admin user (to avoid locking out)
+    // Prevent deactivating primary administrator account
     if (
       (user.email === 'admin@gms.local' || user.username === 'admin') &&
       !dto.isActive
@@ -425,9 +457,26 @@ export class UsersService {
       });
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data: { isActive: dto.isActive },
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      if (user.role === 'ADMIN' && !dto.isActive) {
+        const activeAdminCount = await prismaTx.user.count({
+          where: { role: 'ADMIN', isActive: true, isDeleted: false },
+        });
+        if (activeAdminCount <= 1) {
+          throw new BadRequestException(
+            'Deaktivasi ditolak: Sistem harus selalu memiliki minimal satu ADMIN aktif.',
+          );
+        }
+      }
+
+      return prismaTx.user.update({
+        where: { id },
+        data: {
+          isActive: dto.isActive,
+          tokenVersion: { increment: 1 },
+          refreshTokenHash: null,
+        },
+      });
     });
 
     return {

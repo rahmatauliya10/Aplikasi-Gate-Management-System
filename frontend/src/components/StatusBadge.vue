@@ -12,6 +12,10 @@ const props = defineProps({
   status: {
     type: String,
     required: true
+  },
+  processType: {
+    type: String,
+    default: ''
   }
 })
 
@@ -43,5 +47,11 @@ const dotClasses = computed(() => {
   }
 })
 
-const label = computed(() => props.status.replace(/_/g, ' '))
+const label = computed(() => {
+  let s = props.status || ''
+  if ((props.processType === 'GBB' || props.processType === 'GSP') && s.startsWith('QC_VEHICLE')) {
+    s = s.replace('QC_VEHICLE', 'QC_SAMPLING')
+  }
+  return s.replace(/_/g, ' ')
+})
 </script>

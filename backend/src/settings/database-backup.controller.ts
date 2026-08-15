@@ -3,11 +3,13 @@ import {
   Get,
   Post,
   Body,
+  Param,
   UseGuards,
   Req,
   Res,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -16,6 +18,7 @@ import {
   ApiResponse,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import * as fs from 'fs';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -32,7 +35,9 @@ export class DatabaseBackupController {
   constructor(private backupService: DatabaseBackupService) {}
 
   @Get('status')
-  @ApiOperation({ summary: 'Get backup system health status and enterprise metrics' })
+  @ApiOperation({
+    summary: 'Get backup system health status and enterprise metrics',
+  })
   @ApiResponse({ status: 200, description: 'System status retrieved' })
   async getStatus() {
     const status = await this.backupService.getSystemStatus();
@@ -74,14 +79,20 @@ export class DatabaseBackupController {
 
   @Post('backup')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Generate and download database backup file (Admin only)' })
-  @ApiResponse({ status: 200, description: 'Backup file generated successfully' })
+  @ApiOperation({
+    summary: 'Generate and download database backup file (Admin only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Backup file generated successfully',
+  })
   async downloadBackup(
     @CurrentUser() user: JwtPayloadUser,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
     const backupData = await this.backupService.generateBackup(user, ipAddress);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -102,7 +113,16 @@ export class DatabaseBackupController {
     @Body('adminPassword') adminPasswordConfirm: string,
     @Req() req: Request,
   ) {
-    const ipAddress = (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Akses pemulihan langsung melalui HTTP API dinonaktifkan di lingkungan produksi untuk menjamin atomisitas dan konsistensi data. Silakan gunakan operator control plane resmi: scripts/gms-production-restore.ps1.',
+      });
+    }
+
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
 
     let payload = backupData;
     if (typeof backupData === 'string') {
@@ -113,13 +133,85 @@ export class DatabaseBackupController {
       }
     }
 
-    const result = await this.backupService.restoreDatabase(
+    return await this.backupService.restoreDatabase(
       user,
       payload,
       adminPasswordConfirm,
       ipAddress,
     );
+  }
 
-    return result;
+  @Get('download-bundle/:backupId')
+  @ApiOperation({
+    summary: 'Download complete portable DR backup bundle (.gmsbackup)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Portable DR backup bundle downloaded',
+  })
+  async downloadBundle(
+    @Param('backupId') backupId: string,
+    @Res() res: Response,
+  ) {
+    const filePath =
+      await this.backupService.exportPortableBackupBundle(backupId);
+    const filename = `GMS_DR_Bundle_${backupId}.gmsbackup`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const readStream = fs.createReadStream(filePath);
+    readStream.pipe(res);
+    readStream.on('end', () => {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (e) {
+        // Abaikan error jika file sudah terhapus
+      }
+    });
+  }
+
+  @Post('restore-bundle')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Restore database and attachments from portable DR bundle (.gmsbackup)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Database restored from portable DR bundle',
+  })
+  async restoreBundle(
+    @CurrentUser() user: JwtPayloadUser,
+    @Body('bundleData') bundleData: any,
+    @Body('adminPassword') adminPasswordConfirm: string,
+    @Req() req: Request,
+  ) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Akses pemulihan langsung melalui HTTP API dinonaktifkan di lingkungan produksi untuk menjamin atomisitas dan konsistensi data. Silakan gunakan operator control plane resmi: scripts/gms-production-restore.ps1.',
+      });
+    }
+
+    const ipAddress =
+      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+
+    let payload = bundleData;
+    if (typeof bundleData === 'string') {
+      try {
+        payload = JSON.parse(bundleData);
+      } catch (e) {
+        throw new Error('Format JSON bundleData tidak valid');
+      }
+    }
+
+    return await this.backupService.restoreFromPortableBundle(
+      user,
+      payload,
+      adminPasswordConfirm,
+      ipAddress,
+    );
   }
 }

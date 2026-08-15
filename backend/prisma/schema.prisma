@@ -98,6 +98,24 @@ enum RiskLevel {
   INVALID_DATA
 }
 
+enum CorrectionTargetModule {
+  TRANSACTION
+  WEIGHBRIDGE
+  QC_VEHICLE
+  QC_MATERIAL
+  INCOMING_MATERIAL
+  WAREHOUSE
+  STATUS
+  ATTACHMENT
+  REMARK
+}
+
+enum CorrectionAction {
+  CORRECT_DATA
+  CORRECT_RECORDED_STATUS
+  REOPEN_WORKFLOW
+}
+
 model User {
   id                         String    @id @default(uuid())
   email                      String    @unique
@@ -134,6 +152,10 @@ model User {
   uploadedAttachments       Attachment[]            @relation("UploadedBy")
   acknowledgedFrauds        FraudCheck[]            @relation("AcknowledgedBy")
   systemIssues              SystemIssue[]
+  transactionCorrections    TransactionCorrection[]
+  createdTransactions       Transaction[]           @relation("CreatedByUser")
+  cancelledTransactions     Transaction[]           @relation("CancelledByUser")
+  statusHistoryChanges      TransactionStatusHistory[] @relation("StatusChangedBy")
 }
 
 model UserWarehouseAccess {
@@ -152,6 +174,7 @@ model Transaction {
   id                    String            @id @default(uuid())
   transactionNumber     String            @unique
   plateNumber           String
+  plateNumberNormalized String?
   driverName            String
   driverPhone           String
   vendorName            String
@@ -189,12 +212,16 @@ model Transaction {
   warehouseUnit         WarehouseUnit?
   qcStartAt             DateTime?
   qcEndAt               DateTime?
+  incomingQcStartAt     DateTime?
   qcAnalysisCompleted   Boolean           @default(false)
   qcAnalysisCompletedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  revision  Int      @default(1)
 
+  createdBy              User?                      @relation("CreatedByUser", fields: [createdById], references: [id], onDelete: SetNull)
+  cancelledBy            User?                      @relation("CancelledByUser", fields: [cancelledById], references: [id], onDelete: SetNull)
   weighInBy              User?                      @relation("WeighInByUser", fields: [weighInById], references: [id], onDelete: SetNull)
   weighOutBy             User?                      @relation("WeighOutByUser", fields: [weighOutById], references: [id], onDelete: SetNull)
   warehouseStartBy       User?                      @relation("TxWarehouseStartBy", fields: [warehouseStartById], references: [id], onDelete: SetNull)
@@ -206,11 +233,14 @@ model Transaction {
   incomingMaterialChecks IncomingMaterialCheck[]
   fraudChecks            FraudCheck[]
   attachments            Attachment[]
+  corrections            TransactionCorrection[]
 
   @@index([status])
   @@index([plateNumber])
+  @@index([plateNumberNormalized])
   @@index([processType, status])
   @@index([createdAt])
+  @@index([id, status, revision], map: "idx_transaction_cas_status_revision")
 }
 
 model TransactionStatusHistory {
@@ -223,6 +253,7 @@ model TransactionStatusHistory {
   changedAt     DateTime           @default(now())
 
   transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  changedBy   User?       @relation("StatusChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
 }
@@ -235,12 +266,17 @@ model WeighbridgeRecord {
   ticketNumber  String?
   operatorId    String?
   remarks       String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  isCurrent                Boolean         @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int             @default(1)
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transaction            Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  supersededByCorrection TransactionCorrection? @relation("WeighbridgeSupersededBy", fields: [supersededByCorrectionId], references: [id], onDelete: SetNull)
 
-  @@unique([transactionId, type])
+  @@unique([transactionId, type, revision])
 }
 
 model WarehouseProcess {
@@ -259,13 +295,20 @@ model WarehouseProcess {
   rollCount      Int?
   condition      WarehouseCondition?
   remarks        String?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  checklistItems Json?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+  isCurrent                Boolean             @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int                 @default(1)
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  startBy     User?       @relation("WarehouseStartBy", fields: [startById], references: [id], onDelete: SetNull)
-  endBy       User?       @relation("WarehouseEndBy", fields: [endById], references: [id], onDelete: SetNull)
+  transaction            Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  startBy                User?                  @relation("WarehouseStartBy", fields: [startById], references: [id], onDelete: SetNull)
+  endBy                  User?                  @relation("WarehouseEndBy", fields: [endById], references: [id], onDelete: SetNull)
+  supersededByCorrection TransactionCorrection? @relation("WarehouseSupersededBy", fields: [supersededByCorrectionId], references: [id], onDelete: SetNull)
 
+  @@unique([transactionId, processType, revision])
   @@index([transactionId])
 }
 
@@ -284,13 +327,19 @@ model QcVehicleCheck {
   checkedById          String?
   startedAt            DateTime?
   completedAt          DateTime?
-  createdAt            DateTime     @default(now())
-  updatedAt            DateTime     @updatedAt
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  isCurrent                Boolean      @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int          @default(1)
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  checkedBy   User?       @relation("QCVehicleCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+  transaction            Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  checkedBy              User?                  @relation("QCVehicleCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+  supersededByCorrection TransactionCorrection? @relation("QcVehicleSupersededBy", fields: [supersededByCorrectionId], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
+  @@unique([transactionId, revision])
 }
 
 model IncomingMaterialCheck {
@@ -303,6 +352,7 @@ model IncomingMaterialCheck {
   foreignMatter      Float?
   beanCondition      CheckResult?
   sampleWeight       Float?
+  goodBeanPercentage Float?
   itemCondition      CheckResult?
   packagingCondition CheckResult?
   quantityCheck      CheckResult?
@@ -314,33 +364,49 @@ model IncomingMaterialCheck {
   checkedById        String?
   startedAt          DateTime?
   completedAt        DateTime?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  isCurrent                Boolean      @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  revision                 Int          @default(1)
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  checkedBy   User?       @relation("IncomingCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+  transaction            Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  checkedBy              User?                  @relation("IncomingCheckedBy", fields: [checkedById], references: [id], onDelete: SetNull)
+  supersededByCorrection TransactionCorrection? @relation("IncomingMaterialSupersededBy", fields: [supersededByCorrectionId], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
+  @@unique([transactionId, revision])
 }
 
 model Attachment {
-  id             String         @id @default(uuid())
-  transactionId  String
-  module         String
-  attachmentType AttachmentType
-  originalName   String
-  fileName       String
-  filePath       String
-  mimeType       String
-  size           Int
-  description    String?
-  uploadedById   String?
-  createdAt      DateTime       @default(now())
+  id                       String         @id @default(uuid())
+  attachmentLineageId      String         @default(uuid())
+  transactionId            String
+  module                   String
+  attachmentType           AttachmentType
+  originalName             String
+  fileName                 String
+  filePath                 String
+  mimeType                 String
+  size                     Int
+  description              String?
+  uploadedById             String?
+  createdAt                DateTime       @default(now())
+  revision                 Int            @default(1)
+  isCurrent                Boolean        @default(true)
+  supersededAt             DateTime?
+  supersededByCorrectionId String?
+  sha256                   String?
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  uploadedBy  User?       @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  transaction            Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  uploadedBy             User?                  @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  supersededByCorrection TransactionCorrection? @relation("AttachmentSupersededBy", fields: [supersededByCorrectionId], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
+  @@index([transactionId, isCurrent])
+  @@index([attachmentLineageId])
+  @@unique([attachmentLineageId, revision])
 }
 
 model FraudCheck {
@@ -457,4 +523,52 @@ model SystemIssue {
   reporter      User     @relation(fields: [reporterId], references: [id])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model TransactionCorrection {
+  id               String           @id @default(uuid())
+  transactionId    String
+  correctedById    String
+  correctionNumber String           @unique @default(uuid())
+  action           CorrectionAction @default(CORRECT_DATA)
+  reasonCode       String           @default("OTHER")
+  reason           String
+  remark           String           @default("")
+  evidenceUrl      String?
+  oldValues        Json
+  newValues        Json
+  expectedRevision Int              @default(1)
+  ipAddress        String?
+  createdAt        DateTime         @default(now())
+
+  transaction                     Transaction                 @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  correctedBy                     User                        @relation(fields: [correctedById], references: [id], onDelete: Restrict)
+  items                           TransactionCorrectionItem[]
+  supersededWeighbridgeRecords    WeighbridgeRecord[]         @relation("WeighbridgeSupersededBy")
+  supersededWarehouseProcesses    WarehouseProcess[]          @relation("WarehouseSupersededBy")
+  supersededQcVehicleChecks       QcVehicleCheck[]            @relation("QcVehicleSupersededBy")
+  supersededIncomingMaterialChecks IncomingMaterialCheck[]    @relation("IncomingMaterialSupersededBy")
+  supersededAttachments           Attachment[]               @relation("AttachmentSupersededBy")
+
+  @@index([transactionId])
+  @@index([correctedById])
+  @@index([correctionNumber])
+}
+
+model TransactionCorrectionItem {
+  id                  String                 @id @default(uuid())
+  correctionId        String
+  targetModule        CorrectionTargetModule
+  targetRecordId      String?
+  replacementRecordId String?
+  fieldName           String
+  oldValue            Json?
+  newValue            Json?
+  itemRemark          String?
+  createdAt           DateTime               @default(now())
+
+  correction TransactionCorrection @relation(fields: [correctionId], references: [id], onDelete: Cascade)
+
+  @@index([correctionId])
+  @@index([targetModule, targetRecordId])
 }

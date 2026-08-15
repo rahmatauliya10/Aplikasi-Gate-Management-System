@@ -48,6 +48,7 @@ export class WeighbridgeController {
   }
 
   @Post('in/:transactionId')
+  @Roles('ADMIN', 'SECURITY')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Process vehicle weigh-in (register first weight)' })
   @ApiResponse({
@@ -68,6 +69,7 @@ export class WeighbridgeController {
   }
 
   @Post('out/:transactionId')
+  @Roles('ADMIN', 'SECURITY')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

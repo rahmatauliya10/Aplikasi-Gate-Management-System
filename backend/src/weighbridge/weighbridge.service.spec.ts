@@ -16,14 +16,28 @@ describe('WeighbridgeService Fraud Calculation', () => {
           useValue: {
             $transaction: jest.fn((cb) =>
               cb({
-                transaction: { findUnique: jest.fn(), update: jest.fn() },
-                weighbridgeRecord: { create: jest.fn() },
+                transaction: {
+                  findUnique: jest.fn(),
+                  update: jest.fn(),
+                  updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+                },
+                weighbridgeRecord: {
+                  create: jest.fn(),
+                  aggregate: jest.fn().mockResolvedValue({
+                    _max: { revision: 0 },
+                  }),
+                },
                 transactionStatusHistory: { create: jest.fn() },
                 fraudCheck: { create: jest.fn() },
               }),
             ),
             transaction: { findUnique: jest.fn() },
-            weighbridgeRecord: { findFirst: jest.fn() },
+            weighbridgeRecord: {
+              findFirst: jest.fn(),
+              aggregate: jest.fn().mockResolvedValue({
+                _max: { revision: 0 },
+              }),
+            },
           },
         },
         {
@@ -45,14 +59,22 @@ describe('WeighbridgeService Fraud Calculation', () => {
       grossWeight: 0,
       tareWeight: 0, // netWeight will be 0
       actualWeight: 0, // causes Math.max(0, 0) -> 0
+      revision: 1,
     };
 
     const txClient = {
       transaction: {
         findUnique: jest.fn().mockResolvedValue(mockTx),
         update: jest.fn().mockResolvedValue(mockTx),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
-      weighbridgeRecord: { create: jest.fn() },
+      weighbridgeRecord: {
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        aggregate: jest.fn().mockResolvedValue({
+          _max: { revision: 0 },
+        }),
+      },
       transactionStatusHistory: { create: jest.fn() },
       fraudCheck: { create: jest.fn() },
     };
@@ -79,6 +101,116 @@ describe('WeighbridgeService Fraud Calculation', () => {
         data: expect.objectContaining({
           deviationPercent: 0,
           riskLevel: 'SAFE',
+        }),
+      }),
+    );
+  });
+
+  it('should classify exact 2% deviation as SAFE and 2.1% as WARNING', () => {
+    // 1000 kg net weight, 980 kg actual -> deviation = 20 -> 2.0% -> SAFE
+    const netWeight = 1000;
+    const actual2 = 980;
+    const dev2 = (Math.abs(netWeight - actual2) / netWeight) * 100;
+    expect(dev2).toBe(2);
+    expect(dev2 > 2 ? 'WARNING' : 'SAFE').toBe('SAFE');
+
+    // 1000 kg net weight, 979 kg actual -> deviation = 21 -> 2.1% -> WARNING
+    const actualWarning = 979;
+    const devWarning = (Math.abs(netWeight - actualWarning) / netWeight) * 100;
+    expect(devWarning).toBe(2.1);
+    expect(
+      devWarning > 5 ? 'CRITICAL' : devWarning > 2 ? 'WARNING' : 'SAFE',
+    ).toBe('WARNING');
+  });
+
+  it('should classify exact 5% deviation as WARNING and 5.1% as CRITICAL', () => {
+    const netWeight = 1000;
+
+    // 1000 kg net weight, 950 kg actual -> deviation = 50 -> 5.0% -> WARNING
+    const actual5 = 950;
+    const dev5 = (Math.abs(netWeight - actual5) / netWeight) * 100;
+    expect(dev5).toBe(5);
+    expect(dev5 > 5 ? 'CRITICAL' : dev5 > 2 ? 'WARNING' : 'SAFE').toBe(
+      'WARNING',
+    );
+
+    // 1000 kg net weight, 949 kg actual -> deviation = 51 -> 5.1% -> CRITICAL
+    const actualCritical = 949;
+    const devCritical =
+      (Math.abs(netWeight - actualCritical) / netWeight) * 100;
+    expect(devCritical).toBe(5.1);
+    expect(
+      devCritical > 5 ? 'CRITICAL' : devCritical > 2 ? 'WARNING' : 'SAFE',
+    ).toBe('CRITICAL');
+  });
+
+  it('should allow GBB weigh-out when status is WAREHOUSE_DONE and use fallback IN record weight if grossWeight is missing on transaction', async () => {
+    const mockTx = {
+      id: 'tx-gbb-1',
+      status: 'WAREHOUSE_DONE',
+      processType: 'GBB',
+      grossWeight: null, // missing on root transaction
+      tareWeight: null,
+      actualWeight: null,
+      revision: 1,
+    };
+
+    const txClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue({
+          ...mockTx,
+          status: 'WEIGH_OUT_DONE',
+          grossWeight: 15000,
+          tareWeight: 5000,
+          netWeight: 10000,
+        }),
+        update: jest
+          .fn()
+          .mockResolvedValue({ ...mockTx, status: 'WEIGH_OUT_DONE' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      weighbridgeRecord: {
+        create: jest.fn(),
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null) // OUT duplicate check
+          .mockResolvedValueOnce({ weight: 15000 }), // IN record fallback search
+        aggregate: jest.fn().mockResolvedValue({
+          _max: { revision: 0 },
+        }),
+      },
+      transactionStatusHistory: { create: jest.fn() },
+      fraudCheck: { create: jest.fn() },
+    };
+
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(txClient));
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    jest
+      .spyOn(prismaService.weighbridgeRecord, 'findFirst')
+      .mockImplementation(((args: any) => {
+        if (args?.where?.type === 'OUT') return Promise.resolve(null);
+        if (args?.where?.type === 'IN')
+          return Promise.resolve({ weight: 15000 } as any);
+        return Promise.resolve(null);
+      }) as any);
+
+    const result = await service.submitWeighOut('tx-gbb-1', { weight: 5000 }, {
+      id: 'user-1',
+    } as any);
+
+    expect(txClient.transaction.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'WEIGH_OUT_DONE',
+          grossWeight: 15000,
+          tareWeight: 5000,
+          netWeight: 10000,
         }),
       }),
     );

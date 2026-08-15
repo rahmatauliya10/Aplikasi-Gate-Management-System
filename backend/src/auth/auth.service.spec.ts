@@ -15,6 +15,11 @@ describe('AuthService Refresh Token Rotation', () => {
   let jwtService: JwtService;
 
   beforeEach(async () => {
+    process.env.JWT_ACCESS_SECRET =
+      'a_secure_valid_test_access_secret_key_at_least_32_bytes_long_here_123';
+    process.env.JWT_REFRESH_SECRET =
+      'another_secure_distinct_test_refresh_secret_at_least_32_bytes_long_456';
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -67,10 +72,13 @@ describe('AuthService Refresh Token Rotation', () => {
       UnauthorizedException,
     );
 
-    // Verify rotation security: it must nullify the stored hash
+    // Verify rotation security: it must nullify the stored hash and increment tokenVersion to revoke active access tokens
     expect(updateSpy).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { refreshTokenHash: null },
+      data: {
+        refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
+      },
     });
   });
 });

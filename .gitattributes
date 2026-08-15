@@ -1,0 +1,8 @@
+# Enforce LF line endings for all text files to prevent ESLint Prettier CRLF errors
+* text=auto eol=lf
+*.ts text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

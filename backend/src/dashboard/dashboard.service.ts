@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+
 @Injectable()
 export class DashboardService {
   private readonly logger = new Logger(DashboardService.name);
@@ -10,6 +12,7 @@ export class DashboardService {
   constructor(
     private prisma: PrismaService,
     private activityLogsService: ActivityLogsService,
+    private authorizationScopeService: AuthorizationScopeService,
   ) {}
 
   async getStats(user: JwtPayloadUser) {
@@ -19,6 +22,8 @@ export class DashboardService {
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const scope = this.authorizationScopeService.getTransactionScope(user);
 
     const [
       totalActive,
@@ -32,21 +37,29 @@ export class DashboardService {
       fraudChecks,
     ] = await Promise.all([
       this.prisma.transaction.count({
-        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
       }),
-      this.prisma.transaction.count({ where: { status: 'COMPLETED' } }),
-      this.prisma.transaction.count({ where: { status: 'CANCELLED' } }),
       this.prisma.transaction.count({
-        where: { createdAt: { gte: today, lt: tomorrow } },
+        where: { status: 'COMPLETED', ...scope },
       }),
-      this.prisma.transaction.groupBy({ by: ['status'], _count: { id: true } }),
+      this.prisma.transaction.count({
+        where: { status: 'CANCELLED', ...scope },
+      }),
+      this.prisma.transaction.count({
+        where: { createdAt: { gte: today, lt: tomorrow }, ...scope },
+      }),
+      this.prisma.transaction.groupBy({
+        by: ['status'],
+        _count: { id: true },
+        where: scope,
+      }),
       this.prisma.transaction.groupBy({
         by: ['processType'],
         _count: { id: true },
-        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+        where: { status: { notIn: ['COMPLETED', 'CANCELLED'] }, ...scope },
       }),
       this.prisma.transaction.findMany({
-        where: { createdAt: { gte: today, lt: tomorrow } },
+        where: { createdAt: { gte: today, lt: tomorrow }, ...scope },
         orderBy: { createdAt: 'desc' },
         take: 10,
         select: {
@@ -61,7 +74,12 @@ export class DashboardService {
         },
       }),
       this.prisma.transaction.findMany({
-        where: { status: 'COMPLETED' },
+        where: {
+          status: 'COMPLETED',
+          // 90-day rolling window to prevent unbounded query as data grows
+          createdAt: { gte: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) },
+          ...scope,
+        },
         select: {
           id: true,
           processType: true,
@@ -75,13 +93,25 @@ export class DashboardService {
           gateOutAt: true,
           netWeight: true,
           actualWeight: true,
+          qcVehicleChecks: {
+            where: { isCurrent: true },
+            select: { startedAt: true, completedAt: true },
+          },
+          incomingMaterialChecks: {
+            where: { isCurrent: true },
+            select: { startedAt: true, completedAt: true },
+          },
         },
       }),
       this.prisma.fraudCheck.findMany({
-        where: { riskLevel: { in: ['WARNING', 'CRITICAL'] as any } },
+        where: {
+          riskLevel: { in: ['WARNING', 'CRITICAL'] as any },
+          transaction: { ...scope },
+        },
         include: {
           transaction: {
             select: {
+              id: true,
               plateNumber: true,
               processType: true,
               netWeight: true,
@@ -109,7 +139,33 @@ export class DashboardService {
     completedTx.forEach((t) => {
       sumWaitingIn += getDiffMins(t.gateInAt, t.weighInAt);
       sumWarehouse += getDiffMins(t.warehouseStartAt, t.warehouseEndAt);
-      sumQc += getDiffMins(t.qcStartAt, t.qcEndAt); // This might be null if no QC, use fallback if needed
+
+      const v =
+        t.qcVehicleChecks && t.qcVehicleChecks.length > 0
+          ? t.qcVehicleChecks[0]
+          : null;
+      const inc =
+        t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0
+          ? t.incomingMaterialChecks[0]
+          : null;
+
+      const hasVehicleQc = !!v?.startedAt && !!v?.completedAt;
+      const hasIncomingQc = !!inc?.startedAt && !!inc?.completedAt;
+
+      if (hasVehicleQc || hasIncomingQc) {
+        const vehicleQcDur =
+          v && v.startedAt && v.completedAt
+            ? getDiffMins(v.startedAt, v.completedAt)
+            : 0;
+        const incomingQcDur =
+          inc && inc.startedAt && inc.completedAt
+            ? getDiffMins(inc.startedAt, inc.completedAt)
+            : 0;
+        sumQc += vehicleQcDur + incomingQcDur;
+      } else {
+        sumQc += getDiffMins(t.qcStartAt, t.qcEndAt);
+      }
+
       sumWaitingOut += getDiffMins(t.warehouseEndAt, t.weighOutAt);
       sumTotalTat += getDiffMins(t.gateInAt, t.gateOutAt);
     });
@@ -144,26 +200,37 @@ export class DashboardService {
       }
     });
 
-    const activeFraudAlerts = fraudChecks.map((f: any) => ({
-      id: f.id,
-      plate: f.transaction.plateNumber,
-      type: f.transaction.processType,
-      net: f.transaction.netWeight,
-      processed: f.transaction.actualWeight,
-      diffPercent: f.deviationPercent
-        ? f.deviationPercent.toFixed(2)
-        : f.deviationKg
-          ? (
-              (f.deviationKg /
-                Math.max(
-                  f.transaction.netWeight || 1,
-                  f.transaction.actualWeight || 1,
-                )) *
-              100
-            ).toFixed(2)
-          : '0.00',
-      riskLevel: f.riskLevel,
-    }));
+    // Deduplicate active fraud alerts per transaction (keep only the latest check per transaction/plate)
+    const seenTx = new Set<string>();
+    const activeFraudAlerts: any[] = [];
+
+    for (const f of fraudChecks) {
+      const txKey =
+        f.transactionId || f.transaction?.id || f.transaction?.plateNumber;
+      if (txKey && !seenTx.has(txKey)) {
+        seenTx.add(txKey);
+        activeFraudAlerts.push({
+          id: f.id,
+          plate: f.transaction?.plateNumber || '-',
+          type: f.transaction?.processType || '-',
+          net: f.transaction?.netWeight || 0,
+          processed: f.transaction?.actualWeight || 0,
+          diffPercent: f.deviationPercent
+            ? f.deviationPercent.toFixed(2)
+            : f.deviationKg
+              ? (
+                  (f.deviationKg /
+                    Math.max(
+                      f.transaction?.netWeight || 1,
+                      f.transaction?.actualWeight || 1,
+                    )) *
+                  100
+                ).toFixed(2)
+              : '0.00',
+          riskLevel: f.riskLevel,
+        });
+      }
+    }
 
     await this.activityLogsService
       .logAction({

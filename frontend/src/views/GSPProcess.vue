@@ -11,7 +11,7 @@
                 <h2 class="text-[10px] font-black text-[#4A8BDF] uppercase tracking-[0.2em]">Active Operation</h2>
                 <h3 class="text-xl font-black text-slate-800 tracking-tight mt-0.5">Truck Details</h3>
               </div>
-              <StatusBadge :status="selectedTruck.status" class="shadow-sm" />
+              <StatusBadge :status="selectedTruck.status" :process-type="getProcessType(selectedTruck)" class="shadow-sm" />
             </div>
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
@@ -62,7 +62,7 @@
             
             <div class="mt-6 space-y-4">
               <!-- Missing Security Info -->
-              <div v-if="selectedTruck.status === 'WEIGH_IN_DONE' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
+              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
                 <div class="flex items-center space-x-2 text-[#800057] mb-2">
                   <span class="material-icons text-lg">warning_amber</span>
                   <span class="text-[11px] font-black uppercase tracking-wider">Complete Security Data</span>
@@ -88,14 +88,13 @@
                 <WeightInput label="Input Actual Weight GSP (KG)" :is-submitting="isProcessing" @save="handleWeightSave" />
               </div>
 
-              <!-- Incoming Material Check -->
-              <div v-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="mt-6">
-                <button @click="openChecklist" class="w-full py-4 rounded-xl flex items-center justify-center space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(74,139,223,0.3)] active:scale-[0.98]" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);color:white;transform:translateZ(0)">
-                  <span class="material-icons text-xl">fact_check</span>
-                  <span class="font-black tracking-widest uppercase">
-                    {{ selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS' ? 'Lanjutkan Incoming Material Check' : 'Start Incoming Material Check' }}
-                  </span>
-                </button>
+              <!-- Incoming Material Check (Read Only for Warehouse) -->
+              <div v-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="mt-6 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2)">
+                <span class="material-icons text-blue-500 text-2xl animate-spin">sync</span>
+                <div>
+                  <p class="text-sm font-black text-blue-700">Pemeriksaan Incoming QC Berlangsung</p>
+                  <p class="text-[11px] text-blue-600">Menunggu pemeriksaan Incoming QC oleh QC Team.</p>
+                </div>
               </div>
 
               <!-- Sampling Result Badge -->
@@ -320,7 +319,11 @@ const getProcessType = (truck) => {
 
 const getStepLabel = (truck) => {
   if (!truck) return '-'
-  const step = truck.step || truck.status || '-'
+  let step = truck.step || truck.status || '-'
+  const pType = getProcessType(truck)
+  if ((pType === 'GBB' || pType === 'GSP') && String(step).startsWith('QC_VEHICLE')) {
+    step = String(step).replace('QC_VEHICLE', 'QC_SAMPLING')
+  }
   return String(step).replace(/_/g, ' ').toUpperCase()
 }
 
@@ -355,31 +358,13 @@ onMounted(async () => {
 
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
-const showChecklistModal = ref(false)
 const currentPage = ref(1)
 const searchQuery = ref('')
 const suratJalanInput = ref('')
 const poNumberInput = ref('')
-const rejectComment = ref('')
 const isProcessing = ref(false)
 
-// Checklists by Cargo Type
-const CHECKLISTS = {
-  Chemicals: ["Cek MSDS (Material Safety Data Sheet)", "Cek Kemasan Bocor"],
-  Fuel: ["Cek Segel Tangki", "Cek Tera Flowmeter"],
-  'Batu Bara': ["Cek Terpal Penutup", "Visual Kondisi Basah/Kering"],
-  default: ["Cek Kesesuaian PO", "Visual Kondisi Kemasan"]
-}
-const currentChecklist = computed(() => {
-  if (!selectedTruck.value) return CHECKLISTS.default
-  return CHECKLISTS[selectedTruck.value.cargoType] || CHECKLISTS.default
-})
-const checklistStates = ref([])
-
-const isChecklistComplete = computed(() => checklistStates.value.every(s => s !== null))
-const hasChecklistReject = computed(() => checklistStates.value.some(s => s === false))
-
-const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'WEIGH_IN_DONE' || t.status === 'WAREHOUSE_IN_PROGRESS' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(t) === 'GSP'))
+const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'WAREHOUSE_IN_PROGRESS' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(t) === 'GSP'))
 const filteredGspTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
   if (!keyword) return gspTrucks.value
@@ -399,16 +384,9 @@ watch(filteredGspTrucks, () => {
 })
 watch(searchQuery, () => { currentPage.value = 1 })
 const selectTruck = (truck) => { 
-  const isSameTruck = selectedTruck.value && String(selectedTruck.value.id) === String(truck.id)
   selectedTruck.value = truck 
   suratJalanInput.value = truck.suratJalanNumber || ''
   poNumberInput.value = truck.poNumber || ''
-
-  if (!isSameTruck || truck.status === 'INCOMING_CHECK_PENDING') {
-    const listLen = currentChecklist.value ? currentChecklist.value.length : 0
-    checklistStates.value = Array(listLen).fill(null)
-    rejectComment.value = ''
-  }
 }
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
 
@@ -443,57 +421,6 @@ const handleWeightSave = async (weight) => {
       const updatedTruck = response?.data || response;
       if (updatedTruck) truckStore.upsertTruck(updatedTruck);
       toast.success(`Processed Weight ${weight}kg saved — proceed to Incoming Material Check.`)
-      selectedTruck.value = null
-    } catch(e) {} finally { isProcessing.value = false; }
-  }
-}
-
-const openChecklist = () => {
-  if (selectedTruck.value && selectedTruck.value.status === 'INCOMING_CHECK_PENDING') {
-    const listLen = currentChecklist.value ? currentChecklist.value.length : 0
-    checklistStates.value = Array(listLen).fill(null)
-    rejectComment.value = ''
-    truckStore.updateTruckStatus(selectedTruck.value.id, 'INCOMING_CHECK_IN_PROGRESS')
-  }
-  showChecklistModal.value = true
-}
-
-const acceptChecklist = async (isNote = false) => {
-  if (isProcessing.value) return;
-  isProcessing.value = true;
-  try {
-    const checks = currentChecklist.value.map((item, idx) => `Item ${idx+1}: ${checklistStates.value[idx] ? 'OK' : 'NOT OK'}`);
-    let resultStrs = [];
-    if (isNote || hasChecklistReject.value) {
-      resultStrs.push('DITERIMA DENGAN CATATAN');
-    }
-    resultStrs.push(`Checklist: [${checks.join(' | ')}]`);
-    const remarks = resultStrs.join(' | ');
-
-    const response = await warehouseStore.submitIncomingCheck(selectedTruck.value.id, { decision: 'passed', remarks })
-    const updatedTruck = response?.data || response;
-    if (updatedTruck) {
-      updatedTruck.compiledChecklist = remarks;
-      truckStore.upsertTruck(updatedTruck);
-    }
-    showChecklistModal.value = false
-    toast.success(isNote || hasChecklistReject.value ? 'Incoming Check Passed (With Note) — Proceed to outbound weighbridge.' : 'Incoming Check Complete — Proceed to outbound weighbridge.')
-    selectedTruck.value = null
-  } catch(e) {} finally { isProcessing.value = false; }
-}
-
-const rejectChecklist = async () => {
-  const ok = await confirm({ title: 'Confirm Rejection', message: `REJECT inspection for ${selectedTruck.value.plateNumber}? Truck will be redirected to outbound weighbridge.`, type: 'danger', confirmText: 'Yes, Reject' })
-  if (ok) {
-    if (isProcessing.value) return;
-    isProcessing.value = true;
-    try {
-      const response = await warehouseStore.submitIncomingCheck(selectedTruck.value.id, { decision: 'rejected', rejectReason: rejectComment.value.trim() })
-      const updatedTruck = response?.data || response;
-      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-      toast.error(`${selectedTruck.value.plateNumber} rejected — ${rejectComment.value.trim()}`)
-      rejectComment.value = ''
-      showChecklistModal.value = false
       selectedTruck.value = null
     } catch(e) {} finally { isProcessing.value = false; }
   }

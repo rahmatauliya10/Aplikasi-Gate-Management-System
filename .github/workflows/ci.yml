@@ -1,0 +1,645 @@
+name: GMS Production CI & Security Quality Gate
+
+on:
+  push:
+    branches: [ main, master, develop, update-v1.0.0, 'update-*' ]
+  pull_request:
+    branches: [ main, master, develop, update-v1.0.0, 'update-*' ]
+
+jobs:
+  backend-verification:
+    name: Backend Test, Coverage, Build & Schema Validation (${{ matrix.db_state }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        db_state: [fresh, upgraded]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: gms_test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d gms_test_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run ESLint & TypeScript Type Checking (Check-Only)
+        working-directory: ./backend
+        run: npm run lint:check
+
+      - name: Generate Prisma Client & Validate Migrations
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+        run: |
+          npx prisma generate
+          npm run prisma:preflight -- --report-only --fail-on-duplicates
+          if [ "${{ matrix.db_state }}" = "upgraded" ]; then
+            echo "Executing baseline upgrade simulation..."
+            npx prisma db execute --file prisma/migrations/20260714030729_init/migration.sql --schema prisma/schema.prisma
+            npx prisma migrate resolve --applied 20260714030729_init || true
+          fi
+          npx prisma migrate deploy
+
+      - name: Verify Migration Checksums (P0-01 Evidence)
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+        run: node scripts/check-migration-checksums.js
+
+      - name: Verify Prisma Schema Drift (Zero Drift Gate)
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+        run: npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --exit-code
+
+      - name: Build Backend Production Bundle
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+        run: npm run build
+
+      - name: Execute Automated Unit Test Suites & Code Coverage Thresholds
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          DATABASE_URL_TEST: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          NODE_ENV: test
+        run: npm run test:cov
+
+      - name: Execute Real Backend E2E Test Suite in CI (P1-10)
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          DATABASE_URL_TEST: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          NODE_ENV: test
+        run: npm run test:e2e
+
+  frontend-verification:
+    name: Frontend Build & Bundle Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Verify Frontend Production Build (Vite Bundle Check)
+        working-directory: ./frontend
+        env:
+          VITE_API_BASE_URL: /api
+        run: npm run build
+
+      - name: Execute Frontend Unit Tests (Vitest)
+        working-directory: ./frontend
+        run: npm test
+
+  security-vulnerability-audit:
+    name: Dependency Security & Secret Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code Repository (Full History for Secret Scanning)
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+
+      - name: Execute Repository Secret Scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Execute Production Security Audit (Backend)
+        working-directory: ./backend
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Execute Production Security Audit (Frontend)
+        working-directory: ./frontend
+        run: npm audit --omit=dev --audit-level=high
+
+  historical-migration-rehearsal-gate:
+    name: Historical Migration Rehearsal & DR Integrity Gate (P0-01)
+    runs-on: ubuntu-latest
+    needs: [backend-verification]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: gms_rehearsal_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d gms_rehearsal_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install PostgreSQL Client Tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+
+      - name: Seed Historical Source DB & Generate Authenticated Test Fixtures
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
+          DEFAULT_QC_PASSWORD: test-qc-password-12345
+          DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
+          DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof
+          echo "Generating authentic historical baseline snapshot & companion manifest (migrations 1..6)..."
+          node tests/fixtures/historical/generate-test-fixtures.js
+
+      - name: Execute Historical Database Rehearsal & Invariant Gate
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          PGPASSWORD: testpassword
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof
+          CI_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+          echo "Step 1: Validating historical dump & companion manifest SHA-256 integrity..."
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const manifest = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_manifest.json', 'utf8'));
+            const dumpBuffer = fs.readFileSync('tests/fixtures/historical/historical_test.dump');
+            const calcDumpHash = crypto.createHash('sha256').update(dumpBuffer).digest('hex').toLowerCase();
+            if (calcDumpHash !== manifest.checksums.dump.toLowerCase()) {
+              console.error('FATAL: Historical dump hash mismatch!');
+              process.exit(1);
+            }
+            const attBuffer = fs.readFileSync('tests/fixtures/historical/historical_test_attachments.json');
+            const calcAttHash = crypto.createHash('sha256').update(attBuffer).digest('hex').toLowerCase();
+            if (calcAttHash !== manifest.checksums.attachmentsArchive.toLowerCase()) {
+              console.error('FATAL: Attachment archive hash mismatch!');
+              process.exit(1);
+            }
+            console.log('Companion manifest and artifact SHA-256 hashes verified [PASS].');
+          "
+
+          echo "Step 1.5: Executing Negative Test: Corrupted manifest hash must fail closed..."
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const badManifest = { checksums: { dump: '0000000000000000000000000000000000000000000000000000000000000000' } };
+            const dumpBuffer = fs.readFileSync('tests/fixtures/historical/historical_test.dump');
+            const calcHash = crypto.createHash('sha256').update(dumpBuffer).digest('hex').toLowerCase();
+            if (calcHash === badManifest.checksums.dump) {
+              console.error('Negative test failure: Bad checksum matched unexpectedly!');
+              process.exit(1);
+            }
+            console.log('Negative test PASSED: Mismatched checksum is correctly rejected.');
+          "
+
+          echo "Step 2: Restoring historical baseline dump into target test database via pg_restore..."
+          PGPASSWORD=testpassword psql -h localhost -p 5432 -U postgres -d postgres -c "DROP DATABASE IF EXISTS gms_rehearsal_db WITH (FORCE);" || true
+          PGPASSWORD=testpassword psql -h localhost -p 5432 -U postgres -d postgres -c "CREATE DATABASE gms_rehearsal_db;"
+          PGPASSWORD=testpassword pg_restore -h localhost -p 5432 -U postgres -d gms_rehearsal_db --clean --if-exists --no-owner --no-acl tests/fixtures/historical/historical_test.dump
+
+          echo "Step 2.5: Verifying historical baseline migration count (< 18)..."
+          node -e "
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_manifest.json', 'utf8'));
+            const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
+            const baselineCount = parseInt(out, 10);
+            console.log('Restored baseline migration count:', baselineCount, 'Expected:', manifest.sourceMigrationCount);
+            if (baselineCount >= 18 || baselineCount !== manifest.sourceMigrationCount) {
+              console.error('FATAL: Historical dump does not have authentic pre-migration count (found ' + baselineCount + ', expected ' + manifest.sourceMigrationCount + ')');
+              process.exit(1);
+            }
+            console.log('Historical baseline state verified [PASS].');
+          "
+
+          echo "Step 2.8: Unpacking physical attachment files for preflight integrity verification..."
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const attArchive = JSON.parse(fs.readFileSync('tests/fixtures/historical/historical_test_attachments.json', 'utf8'));
+            for (const f of attArchive.files) {
+              for (const baseDir of ['uploads', 'backend/uploads']) {
+                const dest = path.join(baseDir, f.relativePath);
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                fs.writeFileSync(dest, Buffer.from(f.base64Content, 'base64'));
+              }
+            }
+            console.log('Historical attachment physical files unpacked [PASS].');
+          "
+
+          echo "Step 3: Running production preflight duplicate audit on rehearsal DB..."
+          cd backend
+          npm run prisma:preflight -- --report-only --fail-on-duplicates
+          echo "Step 4: Executing Prisma migration deployment on rehearsal DB (upgrading schema 6 -> 18)..."
+          npx prisma migrate deploy
+          cd ..
+
+          echo "Step 4.5: Verifying upgraded migration count (= 18)..."
+          node -e "
+            const { execSync } = require('child_process');
+            const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
+            const postUpgradeCount = parseInt(out, 10);
+            console.log('Post-upgrade migration count:', postUpgradeCount);
+            if (postUpgradeCount !== 18) {
+              console.error('FATAL: Post-upgrade migration count is not 18! Found: ' + postUpgradeCount);
+              process.exit(1);
+            }
+            console.log('Schema upgrade from historical baseline to 18 migrations succeeded [PASS].');
+          "
+
+          echo "Step 5: Verifying migration checksums..."
+          DATABASE_URL="postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public" node scripts/check-migration-checksums.js > artifacts/release-proof/migration-checksums.txt
+          node -e "
+            const fs = require('fs');
+            const out = fs.readFileSync('artifacts/release-proof/migration-checksums.txt', 'utf8');
+            const report = { timestamp: '$CI_TIMESTAMP', status: 'PASSED', output: out };
+            fs.writeFileSync('artifacts/release-proof/migration-checksums.json', JSON.stringify(report, null, 2), 'utf8');
+          "
+
+          echo "Step 6: Verifying zero schema drift on rehearsal DB..."
+          cd backend
+          npx prisma migrate diff --from-schema-datamodel prisma/schema.prisma --to-schema-datasource prisma/schema.prisma --exit-code > ../artifacts/release-proof/schema-drift.txt
+          cd ..
+
+          echo "Step 7: Validating 16-entity counts, invariants & DB-backed attachments..."
+          DATABASE_URL="postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public" PGPASSWORD=testpassword node scripts/verify-rehearsal-invariants.js
+
+      - name: Upload Historical Rehearsal Proof Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-rehearsal-evidence
+          path: artifacts/release-proof/
+          if-no-files-found: error
+          retention-days: 90
+
+  restore-failure-drill-gate:
+    name: Production Restore DR Failure-Injection Gate (P0-02)
+    runs-on: ubuntu-latest
+    needs: [historical-migration-rehearsal-gate]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: gms_rehearsal_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d gms_rehearsal_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install PostgreSQL Client Tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+
+      - name: Seed Baseline Historical Database
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
+          DEFAULT_QC_PASSWORD: test-qc-password-12345
+          DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
+          DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof
+          node tests/fixtures/historical/generate-test-fixtures.js
+
+      - name: Execute 4-Phase DR Failure-Injection & Operator Restore Drill
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          PGPASSWORD: testpassword
+        run: |
+          set -Eeuo pipefail
+          node scripts/ci-restore-failure-drill.js
+
+      - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-failure-drill-evidence
+          path: artifacts/release-proof/restore-failure-drill-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+  post-migration-rollback-drill-gate:
+    name: Post-Migration Coordinated Rollback Drill Gate (P0-03)
+    runs-on: ubuntu-latest
+    needs: [historical-migration-rehearsal-gate]
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: gms_rehearsal_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d gms_rehearsal_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install PostgreSQL Client Tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+
+      - name: Seed Baseline Historical Database
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
+          DEFAULT_QC_PASSWORD: test-qc-password-12345
+          DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
+          DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof backups/local
+          node tests/fixtures/historical/generate-test-fixtures.js
+
+      - name: Execute Post-Migration Coordinated Rollback Drill
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          PGPASSWORD: testpassword
+        run: |
+          set -Eeuo pipefail
+          node scripts/ci-rollback-drill.js
+
+      - name: Upload Post-Migration Rollback Proof Artifacts (P0-03 Evidence)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-migration-rollback-evidence
+          path: artifacts/release-proof/post-migration-rollback-evidence.json
+          if-no-files-found: error
+          retention-days: 90
+
+  fullstack-staging-gate:
+    name: Full-Stack Staging Stack & Cross-Stack E2E Gate (GBB / GSP / GBJ)
+    runs-on: ubuntu-latest
+    needs: [backend-verification, frontend-verification, historical-migration-rehearsal-gate, restore-failure-drill-gate, post-migration-rollback-drill-gate]
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+
+      - name: Verify Full-Stack Docker Stack Boot & API Smoke Gate
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpassword_staging_gate_ci
+          POSTGRES_DB: gms
+          JWT_ACCESS_SECRET: test-jwt-access-secret-for-ci-pipeline-min-32-chars-long
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
+          BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
+          DEFAULT_ADMIN_PASSWORD: test-admin-password-12345
+          DEFAULT_QC_PASSWORD: test-qc-password-12345
+          DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
+          DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
+          E2E_API_URL: http://localhost:3001
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TESTED_MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          echo "Initializing full-stack staging gate environment..."
+          cp backend/.env.example backend/.env 2>/dev/null || touch backend/.env
+          echo "JWT_ACCESS_SECRET=test-jwt-access-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+          echo "JWT_REFRESH_SECRET=test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+          echo "BACKUP_SIGNATURE_SECRET=test-backup-signature-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+          docker compose -f docker-compose.yml up -d postgres
+          sleep 5
+          docker compose -f docker-compose.yml run --rm backend npx prisma migrate deploy
+          docker compose -f docker-compose.yml up -d --build
+          sleep 5
+          docker compose -f docker-compose.yml exec -T -e NODE_ENV=test -e SEED_ALL_USERS=true -e DEFAULT_ADMIN_PASSWORD=test-admin-password-12345 -e DEFAULT_QC_PASSWORD=test-qc-password-12345 -e DEFAULT_WAREHOUSE_PASSWORD=test-wh-password-12345 -e DEFAULT_SECURITY_PASSWORD=test-sec-password-12345 backend node dist/prisma/seed.js
+          sleep 5
+          docker compose ps
+          echo "Executing Cross-Stack E2E API & Business Matrix Smoke Verification..."
+          node scripts/ci-e2e-smoke.js
+          echo "Cross-stack E2E gate passed successfully."
+          echo "Capturing CI Evidence Proof Artifacts & Release Manifest (P0-01 Hardening)..."
+          mkdir -p artifacts/release-proof deploy deploy/releases
+          CI_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          BACKEND_IMAGE_ID=$(docker compose images -q backend 2>/dev/null | head -n 1)
+          FRONTEND_IMAGE_ID=$(docker compose images -q frontend 2>/dev/null | head -n 1)
+          if [ -z "$BACKEND_IMAGE_ID" ]; then
+            BACKEND_IMAGE_ID="local-build-sha256-untracked"
+          fi
+          if [ -z "$FRONTEND_IMAGE_ID" ]; then
+            FRONTEND_IMAGE_ID="local-build-sha256-untracked"
+          fi
+          
+          # 1. Versioned Release Manifest with actual image digests/IDs
+          node -e "
+            const fs = require('fs');
+            const manifest = {
+              manifestType: 'CI_TEST_EVIDENCE',
+              release: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              gitSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              sourceHeadSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              testedMergeSha: process.env.TESTED_MERGE_SHA || process.env.GITHUB_SHA || 'local-sha',
+              timestamp: '$CI_TIMESTAMP',
+              backend: { image: 'gms-backend', digest: '$BACKEND_IMAGE_ID', ciLocalImageId: '$BACKEND_IMAGE_ID' },
+              frontend: { image: 'gms-frontend', digest: '$FRONTEND_IMAGE_ID', ciLocalImageId: '$FRONTEND_IMAGE_ID' }
+            };
+            fs.writeFileSync('deploy/release_manifest.json', JSON.stringify(manifest, null, 2), 'utf8');
+            if (process.env.GITHUB_SHA) {
+              fs.writeFileSync('deploy/releases/' + process.env.GITHUB_SHA + '.json', JSON.stringify(manifest, null, 2), 'utf8');
+            }
+          "
+
+          # 2. Extract Authentic Database Migration & Invariant Metrics directly from Staging Container via Node
+          node -e "
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+
+            function queryPostgres(sql) {
+              const cmd = 'docker compose exec -T postgres psql -U postgres -d gms -t -A -c \"' + sql.replace(/\"/g, '\\\\\"') + '\"';
+              const out = execSync(cmd, { stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+              const num = parseInt(out, 10);
+              if (isNaN(num)) {
+                throw new Error('Query returned non-numeric result for [' + sql + ']: ' + out);
+              }
+              return num;
+            }
+
+            console.log('Querying staging database metrics for release proof...');
+            const tableCount = queryPostgres(\"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';\");
+            const migrationCount = queryPostgres(\"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\");
+            const userCount = queryPostgres(\"SELECT COUNT(*) FROM \\\"User\\\";\");
+            const txCount = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\";\");
+            const gbbCompleted = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GBB' AND status = 'COMPLETED';\");
+            const gspCompleted = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GSP' AND status = 'COMPLETED';\");
+            const gbjCompleted = queryPostgres(\"SELECT COUNT(*) FROM \\\"Transaction\\\" WHERE \\\"processType\\\" = 'GBJ' AND status = 'COMPLETED';\");
+
+            console.log('Metrics retrieved:', { tableCount, migrationCount, userCount, txCount, gbbCompleted, gspCompleted, gbjCompleted });
+
+            const assertions = [
+              { name: 'tableCount >= 10', pass: tableCount >= 10, val: tableCount },
+              { name: 'migrationCount >= 1', pass: migrationCount >= 1, val: migrationCount },
+              { name: 'userCount >= 1', pass: userCount >= 1, val: userCount },
+              { name: 'transactionCount >= 1', pass: txCount >= 1, val: txCount },
+              { name: 'gbbCompleted >= 1', pass: gbbCompleted >= 1, val: gbbCompleted },
+              { name: 'gspCompleted >= 1', pass: gspCompleted >= 1, val: gspCompleted },
+              { name: 'gbjCompleted >= 1', pass: gbjCompleted >= 1, val: gbjCompleted }
+            ];
+
+            const allPassed = assertions.every(a => a.pass);
+            const verdictStatus = allPassed ? 'PASSED' : 'FAILED';
+
+            const report = {
+              reportTitle: 'Cross-Stack CI E2E & Business Smoke Verification Report',
+              timestamp: '$CI_TIMESTAMP',
+              status: verdictStatus,
+              gitSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              sourceHeadSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              testedMergeSha: process.env.TESTED_MERGE_SHA || process.env.GITHUB_SHA || 'local-sha',
+              verifiedMetrics: {
+                tableCount,
+                migrationCount,
+                userCount,
+                transactionCount: txCount,
+                gbbCompletedCount: gbbCompleted,
+                gspCompletedCount: gspCompleted,
+                gbjCompletedCount: gbjCompleted
+              },
+              assertions
+            };
+
+            fs.writeFileSync('artifacts/release-proof/smoke-test-report.json', JSON.stringify(report, null, 2), 'utf8');
+
+            if (!allPassed) {
+              console.error('FATAL: One or more release metric assertions failed!', assertions);
+              process.exit(1);
+            }
+            console.log('All release metric assertions PASSED with valid evidence.');
+          "
+
+          docker compose down --volumes --remove-orphans
+
+      - name: Upload Release Proof Evidence Artifacts (P0-01, P0-06 Evidence Gate)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-proof-evidence
+          path: |
+            artifacts/release-proof/
+            deploy/release_manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+

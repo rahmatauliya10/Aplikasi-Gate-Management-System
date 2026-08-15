@@ -287,10 +287,12 @@
               </td>
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-[10px] sm:text-[11px] font-bold text-slate-500 font-mono border-y border-slate-100">{{ formatTime(truck?.gateInAt || truck?.createdAt) }}</td>
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-slate-100">
-                <div class="text-[10px] sm:text-[11px] font-black text-slate-700 font-mono flex items-center">
-                  <span class="material-icons text-[12px] sm:text-[14px] mr-1 text-slate-400">schedule</span>
-                  {{ getDuration(truck?.gateInAt || truck?.createdAt) }}
-                </div>
+                <ProcessTimerBadge 
+                  :start-time="truck.warehouseStartAt || truck.qcStartAt || truck.weighInAt || truck.gateInAt || truck.createdAt" 
+                  :end-time="truck.completedAt || truck.cancelledAt"
+                  :sla-minutes="60"
+                  :compact="true"
+                />
               </td>
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-center border-y border-r border-slate-100 rounded-r-2xl">
                  <button @click="viewDetails(truck)" class="w-8 h-8 rounded-lg inline-flex items-center justify-center transition-all duration-300 text-slate-400 hover:text-[#4A8BDF] hover:bg-indigo-50/80 border border-transparent hover:border-[#4A8BDF]/20" title="View Details">
@@ -298,7 +300,20 @@
                  </button>
               </td>
             </tr>
-            <tr v-if="activeTrucks.length === 0">
+            <tr v-if="activeTrucks.length === 0 && storeError">
+              <td colspan="7" class="px-4 sm:px-8 py-12 sm:py-16 text-center border border-rose-100 rounded-2xl bg-rose-50/40 shadow-sm">
+                 <div class="w-12 h-12 sm:w-14 sm:h-14 mx-auto rounded-2xl bg-rose-100 flex items-center justify-center mb-3">
+                   <span class="material-icons text-rose-600 text-2xl sm:text-3xl">cloud_off</span>
+                 </div>
+                 <p class="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-widest">Active Fleet Sync Error</p>
+                 <p class="text-[10px] sm:text-xs font-bold text-rose-600 mt-1 max-w-sm mx-auto">{{ storeError }}</p>
+                 <button @click="retryFetch" class="mt-4 px-4 py-2 bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-[10px] sm:text-[11px] font-black uppercase tracking-wider rounded-xl shadow-sm transition-all inline-flex items-center space-x-1.5">
+                   <span class="material-icons text-sm">refresh</span>
+                   <span>Retry Sync</span>
+                 </button>
+              </td>
+            </tr>
+            <tr v-else-if="activeTrucks.length === 0">
               <td colspan="7" class="px-4 sm:px-8 py-16 sm:py-24 text-center border border-slate-100 rounded-2xl bg-white shadow-sm">
                  <div class="w-12 h-12 sm:w-16 sm:h-16 mx-auto rounded-2xl bg-slate-50 flex items-center justify-center mb-4">
                    <span class="material-icons text-slate-200 text-2xl sm:text-3xl">check_circle</span>
@@ -322,6 +337,7 @@ import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import dashboardService from '../services/dashboardService'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 
 const truckStore = useTruckStore()
@@ -381,6 +397,11 @@ const targetTat = computed(() => settingsStore.targetTat)
 const currentDate = new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 
 const activeTrucks = computed(() => truckStore.activeTrucks)
+const storeError = computed(() => truckStore.error)
+const retryFetch = () => {
+  truckStore.fetchTrucks()
+  fetchDashboardStats()
+}
 const totalTrucks = computed(() => stats.value?.summary?.totalToday || 0)
 const activeTruckCount = computed(() => stats.value?.summary?.totalActive || 0)
 const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted || 0)
@@ -388,7 +409,16 @@ const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted 
 const avgTotalTAT = computed(() => stats.value?.avgTotalTAT || 0)
 const avgStageTimes = computed(() => stats.value?.avgStageTimes || { waitingIn: 0, warehouse: 0, qc: 0, waitingOut: 0 })
 
-const alertList = computed(() => stats.value?.activeFraudAlerts || [])
+const alertList = computed(() => {
+  const list = stats.value?.activeFraudAlerts || []
+  const seen = new Set()
+  return list.filter(item => {
+    const key = item.plate || item.id
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
 const alertPage = ref(1)
 const alertPerPage = ref(4)
 const paginatedAlertList = computed(() => {

@@ -255,9 +255,9 @@
                   <option value="QC">QC</option>
                 </select>
               </div>
-              <!-- Warehouse Access (conditional) -->
-              <div v-if="form.role === 'WAREHOUSE' || form.role === 'ADMIN'">
-                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Akses Gudang</label>
+              <!-- Process/Warehouse Access (conditional) -->
+              <div v-if="form.role === 'WAREHOUSE' || form.role === 'QC' || form.role === 'ADMIN'">
+                <label class="block text-xs font-black text-slate-500 uppercase tracking-wider mb-1.5">Akses Scope Proses / Gudang</label>
                 <div class="flex flex-wrap gap-3">
                   <label v-for="wh in warehouseOptions" :key="wh" class="flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-all"
                     :class="form.warehouseAccess.includes(wh) ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-100 text-slate-500 hover:border-blue-200'">
@@ -562,8 +562,8 @@ async function submitForm() {
   if (!form.value.username.trim()) { formError.value = 'Username wajib diisi'; return }
   if (!form.value.email.trim()) { formError.value = 'Email wajib diisi'; return }
   if (!form.value.role) { formError.value = 'Role wajib dipilih'; return }
-  if (form.value.role === 'WAREHOUSE' && form.value.warehouseAccess.length === 0) {
-    formError.value = 'Warehouse role membutuhkan minimal 1 akses gudang'
+  if ((form.value.role === 'WAREHOUSE' || form.value.role === 'QC') && form.value.warehouseAccess.length === 0) {
+    formError.value = 'Role Warehouse dan QC membutuhkan minimal 1 akses proses/gudang'
     return
   }
 

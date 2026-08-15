@@ -1,6 +1,84 @@
 import { PrismaClient, Role } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+
+function getOrCreateBootstrapAdminPassword(secretFilePath?: string): string {
+  const envPwd = (
+    process.env.ADMIN_PASSWORD || process.env.DEFAULT_ADMIN_PASSWORD
+  )?.trim();
+  const weakPasswords = [
+    'admin123',
+    'admin123!',
+    'password',
+    'password123',
+    'password123!',
+    'admin',
+    'supersecret',
+    'changeit',
+    'changeme',
+    'gms123',
+    'gms123!',
+    '12345678',
+    '123456789',
+    '1234567890',
+  ];
+
+  if (
+    envPwd &&
+    envPwd.length >= 12 &&
+    !weakPasswords.includes(envPwd.toLowerCase())
+  ) {
+    return envPwd;
+  }
+
+  const defaultPath =
+    process.env.NODE_ENV === 'production'
+      ? '/app/secrets/bootstrap_admin_password.txt'
+      : path.resolve(
+          process.cwd(),
+          '../deploy/secrets/bootstrap_admin_password.txt',
+        );
+  const targetPath = secretFilePath || defaultPath;
+
+  if (fs.existsSync(targetPath)) {
+    try {
+      const savedPwd = fs.readFileSync(targetPath, 'utf8').trim();
+      if (savedPwd.length >= 12) {
+        return savedPwd;
+      }
+    } catch (e) {
+      console.error(`[BootstrapPassword] Failed reading ${targetPath}:`, e);
+    }
+  }
+
+  const newPassword = 'GMS_' + randomBytes(12).toString('hex') + '!';
+
+  try {
+    const dir = path.dirname(targetPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(targetPath, newPassword, {
+      mode: 0o600,
+      encoding: 'utf8',
+    });
+    console.log(
+      `[BootstrapPassword] Generated secure admin bootstrap password and saved to ${targetPath}`,
+    );
+  } catch (e) {
+    console.error(
+      `[BootstrapPassword] CRITICAL: Unable to write bootstrap password file at ${targetPath}:`,
+      e,
+    );
+    throw new Error(
+      `CRITICAL: Failed writing admin bootstrap secret file at ${targetPath}. Refusing to create admin with unretrievable password.`,
+    );
+  }
+
+  return newPassword;
+}
 
 const prisma = new PrismaClient();
 
@@ -11,8 +89,12 @@ async function main() {
   }
 
   const isTest = environment === 'test';
+  if (environment === 'production' && process.env.SEED_ALL_USERS === 'true' && process.env.ALLOW_PROD_SEED_ALL_USERS !== 'true') {
+    throw new Error('SEED_ALL_USERS=true is prohibited in production environment unless ALLOW_PROD_SEED_ALL_USERS=true is explicitly set.');
+  }
+  const isDevOrTest = environment === 'development' || environment === 'test' || (process.env.SEED_ALL_USERS === 'true' && (environment !== 'production' || process.env.ALLOW_PROD_SEED_ALL_USERS === 'true'));
 
-  if (isTest && !process.env.DATABASE_URL?.toLowerCase().includes('test')) {
+  if (isTest && process.env.ALLOW_NON_TEST_DB !== 'true' && !process.env.SEED_ALL_USERS && !process.env.DATABASE_URL?.toLowerCase().includes('test')) {
     throw new Error('Test seed menolak database non-test.');
   }
 
@@ -38,7 +120,7 @@ async function main() {
 
   if (!existingAdmin) {
     console.log(`Seeding admin user with username: ${adminUsername}, email: ${adminEmail}...`);
-    const tempAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'admin123';
+    const tempAdminPassword = getOrCreateBootstrapAdminPassword();
 
     const admin = await prisma.user.create({
       data: {
@@ -48,12 +130,12 @@ async function main() {
         role: Role.ADMIN,
         isActive: true,
         passwordHash: await argon2.hash(tempAdminPassword, hashOptions),
-        mustChangePassword: false,
+        mustChangePassword: isDevOrTest ? false : true,
         passwordChangedAt: new Date(),
       },
     });
     if (!isTest) {
-      console.log(`[SEED] Admin created. Temporary Password: ${tempAdminPassword}`);
+      console.log(`[SEED] Admin created. Bootstrap password preserved in deploy/secrets or environment.`);
     }
     await prisma.userWarehouseAccess.createMany({
       data: [
@@ -65,22 +147,11 @@ async function main() {
     });
     adminId = admin.id;
   } else {
-    console.log('User admin already exists, updating admin password to default...');
-    const tempAdminPassword = process.env.DEFAULT_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'admin123';
-    await prisma.user.update({
-      where: { id: existingAdmin.id },
-      data: {
-        passwordHash: await argon2.hash(tempAdminPassword, hashOptions),
-        mustChangePassword: false,
-        isActive: true,
-      },
-    });
+    console.log('User admin already exists, skipping creation and preserving existing password (idempotency enforced).');
     adminId = existingAdmin.id;
   }
 
-  // Seeding of other roles is allowed ONLY in development or test environments
-  const isDevOrTest = environment === 'development' || environment === 'test';
-
+  // Seeding of other roles is allowed in development, test, or when SEED_ALL_USERS is requested
   if (isDevOrTest) {
     // 2. QC
     console.log('Checking QC user...');
@@ -90,8 +161,8 @@ async function main() {
 
     if (!existingQC) {
       console.log('Seeding QC user...');
-      const tempQCPassword = isTest ? 'QCPassword123!' : generateTempPassword();
-      await prisma.user.create({
+      const tempQCPassword = process.env.DEFAULT_QC_PASSWORD || process.env.QC_PASSWORD || (isTest ? 'QCPassword123!' : generateTempPassword());
+      const qcUser = await prisma.user.create({
         data: {
           email: 'frengky.qc@gms.local',
           username: 'qc',
@@ -99,15 +170,31 @@ async function main() {
           role: Role.QC,
           isActive: true,
           passwordHash: await argon2.hash(tempQCPassword, hashOptions),
-          mustChangePassword: true,
+          mustChangePassword: false,
           temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
+      await prisma.userWarehouseAccess.createMany({
+        data: [
+          { userId: qcUser.id, processType: 'GBB' },
+          { userId: qcUser.id, processType: 'GBJ' },
+          { userId: qcUser.id, processType: 'GSP' },
+        ],
+        skipDuplicates: true,
+      });
       if (!isTest) {
-        console.log(`[SEED] QC created. Temporary Password: ${tempQCPassword}`);
+        console.log(`[SEED] QC created with GBB, GBJ, GSP access.`);
       }
     } else {
-      console.log('User qc already exists, skipped.');
+      await prisma.userWarehouseAccess.createMany({
+        data: [
+          { userId: existingQC.id, processType: 'GBB' },
+          { userId: existingQC.id, processType: 'GBJ' },
+          { userId: existingQC.id, processType: 'GSP' },
+        ],
+        skipDuplicates: true,
+      });
+      console.log('User qc already exists, process access mapping verified.');
     }
 
     // 3. Warehouse
@@ -118,7 +205,7 @@ async function main() {
 
     if (!existingWarehouse) {
       console.log('Seeding warehouse user...');
-      const tempWarehousePassword = isTest ? 'WarehousePassword123!' : generateTempPassword();
+      const tempWarehousePassword = process.env.DEFAULT_WAREHOUSE_PASSWORD || process.env.WAREHOUSE_PASSWORD || (isTest ? 'WarehousePassword123!' : generateTempPassword());
       const warehouse = await prisma.user.create({
         data: {
           email: 'arga.warehouse@gms.local',
@@ -127,12 +214,12 @@ async function main() {
           role: Role.WAREHOUSE,
           isActive: true,
           passwordHash: await argon2.hash(tempWarehousePassword, hashOptions),
-          mustChangePassword: true,
+          mustChangePassword: false,
           temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
       if (!isTest) {
-        console.log(`[SEED] Warehouse created. Temporary Password: ${tempWarehousePassword}`);
+        console.log(`[SEED] Warehouse created.`);
       }
       await prisma.userWarehouseAccess.createMany({
         data: [
@@ -154,7 +241,7 @@ async function main() {
 
     if (!existingSecurity) {
       console.log('Seeding security user...');
-      const tempSecurityPassword = isTest ? 'SecurityPassword123!' : generateTempPassword();
+      const tempSecurityPassword = process.env.DEFAULT_SECURITY_PASSWORD || process.env.SECURITY_PASSWORD || (isTest ? 'SecurityPassword123!' : generateTempPassword());
       await prisma.user.create({
         data: {
           email: 'enggar.security@gms.local',
@@ -163,12 +250,12 @@ async function main() {
           role: Role.SECURITY,
           isActive: true,
           passwordHash: await argon2.hash(tempSecurityPassword, hashOptions),
-          mustChangePassword: true,
+          mustChangePassword: false,
           temporaryPasswordExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         },
       });
       if (!isTest) {
-        console.log(`[SEED] Security created. Temporary Password: ${tempSecurityPassword}`);
+        console.log(`[SEED] Security created.`);
       }
     } else {
       console.log('User security already exists, skipped.');

@@ -118,9 +118,11 @@ function hasRoleAccess(userRole, allowedRoles) {
 
 function hasWarehouseAccess(user, warehouseCode) {
   if (!warehouseCode) return true;
-  if (user?.role === "ADMIN") return true;
-  if (user?.role !== "WAREHOUSE") return false;
-  return Array.isArray(user?.warehouseAccess) && user.warehouseAccess.includes(warehouseCode);
+  if (user?.role === "ADMIN" || user?.role === "SECURITY") return true;
+  if (user?.role === "WAREHOUSE" || user?.role === "QC") {
+    return Array.isArray(user?.warehouseAccess) && user.warehouseAccess.includes(warehouseCode);
+  }
+  return false;
 }
 
 router.beforeEach(async (to, from, next) => {
@@ -132,8 +134,8 @@ router.beforeEach(async (to, from, next) => {
   const { useAuthStore } = await import('../stores/authStore')
   const authStore = useAuthStore()
   
-  // Ensure auth is initialized from localStorage
-  authStore.initializeAuth()
+  // Ensure auth is initialized via silent refresh if needed
+  await authStore.initializeAuth()
   
   // If not logged in and not heading to login page
   if (to.path !== '/login' && !authStore.isAuthenticated) {

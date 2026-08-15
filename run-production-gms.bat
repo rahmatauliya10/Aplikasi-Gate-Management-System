@@ -8,7 +8,16 @@ echo       UPDATE DARI GIT ^& DEPLOY ULANG GMS V6 - STABLE PRODUCTION
 echo ==============================================================
 echo.
 
-REM 1. Memeriksa keberadaan file .env di backend
+REM 1. Memeriksa status working tree (Clean tree guard)
+for /f "tokens=*" %%i in ('git status --porcelain') do set DIRTY_TREE=%%i
+if defined DIRTY_TREE (
+    echo [!] GAGAL: Working tree repositori tidak bersih!
+    echo Harap commit atau stash semua perubahan lokal sebelum melakukan deployment produksi.
+    pause
+    exit /b 1
+)
+
+REM 2. Memeriksa keberadaan file .env di backend
 if not exist backend\.env (
     echo ERROR: File backend\.env tidak ditemukan!
     echo Silakan buat file backend\.env berdasarkan backend\.env.example dengan credential produksi aman.
@@ -16,74 +25,58 @@ if not exist backend\.env (
     exit /b 1
 )
 
-echo [1/8] Memeriksa status repositori Git...
-git diff-index --quiet HEAD -- >nul 2>&1
-if errorlevel 1 (
-    echo [!] WARNING: Working tree lokal memiliki perubahan belum tertulis.
-    echo Mengambil update terbaru tanpa menghapus perubahan lokal...
+echo [1/4] Memeriksa status repositori ^& commit SHA...
+for /f "tokens=*" %%a in ('git rev-parse --short HEAD') do set CURRENT_COMMIT=%%a
+echo [+] Target release commit SHA: [%CURRENT_COMMIT%]
+set RELEASE_TAG=%CURRENT_COMMIT%
+
+set PREVIOUS_RELEASE_TAG=stable
+if exist deploy\current_release.txt (
+    for /f "usebackq tokens=*" %%p in ("deploy\current_release.txt") do set PREVIOUS_RELEASE_TAG=%%p
 )
-git pull origin master || git pull origin main
-if errorlevel 1 (
-    echo [!] GAGAL: Git pull gagal. Harap selesaikan konflik Git sebelum deployment.
+echo [+] Previous release commit SHA: [%PREVIOUS_RELEASE_TAG%]
+
+echo.
+echo [2/4] Memeriksa keberadaan ^& format file .env...
+if not exist backend\.env (
+    echo [!] GAGAL: File backend\.env tidak ditemukan!
     pause
     exit /b 1
 )
-echo [+] Pembaruan Git selesai diselaraskan.
+echo [+] Config backend\.env terverifikasi.
 
 echo.
-echo [2/8] Sanitasi file .env...
-powershell -NoProfile -Command "(Get-Content -Path 'backend\.env') -replace [char]34, '' | Set-Content -Path 'backend\.env'" >nul 2>&1
-echo [+] File .env telah dibersihkan.
-
-echo.
-echo [3/8] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
+echo [3/4] Memeriksa ^& Menyiapkan Sertifikat SSL TLS Nginx...
+if not exist deploy\nginx\ssl mkdir deploy\nginx\ssl
 if not exist deploy\nginx\ssl\server.crt (
-    echo [!] Sertifikat SSL belum ditemukan. Menyiapkan folder SSL...
-    if not exist deploy\nginx\ssl mkdir deploy\nginx\ssl
-)
-echo [+] Sertifikat SSL TLS terkonfigurasi.
-
-echo.
-echo [4/8] Menghentikan service lama...
-docker compose -f docker-compose.prod.yml down --remove-orphans >nul 2>&1
-
-echo.
-echo [5/8] Membangun Images Produksi (No-Cache dengan --env-file)...
-docker compose -f docker-compose.prod.yml --env-file backend\.env build --no-cache
-if errorlevel 1 (
-    echo [!] GAGAL: Proses build Docker image produksi gagal!
+    echo [!] GAGAL: File sertifikat SSL (deploy\nginx\ssl\server.crt) tidak ditemukan!
     pause
     exit /b 1
 )
-
-echo.
-echo [6/8] Menjalankan Service Produksi Baru (Nginx, Backend, Frontend, Postgres)...
-docker compose -f docker-compose.prod.yml --env-file backend\.env up -d
-if errorlevel 1 (
-    echo [!] GAGAL: Gagal menjalankan container produksi.
+if not exist deploy\nginx\ssl\server.key (
+    echo [!] GAGAL: File private key SSL (deploy\nginx\ssl\server.key) tidak ditemukan!
     pause
     exit /b 1
 )
+echo [+] Sertifikat SSL TLS (server.crt dan server.key) terverifikasi.
 
-echo.
-echo [7/8] Menjalankan Migrasi Database Prisma...
-docker compose -f docker-compose.prod.yml exec -T backend npx prisma db push --skip-generate
+echo [4/4] Menjalankan Immutable Deployment Orchestrator (deploy-with-rollback.ps1)...
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\deploy-with-rollback.ps1 -TargetReleaseTag "%CURRENT_COMMIT%" -PreviousReleaseTag "%PREVIOUS_RELEASE_TAG%" -RequireDigest
 if errorlevel 1 (
     echo.
-    echo [!] GAGAL: Migrasi database Prisma gagal! Deployment dibatalkan demi keamanan data.
-    docker compose -f docker-compose.prod.yml stop
+    echo [!] GAGAL: Deployment produksi gagal atau dibatalkan oleh orchestrator!
     pause
     exit /b 1
 )
 
 echo.
-echo [8/8] Membersihkan sampah Docker Image...
+echo [Post-Deploy] Membersihkan Docker Image Prune setelah verifikasi sukses...
 docker image prune -f >nul 2>&1
 
 echo.
 echo ==============================================================
 echo  [+] GMS V6 PRODUKSI BERHASIL MENYALA ^& TERDEPLOY!
-echo  [+] Web Portal  : http://localhost:8080 (atau IP Server:8080)
+echo  [+] Web Portal (HTTPS): https://localhost (atau https://IP-Server)
 echo  [+] Gunakan perintah: 'docker compose -f docker-compose.prod.yml logs -f' untuk melacak log
 echo ==============================================================
 echo.

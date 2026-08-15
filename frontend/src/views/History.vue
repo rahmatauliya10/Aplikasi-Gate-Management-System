@@ -16,9 +16,9 @@
         </button>
 
         <!-- CSV Export Button -->
-        <button @click="exportData" class="btn-primary px-6 py-2.5 text-xs flex items-center space-x-1.5 shadow-[0_4px_12px_rgba(74,139,223,0.25)] hover:shadow-lg transition-all duration-300">
+        <button @click="exportData" class="px-5 py-2.5 text-xs rounded-xl bg-[#4A8BDF] text-white hover:bg-[#3B72C4] font-black flex items-center space-x-1.5 shadow-sm hover:shadow-md transition-all duration-300">
           <span class="material-icons text-base">download</span>
-          <span class="font-black">EXPORT CSV</span>
+          <span>EXPORT CSV</span>
         </button>
       </div>
     </PageHeader>
@@ -126,33 +126,88 @@
     </div>
 
     <!-- ═══ FILTER CONTROL HUB ═══ -->
-    <div class="bg-white/80 backdrop-blur-xl border border-white/50 shadow-md rounded-2xl p-4 sm:p-5 flex flex-col space-y-4 md:space-y-0 md:flex-row md:items-center md:justify-between gap-4 animate-fadeInUp">
-      <!-- Search Input -->
-      <div class="relative flex-1 max-w-md">
-        <input v-model="searchQuery" type="text" placeholder="Search Plate, Driver, or Vendor..." 
-          class="w-full h-11 pl-11 pr-10 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all shadow-inner">
-        <span class="material-icons absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
-        <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
-          <span class="material-icons text-base">close</span>
+    <div class="bg-white border border-slate-200/80 shadow-sm rounded-2xl p-4 sm:p-5 space-y-4 animate-fadeInUp">
+      <!-- ROW 1: Search + Date Presets + Mode Toggle -->
+      <div class="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+        <!-- Search Input -->
+        <div class="relative flex-1 max-w-md">
+          <input v-model="searchQuery" type="text" placeholder="Cari No. Plat, Nama Supir, atau Vendor..." 
+            class="w-full h-11 pl-11 pr-10 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
+          <span class="material-icons absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-lg">search</span>
+          <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+            <span class="material-icons text-base">close</span>
+          </button>
+        </div>
+
+        <!-- Date Range Quick Presets -->
+        <div class="flex items-center space-x-1 p-1 rounded-2xl bg-slate-100/90 border border-slate-200/50 shadow-inner">
+          <button v-for="p in [{ key: 'ALL', label: 'SEMUA' }, { key: 'TODAY', label: 'HARI INI' }, { key: 'THIS_WEEK', label: 'MINGGU INI' }, { key: 'THIS_MONTH', label: 'BULAN INI' }]" :key="p.key"
+                  @click="applyDatePreset(p.key)"
+                  :class="datePreset === p.key ? 'bg-white shadow-xs text-[#4A8BDF] font-black rounded-xl border-b-2 border-[#4A8BDF]' : 'text-slate-500 hover:text-slate-800 font-bold'"
+                  class="px-4 py-2 text-[11px] tracking-wider transition-all duration-200">
+            {{ p.label }}
+          </button>
+        </div>
+
+        <!-- Mode Toggle -->
+        <div class="flex items-center space-x-1 p-1 rounded-2xl bg-slate-100/90 border border-slate-200/50 shadow-inner shrink-0">
+          <button @click="currentMode = 'time'" :class="currentMode === 'time' ? 'bg-white shadow-xs text-[#4A8BDF] font-black rounded-xl' : 'text-slate-500 hover:text-slate-800 font-bold'" class="px-4 py-2 text-[11px] tracking-wider transition-all duration-200 flex items-center">
+            <span class="material-icons text-sm mr-1.5 text-[#4A8BDF]">schedule</span> TIMELINE
+          </button>
+          <button @click="currentMode = 'fraud'" :class="currentMode === 'fraud' ? 'bg-white shadow-xs text-rose-600 font-black rounded-xl' : 'text-slate-500 hover:text-slate-800 font-bold'" class="px-4 py-2 text-[11px] tracking-wider transition-all duration-200 flex items-center">
+            <span class="material-icons text-sm mr-1.5 text-rose-500">policy</span> SCALE AUDIT
+          </button>
+        </div>
+      </div>
+
+      <div class="w-full h-px bg-slate-100"></div>
+
+      <!-- ROW 2: Custom Date Range Picker -->
+      <div class="flex items-center space-x-3">
+        <span class="material-icons text-[#4A8BDF] text-xl">event</span>
+        <span class="text-xs font-black text-slate-500 uppercase tracking-widest">PERIODE:</span>
+        
+        <div class="relative">
+          <input type="date" v-model="startDate" @change="datePreset = 'CUSTOM'" class="h-11 px-4 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] cursor-pointer" title="Tanggal Mulai" />
+        </div>
+        <span class="text-xs font-bold text-slate-400">s/d</span>
+        <div class="relative">
+          <input type="date" v-model="endDate" @change="datePreset = 'CUSTOM'" class="h-11 px-4 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] cursor-pointer" title="Tanggal Akhir" />
+        </div>
+        <button v-if="startDate || endDate" @click="applyDatePreset('ALL')" class="text-rose-500 hover:bg-rose-50 rounded-xl px-2.5 py-1 text-xs font-black transition-colors" title="Reset Tanggal">
+          ✕ Reset
         </button>
       </div>
 
-      <!-- Advanced Selectors -->
-      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
-        <!-- Destination Filter -->
-        <div class="flex flex-col">
-          <select v-model="destinationFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
-            <option value="ALL">All Hubs (GBB/GBJ/GSP)</option>
+      <!-- ROW 3: Operational Filter Cards + Dark Sort Selector -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <!-- 1. Status Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">format_list_bulleted</span>
+          <select v-model="statusFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
+            <option value="ALL">Semua Status</option>
+            <option value="COMPLETED">Completed Only</option>
+            <option value="CANCELLED">Cancelled / Voided</option>
+            <option value="ACTIVE">Active &amp; Reopened</option>
+          </select>
+        </div>
+
+        <!-- 2. Hub Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">hub</span>
+          <select v-model="destinationFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
+            <option value="ALL">Semua Hub (GBB/GBJ/GSP)</option>
             <option value="GBB">GBB (Raw Materials)</option>
             <option value="GBJ">GBJ (Finished Goods)</option>
             <option value="GSP">GSP (Spareparts)</option>
           </select>
         </div>
 
-        <!-- Bottleneck Filter -->
-        <div class="flex flex-col">
-          <select v-model="bottleneckFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all">
-            <option value="ALL">All Bottlenecks</option>
+        <!-- 3. Bottleneck Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">filter_alt</span>
+          <select v-model="bottleneckFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
+            <option value="ALL">Semua Bottleneck</option>
             <option value="waitingIn">Delay: Weigh In</option>
             <option value="warehouse">Delay: Warehouse</option>
             <option value="qc">Delay: Quality Control</option>
@@ -160,24 +215,26 @@
           </select>
         </div>
 
-        <!-- Integrity Filter -->
-        <div class="flex flex-col">
-          <select v-model="integrityFilter" class="h-11 px-3.5 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-600 outline-none focus:bg-white focus:border-[#EF4444] focus:ring-4 focus:ring-[#EF4444]/10 transition-all">
-            <option value="ALL">All Integrity Statuses</option>
-            <option value="SAFE">SAFE (Matched)</option>
-            <option value="WARNING">WARNING (Shrinkage)</option>
-            <option value="CRITICAL">CRITICAL (Investigate)</option>
+        <!-- 4. Integrity Filter -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">extension</span>
+          <select v-model="integrityFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#EF4444] transition-all cursor-pointer">
+            <option value="ALL">Semua Integrasi</option>
+            <option value="SAFE">SAFE (Sesuai)</option>
+            <option value="WARNING">WARNING (Penyusutan)</option>
+            <option value="CRITICAL">CRITICAL (Investigasi)</option>
           </select>
         </div>
 
-        <!-- Mode Toggle -->
-        <div class="flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200/50 shadow-inner">
-          <button @click="currentMode = 'time'" :class="currentMode === 'time' ? 'bg-white shadow-md text-[#4A8BDF] scale-105' : 'text-slate-500 hover:text-slate-800'" class="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-300 flex items-center">
-            <span class="material-icons text-sm mr-1.5">schedule</span> TIMELINE
-          </button>
-          <button @click="currentMode = 'fraud'" :class="currentMode === 'fraud' ? 'bg-white shadow-md text-red-600 scale-105' : 'text-slate-500 hover:text-slate-800'" class="px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all duration-300 flex items-center">
-            <span class="material-icons text-sm mr-1.5">policy</span> SCALE AUDIT
-          </button>
+        <!-- 5. Dark Sort Selector -->
+        <div class="relative">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-white/80 text-base pointer-events-none">schedule</span>
+          <select v-model="sortBy" class="w-full h-11 pl-10 pr-8 bg-[#0f172a] text-white border border-slate-900 shadow-md rounded-2xl text-xs font-black outline-none focus:ring-2 focus:ring-slate-700 transition-all cursor-pointer">
+            <option value="gateInDesc">Datang Terbaru</option>
+            <option value="gateInAsc">Datang Terawal (Pertama)</option>
+            <option value="tatDesc">TAT Terlama</option>
+            <option value="deviationDesc">Deviasi Terbesar</option>
+          </select>
         </div>
       </div>
     </div>
@@ -187,37 +244,42 @@
       <!-- Glossy grid overlay -->
       <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-white/30 pointer-events-none"></div>
 
-      <div class="overflow-x-auto hide-scrollbar p-4 relative z-10 w-full custom-scrollbar">
-        <table class="w-full border-separate relative z-10 min-w-[950px]" style="border-spacing: 0 10px;">
+      <div class="overflow-x-auto p-4 relative z-10 w-full custom-scrollbar">
+        <table class="w-full border-separate relative z-10 min-w-[1180px]" style="border-spacing: 0 8px;">
           <thead>
-            <tr>
-              <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[40px]">
+            <tr class="text-[9.5px] font-black text-slate-500 uppercase tracking-widest bg-slate-100/70 border-b border-slate-200/80 rounded-xl">
+              <th class="px-4 py-3 text-center w-[44px] min-w-[44px]">
                 <input type="checkbox" :checked="isAllSelected" @change="toggleSelectAll" class="accent-[#4A8BDF] rounded cursor-pointer w-4 h-4" />
               </th>
-              <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Vehicle ID</th>
+              <th class="px-4 py-3 text-left w-[260px] min-w-[260px]">Vehicle ID</th>
               <template v-if="currentMode === 'time'">
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Registration</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[110px]">Timb. In</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Warehouse</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">QC Check</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[110px]">Timb. Out</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[140px]">Process Timeline &amp; Health</th>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[90px]">Total TAT</th>
+                <th class="px-4 py-3 text-left text-[#4A8BDF] w-[130px] min-w-[130px]">
+                  <div class="flex items-center space-x-1">
+                    <span class="material-icons text-xs">event</span>
+                    <span>Kedatangan</span>
+                  </div>
+                </th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">Timb. In</th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">Warehouse</th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">QC Check</th>
+                <th class="px-4 py-3 text-left w-[100px] min-w-[100px]">Timb. Out</th>
+                <th class="px-4 py-3 text-left w-[140px] min-w-[140px]">Process Timeline</th>
+                <th class="px-4 py-3 text-right w-[95px] min-w-[95px]">Total TAT</th>
               </template>
               <template v-else>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[140px]">Weighbridge Net</th>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[140px]">Warehouse Scale</th>
-                <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Reconciled Deviation</th>
-                <th class="px-5 py-2 text-left text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[160px]">Scale Audit Verdict</th>
-                <th class="px-5 py-2 text-center text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[120px]">Cargo Safety</th>
+                <th class="px-4 py-3 text-right w-[130px] min-w-[130px]">Weighbridge Net</th>
+                <th class="px-4 py-3 text-right w-[130px] min-w-[130px]">Warehouse Scale</th>
+                <th class="px-4 py-3 text-right w-[160px] min-w-[160px]">Reconciled Deviation</th>
+                <th class="px-4 py-3 text-left w-[170px] min-w-[170px]">Scale Audit Verdict</th>
+                <th class="px-4 py-3 text-center w-[100px] min-w-[100px]">Cargo Safety</th>
               </template>
-              <th class="px-5 py-2 text-right text-[9.5px] font-black text-slate-500 uppercase tracking-widest w-[110px]">Actions</th>
+              <th class="px-4 py-3 text-right w-[110px] min-w-[110px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             <template v-for="truck in paginatedFilteredTrucks" :key="truck.id">
               <!-- Regular Row -->
-              <tr class="group bg-white hover:bg-slate-50 transition-all duration-300 shadow-sm border border-slate-100 cursor-pointer"
+              <tr class="group bg-white hover:bg-slate-50 transition-all duration-300 shadow-xs hover:shadow-md border border-slate-100 cursor-pointer"
                 :class="[
                   isRowExpanded(truck.id) ? 'shadow-md border-b-0 ring-1 ring-[#4A8BDF]/20' : '',
                   currentMode==='fraud'&&truck.fraud.status==='CRITICAL' ? 'shadow-[0_4px_15px_rgba(239,68,68,0.12)] border-red-200' : ''
@@ -225,33 +287,57 @@
                 @click="toggleRow(truck.id)">
                 
                 <!-- Checkbox -->
-                <td class="px-5 py-3 rounded-l-xl border-y border-l border-slate-100" @click.stop>
+                <td class="px-4 py-3 rounded-l-xl border-y border-l border-slate-100 text-center w-[44px] min-w-[44px]" @click.stop>
                   <input type="checkbox" :value="truck.id" v-model="selectedTruckIds" class="accent-[#4A8BDF] rounded cursor-pointer w-4 h-4" />
                 </td>
 
-                <!-- Plate Number & Cargo Type -->
-                <td class="px-5 py-3 border-y border-slate-100">
+                <!-- Plate Number & Badges -->
+                <td class="px-4 py-3 border-y border-slate-100 w-[260px] min-w-[260px]">
                   <div class="flex items-center space-x-2.5">
-                    <div class="flex flex-col items-center justify-center bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 shadow-inner shrink-0">
-                      <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-widest leading-none">{{ getPlateNumber(truck) }}</span>
+                    <!-- License Plate Dark Card -->
+                    <div class="flex flex-col items-center justify-center bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-inner shrink-0 min-w-[82px]">
+                      <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-wider leading-none">{{ getPlateNumber(truck) }}</span>
+                      <span v-if="getVendor(truck) !== '-'" class="text-[8px] font-bold text-slate-400 mt-0.5 max-w-[75px] truncate leading-none" :title="getVendor(truck)">{{ getVendor(truck) }}</span>
                     </div>
-                    <div class="flex flex-col min-w-0">
-                      <span class="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border text-center self-start" 
-                        :style="getProcessBadgeStyle(truck)">
-                        {{ getProcessType(truck) }}
-                      </span>
-                      <span class="text-[9px] font-bold text-slate-400 mt-1 truncate max-w-[80px]">{{ getVendor(truck) }}</span>
+
+                    <!-- Badges Column -->
+                    <div class="flex flex-col space-y-1 min-w-0 flex-1">
+                      <div class="flex items-center space-x-1 flex-wrap gap-y-1">
+                        <span class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider border shrink-0" :style="getProcessBadgeStyle(truck)">
+                          {{ getProcessType(truck) }}
+                        </span>
+                        
+                        <span v-if="truck.status === 'CANCELLED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-rose-50 border border-rose-200 text-rose-600 shrink-0">CANCELLED</span>
+                        <span v-else-if="truck.status === 'COMPLETED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 shrink-0">COMPLETED</span>
+                        <span v-else class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ truck.status || 'ACTIVE' }}</span>
+                      </div>
+
+                      <div v-if="getCorrectionCount(truck) > 0">
+                        <span class="inline-flex items-center px-1.5 py-0.5 bg-amber-100 border border-amber-300 text-amber-900 text-[8.5px] font-mono font-black rounded uppercase tracking-wider shadow-xs" :title="`${getCorrectionCount(truck)} Koreksi Admin dicatat`">
+                          {{ getCorrectionCount(truck) }} KOREKSI
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </td>
 
                 <!-- MODE 1: TIME TIMELINE ANALYTICS -->
                 <template v-if="currentMode === 'time'">
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] text-slate-600 font-bold">
-                    {{ formatTime(truck.timestamps?.gateInAt || truck.gateInAt) }}
+                  <!-- Kedatangan (Tanggal & Waktu) -->
+                  <td class="px-4 py-3 border-y border-slate-100 whitespace-nowrap w-[130px] min-w-[130px]">
+                    <div class="flex flex-col">
+                      <div class="flex items-center space-x-1 text-slate-800 font-bold text-[11px]">
+                        <span class="material-icons text-slate-400 text-xs">calendar_today</span>
+                        <span>{{ formatArrivalDateTime(truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt).date }}</span>
+                      </div>
+                      <div class="flex items-center space-x-1 text-[#4A8BDF] font-black font-mono text-[10.5px] mt-0.5">
+                        <span class="material-icons text-xs">schedule</span>
+                        <span>{{ formatArrivalDateTime(truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt).time }}</span>
+                      </div>
+                    </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'waitingIn')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'waitingIn')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.weighInAt || truck.weighInAt) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.waitingIn > 15 ? 'text-red-500' : 'text-slate-400'">
@@ -260,7 +346,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'warehouse')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'warehouse')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.warehouseEndAt || truck.warehouseEndAt) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.warehouse > 15 ? 'text-red-500 animate-pulse' : 'text-slate-400'">
@@ -269,7 +355,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'qc')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'qc')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(getQCEndTime(truck)) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.qc > 15 ? 'text-red-500 animate-pulse' : 'text-slate-400'">
@@ -278,7 +364,7 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-[11px] relative" :class="getHighlightClass(truck, 'waitingOut')">
+                  <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'waitingOut')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.weighOutAt || truck.weighOutAt) }}</span>
                       <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.waitingOut > 15 ? 'text-red-500' : 'text-slate-400'">
@@ -288,8 +374,8 @@
                   </td>
 
                   <!-- Horizontal Flow Graphic Segment -->
-                  <td class="px-5 py-3 border-y border-slate-100">
-                    <div class="flex items-center space-x-0.5 w-[140px] h-3 bg-slate-100 rounded-full overflow-hidden p-0.5">
+                  <td class="px-4 py-3 border-y border-slate-100 w-[140px] min-w-[140px]">
+                    <div class="flex items-center space-x-0.5 w-[120px] h-3 bg-slate-100 rounded-full overflow-hidden p-0.5">
                       <div class="h-full rounded-l-full" :class="truck.durations.waitingIn > 15 ? 'bg-red-500' : 'bg-blue-400'" :style="{ width: getPercentageWidth(truck.durations.waitingIn, truck.durations.total) + '%' }" title="Waiting In"></div>
                       <div class="h-full" :class="truck.durations.warehouse > 15 ? 'bg-red-500' : 'bg-indigo-400'" :style="{ width: getPercentageWidth(truck.durations.warehouse, truck.durations.total) + '%' }" title="Warehouse"></div>
                       <div class="h-full" :class="truck.durations.qc > 15 ? 'bg-red-500' : 'bg-emerald-400'" :style="{ width: getPercentageWidth(truck.durations.qc, truck.durations.total) + '%' }" title="QC Check"></div>
@@ -297,29 +383,31 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100 text-right">
-                    <div class="inline-flex items-center px-2 py-1 rounded-lg border font-mono" :class="truck.durations.total > 90 ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-slate-50 border-slate-100 text-slate-800'">
-                      <span class="text-xs font-black">{{ truck.durations.total }}</span>
-                      <span class="text-[8px] font-black opacity-60 ml-0.5 uppercase">min</span>
-                    </div>
+                  <td class="px-4 py-3 border-y border-slate-100 text-right w-[95px] min-w-[95px]">
+                    <ProcessTimerBadge 
+                      :start-time="truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt" 
+                      :end-time="truck.completedAt || truck.cancelledAt || (truck.durations?.total ? new Date((new Date(truck.gateInAt || truck.createdAt)).getTime() + truck.durations.total * 60000) : null)"
+                      :sla-minutes="90"
+                      :compact="true"
+                    />
                   </td>
                 </template>
 
                 <!-- MODE 2: WEIGHBRIDGE & DISCREPANCY RECONCILIATION -->
                 <template v-else>
-                  <td class="px-5 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100">
+                  <td class="px-4 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100 w-[130px] min-w-[130px]">
                     <template v-if="formatWeight(truck.fraud.net) !== '-'">
                       {{ formatWeight(truck.fraud.net) }} <span class="text-[9px] text-slate-400">kg</span>
                     </template>
                     <template v-else>-</template>
                   </td>
-                  <td class="px-5 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100">
+                  <td class="px-4 py-3 border-y text-xs font-mono text-right font-black text-slate-800 border-slate-100 w-[130px] min-w-[130px]">
                     <template v-if="formatWeight(truck.fraud.roll) !== '-'">
                       {{ formatWeight(truck.fraud.roll) }} <span class="text-[9px] text-slate-400">kg</span>
                     </template>
                     <template v-else>-</template>
                   </td>
-                  <td class="px-5 py-3 border-y border-slate-100 text-right">
+                  <td class="px-4 py-3 border-y border-slate-100 text-right w-[160px] min-w-[160px]">
                     <div class="flex flex-col items-end">
                       <span class="font-mono text-xs font-black tracking-tight" :class="truck.fraud.status==='CRITICAL'?'text-red-600':truck.fraud.status==='WARNING'?'text-orange-600':'text-[#3A6ABF]'">
                         {{ formatPercentage(truck.fraud.deviationPercent) }}
@@ -331,25 +419,25 @@
                     </div>
                   </td>
                   
-                  <td class="px-5 py-3 border-y border-slate-100">
-                    <span v-if="truck.fraud.status==='CRITICAL'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black text-white animate-pulse" style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 3px 10px rgba(220,38,38,0.25)">
-                      <span class="material-icons text-sm mr-1">warning</span> CRITICAL ANOMALY
+                  <td class="px-4 py-3 border-y border-slate-100 w-[170px] min-w-[170px]">
+                    <span v-if="truck.fraud.status==='CRITICAL'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black text-white animate-pulse" style="background:linear-gradient(135deg,#DC2626,#EF4444);box-shadow:0 3px 10px rgba(220,38,38,0.25)">
+                      <span class="material-icons text-xs mr-1">warning</span> CRITICAL ANOMALY
                     </span>
-                    <span v-else-if="truck.fraud.status==='WARNING'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black text-white" style="background:linear-gradient(135deg,#D97706,#F59E0B);box-shadow:0 3px 10px rgba(217,119,6,0.2)">
-                      <span class="material-icons text-sm mr-1">error_outline</span> SHRINKAGE
+                    <span v-else-if="truck.fraud.status==='WARNING'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black text-white" style="background:linear-gradient(135deg,#D97706,#F59E0B);box-shadow:0 3px 10px rgba(217,119,6,0.2)">
+                      <span class="material-icons text-xs mr-1">error_outline</span> SHRINKAGE
                     </span>
-                    <span v-else-if="truck.fraud.status==='PENDING'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black border border-slate-200 bg-slate-50 text-slate-600">
-                      <span class="material-icons text-sm mr-1">hourglass_empty</span> PENDING
+                    <span v-else-if="truck.fraud.status==='PENDING'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black border border-slate-200 bg-slate-50 text-slate-600">
+                      <span class="material-icons text-xs mr-1">hourglass_empty</span> PENDING
                     </span>
-                    <span v-else-if="truck.fraud.status==='ERROR DATA'" class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black border border-red-200 bg-red-50 text-red-700">
-                      <span class="material-icons text-sm mr-1">error</span> ERROR DATA
+                    <span v-else-if="truck.fraud.status==='ERROR DATA'" class="inline-flex items-center px-2 py-0.5 rounded-lg text-[8.5px] uppercase tracking-wider font-black border border-red-200 bg-red-50 text-red-700">
+                      <span class="material-icons text-xs mr-1">error</span> ERROR DATA
                     </span>
                     <span v-else class="inline-flex items-center px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black border border-emerald-100 bg-emerald-50 text-emerald-700">
                       <span class="material-icons text-sm mr-1">verified</span> SAFE (MATCHED)
                     </span>
                   </td>
 
-                  <td class="px-5 py-3 border-y border-slate-100 text-center">
+                  <td class="px-4 py-3 border-y border-slate-100 text-center w-[100px] min-w-[100px]">
                     <!-- Progress meter -->
                     <div class="w-16 h-2 bg-slate-100 rounded-full mx-auto overflow-hidden p-[1px]">
                       <div class="h-full rounded-full" 
@@ -361,15 +449,15 @@
                 </template>
 
                 <!-- Actions -->
-                <td class="px-5 py-3 rounded-r-xl border-y border-r border-slate-100 text-right">
-                  <div class="flex items-center justify-end space-x-1.5">
-                    <button @click.stop="downloadSinglePDF(truck)" class="w-8 h-8 rounded-lg flex items-center justify-center text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-600 hover:text-white transition-all duration-300" title="Download PDF Report">
-                      <span class="material-icons text-[15px]">picture_as_pdf</span>
+                <td class="px-4 py-3 rounded-r-xl border-y border-r border-slate-100 text-right w-[110px] min-w-[110px]">
+                  <div class="flex items-center justify-end space-x-1">
+                    <button @click.stop="downloadSinglePDF(truck)" class="w-7 h-7 rounded-lg flex items-center justify-center text-rose-600 bg-rose-50 border border-rose-100 hover:bg-rose-600 hover:text-white transition-all duration-300 active:scale-95" title="Download PDF Report">
+                      <span class="material-icons text-[14px]">picture_as_pdf</span>
                     </button>
-                    <button @click.stop="viewDetails(truck)" class="w-8 h-8 rounded-lg flex items-center justify-center text-[#4A8BDF] bg-blue-50 border border-blue-100 hover:bg-[#4A8BDF] hover:text-white transition-all" title="View Details">
-                      <span class="material-icons text-[15px]">travel_explore</span>
+                    <button @click.stop="viewDetails(truck)" class="w-7 h-7 rounded-lg flex items-center justify-center text-[#4A8BDF] bg-blue-50 border border-blue-100 hover:bg-[#4A8BDF] hover:text-white transition-all active:scale-95" title="View Details">
+                      <span class="material-icons text-[14px]">travel_explore</span>
                     </button>
-                    <button @click.stop="toggleRow(truck.id)" class="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
+                    <button @click.stop="toggleRow(truck.id)" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all">
                       <span class="material-icons text-base transition-transform duration-300" :class="isRowExpanded(truck.id) ? 'rotate-180' : ''">expand_more</span>
                     </button>
                   </div>
@@ -531,6 +619,22 @@
                 </div>
               </td>
             </tr>
+            <!-- Error State (Taste Skill / UI UX Pro Max: Explicit Interactive Failure State) -->
+            <tr v-else-if="errorMessage" key="error-history">
+              <td :colspan="currentMode === 'time' ? 10 : 8" class="px-5 py-20 text-center">
+                <div class="flex flex-col items-center justify-center max-w-md mx-auto p-6 bg-rose-50/50 border border-rose-100 rounded-2xl shadow-sm">
+                  <div class="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center mb-3">
+                    <span class="material-icons text-2xl text-rose-600">cloud_off</span>
+                  </div>
+                  <h4 class="text-xs font-black uppercase tracking-widest text-slate-800">Server Synchronization Failed</h4>
+                  <p class="text-[11px] font-bold text-rose-600 mt-1">{{ errorMessage }}</p>
+                  <button @click="fetchHistory" class="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-[11px] font-black uppercase tracking-wider rounded-xl shadow-sm transition-all flex items-center space-x-1.5">
+                    <span class="material-icons text-sm">refresh</span>
+                    <span>Retry Connection</span>
+                  </button>
+                </div>
+              </td>
+            </tr>
             <!-- Empty State -->
             <tr v-else-if="filteredAnalyzedTrucks.length === 0" key="empty-history">
               <td :colspan="currentMode==='time' ? 10 : 8" class="px-5 py-24 text-center">
@@ -564,6 +668,7 @@ import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import truckService from '../services/truckService'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pagination from '../components/Pagination.vue'
 import { useToast } from '../composables/useToast'
@@ -578,22 +683,31 @@ const handleTruckDeleted = (id) => {
   rawCompletedTrucks.value = rawCompletedTrucks.value.filter(t => String(t.id) !== String(id))
 }
 const loading = ref(false)
+const errorMessage = ref(null)
 
-onMounted(async () => {
+const fetchHistory = async () => {
   loading.value = true
+  errorMessage.value = null
   try {
-    const res = await truckService.getCompleted({ limit: 100 })
+    // Fetch all historical transactions (COMPLETED, CANCELLED, REOPENED/ACTIVE) to ensure no operation log data is missing
+    const res = await truckService.getAll({ limit: 1000 })
     rawCompletedTrucks.value = res.data?.data || res.data || []
   } catch (err) {
     // Don't show toast for password-change-required redirect (handled by interceptor)
     const is403Redirect = err.response?.status === 403 && err.response?.data?.code === 'PASSWORD_CHANGE_REQUIRED'
     if (!is403Redirect) {
       console.warn('[History] Mount-time fetch failed:', err.message)
-      toast.error(err.gmsMessage || 'Failed to load history data')
+      const msg = err.gmsMessage || err.response?.data?.message || 'Failed to load history data'
+      errorMessage.value = msg
+      toast.error(msg)
     }
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => {
+  fetchHistory()
 })
 
 // Reactive View State
@@ -603,10 +717,104 @@ const selectedTruck = ref({})
 const searchQuery = ref('')
 const expandedRowId = ref(null)
 
-// Advanced Filters
+// Advanced Filters & Date Range State
+const statusFilter = ref('ALL')
 const destinationFilter = ref('ALL')
 const bottleneckFilter = ref('ALL')
 const integrityFilter = ref('ALL')
+const datePreset = ref('ALL')
+const startDate = ref('')
+const endDate = ref('')
+const sortBy = ref('gateInDesc')
+
+const applyDatePreset = (preset) => {
+  datePreset.value = preset
+  const today = new Date()
+  const todayStr = today.toISOString().split('T')[0]
+
+  if (preset === 'TODAY') {
+    startDate.value = todayStr
+    endDate.value = todayStr
+  } else if (preset === 'THIS_WEEK') {
+    const day = today.getDay()
+    const firstDay = new Date(today)
+    firstDay.setDate(today.getDate() - (day === 0 ? 6 : day - 1))
+    startDate.value = firstDay.toISOString().split('T')[0]
+    endDate.value = todayStr
+  } else if (preset === 'THIS_MONTH') {
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+    startDate.value = firstDay.toISOString().split('T')[0]
+    endDate.value = todayStr
+  } else if (preset === 'ALL') {
+    startDate.value = ''
+    endDate.value = ''
+  }
+  currentPage.value = 1
+}
+
+const formatArrivalDateTime = (isoString) => {
+  if (!isoString) return { date: '-', time: '-' }
+  const d = new Date(isoString)
+  if (isNaN(d.getTime())) return { date: '-', time: '-' }
+  const date = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return { date, time }
+}
+
+const extractMoistureValue = (target) => {
+  if (!target) return null;
+
+  // 1. Direct property check
+  if (target.moisture !== undefined && target.moisture !== null) return Number(target.moisture);
+  if (target.kadarAir !== undefined && target.kadarAir !== null) return Number(target.kadarAir);
+  if (target.initialMoisture !== undefined && target.initialMoisture !== null) return Number(target.initialMoisture);
+  if (target.moistureEst !== undefined && target.moistureEst !== null) return Number(target.moistureEst);
+
+  // 2. ChecklistItems array or object
+  const items = target.checklistItems;
+  if (Array.isArray(items)) {
+    const mItem = items.find(i => i && i.label && (
+      i.label.toLowerCase().includes('moisture') || 
+      i.label.toLowerCase().includes('kadar air') || 
+      i.label.toLowerCase().includes('estimasi')
+    ));
+    if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
+      return Number(mItem.value);
+    }
+  } else if (typeof items === 'object' && items !== null) {
+    if (items.initialMoisture !== undefined && items.initialMoisture !== null) return Number(items.initialMoisture);
+    if (items.moisture !== undefined && items.moisture !== null) return Number(items.moisture);
+    if (items.kadarAir !== undefined && items.kadarAir !== null) return Number(items.kadarAir);
+    if (Array.isArray(items.items)) {
+      const mItem = items.items.find(i => i && i.label && (
+        i.label.toLowerCase().includes('moisture') || 
+        i.label.toLowerCase().includes('kadar air') || 
+        i.label.toLowerCase().includes('estimasi')
+      ));
+      if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
+        return Number(mItem.value);
+      }
+    }
+  }
+
+  // 3. qcVehicleChecks / incomingMaterialChecks on truck object
+  if (target.incomingMaterialChecks && target.incomingMaterialChecks.length > 0) {
+    const im = target.incomingMaterialChecks[0];
+    if (im.moisture !== undefined && im.moisture !== null) return Number(im.moisture);
+  }
+  if (target.qcVehicleChecks && target.qcVehicleChecks.length > 0) {
+    const qv = target.qcVehicleChecks[0];
+    const val = extractMoistureValue(qv);
+    if (val !== null && !isNaN(val)) return val;
+  }
+  if (target.qcDetails) {
+    if (target.qcDetails.kadarAir !== undefined && target.qcDetails.kadarAir !== null) return Number(target.qcDetails.kadarAir);
+    if (target.qcDetails.moisture !== undefined && target.qcDetails.moisture !== null) return Number(target.qcDetails.moisture);
+    if (target.qcDetails.initialMoisture !== undefined && target.qcDetails.initialMoisture !== null) return Number(target.qcDetails.initialMoisture);
+  }
+
+  return null;
+}
 
 // Pagination State
 const currentPage = ref(1)
@@ -648,7 +856,10 @@ const getPlateNumber = (truck) => {
 
 const getVendor = (truck) => {
   if (!truck) return '-'
-  return truck.vendorName || truck.vendor || truck.vehicle?.companyName || truck.companyName || truck.cargo?.supplierOrCustomer || '-'
+  const val = truck.vendorName || truck.vendor || truck.vehicle?.companyName || truck.companyName || truck.cargo?.supplierOrCustomer || ''
+  const plate = getPlateNumber(truck)
+  if (!val || val === plate || val === truck.licensePlate) return '-'
+  return val
 }
 
 const getProcessType = (truck) => {
@@ -661,6 +872,14 @@ const getProcessBadgeStyle = (truck) => {
   if (type === 'GBB') return 'color:#93005A;background:#FFF0F8;border-color:#FBCFE8'
   if (type === 'GBJ') return 'color:#1E40AF;background:#EFF6FF;border-color:#BFDBFE'
   return 'color:#065F46;background:#ECFDF5;border-color:#A7F3D0'
+}
+
+const getCorrectionCount = (truck) => {
+  if (!truck) return 0
+  if (Array.isArray(truck.corrections)) return truck.corrections.length
+  if (typeof truck.correctionCount === 'number') return truck.correctionCount
+  if (typeof truck._count?.corrections === 'number') return truck._count.corrections
+  return 0
 }
 
 // Completed trucks sorted descending
@@ -694,7 +913,7 @@ const analyzedTrucks = computed(() => {
       qcDetails = {
         status: im.result,
         note: im.notes || im.defectNotes || '',
-        kadarAir: im.moisture,
+        kadarAir: extractMoistureValue(im) ?? extractMoistureValue(truck),
         totalFM: im.foreignMatter,
         bijiOK: im.beanCondition === 'PASS' || im.result === 'PASS' ? 100 : 0,
         pic: im.checkedBy?.name || 'N/A'
@@ -704,7 +923,7 @@ const analyzedTrucks = computed(() => {
       qcDetails = {
         status: qv.result,
         note: qv.notes || '',
-        kadarAir: null,
+        kadarAir: extractMoistureValue(qv) ?? extractMoistureValue(truck),
         totalFM: null,
         bijiOK: null,
         pic: qv.checkedBy?.name || 'N/A',
@@ -724,11 +943,11 @@ const analyzedTrucks = computed(() => {
   }).filter(Boolean)
 })
 
-// Multi-criteria filters
+// Multi-criteria filters + Date Range + Sorting
 const filteredAnalyzedTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
   
-  return analyzedTrucks.value.filter(truck => {
+  const filtered = analyzedTrucks.value.filter(truck => {
     // 1. Text Search matching
     const plate = getPlateNumber(truck).toLowerCase()
     const driver = (truck.driverName || '').toLowerCase()
@@ -746,7 +965,34 @@ const filteredAnalyzedTrucks = computed(() => {
     // 4. Integrity status filter
     const matchesIntegrity = integrityFilter.value === 'ALL' || truck.fraud.status === integrityFilter.value
 
-    return matchesKeyword && matchesDest && matchesBottleneck && matchesIntegrity
+    // 5. Operational Status filter (COMPLETED, CANCELLED, ACTIVE/REOPENED)
+    let matchesStatus = true
+    if (statusFilter.value === 'COMPLETED') matchesStatus = truck.status === 'COMPLETED'
+    else if (statusFilter.value === 'CANCELLED') matchesStatus = truck.status === 'CANCELLED'
+    else if (statusFilter.value === 'ACTIVE') matchesStatus = truck.status !== 'COMPLETED' && truck.status !== 'CANCELLED'
+
+    // 6. Date Range filter (Gate In Arrival Date)
+    let matchesDate = true
+    const arrTime = truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt
+    if (arrTime) {
+      const arrDateStr = new Date(arrTime).toISOString().split('T')[0]
+      if (startDate.value && arrDateStr < startDate.value) matchesDate = false
+      if (endDate.value && arrDateStr > endDate.value) matchesDate = false
+    }
+
+    return matchesKeyword && matchesDest && matchesBottleneck && matchesIntegrity && matchesStatus && matchesDate
+  })
+
+  // Sorting logic
+  return filtered.sort((a, b) => {
+    const timeA = new Date(a.gateInAt || a.timestamps?.gateInAt || a.createdAt || 0).getTime()
+    const timeB = new Date(b.gateInAt || b.timestamps?.gateInAt || b.createdAt || 0).getTime()
+    
+    if (sortBy.value === 'gateInAsc') return timeA - timeB // Datang Terawal / Pertama (Oldest first)
+    if (sortBy.value === 'gateInDesc') return timeB - timeA // Datang Terbaru / Terakhir (Newest first)
+    if (sortBy.value === 'tatDesc') return (b.durations?.totalTat || 0) - (a.durations?.totalTat || 0)
+    if (sortBy.value === 'deviationDesc') return (b.fraud?.diffPercent || 0) - (a.fraud?.diffPercent || 0)
+    return timeB - timeA
   })
 })
 
@@ -766,7 +1012,7 @@ watch(filteredAnalyzedTrucks, () => {
     currentPage.value = 1
   }
 })
-watch([searchQuery, destinationFilter, bottleneckFilter, integrityFilter], () => {
+watch([searchQuery, statusFilter, destinationFilter, bottleneckFilter, integrityFilter], () => {
   currentPage.value = 1
 })
 

@@ -24,13 +24,17 @@ const api = axios.create({
   withCredentials: true
 })
 
-// ── Request Interceptor ──────────────────────────────
-// Attach access_token from localStorage to every request
+// Attach access_token from in-memory Pinia store to every request
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+  async (config) => {
+    try {
+      const { useAuthStore } = await import('../stores/authStore')
+      const authStore = useAuthStore()
+      if (authStore.token) {
+        config.headers.Authorization = `Bearer ${authStore.token}`
+      }
+    } catch (e) {
+      // Store not initialized yet
     }
     return config
   },
@@ -38,6 +42,20 @@ api.interceptors.request.use(
     return Promise.reject(error)
   }
 )
+
+let isRefreshing = false
+let failedQueue = []
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error)
+    } else {
+      prom.resolve(token)
+    }
+  })
+  failedQueue = []
+}
 
 // ── Response Interceptor ─────────────────────────────
 // Handle 401 Unauthorized globally & parse Blob error payloads
@@ -59,25 +77,77 @@ api.interceptors.response.use(
       }
     }
 
-    if (error.response && error.response.status === 401) {
-      // Token expired or invalid — clear auth data
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('user')
+    const originalRequest = error.config;
 
-      const isLoginRequest = error.config && error.config.url && error.config.url.includes('/login');
-
-      // Redirect to login if not already there (SPA friendly)
-      import('../router').then(({ default: router }) => {
-        if (router.currentRoute.value.path !== '/login') {
-           router.push('/login?expired=1')
+    if (error.response && error.response.status === 401 && !originalRequest._retry) {
+      const isLoginRequest = originalRequest.url && originalRequest.url.includes('/login');
+      const isRefreshRequest = originalRequest.url && originalRequest.url.includes('/refresh');
+      
+      if (isLoginRequest || isRefreshRequest) {
+        if (isLoginRequest) {
+          error.gmsMessage = error.response?.data?.message || 'Username atau password salah.';
+        } else {
+          error.gmsMessage = 'Sesi login sudah habis. Silakan login ulang.';
+          try {
+            const { useAuthStore } = await import('../stores/authStore')
+            useAuthStore().clearAuth()
+            const { default: router } = await import('../router')
+            if (router.currentRoute.value.path !== '/login') {
+              router.push('/login?expired=1')
+            }
+          } catch (e) {}
         }
-      })
+        return Promise.reject(error);
+      }
 
-      if (isLoginRequest) {
-        error.gmsMessage = error.response?.data?.message || 'Username atau password salah.';
-      } else {
+      if (isRefreshing) {
+        return new Promise(function(resolve, reject) {
+          failedQueue.push({ resolve, reject })
+        }).then(token => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        }).catch(err => {
+          return Promise.reject(err);
+        });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const { useAuthStore } = await import('../stores/authStore')
+        const authStore = useAuthStore()
+        
+        // Attempt to refresh token
+        const refreshResponse = await api.post('/auth/refresh', {}, { _retry: true });
+        if (refreshResponse.data && refreshResponse.data.data && refreshResponse.data.data.accessToken) {
+          const newToken = refreshResponse.data.data.accessToken;
+          authStore.setToken(newToken);
+          
+          processQueue(null, newToken);
+          
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        } else {
+          throw new Error('No token returned');
+        }
+      } catch (refreshError) {
+        processQueue(refreshError, null);
+        
+        // Refresh failed, clear auth and logout
+        try {
+          const { useAuthStore } = await import('../stores/authStore')
+          useAuthStore().clearAuth()
+          const { default: router } = await import('../router')
+          if (router.currentRoute.value.path !== '/login') {
+             router.push('/login?expired=1')
+          }
+        } catch (e) {}
+
         error.gmsMessage = 'Sesi login sudah habis. Silakan login ulang.';
+        return Promise.reject(error);
+      } finally {
+        isRefreshing = false;
       }
     } else if (error.response && error.response.status === 403) {
       if (error.response.data && error.response.data.code === 'PASSWORD_CHANGE_REQUIRED') {
@@ -91,8 +161,6 @@ api.interceptors.response.use(
         error.gmsMessage = error.response?.data?.message || 'Anda tidak memiliki akses ke halaman ini.';
       }
     } else {
-      // Attach our human-readable message directly to the error object 
-      // so stores can just use error.gmsMessage
       error.gmsMessage = getErrorMessage(error);
     }
 

@@ -53,15 +53,6 @@ const warehouseService = {
   },
 
   /**
-   * Submit incoming check
-   * @param {Number|String} truckId
-   * @param {Object} data
-   */
-  submitIncomingCheck(truckId, data) {
-    return api.post(`/warehouse/incoming-check/${truckId}`, data)
-  },
-
-  /**
    * Complete QC Analysis for GBB
    * @param {Number|String} truckId
    */

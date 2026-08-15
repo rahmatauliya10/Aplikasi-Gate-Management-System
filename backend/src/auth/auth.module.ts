@@ -7,6 +7,7 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
 import { ActivityLogsModule } from '../activity-logs/activity-logs.module';
+import { AuthorizationScopeService } from './authorization-scope.service';
 
 import { getJwtAccessSecret } from '../common/utils/jwt-secrets.util';
 
@@ -25,7 +26,7 @@ import { getJwtAccessSecret } from '../common/utils/jwt-secrets.util';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService],
+  providers: [AuthService, JwtStrategy, AuthorizationScopeService],
+  exports: [AuthService, AuthorizationScopeService],
 })
 export class AuthModule {}

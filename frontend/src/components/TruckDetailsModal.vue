@@ -22,6 +22,14 @@
                   :class="truck.processType === 'GBB' ? 'bg-pink-50 text-[#A0006D] border border-pink-200' : truck.processType === 'GBJ' ? 'bg-indigo-50 text-indigo-600 border border-indigo-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'">
                   {{ truck.processType }}
                 </span>
+                <StatusBadge :status="truck.status" :process-type="truck.processType" />
+                <ProcessTimerBadge 
+                  :start-time="activeStageStartTime" 
+                  :end-time="truck.completedAt || truck.cancelledAt"
+                  :sla-minutes="60"
+                  label="Durasi"
+                  :compact="true"
+                />
               </div>
               <div class="flex items-center space-x-1.5 mt-0.5">
                 <span class="text-[10px] font-bold text-slate-500">{{ truck.driverName }}</span>
@@ -30,10 +38,18 @@
               </div>
             </div>
           </div>
-          <button @click="close"
-            class="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:bg-red-50 hover:text-red-500 text-slate-400">
-            <span class="material-icons text-lg">close</span>
-          </button>
+          <div class="flex items-center space-x-2">
+            <button v-if="isAdmin && (truck.status === 'COMPLETED' || truck.status === 'CANCELLED' || truck.status === 'IN_PROGRESS')" @click="openCorrectionModal"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1.5 transition-all shadow-sm active:scale-95">
+              <span class="material-icons text-sm text-amber-600">edit_note</span>
+              <span>Koreksi Admin</span>
+              <span v-if="correctionCount > 0" class="ml-1 px-1.5 py-0.5 bg-amber-200/80 text-amber-950 rounded text-[9px] font-mono font-black">{{ correctionCount }} Koreksi</span>
+            </button>
+            <button @click="close"
+              class="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:bg-red-50 hover:text-red-500 text-slate-400">
+              <span class="material-icons text-lg">close</span>
+            </button>
+          </div>
         </div>
 
         <!-- Body -->
@@ -75,35 +91,101 @@
                 </div>
               </div>
 
-              <!-- QC Results (only show if qcDetails exist) -->
-              <div v-if="qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+              <!-- 1. Initial QC Sampling Card / SAMPLING PARAMETERS (For GBB & GSP) -->
+              <div v-if="(truck.processType === 'GBB' || truck.processType === 'GSP') && initialSamplingDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm space-y-2 p-3">
+                <div class="flex items-center justify-between border-b border-slate-50 pb-2">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-indigo-500 text-[14px]">biotech</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">SAMPLING PARAMETERS</h3>
+                  </div>
+                  <span class="text-[9px] font-bold text-slate-400">PIC: [SAMPLING QC] {{ initialSamplingDetails.pic || 'QC Inspector' }}</span>
+                </div>
+
+                <!-- 3 Sampling Parameter Cards: MOISTURE, VISUAL, ODOR (Sesuai Gambar User) -->
+                <div class="grid grid-cols-3 gap-2.5">
+                  <div v-for="item in initialSamplingMetrics" :key="item.label" 
+                       class="p-3 rounded-2xl border transition-all text-center flex flex-col items-center justify-center space-y-1.5"
+                       :class="item.isOk ? 'border-emerald-200/80 bg-emerald-50/20' : 'border-rose-200/80 bg-rose-50/20'">
+                    <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest">{{ item.label }}</div>
+                    
+                    <!-- Numeric Moisture Value Badge -->
+                    <template v-if="!item.isText">
+                      <div class="text-xs font-black font-mono text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
+                        {{ item.value }}
+                      </div>
+                    </template>
+
+                    <!-- Icon + OK / NOT OK Badge for Visual & Odor -->
+                    <template v-else>
+                      <div class="flex items-center space-x-1 font-black text-xs" :class="item.isOk ? 'text-emerald-600' : 'text-rose-600'">
+                        <span class="material-icons text-[14px]">{{ item.isOk ? 'check_circle' : 'cancel' }}</span>
+                        <span>{{ item.value }}</span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Overall Status Banner -->
+                <div class="rounded-xl p-2.5 text-white relative overflow-hidden shadow-sm"
+                     :style="{ background: initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #10B981, #047857)' }">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-white/90 text-sm">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
+                    <span class="text-xs font-black tracking-widest uppercase">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'REJECTED' : 'APPROVED' }}</span>
+                  </div>
+                  <p v-if="initialSamplingDetails.note" class="text-[10px] font-bold text-white mt-1.5 p-2 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ initialSamplingDetails.note }}"</p>
+                </div>
+              </div>
+
+              <!-- 2. Quality Analysis (QC Lab) Card (For GBB & GSP) -->
+              <div v-if="(truck.processType === 'GBB' || truck.processType === 'GSP') && qcLabDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                 <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
                   <div class="flex items-center space-x-2">
-                    <span class="material-icons text-[14px]" :class="truck.processType === 'GBJ' ? 'text-indigo-500' : 'text-blue-500'">{{ truck.processType === 'GBJ' ? 'local_shipping' : 'biotech' }}</span>
-                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">{{ truck.processType === 'GBJ' ? 'QC Vehicle' : 'Quality Analysis' }}</h3>
+                    <span class="material-icons text-blue-500 text-[14px]">science</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Quality Analysis (QC Lab)</h3>
                   </div>
-                  <span v-if="!isWarehouseRejection && qcPicLabel" class="text-[9px] font-bold text-slate-400">PIC: {{ qcPicLabel }}</span>
+                  <span v-if="!qcLabDetails.isSkipped" class="text-[9px] font-bold text-slate-400">PIC: [LAB QC] {{ qcLabDetails.pic || 'QC Lab Team' }}</span>
                 </div>
                 <div class="p-3">
-                  <div v-if="!isWarehouseRejection && qcMetrics.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
-                    <div v-for="item in qcMetrics" :key="item.label" 
-                         class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
-                      <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
-                      <div class="text-sm font-black text-slate-800 font-mono">{{ item.value }}</div>
-                    </div>
-                  </div>
-                  <!-- QC Status Banner -->
-                  <div v-if="isWarehouseRejection" class="rounded-xl p-3 text-slate-500 relative overflow-hidden bg-slate-50 border border-slate-150 shadow-sm flex items-center space-x-2">
+                  <div v-if="qcLabDetails.isSkipped" class="rounded-xl p-3 text-slate-500 relative overflow-hidden bg-slate-50 border border-slate-200 shadow-sm flex items-center space-x-2">
                     <span class="material-icons text-slate-400 text-sm">next_plan</span>
-                    <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED (REJECTED AT WAREHOUSE)</span>
+                    <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED ({{ qcLabDetails.reason }})</span>
                   </div>
-                  <div v-else class="rounded-xl p-3 text-white relative overflow-hidden"
-                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'linear-gradient(135deg, #F59E0B, #D97706)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)') }">
-                    <div class="flex items-center space-x-2">
-                      <span class="material-icons text-white/80 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'warning' : 'verified') }}</span>
-                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'REJECTED' : (qcDetails.status?.includes('Note') || qcDetails.note || parsedChecklist?.hasIssue ? 'ACCEPTED (WITH NOTE)' : (qcDetails.status || 'ACCEPTED')) }}</span>
+                  <div v-else class="space-y-2.5">
+                    <div v-if="qcMetrics.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
+                      <div v-for="item in qcMetrics" :key="item.label" class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                        <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
+                        <div class="text-sm font-black text-slate-800 font-mono">{{ item.value }}</div>
+                      </div>
                     </div>
-                    <p v-if="qcDetails.note" class="text-[10px] font-bold text-white/80 mt-1 italic">"{{ qcDetails.note }}"</p>
+                    <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
+                         :style="{ background: qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'linear-gradient(135deg, #F59E0B, #D97706)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)') }">
+                      <div class="flex items-center space-x-2">
+                        <span class="material-icons text-white/90 text-sm">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'cancel' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'warning' : 'verified') }}</span>
+                        <span class="text-xs font-black tracking-widest uppercase">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'REJECTED' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? '⚠️ APPROVED WITH NOTE (QUALITY CONCESSION)' : (qcLabDetails.status || 'ACCEPTED')) }}</span>
+                      </div>
+                      <p v-if="qcLabDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcLabDetails.note }}"</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. QC Vehicle Card (For GBJ) -->
+              <div v-if="truck.processType === 'GBJ' && qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-indigo-500 text-[14px]">local_shipping</span>
+                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">QC Vehicle Inspection</h3>
+                  </div>
+                  <span v-if="qcPicLabel" class="text-[9px] font-bold text-slate-400">PIC: {{ qcPicLabel }}</span>
+                </div>
+                <div class="p-3">
+                  <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
+                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-white/90 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
+                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'REJECTED' : 'ACCEPTED' }}</span>
+                    </div>
+                    <p v-if="qcDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcDetails.note }}"</p>
                   </div>
                 </div>
               </div>
@@ -240,81 +322,82 @@
                   <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Tonnage Analytics</h3>
                 </div>
                 <div class="p-3.5 space-y-3">
-                  <!-- 1. Weighing Inputs Grid -->
-                  <div class="grid grid-cols-2 gap-2.5">
+                  <!-- 1. Weighing Inputs Grid (GROSS IN & TARE OUT) -->
+                  <div class="grid grid-cols-2 gap-3">
                     <template v-if="truck.processType === 'GBB' || truck.processType === 'GSP'">
-                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
-                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400/20"></div>
-                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Gross (IN)</span>
-                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossInVal) }}</div>
-                        <span v-if="props.truck.weighInBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
+                      <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
+                        <div>
+                          <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">GROSS (IN)</span>
+                          <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossInVal) }}</div>
+                        </div>
+                        <span v-if="props.truck.weighInBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
                       </div>
-                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
-                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-red-400/20"></div>
-                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Tare (OUT)</span>
-                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareOutVal) }}</div>
-                        <span v-if="props.truck.weighOutBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
+                      <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
+                        <div>
+                          <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">TARE (OUT)</span>
+                          <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareOutVal) }}</div>
+                        </div>
+                        <span v-if="props.truck.weighOutBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
                       </div>
                     </template>
                     <template v-else-if="truck.processType === 'GBJ'">
-                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
-                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400/20"></div>
-                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Tare (IN)</span>
-                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareInVal) }}</div>
-                        <span v-if="props.truck.weighInBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
+                      <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
+                        <div>
+                          <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">TARE (IN)</span>
+                          <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareInVal) }}</div>
+                        </div>
+                        <span v-if="props.truck.weighInBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
                       </div>
-                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 relative">
-                        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-red-400/20"></div>
-                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Gross (OUT)</span>
-                        <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossOutVal) }}</div>
-                        <span v-if="props.truck.weighOutBy?.name" class="text-[8px] font-bold text-slate-400/80 block mt-1.5 leading-none">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
+                      <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
+                        <div>
+                          <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">GROSS (OUT)</span>
+                          <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossOutVal) }}</div>
+                        </div>
+                        <span v-if="props.truck.weighOutBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
                       </div>
                     </template>
                   </div>
 
-                  <!-- 2. Reconciled Weights Grid -->
-                  <div class="grid grid-cols-2 gap-2.5">
-                    <div class="p-2.5 rounded-xl bg-emerald-50/50 border border-emerald-100/50 relative">
-                      <span class="text-[8px] font-black text-emerald-600/80 uppercase tracking-widest block mb-1">Bridge Net</span>
-                      <div class="text-base font-black text-emerald-700 font-mono tracking-tight">{{ formatWeightCustom(nettoTimbanganJembatan) }}</div>
+                  <!-- 2. Reconciled Weights Grid (BRIDGE NET & WAREHOUSE REALIZATION) -->
+                  <div class="grid grid-cols-2 gap-3">
+                    <div class="p-3 rounded-2xl bg-emerald-50/30 border border-emerald-200/60 flex flex-col justify-between">
+                      <div>
+                        <span class="text-[9px] font-black text-emerald-600/80 uppercase tracking-widest block mb-1">BRIDGE NET</span>
+                        <div class="text-xl font-black text-emerald-700 font-mono tracking-tight">{{ formatWeightCustom(nettoTimbanganJembatan) }}</div>
+                      </div>
                     </div>
-                    <div class="p-2.5 rounded-xl bg-orange-50/50 border border-orange-100/50 relative">
-                      <span class="text-[8px] font-black text-orange-600/80 uppercase tracking-widest block mb-1">Warehouse Realization</span>
-                      <div class="text-base font-black text-orange-700 font-mono tracking-tight">{{ formatWeightCustom(warehouseRealization) }}</div>
-                      <span v-if="props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name" class="text-[8px] font-bold text-orange-600/80 block mt-1.5 leading-none">PIC: [GUDANG] {{ props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name }}</span>
+                    <div class="p-3 rounded-2xl bg-amber-50/30 border border-amber-200/60 flex flex-col justify-between">
+                      <div>
+                        <span class="text-[9px] font-black text-amber-700/80 uppercase tracking-widest block mb-1">WAREHOUSE REALIZATION</span>
+                        <div class="text-xl font-black text-amber-800 font-mono tracking-tight">{{ formatWeightCustom(warehouseRealization) }}</div>
+                      </div>
+                      <span v-if="props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name" class="text-[9px] font-bold text-amber-700/80 block mt-2">PIC: [GUDANG] {{ props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name }}</span>
                     </div>
                   </div>
 
-                  <!-- 3. Status and Alert Bar -->
-                  <div class="p-3 rounded-xl border flex justify-between items-center gap-2"
-                       :class="statusTonnage === 'OK' ? 'bg-emerald-50 border-emerald-200' : (statusTonnage === 'PENDING' ? 'bg-slate-50 border-slate-200' : 'bg-red-50 border-red-200')">
+                  <!-- 3. Status and Alert Bar (DEVIATION CARD & BUTTON) -->
+                  <div class="p-4 rounded-2xl border border-rose-200/70 bg-rose-50/40 flex items-center justify-between gap-3">
                     <div class="flex flex-col">
-                      <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-0.5">Deviation</span>
-                      <div class="flex items-center space-x-1.5">
-                        <span class="text-base font-black font-mono" :class="statusTonnage === 'OK' ? 'text-emerald-700' : (statusTonnage === 'PENDING' ? 'text-slate-600' : 'text-red-700')">
-                          {{ formatPercentageCustom(deviationPercentage) }}
-                        </span>
-                        <span v-if="statusTonnage === 'PENDING' && (!nettoTimbanganJembatan || !warehouseRealization)" class="text-[9px] font-bold text-slate-400 italic">
-                          Waiting for weighbridge out
-                        </span>
+                      <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">DEVIATION</span>
+                      <div class="text-2xl font-black text-rose-700 font-mono tracking-tight">
+                        {{ formatPercentageCustom(deviationPercentage) }}
                       </div>
                     </div>
-                    
-                    <!-- Badge -->
+
                     <div class="flex items-center">
-                      <span class="px-2.5 py-1 rounded-lg text-[9px] uppercase tracking-wider font-black text-white"
-                            :style="badgeStyle">
-                        {{ statusTonnage }}
+                      <span class="px-5 py-2.5 rounded-2xl text-[10px] uppercase tracking-widest font-black text-white shadow-sm transition-all"
+                            :class="statusTonnage === 'OK' ? 'bg-emerald-600' : (statusTonnage === 'PENDING' ? 'bg-slate-500' : 'bg-amber-600')">
+                        {{ statusTonnage === 'OK' ? 'PASSED / NORMAL' : (statusTonnage === 'PENDING' ? 'PENDING' : 'CHECK / INVESTIGASI') }}
                       </span>
                     </div>
                   </div>
 
-                  <!-- Alert Warning if triggerAlert is true and deviation > variance -->
-                  <div v-if="shouldShowAlert" class="p-3 rounded-xl bg-red-50 border border-red-200 flex items-start space-x-2.5">
-                    <span class="material-icons text-red-600 text-base mt-0.5">warning</span>
+                  <!-- 4. Alert Warning if triggerAlert is true -->
+                  <div v-if="shouldShowAlert" class="p-3.5 rounded-2xl bg-rose-50/60 border border-rose-200 flex items-center space-x-3">
+                    <span class="material-icons text-rose-600 text-xl flex-shrink-0">warning</span>
                     <div class="flex-1">
-                      <h4 class="text-[9px] font-black text-red-800 uppercase tracking-wider">Tonnage Deviation Alert!</h4>
-                      <p class="text-[9px] font-bold text-red-600 leading-snug mt-0.5">
+                      <h4 class="text-[10px] font-black text-rose-900 uppercase tracking-widest">TONNAGE DEVIATION ALERT!</h4>
+                      <p class="text-[10px] font-bold text-rose-700 leading-snug mt-0.5">
                         Weight deviation ({{ formatPercentageCustom(deviationPercentage) }}) exceeds the Net Weight Variance tolerance of {{ toleranceLimit }}%.
                       </p>
                     </div>
@@ -366,11 +449,102 @@
               </div>
             </div>
           </div>
+
+          <!-- Full-Width Audit Trail & Correction History (Admin Only / When Available) -->
+          <div v-if="isAdmin && (historyLoading || correctionCount > 0 || historyError)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
+            <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/80">
+              <div class="flex items-center space-x-2">
+                <span class="material-icons text-amber-600 text-[16px]">history_edu</span>
+                <h3 class="text-[11px] font-black text-slate-700 uppercase tracking-[0.15em]">Audit Trail & Operation Log History</h3>
+                <span class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[9px] font-black font-mono">{{ correctionCount }} Koreksi</span>
+              </div>
+              <button @click="fetchCorrectionHistory" class="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 transition-colors">
+                <span class="material-icons text-[13px]">refresh</span> Reload
+              </button>
+            </div>
+
+            <!-- Attribution Banner (Original Creator vs Last Corrected - Clean Light Theme) -->
+            <div v-if="attributionData" class="px-4 py-2 bg-slate-50 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-slate-600">
+              <div class="flex items-center gap-1.5">
+                <span class="material-icons text-xs text-slate-400">person_outline</span>
+                <span>Operator Awal:</span>
+                <span class="font-bold text-slate-800">{{ attributionData.originalCreatedBy }}</span>
+              </div>
+              <div v-if="attributionData.lastCorrectedBy" class="flex items-center gap-1.5">
+                <span class="material-icons text-xs text-amber-500">edit_note</span>
+                <span>Koreksi Terakhir Oleh:</span>
+                <span class="font-bold text-amber-800 bg-amber-100/70 px-2 py-0.5 rounded border border-amber-200 text-[10px]">{{ attributionData.lastCorrectedBy }}</span>
+              </div>
+            </div>
+
+            <!-- Loading state -->
+            <div v-if="historyLoading" class="p-6 flex flex-col items-center justify-center text-slate-400 space-y-2">
+              <span class="material-icons animate-spin text-2xl text-amber-600">sync</span>
+              <span class="text-xs font-bold">Memuat riwayat koreksi dan audit trail...</span>
+            </div>
+
+            <!-- Error state -->
+            <div v-else-if="historyError" class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center justify-between m-3">
+              <div class="flex items-center space-x-2">
+                <span class="material-icons text-rose-600 text-base">error_outline</span>
+                <span class="font-bold">{{ correctionCount > 0 ? 'Riwayat koreksi tersedia tetapi gagal dimuat. Silakan Reload.' : 'Riwayat koreksi gagal dimuat. Silakan Reload.' }}</span>
+              </div>
+              <button @click="fetchCorrectionHistory" type="button" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all">
+                <span class="material-icons text-xs">refresh</span> Reload
+              </button>
+            </div>
+
+            <!-- Empty state -->
+            <div v-else-if="!auditHistory.length" class="p-6 text-center text-slate-400">
+              <p class="text-xs font-medium">Belum ada catatan koreksi log operasi pada transaksi ini.</p>
+            </div>
+
+            <!-- History List -->
+            <div v-else class="divide-y divide-slate-100 max-h-60 overflow-y-auto custom-scrollbar">
+              <div v-for="(log, idx) in auditHistory" :key="idx" class="p-3 hover:bg-slate-50/60 transition-colors text-xs space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center space-x-2">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-black tracking-wider text-white"
+                      :class="log.action === 'MODIFY_FIELD' ? 'bg-amber-600' : log.action === 'OVERRIDE_STATUS' ? 'bg-red-600' : 'bg-blue-600'">
+                      {{ log.action || 'MODIFY' }}
+                    </span>
+                    <span class="font-bold text-slate-700 font-mono text-[11px]">{{ log.module || 'TRANSACTION' }}</span>
+                  </div>
+                  <span class="text-[10px] text-slate-400 font-mono">{{ formatTimeFull(log.createdAt) }}</span>
+                </div>
+                
+                <div class="flex items-center justify-between text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <div class="flex items-center gap-2">
+                    <span class="text-slate-500 font-bold">Oleh Admin:</span>
+                    <span class="font-black text-slate-800">{{ log.user?.name || log.userId || 'System Admin' }}</span>
+                  </div>
+                  <div v-if="log.evidenceUrl" class="flex items-center gap-1 text-[#4A8BDF] font-bold">
+                    <span class="material-icons text-[13px]">attachment</span>
+                    <a :href="log.evidenceUrl" target="_blank" class="hover:underline">Bukti Lampiran</a>
+                  </div>
+                  <span v-else class="text-slate-400 italic text-[10px]">Tanpa Lampiran</span>
+                </div>
+
+                <div class="text-slate-700 text-xs font-medium bg-white p-2 rounded border border-slate-100 shadow-2xs">
+                  <span class="font-black text-slate-900">Alasan:</span> {{ log.reason || 'Koreksi operasional log admin.' }}
+                </div>
+
+                <!-- Field Level Diff Item if available -->
+                <div v-if="log.items && log.items.length" class="mt-1 space-y-1">
+                  <div v-for="(item, iIdx) in log.items" :key="iIdx" class="grid grid-cols-3 gap-2 bg-slate-50/90 border border-slate-200/70 rounded-lg p-2 text-[10px] font-mono items-center">
+                    <div class="text-slate-600 font-bold truncate">Field: <span class="text-slate-900 font-black text-[11px]">{{ item.fieldName }}</span></div>
+                    <div class="text-red-700 font-medium truncate">Old: <span class="line-through">{{ item.oldValue || '-' }}</span></div>
+                    <div class="text-emerald-700 font-bold truncate">New: <span>{{ item.newValue || '-' }}</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Footer (Compact) -->
         <div class="px-4 py-2.5 flex justify-between shrink-0" style="background: #FAFBFF; border-top: 1px solid #E8EEF7;">
-          <button v-if="authStore.isAdmin" @click="handleDelete" class="group relative overflow-hidden flex items-center space-x-1.5 px-5 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
+          <button v-if="authStore.isAdmin && props.truck?.status !== 'COMPLETED' && props.truck?.status !== 'CANCELLED'" @click="handleDelete" class="group relative overflow-hidden flex items-center space-x-1.5 px-5 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
             style="background: linear-gradient(135deg, #EF4444, #B91C1C); box-shadow: 0 2px 8px rgba(239,68,68,0.25);">
             <span class="material-icons text-white/80 text-[14px]">delete_forever</span>
             <span class="text-[10px] font-black text-white uppercase tracking-[0.12em]">Delete</span>
@@ -408,16 +582,690 @@
       <img :src="selectedPhoto" class="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain ring-1 ring-white/10" />
     </div>
   </transition>
+
+  <!-- Admin Correction Modal Overlay (Fail-Closed & High-Accountability UI) -->
+      <transition name="modal">
+        <div v-if="showCorrectionModal" class="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" @click.self="showCorrectionModal = false">
+          <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div class="flex items-center space-x-2">
+                <span class="material-icons text-amber-600">edit_note</span>
+                <h3 class="text-base font-black text-slate-800">Koreksi Log Operasi (Admin & Auditor)</h3>
+              </div>
+              <button @click="showCorrectionModal = false" class="text-slate-400 hover:text-slate-600 transition-colors">
+                <span class="material-icons">close</span>
+              </button>
+            </div>
+
+            <!-- Error Banner -->
+            <div v-if="correctionError" class="p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-bold flex items-start gap-2">
+              <span class="material-icons text-base text-red-600 shrink-0">error_outline</span>
+              <span>{{ correctionError }}</span>
+            </div>
+
+            <!-- OCC Concurrency Conflict Warning Banner (Fail-Closed) -->
+            <div v-if="occConflictError" class="p-4 bg-amber-50 border-2 border-amber-400 text-amber-950 rounded-xl text-xs space-y-2">
+              <div class="flex items-center gap-2 font-black">
+                <span class="material-icons text-amber-600 text-base">verified_user</span>
+                <span class="uppercase tracking-wide">Konflik Konkurensi (OCC Protect)</span>
+              </div>
+              <p class="font-medium text-slate-700">{{ occConflictError }}</p>
+              <div class="flex justify-end pt-1">
+                <button @click="fetchCorrectionHistory; showCorrectionModal = false" type="button" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-sm">
+                  <span class="material-icons text-[14px]">refresh</span> Refresh Data
+                </button>
+              </div>
+            </div>
+
+            <!-- Sensitive Change Confirmation Notice Box -->
+            <div v-if="showSensitiveConfirm" class="p-4 bg-red-50/90 border-2 border-red-300 rounded-xl space-y-3 animate-fade">
+              <div class="flex items-center space-x-2 text-red-800 font-black text-xs uppercase tracking-wider">
+                <span class="material-icons text-red-600 text-base">warning</span>
+                <span>Konfirmasi Perubahan Sensitif (Status / Bobot Ekstrim)</span>
+              </div>
+              <p class="text-xs text-slate-700 font-medium leading-relaxed">
+                Anda mendeteksi modifikasi <b>Status Transaksi</b> atau perubahan angka signifikan yang berdampak pada rekonsiliasi tonase. Tindakan ini dicatat permanen dalam Audit Trail (Old/New Value).
+              </p>
+              <div class="flex justify-end space-x-2 pt-1">
+                <button @click="showSensitiveConfirm = false" type="button" class="px-3 py-1.5 bg-white text-slate-700 font-bold text-xs rounded-lg border border-slate-200 hover:bg-slate-100">Batal</button>
+                <button @click="executeCorrectionSubmission" type="button" class="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow-sm">Ya, Lanjutkan Koreksi</button>
+              </div>
+            </div>
+
+            <!-- Main Form (Hidden if confirming sensitive change) -->
+            <div v-else class="space-y-4">
+              <!-- 0. Jenis Tindakan Koreksi (Action) -->
+              <div class="p-3 bg-amber-50/40 rounded-xl border border-amber-200/80 space-y-2">
+                <label class="block font-bold text-slate-700 text-[11px] uppercase tracking-wider">
+                  Jenis Tindakan Koreksi <span class="text-red-500">*</span>
+                </label>
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all"
+                    :class="correctionForm.action === 'CORRECT_DATA' ? 'border-amber-500 bg-white ring-2 ring-amber-400/20 shadow-2xs' : 'border-slate-200 bg-slate-50/60 hover:bg-white'">
+                    <input type="radio" v-model="correctionForm.action" value="CORRECT_DATA" class="mt-0.5 text-amber-600 focus:ring-amber-500" />
+                    <div>
+                      <div class="text-xs font-bold text-slate-800">Koreksi Data</div>
+                      <div class="text-[10px] text-slate-500">Ubah nilai timbangan, identitas, atau QC</div>
+                    </div>
+                  </label>
+                  <label class="flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-all"
+                    :class="correctionForm.action === 'REOPEN_WORKFLOW' ? 'border-amber-500 bg-white ring-2 ring-amber-400/20 shadow-2xs' : 'border-slate-200 bg-slate-50/60 hover:bg-white'">
+                    <input type="radio" v-model="correctionForm.action" value="REOPEN_WORKFLOW" class="mt-0.5 text-amber-600 focus:ring-amber-500" />
+                    <div>
+                      <div class="text-xs font-bold text-slate-800">Buka Ulang Workflow</div>
+                      <div class="text-[10px] text-slate-500">REOPEN ke tahap sebelumnya</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Explicit Target Tahap REOPEN (hanya jika action === 'REOPEN_WORKFLOW') -->
+              <div v-if="correctionForm.action === 'REOPEN_WORKFLOW'" class="p-3 bg-amber-50 border border-amber-300 rounded-xl space-y-2 animate-fade">
+                <label class="block font-bold text-amber-900 text-[11px] uppercase tracking-wider">
+                  Target Tahap REOPEN <span class="text-red-500">*</span>
+                </label>
+                <select v-model="correctionForm.reopenTargetStatus" class="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs shadow-2xs">
+                  <option value="" disabled>-- Pilih Target Tahap REOPEN (Wajib) --</option>
+                  <option v-for="target in allowedReopenTargets" :key="target.value" :value="target.value">
+                    {{ target.label }}
+                  </option>
+                </select>
+                <p class="text-[10px] text-amber-800 font-medium">
+                  * Matriks target REOPEN untuk tipe proses: <b class="uppercase">{{ currentProcessType }}</b>
+                </p>
+              </div>
+
+              <!-- 1. Alasan Koreksi (Wajib) -->
+              <div>
+                <label class="block font-bold text-slate-700 mb-1 text-[11px] uppercase tracking-wider">Kategori Alasan Koreksi <span class="text-red-500">*</span></label>
+                <select v-model="correctionForm.reasonCategory" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all text-xs">
+                  <option value="" disabled>-- Pilih Kategori Alasan Koreksi (Wajib) --</option>
+                  <option value="SALAH_INPUT_ANGKA">Salah Input Angka / Penimbangan</option>
+                  <option value="PENYESUAIAN_DOKUMEN">Penyesuaian Dokumen / Surat Jalan</option>
+                  <option value="PERUBAHAN_KONDISI_LAPANGAN">Perubahan Kondisi Aktual di Lapangan</option>
+                  <option value="KOREKSI_STATUS_SENSITIF">Koreksi Status Transaksi (Sensitif)</option>
+                  <option value="LAINNYA">Lainnya (Jelaskan di catatan)</option>
+                </select>
+              </div>
+
+              <!-- 2. Catatan Singkat (Wajib, min 10 karakter) -->
+              <div>
+                <div class="flex justify-between items-center mb-1">
+                  <label class="block font-bold text-slate-700 text-[11px] uppercase tracking-wider">Catatan Singkat & Penjelasan <span class="text-red-500">*</span></label>
+                  <span class="text-[10px] font-mono font-bold" :class="correctionForm.remark.trim().length < 10 ? 'text-amber-600' : 'text-emerald-600'">
+                    {{ correctionForm.remark.trim().length }} / min. 10 karakter
+                  </span>
+                </div>
+                <textarea v-model="correctionForm.remark" rows="3" placeholder="Jelaskan secara akurat alasan koreksi ini agar dapat diverifikasi Auditor..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all text-xs"></textarea>
+              </div>
+
+              <!-- 3. Lampiran Bukti Dokumen / Foto (Opsional) -->
+              <div>
+                <label class="block font-bold text-slate-700 mb-1 text-[11px] uppercase tracking-wider">Lampiran Bukti Dokumen <span class="text-slate-400 font-normal">(Opsional)</span></label>
+                <div class="flex flex-col gap-2">
+                  <input v-model="correctionForm.evidenceUrl" type="text" placeholder="URL dokumen / hasil upload otomatis..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all font-mono text-xs" />
+                  <div class="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-200">
+                    <span class="text-[11px] font-bold text-slate-600 flex items-center gap-1">
+                      <span class="material-icons text-sm text-amber-600">upload_file</span> Pilih Bukti Fisik / Foto:
+                    </span>
+                    <input type="file" @change="handleEvidenceUpload" class="text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" accept="image/*,.pdf" />
+                  </div>
+                  <span v-if="correctionForm.evidencePhoto" class="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                    ✓ File terlampir: {{ correctionForm.evidencePhoto }}
+                  </span>
+                </div>
+              </div>
+
+              <!-- 4. Target Nilai Koreksi Per Modul (Tabs) -->
+              <div v-if="correctionForm.action === 'CORRECT_DATA'" class="p-5 bg-slate-50/90 rounded-2xl border border-slate-200/80 space-y-4 shadow-2xs">
+                <div class="space-y-2 border-b border-slate-200/80 pb-3">
+                  <div class="flex items-center justify-between">
+                    <h4 class="text-xs font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                      <span class="w-6 h-6 rounded-lg bg-amber-100/80 border border-amber-200 flex items-center justify-center text-amber-700">
+                        <span class="material-icons text-sm">tune</span>
+                      </span>
+                      <span>Modul Koreksi (Source Data vs Kalkulasi)</span>
+                    </h4>
+                    <span class="text-[10px] font-bold text-slate-400">Pilih modul yang akan dikoreksi</span>
+                  </div>
+
+                  <!-- Segmented Control Tab Bar (4 Module Columns) -->
+                  <div class="bg-slate-200/70 p-1 rounded-xl font-bold text-xs border border-slate-200/80">
+                    <div class="grid grid-cols-4 gap-1 text-[11px]">
+                      <button type="button" @click="activeCorrectionTab = 'WEIGHBRIDGE'" 
+                        :class="activeCorrectionTab === 'WEIGHBRIDGE' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
+                        <span class="material-icons text-sm">scale</span>
+                        <span class="truncate">Timbangan</span>
+                      </button>
+                      <button type="button" @click="activeCorrectionTab = 'IDENTITY'" 
+                        :class="activeCorrectionTab === 'IDENTITY' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
+                        <span class="material-icons text-sm">badge</span>
+                        <span class="truncate">Identitas</span>
+                      </button>
+                      <button type="button" @click="activeCorrectionTab = 'QC_LAB'" 
+                        :class="activeCorrectionTab === 'QC_LAB' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
+                        <span class="material-icons text-sm">science</span>
+                        <span class="truncate">QC Lab</span>
+                      </button>
+                      <button type="button" @click="activeCorrectionTab = 'QC_SAMPLING'" 
+                        :class="activeCorrectionTab === 'QC_SAMPLING' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
+                        <span class="material-icons text-sm">fact_check</span>
+                        <span class="truncate">QC Sampling</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- TAB 1: WEIGHBRIDGE & REALIZATION (Source Data) -->
+                <div v-if="activeCorrectionTab === 'WEIGHBRIDGE'" class="space-y-4 animate-fadeInUp">
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                    <!-- Input 1: Gross Weight -->
+                    <div class="space-y-1">
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Gross Weight (kg) [Source IN]</label>
+                      <div class="relative">
+                        <input v-model.number="correctionForm.grossWeight" type="number" 
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                          :class="Number(correctionForm.grossWeight) !== Number(props.truck?.grossWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                      </div>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.grossWeight || 0 }} kg</span>
+                    </div>
+
+                    <!-- Input 2: Tare Weight -->
+                    <div class="space-y-1">
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Tare Weight (kg) [Source OUT]</label>
+                      <div class="relative">
+                        <input v-model.number="correctionForm.tareWeight" type="number" 
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                          :class="Number(correctionForm.tareWeight) !== Number(props.truck?.tareWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                      </div>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.tareWeight || 0 }} kg</span>
+                    </div>
+
+                    <!-- Input 3: Warehouse Realization -->
+                    <div class="space-y-1">
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Warehouse Realization (kg)</label>
+                      <div class="relative">
+                        <input v-model.number="correctionForm.actualWeight" type="number" 
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                          :class="Number(correctionForm.actualWeight) !== Number(props.truck?.actualWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                      </div>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.actualWeight || 0 }} kg</span>
+                    </div>
+                  </div>
+
+                  <!-- Executive Calculated Card -->
+                  <div class="p-4 bg-white border border-slate-200/90 rounded-2xl space-y-3 shadow-xs">
+                    <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                      <div class="flex items-center gap-1.5">
+                        <span class="material-icons text-slate-400 text-base">lock</span>
+                        <span class="text-[11px] font-black text-slate-800 uppercase tracking-wider">KALKULASI OTOMATIS SISTEM</span>
+                      </div>
+                      <span class="text-[9px] font-black text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg uppercase tracking-wider border border-slate-200/60">SOURCE-DRIVEN</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <!-- Box 1: Net Weight Kalkulasi -->
+                      <div class="p-3 bg-slate-50/80 rounded-xl border border-slate-200/70 space-y-1">
+                        <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest">NET WEIGHT (GROSS - TARE)</div>
+                        <div class="text-lg font-black text-slate-900 font-mono flex items-baseline gap-1">
+                          <span>{{ Math.max(0, (Number(correctionForm.grossWeight) || 0) - (Number(correctionForm.tareWeight) || 0)).toLocaleString() }}</span>
+                          <span class="text-xs font-bold text-slate-500">kg</span>
+                        </div>
+                        <div class="text-[10px] text-slate-400 font-semibold font-mono">Original Net: {{ (props.truck?.netWeight || 0).toLocaleString() }} kg</div>
+                      </div>
+
+                      <!-- Box 2: Warehouse Realization & Deviasi -->
+                      <div class="p-3 bg-amber-50/50 rounded-xl border border-amber-200/80 space-y-1">
+                        <div class="text-[9px] font-black text-amber-800 uppercase tracking-widest">WAREHOUSE REALIZATION &amp; DEVIASI</div>
+                        <div class="text-xs font-bold text-amber-900 font-mono">Actual: {{ (Number(correctionForm.actualWeight) || 0).toLocaleString() }} kg</div>
+                        <div class="text-[10px] font-bold font-mono pt-0.5 flex items-center gap-1">
+                          <span class="text-slate-500">Deviasi:</span>
+                          <span :class="Math.abs(((Number(correctionForm.grossWeight) || 0) - (Number(correctionForm.tareWeight) || 0)) - (Number(correctionForm.actualWeight) || 0)) > 500 ? 'text-rose-600 font-black' : 'text-slate-800 font-bold'">
+                            {{ Math.abs(((Number(correctionForm.grossWeight) || 0) - (Number(correctionForm.tareWeight) || 0)) - (Number(correctionForm.actualWeight) || 0)).toLocaleString() }} kg
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- TAB 2: IDENTITY -->
+                <div v-if="activeCorrectionTab === 'IDENTITY'" class="space-y-3 animate-fade">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Nama Supir / PIC</label>
+                      <input v-model="correctionForm.driverName" type="text" placeholder="Nama supir..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.driverName !== (props.truck?.driverName || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Vendor / Ekspedisi</label>
+                      <input v-model="correctionForm.vendorName" type="text" placeholder="Nama perusahaan vendor..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Jenis Kendaraan / Armada</label>
+                      <input v-model="correctionForm.vehicleType" type="text" placeholder="Tronton / Wingbox / dll..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vehicleType !== (props.truck?.vehicleType || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. HP Supir / Driver Phone</label>
+                      <input v-model="correctionForm.driverPhone" type="text" placeholder="08123456789..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.driverPhone !== (props.truck?.driverPhone || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. Surat Jalan / Delivery Note (SJ)</label>
+                      <input v-model="correctionForm.suratJalanNumber" type="text" placeholder="Nomor surat jalan..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.suratJalanNumber !== (props.truck?.suratJalanNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Logistics PO / No. PO</label>
+                      <input v-model="correctionForm.poNumber" type="text" placeholder="Nomor PO..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.poNumber !== (props.truck?.poNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Permit Card / No. VMS</label>
+                      <input v-model="correctionForm.permitCardNumber" type="text" placeholder="Nomor Permit Card / VMS..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.permitCardNumber !== (props.truck?.permitCardNumber || props.truck?.permitCard || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. KTP / ID Number</label>
+                      <input v-model="correctionForm.guestIdNumber" type="text" placeholder="Nomor KTP / Guest ID..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.guestIdNumber !== (props.truck?.guestIdNumber || props.truck?.guestId || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- TAB 3: QC LAB (Quality Analysis & Incoming Material) -->
+                <div v-if="activeCorrectionTab === 'QC_LAB'" class="space-y-3.5 animate-fade">
+                  <div class="p-2.5 bg-blue-50/80 border border-blue-200/80 rounded-xl flex items-center gap-2 text-[11px] text-blue-900 font-medium shadow-2xs">
+                    <span class="material-icons text-blue-600 text-sm shrink-0">science</span>
+                    <span>Koreksi parameter Quality Analysis (QC Lab) & pengujian mutu material.</span>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Hasil Status QC Lab</label>
+                      <select v-model="correctionForm.imResult" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.imResult !== imOriginal.result ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                        <option value="APPROVED">APPROVED (Lolos Mutu)</option>
+                        <option value="REJECTED">REJECTED (Ditolak Lab)</option>
+                        <option value="APPROVED_WITH_NOTE">APPROVED WITH NOTE (Konsesi)</option>
+                      </select>
+                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.rawResult || imOriginal.result }}</span>
+                    </div>
+
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Kadar Air (% Moisture)</label>
+                      <input v-model.number="correctionForm.imMoisture" type="number" step="0.01" placeholder="0.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="Number(correctionForm.imMoisture) !== Number(imOriginal.moisture) ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.moisture }}%</span>
+                    </div>
+
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Total FM (% Foreign Matter)</label>
+                      <input v-model.number="correctionForm.imForeignMatter" type="number" step="0.01" placeholder="0.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="Number(correctionForm.imForeignMatter) !== Number(imOriginal.foreignMatter) ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.foreignMatter }}%</span>
+                    </div>
+
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Berat Sample / Biji OK (gr)</label>
+                      <input v-model.number="correctionForm.imSampleWeight" type="number" step="1" placeholder="0" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="Number(correctionForm.imSampleWeight) !== Number(imOriginal.sampleWeight) ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.sampleWeight }} gr</span>
+                    </div>
+
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Persentase Biji Baik (%)</label>
+                      <input v-model.number="correctionForm.imGoodBeanPercentage" type="number" step="0.1" placeholder="0.0" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="Number(correctionForm.imGoodBeanPercentage) !== Number(imOriginal.goodBeanPercentage) ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.goodBeanPercentage }}%</span>
+                    </div>
+
+                    <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Pemeriksaan Bau (Odor) & Warna</label>
+                      <div class="grid grid-cols-2 gap-2">
+                        <select v-model="correctionForm.imOdor" class="w-full pl-2.5 pr-6 py-2 rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.imOdor !== imOriginal.odor ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option value="PASS">Odor: PASS</option>
+                          <option value="REJECT">Odor: REJECT</option>
+                        </select>
+                        <select v-model="correctionForm.imColor" class="w-full pl-2.5 pr-6 py-2 rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.imColor !== imOriginal.color ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option value="PASS">Color: PASS</option>
+                          <option value="REJECT">Color: REJECT</option>
+                        </select>
+                      </div>
+                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.odor || 'PASS' }} / {{ imOriginal.color || 'PASS' }}</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="block font-bold text-slate-700 mb-1 text-[11px]">Catatan Defect & Alasan Konsesi Lab</label>
+                    <input v-model="correctionForm.imNotes" type="text" placeholder="Catatan hasil inspeksi material..." class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="correctionForm.imNotes !== imOriginal.notes ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                  </div>
+                </div>
+
+                <!-- TAB 4: QC CHECKLIST & SAMPLING (Initial QC Sampling & Warehouse Inspection) -->
+                <div v-if="activeCorrectionTab === 'QC_SAMPLING'" class="space-y-3.5 animate-fade">
+                  <div class="p-2.5 bg-indigo-50/70 border border-indigo-200/80 rounded-xl flex items-center gap-2 text-[11px] text-indigo-900 font-medium shadow-2xs">
+                    <span class="material-icons text-indigo-600 text-sm shrink-0">assignment_turned_in</span>
+                    <span>Koreksi parameter Initial QC Sampling Pre-Unloading (Bau, Visual, Moisture), Armada, & Gudang.</span>
+                  </div>
+
+                  <!-- 1. Form Utama Initial QC Sampling (Bau, Visual, Moisture) -->
+                  <div class="p-3.5 bg-white rounded-2xl border border-indigo-100/90 space-y-3 shadow-2xs">
+                    <div class="flex items-center justify-between border-b border-indigo-50 pb-2">
+                      <h5 class="text-[10px] font-black text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
+                        <span class="material-icons text-sm text-indigo-600">biotech</span>
+                        <span>1. Initial QC Sampling (Pre-Unloading)</span>
+                      </h5>
+                      <span class="text-[9px] font-mono text-indigo-400 uppercase tracking-wide">3 Parameter Sampling</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label class="block font-bold text-slate-700 mb-1 text-[11px]">Hasil Initial Sampling</label>
+                        <select v-model="correctionForm.qcvResult" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.qcvResult !== qcvOriginal.result ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option value="APPROVED">APPROVED (Lolos Sampling)</option>
+                          <option value="REJECTED">REJECTED (Ditolak)</option>
+                        </select>
+                        <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ qcvOriginal.rawResult || qcvOriginal.result }}</span>
+                      </div>
+
+                      <div>
+                        <label class="block font-bold text-slate-700 mb-1 text-[11px]">1. Pengecekan Bau (Odor Check)</label>
+                        <select v-model="correctionForm.qcvOdor" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.qcvOdor !== qcvOriginal.vehicleOdor ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option value="PASS">PASS (Bau Normal)</option>
+                          <option value="REJECT">REJECT (Bau Abnormal)</option>
+                        </select>
+                        <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ qcvOriginal.vehicleOdor }}</span>
+                      </div>
+
+                      <div>
+                        <label class="block font-bold text-slate-700 mb-1 text-[11px]">2. Pengecekan Visual (Inspection)</label>
+                        <select v-model="correctionForm.qcvVisual" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.qcvVisual !== qcvOriginal.vehicleCondition ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option value="PASS">PASS (Visual Normal)</option>
+                          <option value="REJECT">REJECT (Defect Visual)</option>
+                        </select>
+                        <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ qcvOriginal.vehicleCondition }}</span>
+                      </div>
+
+                      <div>
+                        <label class="block font-bold text-slate-700 mb-1 text-[11px]">3. Initial Moisture (% Kadar Air)</label>
+                        <input v-model.number="correctionForm.qcvMoisture" type="number" step="0.01" placeholder="0.00" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-mono text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="Number(correctionForm.qcvMoisture) !== Number(qcvOriginal.moisture) ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                        <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ qcvOriginal.moisture }}%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 2. Form Checklist 10 Item Vehicle & Goods Inspection (Sesuai Gambar 1 & GBB Process) -->
+                  <div class="p-3.5 bg-white rounded-2xl border border-slate-200 space-y-3 shadow-2xs">
+                    <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                      <h5 class="text-[10px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
+                        <span class="material-icons text-sm text-slate-600">local_shipping</span>
+                        <span>2. Vehicle & Goods Inspection (10 Checklist Items)</span>
+                      </h5>
+                      <span class="text-[9px] font-mono text-slate-400 uppercase">GBB / GSP / GBJ Checklist</span>
+                    </div>
+
+                    <!-- Clean 2-Column Grid of Segmented Toggle Cards with Photo Attachment -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <!-- 1. Vehicle Cleanliness -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvCleanliness === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Vehicle Cleanliness</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvCleanliness = 'PASS'" :class="correctionForm.qcvCleanliness === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvCleanliness = 'REJECT'" :class="correctionForm.qcvCleanliness === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvCleanliness === 'REJECT' || correctionForm.qcvCleanlinessPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvCleanlinessPhoto" type="button" @click="selectedPhoto = correctionForm.qcvCleanlinessPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvCleanlinessPhoto" type="button" @click="correctionForm.qcvCleanlinessPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvCleanlinessPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 2. Door Seal Intact -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvSeal === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Door Seal Intact</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvSeal = 'PASS'" :class="correctionForm.qcvSeal === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvSeal = 'REJECT'" :class="correctionForm.qcvSeal === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvSeal === 'REJECT' || correctionForm.qcvSealPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvSealPhoto" type="button" @click="selectedPhoto = correctionForm.qcvSealPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvSealPhoto" type="button" @click="correctionForm.qcvSealPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvSealPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 3. Odor/Smell Check -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvOdorCheck === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Odor/Smell Check</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvOdorCheck = 'PASS'" :class="correctionForm.qcvOdorCheck === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvOdorCheck = 'REJECT'" :class="correctionForm.qcvOdorCheck === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvOdorCheck === 'REJECT' || correctionForm.qcvOdorCheckPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvOdorCheckPhoto" type="button" @click="selectedPhoto = correctionForm.qcvOdorCheckPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvOdorCheckPhoto" type="button" @click="correctionForm.qcvOdorCheckPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvOdorCheckPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 4. Arrangement -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvArrangement === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Arrangement</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvArrangement = 'PASS'" :class="correctionForm.qcvArrangement === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvArrangement = 'REJECT'" :class="correctionForm.qcvArrangement === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvArrangement === 'REJECT' || correctionForm.qcvArrangementPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvArrangementPhoto" type="button" @click="selectedPhoto = correctionForm.qcvArrangementPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvArrangementPhoto" type="button" @click="correctionForm.qcvArrangementPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvArrangementPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 5. Pest/Animal Control -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvPest === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Pest/Animal Control</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvPest = 'PASS'" :class="correctionForm.qcvPest === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvPest = 'REJECT'" :class="correctionForm.qcvPest === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvPest === 'REJECT' || correctionForm.qcvPestPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvPestPhoto" type="button" @click="selectedPhoto = correctionForm.qcvPestPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvPestPhoto" type="button" @click="correctionForm.qcvPestPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvPestPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 6. Foreign Objects -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvForeignObjects === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Foreign Objects</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvForeignObjects = 'PASS'" :class="correctionForm.qcvForeignObjects === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvForeignObjects = 'REJECT'" :class="correctionForm.qcvForeignObjects === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvForeignObjects === 'REJECT' || correctionForm.qcvForeignObjectsPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvForeignObjectsPhoto" type="button" @click="selectedPhoto = correctionForm.qcvForeignObjectsPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvForeignObjectsPhoto" type="button" @click="correctionForm.qcvForeignObjectsPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvForeignObjectsPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 7. Packaging Integrity -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvPackaging === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Packaging Integrity</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvPackaging = 'PASS'" :class="correctionForm.qcvPackaging === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvPackaging = 'REJECT'" :class="correctionForm.qcvPackaging === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvPackaging === 'REJECT' || correctionForm.qcvPackagingPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvPackagingPhoto" type="button" @click="selectedPhoto = correctionForm.qcvPackagingPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvPackagingPhoto" type="button" @click="correctionForm.qcvPackagingPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvPackagingPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 8. CoA Validation -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvCoa === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">CoA Validation</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvCoa = 'PASS'" :class="correctionForm.qcvCoa === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvCoa = 'REJECT'" :class="correctionForm.qcvCoa === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvCoa === 'REJECT' || correctionForm.qcvCoaPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvCoaPhoto" type="button" @click="selectedPhoto = correctionForm.qcvCoaPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvCoaPhoto" type="button" @click="correctionForm.qcvCoaPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvCoaPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 9. Quantity Verification -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvQuantity === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Quantity Verification</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvQuantity = 'PASS'" :class="correctionForm.qcvQuantity === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvQuantity = 'REJECT'" :class="correctionForm.qcvQuantity === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvQuantity === 'REJECT' || correctionForm.qcvQuantityPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvQuantityPhoto" type="button" @click="selectedPhoto = correctionForm.qcvQuantityPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvQuantityPhoto" type="button" @click="correctionForm.qcvQuantityPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvQuantityPhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- 10. Leakage & Condition -->
+                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvLeakage === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Leakage & Condition</span>
+                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
+                            <button type="button" @click="correctionForm.qcvLeakage = 'PASS'" :class="correctionForm.qcvLeakage === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
+                            <button type="button" @click="correctionForm.qcvLeakage = 'REJECT'" :class="correctionForm.qcvLeakage === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
+                          </div>
+                        </div>
+                        <div v-if="correctionForm.qcvLeakage === 'REJECT' || correctionForm.qcvLeakagePhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
+                          <div class="flex items-center gap-1.5">
+                            <button v-if="correctionForm.qcvLeakagePhoto" type="button" @click="selectedPhoto = correctionForm.qcvLeakagePhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
+                            <button v-if="correctionForm.qcvLeakagePhoto" type="button" @click="correctionForm.qcvLeakagePhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
+                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
+                              + Upload
+                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvLeakagePhoto')" />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label class="block font-bold text-slate-700 mb-1 text-[11px]">Catatan Initial QC Sampling & Inspeksi Kendaraan</label>
+                    <input v-model="correctionForm.qcvNotes" type="text" placeholder="Catatan pemeriksaan sampling pre-unloading & kondisi kendaraan..." class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="correctionForm.qcvNotes !== qcvOriginal.notes ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Footer action -->
+              <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
+                <button @click="showCorrectionModal = false" type="button" class="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Batal</button>
+                <button @click="submitCorrection" type="button" :disabled="correctionLoading" class="px-5 py-2 text-xs font-black text-white bg-amber-600 hover:bg-amber-700 rounded-lg flex items-center space-x-1.5 transition-all shadow-sm active:scale-95 disabled:opacity-50">
+                  <span v-if="correctionLoading" class="material-icons animate-spin text-sm">sync</span>
+                  <span class="material-icons text-sm" v-else>save</span>
+                  <span>Simpan & Catat Audit</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
   
   </teleport>
 </template>
 
 <script setup>
-import { defineProps, defineEmits, computed, ref } from 'vue'
+import { defineProps, defineEmits, computed, ref, watch } from 'vue'
+import StatusBadge from './StatusBadge.vue'
+import ProcessTimerBadge from './ProcessTimerBadge.vue'
 import { useAuthStore } from '../stores/authStore'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useConfirm } from '../composables/useConfirm'
+import truckService from '../services/truckService'
+import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
+import { getWeightRecordTypes } from '../utils/weightHelpers'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -434,6 +1282,599 @@ const { confirm } = useConfirm()
 
 const selectedPhoto = ref(null)
 
+const isAdmin = computed(() => {
+  const role = authStore.user?.role || authStore.role
+  return role === 'ADMIN'
+})
+
+const activeStageStartTime = computed(() => {
+  const t = props.truck
+  if (!t) return null
+  const status = t.status || ''
+
+  if (['COMPLETED', 'CANCELLED', 'DISPATCHED'].includes(status)) {
+    return t.gateInAt || t.createdAt
+  }
+  if (['INCOMING_CHECK_PENDING', 'INCOMING_CHECK_IN_PROGRESS', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_IN_PROGRESS'].includes(status)) {
+    return t.qcStartAt || t.weighInAt || t.gateInAt || t.createdAt
+  }
+  if (['WAREHOUSE_IN_PROGRESS', 'WAREHOUSE_DONE'].includes(status)) {
+    return t.warehouseStartAt || t.qcStartAt || t.weighInAt || t.gateInAt || t.createdAt
+  }
+  if (['WEIGH_IN_DONE', 'WEIGH_OUT_DONE'].includes(status)) {
+    return t.weighInAt || t.gateInAt || t.createdAt
+  }
+  return t.gateInAt || t.createdAt
+})
+
+const showCorrectionModal = ref(false)
+const correctionLoading = ref(false)
+const correctionError = ref(null)
+const occConflictError = ref(null)
+const showSensitiveConfirm = ref(false)
+const auditHistory = ref([])
+const historyLoading = ref(false)
+const historyError = ref(null)
+const activeCorrectionTab = ref('WEIGHBRIDGE')
+const attributionData = ref(null)
+
+const normalizeQcResult = (val) => {
+  if (!val) return 'APPROVED'
+  const v = String(val).toUpperCase()
+  if (v === 'PASS' || v === 'APPROVED' || v === 'ACCEPTED' || v === 'LOKAL' || v === 'OK') return 'APPROVED'
+  if (v === 'FAIL' || v === 'REJECT' || v === 'REJECTED') return 'REJECTED'
+  if (v.includes('NOTE') || v.includes('CONCESSION') || v.includes('CATATAN')) return 'APPROVED_WITH_NOTE'
+  return 'APPROVED'
+}
+
+const imOriginal = computed(() => {
+  const checks = props.truck?.incomingMaterialChecks || []
+  const imCheck = checks.find(c => c.isCurrent !== false) || checks[0] || {}
+  const fallback = props.truck?.qcDetails || {}
+  const rawRes = imCheck.result || fallback.status || 'APPROVED'
+  return {
+    id: imCheck.id || undefined,
+    rawResult: rawRes,
+    result: normalizeQcResult(rawRes),
+    moisture: imCheck.moisture !== undefined && imCheck.moisture !== null ? imCheck.moisture : (fallback.kadarAir !== undefined ? fallback.kadarAir : 0),
+    foreignMatter: imCheck.foreignMatter !== undefined && imCheck.foreignMatter !== null ? imCheck.foreignMatter : (fallback.totalFM !== undefined ? fallback.totalFM : 0),
+    sampleWeight: imCheck.sampleWeight !== undefined && imCheck.sampleWeight !== null ? imCheck.sampleWeight : (fallback.bijiOK !== undefined ? fallback.bijiOK : 0),
+    goodBeanPercentage: imCheck.goodBeanPercentage !== undefined && imCheck.goodBeanPercentage !== null ? imCheck.goodBeanPercentage : 0,
+    odor: (imCheck.odor === 'REJECT' || fallback.bau === 'Abnormal') ? 'REJECT' : 'PASS',
+    color: (imCheck.color === 'REJECT' || fallback.warna === 'Abnormal') ? 'REJECT' : 'PASS',
+    notes: imCheck.notes || imCheck.defectNotes || fallback.note || ''
+  }
+})
+
+const qcvOriginal = computed(() => {
+  const checks = props.truck?.qcVehicleChecks || []
+  const qcvCheck = checks.find(c => c.isCurrent !== false) || checks[0] || {}
+  const fallback = props.truck?.qcDetails || {}
+  const rawRes = qcvCheck.result || 'APPROVED'
+  const normChecklist = normalizeChecklistItems(qcvCheck.checklistItems)
+  const checklistItemsList = normChecklist.items.length > 0 ? normChecklist.items : (parsedChecklist.value?.items || [])
+
+  const getItemData = (label, defaultVal = 'PASS') => {
+    let okStatus = defaultVal
+    let photoUrl = null
+    const found = checklistItemsList.find(i => i.label?.toLowerCase() === label.toLowerCase())
+    if (found) {
+      okStatus = found.ok ? 'PASS' : 'REJECT'
+      photoUrl = found.photo || null
+    }
+    return { ok: okStatus, photo: photoUrl }
+  }
+
+  const cleanliness = getItemData('Vehicle Cleanliness', qcvCheck.vehicleCleanliness === 'REJECT' ? 'REJECT' : 'PASS')
+  const seal = getItemData('Door Seal Intact', qcvCheck.sealCondition === 'REJECT' ? 'REJECT' : 'PASS')
+  const odor = getItemData('Odor/Smell Check', qcvCheck.vehicleOdor === 'REJECT' ? 'REJECT' : 'PASS')
+  const arrangement = getItemData('Arrangement', 'PASS')
+  const pest = getItemData('Pest/Animal Control', qcvCheck.pestEvidence === 'REJECT' ? 'REJECT' : 'PASS')
+  const foreignObjects = getItemData('Foreign Objects', 'PASS')
+  const packaging = getItemData('Packaging Integrity', 'PASS')
+  const coa = getItemData('CoA Validation', qcvCheck.documentCompleteness === 'REJECT' ? 'REJECT' : 'PASS')
+  const quantity = getItemData('Quantity Verification', 'PASS')
+  const leakage = getItemData('Leakage & Condition', qcvCheck.vehicleCondition === 'REJECT' ? 'REJECT' : 'PASS')
+
+  return {
+    id: qcvCheck.id || undefined,
+    rawResult: rawRes,
+    result: normalizeQcResult(rawRes),
+    vehicleOdor: (qcvCheck.vehicleOdor === 'REJECT' || fallback.samplingBau === 'Abnormal' || fallback.bau === 'Abnormal') ? 'REJECT' : 'PASS',
+    vehicleCondition: (qcvCheck.vehicleCondition === 'REJECT' || fallback.samplingVisual === 'Abnormal' || fallback.visual === 'Abnormal') ? 'REJECT' : 'PASS',
+    moisture: normChecklist.initialMoisture !== null ? normChecklist.initialMoisture : (fallback.initialMoisture !== undefined ? fallback.initialMoisture : (fallback.kadarAir !== undefined ? fallback.kadarAir : 0)),
+    vehicleCleanliness: cleanliness.ok,
+    vehicleCleanlinessPhoto: cleanliness.photo,
+    sealCondition: seal.ok,
+    sealConditionPhoto: seal.photo,
+    odorCheck: odor.ok,
+    odorCheckPhoto: odor.photo,
+    arrangement: arrangement.ok,
+    arrangementPhoto: arrangement.photo,
+    pestEvidence: pest.ok,
+    pestEvidencePhoto: pest.photo,
+    foreignObjects: foreignObjects.ok,
+    foreignObjectsPhoto: foreignObjects.photo,
+    packaging: packaging.ok,
+    packagingPhoto: packaging.photo,
+    coa: coa.ok,
+    coaPhoto: coa.photo,
+    quantity: quantity.ok,
+    quantityPhoto: quantity.photo,
+    leakage: leakage.ok,
+    leakagePhoto: leakage.photo,
+    notes: qcvCheck.notes || fallback.samplingNotes || '',
+    _checklistEntries: [
+      { label: 'Vehicle Cleanliness', ok: cleanliness.ok === 'PASS', photo: cleanliness.photo },
+      { label: 'Door Seal Intact', ok: seal.ok === 'PASS', photo: seal.photo },
+      { label: 'Odor/Smell Check', ok: odor.ok === 'PASS', photo: odor.photo },
+      { label: 'Arrangement', ok: arrangement.ok === 'PASS', photo: arrangement.photo },
+      { label: 'Pest/Animal Control', ok: pest.ok === 'PASS', photo: pest.photo },
+      { label: 'Foreign Objects', ok: foreignObjects.ok === 'PASS', photo: foreignObjects.photo },
+      { label: 'Packaging Integrity', ok: packaging.ok === 'PASS', photo: packaging.photo },
+      { label: 'CoA Validation', ok: coa.ok === 'PASS', photo: coa.photo },
+      { label: 'Quantity Verification', ok: quantity.ok === 'PASS', photo: quantity.photo },
+      { label: 'Leakage & Condition', ok: leakage.ok === 'PASS', photo: leakage.photo },
+    ]
+  }
+})
+
+const whOriginal = computed(() => {
+  const procs = props.truck?.warehouseProcesses || []
+  const whProcess = procs.find(p => p.isCurrent !== false) || procs[0] || {}
+  const rawCond = whProcess.condition || 'GOOD'
+  let normalizedCond = 'GOOD'
+  if (rawCond === 'DAMAGED') normalizedCond = 'DAMAGED'
+  if (rawCond === 'REJECTED') normalizedCond = 'REJECTED'
+  return {
+    id: whProcess.id || undefined,
+    condition: normalizedCond,
+    remarks: whProcess.remarks || ''
+  }
+})
+
+const correctionForm = ref({
+  action: 'CORRECT_DATA',
+  reopenTargetStatus: '',
+  driverName: '',
+  driverPhone: '',
+  suratJalanNumber: '',
+  vendorName: '',
+  vehicleType: '',
+  grossWeight: null,
+  tareWeight: null,
+  actualWeight: null,
+  status: 'COMPLETED',
+  reasonCategory: '',
+  remark: '',
+  evidenceUrl: '',
+  evidencePhoto: null,
+  imResult: 'APPROVED',
+  imMoisture: 0,
+  imForeignMatter: 0,
+  imSampleWeight: 0,
+  imGoodBeanPercentage: 0,
+  imOdor: 'PASS',
+  imColor: 'PASS',
+  imNotes: '',
+  qcvResult: 'APPROVED',
+  qcvOdor: 'PASS',
+  qcvVisual: 'PASS',
+  qcvMoisture: 0,
+  qcvCleanliness: 'PASS',
+  qcvCleanlinessPhoto: null,
+  qcvSeal: 'PASS',
+  qcvSealPhoto: null,
+  qcvOdorCheck: 'PASS',
+  qcvOdorCheckPhoto: null,
+  qcvArrangement: 'PASS',
+  qcvArrangementPhoto: null,
+  qcvPest: 'PASS',
+  qcvPestPhoto: null,
+  qcvForeignObjects: 'PASS',
+  qcvForeignObjectsPhoto: null,
+  qcvPackaging: 'PASS',
+  qcvPackagingPhoto: null,
+  qcvCoa: 'PASS',
+  qcvCoaPhoto: null,
+  qcvQuantity: 'PASS',
+  qcvQuantityPhoto: null,
+  qcvLeakage: 'PASS',
+  qcvLeakagePhoto: null,
+  qcvNotes: '',
+  whCondition: 'GOOD',
+  whRemarks: '',
+})
+
+const currentProcessType = computed(() => {
+  return (props.truck?.processType || 'GBB').toUpperCase()
+})
+
+const allowedReopenTargets = computed(() => {
+  const processType = currentProcessType.value
+  if (processType === 'GBJ') {
+    return [
+      { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
+      { value: 'QC_VEHICLE_PENDING', label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+      { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
+    ]
+  }
+  return [
+    { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
+    { value: 'QC_VEHICLE_PENDING', label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+    { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
+    { value: 'INCOMING_CHECK_PENDING', label: '4. Incoming Check Pending (Menunggu QC Material)' },
+  ]
+})
+
+const handleEvidenceUpload = (event) => {
+  const file = event.target.files[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    if (file.type.startsWith('image/')) {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let width = img.width
+        let height = img.height
+        const MAX_SIZE = 800
+        if (width > height && width > MAX_SIZE) {
+          height *= MAX_SIZE / width
+          width = MAX_SIZE
+        } else if (height > MAX_SIZE) {
+          width *= MAX_SIZE / height
+          height = MAX_SIZE
+        }
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
+        correctionForm.value.evidenceUrl = canvas.toDataURL('image/jpeg', 0.7)
+        correctionForm.value.evidencePhoto = file.name
+      }
+      img.src = e.target.result
+    } else {
+      correctionForm.value.evidenceUrl = e.target.result
+      correctionForm.value.evidencePhoto = file.name
+    }
+  }
+  reader.readAsDataURL(file)
+}
+
+const fetchCorrectionHistory = async () => {
+  if (!props.truck?.id || !isAdmin.value) return
+  historyLoading.value = true
+  historyError.value = null
+  try {
+    const res = await truckStore.fetchOperationLogCorrections(props.truck.id)
+    auditHistory.value = res?.data || []
+    attributionData.value = res?.attribution || null
+  } catch (err) {
+    historyError.value = err?.message || 'Gagal memuat riwayat koreksi'
+    auditHistory.value = []
+    attributionData.value = null
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+const correctionCount = computed(() => {
+  if (Array.isArray(auditHistory.value) && auditHistory.value.length > 0) {
+    return auditHistory.value.length
+  }
+  if (Array.isArray(props.truck?.corrections)) {
+    return props.truck.corrections.length
+  }
+  if (typeof props.truck?.correctionCount === 'number') {
+    return props.truck.correctionCount
+  }
+  if (typeof props.truck?._count?.corrections === 'number') {
+    return props.truck._count.corrections
+  }
+  return 0
+})
+
+watch(() => props.isOpen, (newVal) => {
+  if (newVal) {
+    fetchCorrectionHistory()
+  }
+}, { immediate: true })
+
+const handleItemPhotoUpload = (e, fieldKey) => {
+  const file = e.target.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = (event) => {
+    correctionForm.value[fieldKey] = event.target.result
+  }
+  reader.readAsDataURL(file)
+}
+
+const openCorrectionModal = () => {
+  const im = imOriginal.value
+  const qcv = qcvOriginal.value
+  const wh = whOriginal.value
+
+  correctionForm.value = {
+    action: 'CORRECT_DATA',
+    reopenTargetStatus: '',
+    driverName: props.truck?.driverName || '',
+    driverPhone: props.truck?.driverPhone || '',
+    suratJalanNumber: props.truck?.suratJalanNumber || '',
+    vendorName: props.truck?.vendorName || props.truck?.vendor || '',
+    vehicleType: props.truck?.vehicleType || '',
+    poNumber: props.truck?.poNumber || '',
+    permitCardNumber: props.truck?.permitCardNumber || props.truck?.permitCard || '',
+    guestIdNumber: props.truck?.guestIdNumber || props.truck?.guestId || '',
+    grossWeight: props.truck?.grossWeight || null,
+    tareWeight: props.truck?.tareWeight || null,
+    actualWeight: props.truck?.actualWeight !== undefined && props.truck?.actualWeight !== null ? props.truck.actualWeight : ((props.truck?.warehouseProcesses || []).find(p => p.isCurrent !== false)?.actualWeight || null),
+    status: props.truck?.status || 'COMPLETED',
+    reasonCategory: '',
+    remark: '',
+    evidenceUrl: '',
+    evidencePhoto: null,
+    imResult: im.result,
+    imMoisture: im.moisture,
+    imForeignMatter: im.foreignMatter,
+    imSampleWeight: im.sampleWeight,
+    imGoodBeanPercentage: im.goodBeanPercentage,
+    imOdor: im.odor,
+    imColor: im.color,
+    imNotes: im.notes,
+    qcvResult: qcv.result,
+    qcvOdor: qcv.vehicleOdor,
+    qcvVisual: qcv.vehicleCondition,
+    qcvMoisture: qcv.moisture,
+    qcvCleanliness: qcv.vehicleCleanliness,
+    qcvCleanlinessPhoto: qcv.vehicleCleanlinessPhoto,
+    qcvSeal: qcv.sealCondition,
+    qcvSealPhoto: qcv.sealConditionPhoto,
+    qcvOdorCheck: qcv.odorCheck,
+    qcvOdorCheckPhoto: qcv.odorCheckPhoto,
+    qcvArrangement: qcv.arrangement,
+    qcvArrangementPhoto: qcv.arrangementPhoto,
+    qcvPest: qcv.pestEvidence,
+    qcvPestPhoto: qcv.pestEvidencePhoto,
+    qcvForeignObjects: qcv.foreignObjects,
+    qcvForeignObjectsPhoto: qcv.foreignObjectsPhoto,
+    qcvPackaging: qcv.packaging,
+    qcvPackagingPhoto: qcv.packagingPhoto,
+    qcvCoa: qcv.coa,
+    qcvCoaPhoto: qcv.coaPhoto,
+    qcvQuantity: qcv.quantity,
+    qcvQuantityPhoto: qcv.quantityPhoto,
+    qcvLeakage: qcv.leakage,
+    qcvLeakagePhoto: qcv.leakagePhoto,
+    qcvNotes: qcv.notes,
+    whCondition: wh.condition,
+    whRemarks: wh.remarks,
+  }
+  activeCorrectionTab.value = 'WEIGHBRIDGE'
+  correctionError.value = null
+  occConflictError.value = null
+  showSensitiveConfirm.value = false
+  showCorrectionModal.value = true
+}
+
+const submitCorrection = () => {
+  if (!correctionForm.value.reasonCategory) {
+    correctionError.value = 'Kategori / Alasan koreksi wajib dipilih.'
+    return
+  }
+  if (!correctionForm.value.remark || correctionForm.value.remark.trim().length < 10) {
+    correctionError.value = 'Catatan singkat koreksi wajib diisi minimal 10 karakter.'
+    return
+  }
+
+  // Check for sensitive changes (status change or huge weight deviation)
+  const statusChanged = correctionForm.value.status !== props.truck?.status
+  const grossDiff = Math.abs((Number(correctionForm.value.grossWeight) || 0) - (Number(props.truck?.grossWeight) || 0))
+  if ((statusChanged || grossDiff >= 1000) && !showSensitiveConfirm.value) {
+    showSensitiveConfirm.value = true
+    return
+  }
+
+  executeCorrectionSubmission()
+}
+
+const executeCorrectionSubmission = async () => {
+  correctionLoading.value = true
+  correctionError.value = null
+  occConflictError.value = null
+
+  try {
+    const items = []
+    if (correctionForm.value.driverName !== undefined && correctionForm.value.driverName !== (props.truck?.driverName || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'driverName', newValue: String(correctionForm.value.driverName) })
+    }
+    if (correctionForm.value.driverPhone !== undefined && correctionForm.value.driverPhone !== (props.truck?.driverPhone || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'driverPhone', newValue: String(correctionForm.value.driverPhone) })
+    }
+    if (correctionForm.value.suratJalanNumber !== undefined && correctionForm.value.suratJalanNumber !== (props.truck?.suratJalanNumber || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'suratJalanNumber', newValue: String(correctionForm.value.suratJalanNumber) })
+    }
+    if (correctionForm.value.vendorName !== undefined && correctionForm.value.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'vendorName', newValue: String(correctionForm.value.vendorName) })
+    }
+    if (correctionForm.value.vehicleType !== undefined && correctionForm.value.vehicleType !== (props.truck?.vehicleType || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'vehicleType', newValue: String(correctionForm.value.vehicleType) })
+    }
+    if (correctionForm.value.poNumber !== undefined && correctionForm.value.poNumber !== (props.truck?.poNumber || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'poNumber', newValue: String(correctionForm.value.poNumber) })
+    }
+    if (correctionForm.value.permitCardNumber !== undefined && correctionForm.value.permitCardNumber !== (props.truck?.permitCardNumber || props.truck?.permitCard || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'permitCardNumber', newValue: String(correctionForm.value.permitCardNumber) })
+    }
+    if (correctionForm.value.guestIdNumber !== undefined && correctionForm.value.guestIdNumber !== (props.truck?.guestIdNumber || props.truck?.guestId || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'guestIdNumber', newValue: String(correctionForm.value.guestIdNumber) })
+    }
+
+    if (correctionForm.value.grossWeight !== null && Number(correctionForm.value.grossWeight) !== Number(props.truck?.grossWeight)) {
+      const wbRecs = props.truck?.weighbridgeRecords || []
+      const inRec = wbRecs.find(r => r.type === 'IN' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'IN') || wbRecs[0]
+      if (inRec) {
+        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: inRec.id, fieldName: 'weight', newValue: Number(correctionForm.value.grossWeight) })
+      } else {
+        items.push({ targetModule: 'TRANSACTION', fieldName: 'grossWeight', newValue: Number(correctionForm.value.grossWeight) })
+      }
+    }
+
+    if (correctionForm.value.tareWeight !== null && Number(correctionForm.value.tareWeight) !== Number(props.truck?.tareWeight)) {
+      const wbRecs = props.truck?.weighbridgeRecords || []
+      const outRec = wbRecs.find(r => r.type === 'OUT' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'OUT')
+      const inRec = wbRecs.find(r => r.type === 'IN' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'IN')
+      if (outRec && outRec.id !== inRec?.id) {
+        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: outRec.id, fieldName: 'weight', newValue: Number(correctionForm.value.tareWeight) })
+      } else {
+        items.push({ targetModule: 'TRANSACTION', fieldName: 'tareWeight', newValue: Number(correctionForm.value.tareWeight) })
+      }
+    }
+
+    if (correctionForm.value.actualWeight !== null && Number(correctionForm.value.actualWeight) !== Number(props.truck?.actualWeight)) {
+      const whProc = props.truck?.warehouseProcesses?.[0]
+      if (whProc) {
+        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProc.id, fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
+      }
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
+    }
+
+    // QC Vehicle mapping — use current revision record for both compare and targetRecordId
+    const qcvChecks = props.truck?.qcVehicleChecks || []
+    const qcvRec = qcvChecks.find(c => c.isCurrent !== false) || qcvChecks[0]
+    if (qcvRec) {
+      if (correctionForm.value.qcvResult !== undefined && correctionForm.value.qcvResult !== qcvOriginal.value.result) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'result', newValue: correctionForm.value.qcvResult })
+      }
+      if (correctionForm.value.qcvOdor !== undefined && correctionForm.value.qcvOdor !== qcvOriginal.value.vehicleOdor) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleOdor', newValue: correctionForm.value.qcvOdor })
+      }
+      if (correctionForm.value.qcvVisual !== undefined && correctionForm.value.qcvVisual !== qcvOriginal.value.vehicleCondition) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleCondition', newValue: correctionForm.value.qcvVisual })
+      }
+      if (correctionForm.value.qcvCleanliness !== undefined && correctionForm.value.qcvCleanliness !== qcvOriginal.value.vehicleCleanliness) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleCleanliness', newValue: correctionForm.value.qcvCleanliness })
+      }
+      if (correctionForm.value.qcvSeal !== undefined && correctionForm.value.qcvSeal !== qcvOriginal.value.sealCondition) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'sealCondition', newValue: correctionForm.value.qcvSeal })
+      }
+      if (correctionForm.value.qcvPest !== undefined && correctionForm.value.qcvPest !== qcvOriginal.value.pestEvidence) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'pestEvidence', newValue: correctionForm.value.qcvPest })
+      }
+      // qcvMoisture is preserved inside checklistItems.initialMoisture (P0-03 fix)
+      if (correctionForm.value.qcvNotes !== undefined && correctionForm.value.qcvNotes !== qcvOriginal.value.notes) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'notes', newValue: correctionForm.value.qcvNotes })
+      }
+
+      // Build canonical checklistItems JSON preserving { initialMoisture, items } shape (P0-03 fix)
+      const checklistPayload = buildChecklistPayload(correctionForm.value)
+      if (hasChecklistChanged(qcvOriginal.value._checklistEntries, qcvOriginal.value.moisture, checklistPayload)) {
+        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: checklistPayload })
+      }
+    }
+
+    // Incoming Material mapping — use current revision record
+    const imChecks = props.truck?.incomingMaterialChecks || []
+    const imRec = imChecks.find(c => c.isCurrent !== false) || imChecks[0]
+    if (imRec) {
+      if (correctionForm.value.imResult !== undefined && correctionForm.value.imResult !== imOriginal.value.result) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'result', newValue: correctionForm.value.imResult })
+      }
+      if (correctionForm.value.imMoisture !== null && correctionForm.value.imMoisture !== undefined && Number(correctionForm.value.imMoisture) !== Number(imOriginal.value.moisture)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'moisture', newValue: Number(correctionForm.value.imMoisture) })
+      }
+      if (correctionForm.value.imForeignMatter !== null && correctionForm.value.imForeignMatter !== undefined && Number(correctionForm.value.imForeignMatter) !== Number(imOriginal.value.foreignMatter)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'foreignMatter', newValue: Number(correctionForm.value.imForeignMatter) })
+      }
+      if (correctionForm.value.imSampleWeight !== null && correctionForm.value.imSampleWeight !== undefined && Number(correctionForm.value.imSampleWeight) !== Number(imOriginal.value.sampleWeight)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'sampleWeight', newValue: Number(correctionForm.value.imSampleWeight) })
+      }
+      if (correctionForm.value.imGoodBeanPercentage !== null && correctionForm.value.imGoodBeanPercentage !== undefined && Number(correctionForm.value.imGoodBeanPercentage) !== Number(imOriginal.value.goodBeanPercentage)) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'goodBeanPercentage', newValue: Number(correctionForm.value.imGoodBeanPercentage) })
+      }
+      if (correctionForm.value.imOdor !== undefined && correctionForm.value.imOdor !== imOriginal.value.odor) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'odor', newValue: correctionForm.value.imOdor })
+      }
+      if (correctionForm.value.imColor !== undefined && correctionForm.value.imColor !== imOriginal.value.color) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'color', newValue: correctionForm.value.imColor })
+      }
+      if (correctionForm.value.imNotes !== undefined && correctionForm.value.imNotes !== imOriginal.value.notes) {
+        items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'notes', newValue: correctionForm.value.imNotes })
+      }
+    }
+
+    // Warehouse Process mapping — use current revision record
+    const whProcs = props.truck?.warehouseProcesses || []
+    const whProcRec = whProcs.find(p => p.isCurrent !== false) || whProcs[0]
+    if (whProcRec) {
+      if (correctionForm.value.whCondition !== undefined && correctionForm.value.whCondition !== whOriginal.value.condition) {
+        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'condition', newValue: correctionForm.value.whCondition })
+      }
+      if (correctionForm.value.whRemarks !== undefined && correctionForm.value.whRemarks !== whOriginal.value.remarks) {
+        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'remarks', newValue: correctionForm.value.whRemarks })
+      }
+    }
+
+    let action = 'CORRECT_DATA'
+    let reopenTargetStatus = undefined
+    if (correctionForm.value.isReopen || correctionForm.value.action === 'REOPEN_WORKFLOW' || correctionForm.value.status === 'REOPEN_WORKFLOW') {
+      action = 'REOPEN_WORKFLOW'
+      reopenTargetStatus = correctionForm.value.reopenTargetStatus || correctionForm.value.targetStatus
+      if (!reopenTargetStatus) {
+        correctionError.value = 'Target stage/status untuk REOPEN_WORKFLOW wajib dipilih secara eksplisit.'
+        correctionLoading.value = false
+        return
+      }
+    }
+
+    if (items.length === 0 && action !== 'REOPEN_WORKFLOW') {
+      correctionError.value = 'Tidak ada perubahan data yang terdeteksi (No-Op). Silakan ubah minimal satu nilai untuk melakukan koreksi.'
+      correctionLoading.value = false
+      return
+    }
+
+    const payload = {
+      action,
+      reopenTargetStatus: action === 'REOPEN_WORKFLOW' ? reopenTargetStatus : undefined,
+      reasonCode: correctionForm.value.reasonCategory,
+      remark: correctionForm.value.remark.trim(),
+      evidenceUrl: correctionForm.value.evidenceUrl?.trim() || undefined,
+      expectedRevision: props.truck?.revision || 1,
+      items: action === 'REOPEN_WORKFLOW' ? undefined : items
+    }
+
+    let res = null
+    try {
+      res = await truckStore.correctOperationLogTruck(props.truck.id, payload)
+    } catch (apiErr) {
+      const status = apiErr?.response?.status
+      const msg = apiErr?.response?.data?.message || apiErr?.message || ''
+      if (status === 409 || msg.toLowerCase().includes('conflict') || msg.toLowerCase().includes('revision') || msg.toLowerCase().includes('konkurensi')) {
+        occConflictError.value = 'Konflik Konkurensi! Data telah diubah oleh operator/Admin lain (OCC protect). Silakan segarkan data (Refresh) terlebih dahulu.'
+        correctionLoading.value = false
+        return
+      }
+      throw apiErr
+    }
+
+    // Instantly update props.truck so top cards (Identity, QC Lab, Sampling, Checklist, Tonnage Analytics) update live on screen
+    const updatedRecord = res?.data?.updatedTx || res?.data || res
+    if (updatedRecord && typeof updatedRecord === 'object') {
+      Object.assign(props.truck, updatedRecord)
+    }
+
+    showCorrectionModal.value = false
+    showSensitiveConfirm.value = false
+    await fetchCorrectionHistory()
+    await truckStore.fetchTrucks()
+  } catch (err) {
+    correctionError.value = err.gmsMessage || err.response?.data?.message || err.message || 'Gagal menyimpan koreksi (Transaksi dibatalkan secara atomik / fail-closed).'
+  } finally {
+    correctionLoading.value = false
+  }
+}
+
 const handleDelete = async () => {
   const ok = await confirm({
     title: 'Delete Data?',
@@ -449,20 +1890,21 @@ const handleDelete = async () => {
 }
 
 const identityFields = computed(() => {
+  const permitCardVal = props.truck?.permitCardNumber || props.truck?.permitCard
+  const guestIdVal = props.truck?.guestIdNumber || props.truck?.guestId
+
   const fields = [
     { label: 'Driver Name', value: props.truck?.driverName },
     { label: 'Carrier Vendor', value: props.truck?.vendorName || props.truck?.vendor },
     { label: 'Vehicle Type', value: props.truck?.vehicleType },
     { label: 'Process Type', value: props.truck?.processType === 'GBB' ? 'Raw Material (Unloading)' : props.truck?.processType === 'GBJ' ? 'Finished Goods (Loading)' : props.truck?.processType === 'GSP' ? 'Sparepart Warehouse' : props.truck?.processType },
   ]
-  // Only add these if they have values
-  if (props.truck?.driverPhone) fields.push({ label: 'Driver Phone', value: props.truck.driverPhone, highlight: true })
-  if (props.truck?.suratJalanNumber) fields.push({ label: 'Delivery Note (SJ)', value: props.truck.suratJalanNumber, highlight: true })
-  if (props.truck?.poNumber) fields.push({ label: 'Logistics PO', value: props.truck.poNumber, highlight: true })
-  const permitCardVal = props.truck?.permitCard || props.truck?.permitCardNumber
-  const guestIdVal = props.truck?.guestId || props.truck?.guestIdNumber
-  if (permitCardVal) fields.push({ label: 'Permit Card / VMS', value: permitCardVal })
-  if (guestIdVal) fields.push({ label: `${props.truck?.idType || 'ID'} Number`, value: guestIdVal })
+  if (props.truck?.driverPhone || true) fields.push({ label: 'Driver Phone', value: props.truck?.driverPhone, highlight: true })
+  if (props.truck?.suratJalanNumber || true) fields.push({ label: 'Delivery Note (SJ)', value: props.truck?.suratJalanNumber, highlight: true })
+  if (props.truck?.poNumber || true) fields.push({ label: 'Logistics PO', value: props.truck?.poNumber, highlight: true })
+  if (permitCardVal || true) fields.push({ label: 'Permit Card / VMS', value: permitCardVal })
+  if (guestIdVal || true) fields.push({ label: `${props.truck?.idType || 'ID'} Number`, value: guestIdVal })
+
   if (props.truck?.guestCount && props.truck.guestCount > 1) fields.push({ label: 'Guest Count', value: `${props.truck.guestCount} persons` })
   if (props.truck?.securityName) fields.push({ label: 'Security Officer', value: props.truck.securityName })
   if (props.truck?.remarks) {
@@ -474,11 +1916,171 @@ const identityFields = computed(() => {
   return fields
 })
 
+const isInitialSamplingRejected = computed(() => {
+  if (!props.truck) return false;
+  const t = props.truck;
+  if (t.status === 'QC_VEHICLE_REJECTED') return true;
+  if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
+    const check = t.qcVehicleChecks[0];
+    if (check.result === 'REJECT' || check.result === 'REJECTED') return true;
+  }
+  if (t.qcSamplingDetails?.status === 'REJECTED' || t.qcSamplingDetails?.status === 'REJECT') return true;
+  if (t.qcDetails && (t.qcDetails.status === 'REJECT' || t.qcDetails.status === 'REJECTED') && t.qcDetails.kadarAir === undefined) {
+    return true;
+  }
+  return false;
+});
+
+const extractMoistureValue = (target) => {
+  if (!target) return null;
+
+  // 1. Direct property check
+  if (target.moisture !== undefined && target.moisture !== null) return Number(target.moisture);
+  if (target.kadarAir !== undefined && target.kadarAir !== null) return Number(target.kadarAir);
+  if (target.initialMoisture !== undefined && target.initialMoisture !== null) return Number(target.initialMoisture);
+  if (target.moistureEst !== undefined && target.moistureEst !== null) return Number(target.moistureEst);
+
+  // 2. ChecklistItems array or object
+  const items = target.checklistItems;
+  if (Array.isArray(items)) {
+    const mItem = items.find(i => i && i.label && (
+      i.label.toLowerCase().includes('moisture') || 
+      i.label.toLowerCase().includes('kadar air') || 
+      i.label.toLowerCase().includes('estimasi')
+    ));
+    if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
+      return Number(mItem.value);
+    }
+  } else if (typeof items === 'object' && items !== null) {
+    if (items.initialMoisture !== undefined && items.initialMoisture !== null) return Number(items.initialMoisture);
+    if (items.moisture !== undefined && items.moisture !== null) return Number(items.moisture);
+    if (items.kadarAir !== undefined && items.kadarAir !== null) return Number(items.kadarAir);
+    if (Array.isArray(items.items)) {
+      const mItem = items.items.find(i => i && i.label && (
+        i.label.toLowerCase().includes('moisture') || 
+        i.label.toLowerCase().includes('kadar air') || 
+        i.label.toLowerCase().includes('estimasi')
+      ));
+      if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
+        return Number(mItem.value);
+      }
+    }
+  }
+
+  // 3. qcVehicleChecks / incomingMaterialChecks on truck object
+  if (target.incomingMaterialChecks && target.incomingMaterialChecks.length > 0) {
+    const im = target.incomingMaterialChecks[0];
+    if (im.moisture !== undefined && im.moisture !== null) return Number(im.moisture);
+  }
+  if (target.qcVehicleChecks && target.qcVehicleChecks.length > 0) {
+    const qv = target.qcVehicleChecks[0];
+    const val = extractMoistureValue(qv);
+    if (val !== null && !isNaN(val)) return val;
+  }
+  if (target.qcDetails) {
+    if (target.qcDetails.kadarAir !== undefined && target.qcDetails.kadarAir !== null) return Number(target.qcDetails.kadarAir);
+    if (target.qcDetails.moisture !== undefined && target.qcDetails.moisture !== null) return Number(target.qcDetails.moisture);
+    if (target.qcDetails.initialMoisture !== undefined && target.qcDetails.initialMoisture !== null) return Number(target.qcDetails.initialMoisture);
+  }
+
+  return null;
+}
+
+const initialSamplingDetails = computed(() => {
+  if (!props.truck) return null;
+  const t = props.truck;
+  if (t.processType !== 'GBB' && t.processType !== 'GSP') return null;
+
+  let pic = 'QC Inspector'
+  let status = 'APPROVED'
+  let note = ''
+  let bau = 'PASS'
+  let visual = 'PASS'
+  let moisture = null
+
+  if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
+    const check = t.qcVehicleChecks[0];
+    pic = check.checkedBy?.name || check.inspector || 'QC Inspector'
+    status = check.result === 'PASS' || check.result === 'APPROVED' ? 'APPROVED' : check.result === 'REJECT' || check.result === 'REJECTED' ? 'REJECTED' : check.result || 'APPROVED'
+    note = check.notes || check.notesStr || ''
+    bau = check.vehicleOdor || 'PASS'
+    visual = check.vehicleCondition || 'PASS'
+    moisture = extractMoistureValue(check) ?? extractMoistureValue(t)
+  } else if (t.qcSamplingDetails) {
+    return t.qcSamplingDetails;
+  } else if (t.qcDetails) {
+    pic = t.qcDetails.pic || 'QC Inspector'
+    status = (t.qcDetails.status === 'REJECT' || t.qcDetails.status === 'REJECTED' || t.status === 'QC_VEHICLE_REJECTED') ? 'REJECTED' : 'APPROVED'
+    note = t.qcDetails.note || t.qcDetails.samplingNotes || ''
+    bau = t.qcDetails.samplingBau || t.qcDetails.bau || 'PASS'
+    visual = t.qcDetails.samplingVisual || t.qcDetails.visual || 'PASS'
+    moisture = extractMoistureValue(t.qcDetails) ?? extractMoistureValue(t)
+  } else if (t.status === 'QC_VEHICLE_REJECTED' || t.status === 'QC_VEHICLE_PASSED' || t.status === 'QC_VEHICLE_IN_PROGRESS') {
+    status = t.status === 'QC_VEHICLE_REJECTED' ? 'REJECTED' : 'APPROVED'
+    moisture = extractMoistureValue(t)
+  } else {
+    return null
+  }
+
+  if (moisture === null || moisture === undefined) {
+    moisture = extractMoistureValue(t)
+  }
+
+  return { pic, status, note, bau, visual, moisture }
+});
+
+const initialSamplingMetrics = computed(() => {
+  if (!initialSamplingDetails.value) return []
+  const d = initialSamplingDetails.value
+  
+  const odorPass = d.bau === 'PASS' || d.bau === 'Normal' || d.bau === 'COMPLIANT' || d.bau === 'OK'
+  const visualPass = d.visual === 'PASS' || d.visual === 'Normal' || d.visual === 'COMPLIANT' || d.visual === 'OK'
+  
+  const extractedM = d.moisture !== null && d.moisture !== undefined ? Number(d.moisture) : extractMoistureValue(props.truck)
+  const moistureVal = (extractedM !== undefined && extractedM !== null && !isNaN(extractedM)) ? `${Number(extractedM).toFixed(2)}%` : '0.00%'
+
+  return [
+    { label: 'MOISTURE', value: moistureVal, isOk: true, isText: false },
+    { label: 'VISUAL', value: visualPass ? 'OK' : 'NOT OK', isOk: visualPass, isText: true },
+    { label: 'ODOR', value: odorPass ? 'OK' : 'NOT OK', isOk: odorPass, isText: true },
+  ]
+})
+
+const qcLabDetails = computed(() => {
+  if (!props.truck) return null;
+  const t = props.truck;
+  if (t.processType !== 'GBB' && t.processType !== 'GSP') return null;
+
+  if (isInitialSamplingRejected.value) {
+    return { isSkipped: true, reason: 'REJECTED AT INITIAL QC SAMPLING' };
+  }
+
+  if (t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0) {
+    const check = t.incomingMaterialChecks[0];
+    return {
+      pic: check.checkedBy?.name || 'QC Lab Inspector',
+      status: check.result,
+      note: check.notes || check.defectNotes || '',
+      bau: check.odor === 'PASS' ? 'Normal' : check.odor === 'REJECT' ? 'Abnormal' : check.odor || '',
+      warna: check.color === 'PASS' ? 'Normal' : check.color === 'REJECT' ? 'Abnormal' : check.color || '',
+      kadarAir: check.moisture,
+      totalFM: check.foreignMatter,
+      sampleWeight: check.sampleWeight,
+      bijiOK: check.goodBeanPercentage !== undefined && check.goodBeanPercentage !== null ? check.goodBeanPercentage : 0
+    };
+  }
+
+  if (t.qcDetails && (t.qcDetails.kadarAir !== undefined || t.status?.startsWith('INCOMING_CHECK'))) {
+    return t.qcDetails;
+  }
+
+  return null;
+});
+
 const qcDetails = computed(() => {
   const sourceDetails = props.truck?.qcDetails;
   let relationDetails = null;
 
-  // GBB / GSP from backend relations
   if (props.truck?.incomingMaterialChecks && props.truck.incomingMaterialChecks.length > 0) {
     const check = props.truck.incomingMaterialChecks[0];
     relationDetails = {
@@ -489,10 +2091,10 @@ const qcDetails = computed(() => {
       warna: check.color === 'PASS' ? 'Normal' : check.color === 'REJECT' ? 'Abnormal' : check.color || '',
       kadarAir: check.moisture,
       totalFM: check.foreignMatter,
-      bijiOK: check.sampleWeight
+      sampleWeight: check.sampleWeight,
+      bijiOK: check.goodBeanPercentage !== undefined && check.goodBeanPercentage !== null ? check.goodBeanPercentage : 0
     };
   }
-  // GBJ from backend relations
   else if (props.truck?.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
     const check = props.truck.qcVehicleChecks[0];
     relationDetails = {
@@ -505,7 +2107,6 @@ const qcDetails = computed(() => {
     };
   }
 
-  // Merge sourceDetails and relationDetails if both exist
   if (sourceDetails && relationDetails) {
     return {
       ...relationDetails,
@@ -582,12 +2183,11 @@ const parsedChecklist = computed(() => {
   // If GBJ, populate checklist from qcVehicleChecks
   if (props.truck.processType === 'GBJ' && props.truck.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
     const check = props.truck.qcVehicleChecks[0];
-    let items = []
+    const norm = normalizeChecklistItems(check.checklistItems);
+    let items = norm.items;
     
     // Use new checklistItems format if available (includes photos)
-    if (check.checklistItems && Array.isArray(check.checklistItems)) {
-      items = check.checklistItems;
-    } else {
+    if (items.length === 0) {
       // Fallback for old data
       if (check.vehicleCleanliness && check.vehicleCleanliness !== 'NA') {
         items.push({ label: 'Vehicle Cleanliness', ok: check.vehicleCleanliness === 'PASS' })
@@ -723,36 +2323,44 @@ const getWeightVal = (val) => {
 const grossInVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.gross !== 'IN') return null
   let val = getWeightVal(t.weights?.gross)
   if (val === null) val = getWeightVal(t.grossWeight)
-  if (val === null && t.processType !== 'GBJ') val = getWeightVal(t.weighInWeight)
+  if (val === null) val = getWeightVal(t.weighInWeight)
   return val
 })
 
 const tareOutVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.tare !== 'OUT') return null
   let val = getWeightVal(t.weights?.tare)
   if (val === null) val = getWeightVal(t.tareWeight)
-  if (val === null && t.processType !== 'GBJ') val = getWeightVal(t.weighOutWeight)
+  if (val === null) val = getWeightVal(t.weighOutWeight)
   return val
 })
 
 const tareInVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.tare !== 'IN') return null
   let val = getWeightVal(t.weights?.tare)
   if (val === null) val = getWeightVal(t.tareWeight)
-  if (val === null && t.processType === 'GBJ') val = getWeightVal(t.weighInWeight)
+  if (val === null) val = getWeightVal(t.weighInWeight)
   return val
 })
 
 const grossOutVal = computed(() => {
   if (!props.truck) return null
   const t = props.truck
+  const types = getWeightRecordTypes(t.processType)
+  if (types.gross !== 'OUT') return null
   let val = getWeightVal(t.weights?.gross)
   if (val === null) val = getWeightVal(t.grossWeight)
-  if (val === null && t.processType === 'GBJ') val = getWeightVal(t.weighOutWeight)
+  if (val === null) val = getWeightVal(t.weighOutWeight)
   return val
 })
 
@@ -946,22 +2554,28 @@ const getTimestampVal = (key) => {
 }
 
 const timestampRows = computed(() => {
-  if (props.truck?.processType === 'GBJ') {
+  const pType = props.truck?.processType || 'GBB';
+  const isSamplingRejected = props.truck?.status === 'QC_VEHICLE_REJECTED';
+
+  if (pType === 'GBJ') {
     return [
       { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
       { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-      { label: 'QC Check', value: getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt') || getTimestampVal('qcVehicleEndAt') || getTimestampVal('qcVehicleStartAt') },
-      { label: 'Warehouse', value: getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt') },
+      { label: 'QC Vehicle', value: props.truck?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+      { label: 'GBJ Loading', value: isSamplingRejected ? null : (getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt')) },
       { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
       { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
     ]
   }
   
+  const unloadLabel = pType === 'GSP' ? 'GSP Processing' : 'GBB Unloading';
+
   return [
     { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
     { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-    { label: 'Warehouse', value: getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt') },
-    { label: 'QC Check', value: getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt') || getTimestampVal('incomingCheckEndAt') || getTimestampVal('incomingCheckStartAt') },
+    { label: 'QC Sampling', value: props.truck?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+    { label: unloadLabel, value: isSamplingRejected ? null : (getTimestampVal('warehouseStartAt') || getTimestampVal('warehouseEndAt')) },
+    { label: 'QC Lab Check', value: isSamplingRejected ? null : (props.truck?.incomingMaterialChecks?.[0]?.completedAt || (props.truck?.status?.startsWith('INCOMING_CHECK') ? getTimestampVal('qcEndAt') : null)) },
     { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
     { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
   ]

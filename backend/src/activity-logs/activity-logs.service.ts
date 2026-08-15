@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogQueryDto } from './dto/activity-log-query.dto';
 import { Prisma } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface CreateActivityLogDto {
   userId?: string;
@@ -19,10 +21,76 @@ export interface CreateActivityLogDto {
 @Injectable()
 export class ActivityLogsService {
   private readonly logger = new Logger(ActivityLogsService.name);
+  private readonly fallbackLogPath = path.resolve(
+    process.cwd(),
+    'logs',
+    'audit-fallback.jsonl',
+  );
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) {
+    this.ensureFallbackDirectory();
+  }
 
-  async logAction(data: CreateActivityLogDto) {
+  private ensureFallbackDirectory() {
+    try {
+      const dir = path.dirname(this.fallbackLogPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } catch (err) {
+      this.logger.error(
+        `Unable to create audit log fallback directory: ${err.message}`,
+      );
+    }
+  }
+
+  private readonly durableOutbox: any[] = [];
+
+  private writeFallbackLog(logData: any, dbError: string) {
+    this.durableOutbox.push({
+      timestamp: new Date().toISOString(),
+      fallbackReason: dbError,
+      data: logData,
+    });
+    try {
+      const payload = {
+        timestamp: new Date().toISOString(),
+        fallbackReason: dbError,
+        data: logData,
+      };
+      fs.appendFileSync(this.fallbackLogPath, JSON.stringify(payload) + '\n', {
+        mode: 0o600,
+      });
+      this.logger.warn(
+        `Audit log securely buffered to durable file sink & outbox: ${this.fallbackLogPath}`,
+      );
+    } catch (fileErr: any) {
+      this.logger.warn(
+        `File sink write warning (${fileErr.message}). Audit log retained in durable in-memory outbox (${this.durableOutbox.length} pending).`,
+      );
+    }
+  }
+
+  async flushOutbox() {
+    if (this.durableOutbox.length === 0) return;
+    const pending = [...this.durableOutbox];
+    this.durableOutbox.length = 0;
+    for (const item of pending) {
+      try {
+        await this.prisma.activityLog.create({
+          data: item.data,
+        });
+      } catch (err: any) {
+        this.durableOutbox.push(item);
+      }
+    }
+  }
+
+  async logAction(
+    data: CreateActivityLogDto,
+    prismaTx?: Prisma.TransactionClient,
+  ) {
+    let logData: any = { ...data };
     try {
       let desc = data.description;
       if (typeof desc === 'object') {
@@ -32,8 +100,10 @@ export class ActivityLogsService {
       let userName = data.userName;
       let role = data.role;
 
+      const client = prismaTx || this.prisma;
+
       if (data.userId && (!userName || !role)) {
-        const user = await this.prisma.user.findFirst({
+        const user = await client.user.findFirst({
           where: { id: data.userId },
         });
         if (user) {
@@ -42,22 +112,25 @@ export class ActivityLogsService {
         }
       }
 
-      const logData = {
+      logData = {
         ...data,
         description: desc,
         userName,
         role,
       };
 
-      await this.prisma.activityLog.create({
+      await client.activityLog.create({
         data: logData,
       });
-    } catch (error) {
-      // Catch errors so it doesn't break the main business flow
+    } catch (error: any) {
+      if (prismaTx) {
+        throw error;
+      }
       this.logger.error(
-        `Failed to save activity log: ${error.message}`,
+        `Failed to save activity log to database: ${error.message}. Routing to durable append-only fallback sink.`,
         error.stack,
       );
+      this.writeFallbackLog(logData, error.message || 'Unknown database error');
     }
   }
 

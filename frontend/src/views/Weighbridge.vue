@@ -29,7 +29,7 @@
               <button @click="showDetailsModal = true" class="relative w-full overflow-hidden flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl transition-all duration-300 text-xs font-black uppercase tracking-widest text-indigo-600 bg-[#E6F0FA] border border-[#CCE0F5] hover:border-indigo-300 hover:shadow-[0_4px_20px_rgba(74,139,223,0.2)] group">
                 <div class="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-200/50 to-transparent -translate-x-full group-hover:animate-shimmer pointer-events-none"></div>
                 <span class="material-icons text-[18px]">travel_explore</span>
-                <span>LIHAT ANALISA LENGKAP</span>
+                <span>VIEW FULL ANALYSIS</span>
               </button>
             </div>
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9">
@@ -210,7 +210,11 @@ const getProcessType = (truck) => {
 
 const getStepLabel = (truck) => {
   if (!truck) return '-'
-  const step = truck.step || truck.status || '-'
+  let step = truck.step || truck.status || '-'
+  const pType = getProcessType(truck)
+  if ((pType === 'GBB' || pType === 'GSP') && String(step).startsWith('QC_VEHICLE')) {
+    step = String(step).replace('QC_VEHICLE', 'QC_SAMPLING')
+  }
   return String(step).replace(/_/g, ' ').toUpperCase()
 }
 
@@ -230,14 +234,14 @@ const queueTrucks = computed(() => {
       return t.status === 'WAREHOUSE_DONE' || t.status === 'QC_VEHICLE_REJECTED';
     }
     
-    // Timbang Kedua untuk GBB (Lolos Inspeksi ATAU Inspeksi Ditolak)
+    // Timbang Kedua untuk GBB (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak ATAU Bongkar Selesai)
     if (process === 'GBB') {
-      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED';
+      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED' || t.status === 'WAREHOUSE_DONE';
     }
     
-    // Timbang Kedua untuk GSP (Lolos Inspeksi ATAU Inspeksi Ditolak)
+    // Timbang Kedua untuk GSP (Lolos Inspeksi ATAU Inspeksi Ditolak ATAU Sampling Ditolak ATAU Bongkar Selesai)
     if (process === 'GSP') {
-      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED';
+      return t.status === 'INCOMING_CHECK_PASSED' || t.status === 'INCOMING_CHECK_REJECTED' || t.status === 'QC_VEHICLE_REJECTED' || t.status === 'WAREHOUSE_DONE';
     }
     
     return false;
@@ -297,7 +301,9 @@ const weighLabelMap = {
   GBB: { 
     REGISTERED: 'Gross Weight (First Weighing)', 
     INCOMING_CHECK_PASSED: 'Tare Weight (Second Weighing)',
-    INCOMING_CHECK_REJECTED: 'Tare Weight (Second Weighing)'
+    INCOMING_CHECK_REJECTED: 'Tare Weight (Second Weighing)',
+    QC_VEHICLE_REJECTED: 'Tare Weight (Second Weighing)',
+    WAREHOUSE_DONE: 'Tare Weight (Second Weighing)'
   },
   GBJ: { 
     REGISTERED: 'Tare Weight (First Weighing)', 
@@ -306,7 +312,10 @@ const weighLabelMap = {
   },
   GSP: { 
     REGISTERED: 'Gross Weight (First Weighing)', 
-    WAREHOUSE_DONE: 'Tare Weight (Second Weighing)'
+    INCOMING_CHECK_PASSED: 'Tare Weight (Second Weighing)',
+    INCOMING_CHECK_REJECTED: 'Tare Weight (Second Weighing)',
+    WAREHOUSE_DONE: 'Tare Weight (Second Weighing)',
+    QC_VEHICLE_REJECTED: 'Tare Weight (Second Weighing)'
   }
 }
 const weighingLabel = computed(() => {
@@ -319,12 +328,11 @@ const previousWeight = computed(() => {
   if (!selectedTruck.value || selectedTruck.value.status === 'REGISTERED') return null
   const t = selectedTruck.value
   const pt = getProcessType(t)
-  // Backend returns flat fields: grossWeight, tareWeight
-  // Fallback to nested weights object for backward compat with mock data
+  const inRecord = t.weighbridgeRecords?.find?.(r => r.type === 'IN')
   if (pt === 'GBB' || pt === 'GSP') {
-    return t.grossWeight ?? t.weights?.gross ?? null
+    return t.grossWeight ?? inRecord?.weight ?? t.weights?.gross ?? null
   }
-  return t.tareWeight ?? t.weights?.tare ?? null
+  return t.tareWeight ?? inRecord?.weight ?? t.weights?.tare ?? null
 })
 
 const selectTruck = (truck) => { selectedTruck.value = truck }
@@ -333,36 +341,39 @@ const handleWeightSubmit = async (weight) => {
   isProcessing.value = true
   const truck = selectedTruck.value
   const isFirst = truck.status === 'REGISTERED'
+  const pType = getProcessType(truck)
   
   try {
-    if (truck.processType === 'GBB' || truck.processType === 'GSP') {
+    let response
+    if (pType === 'GBB' || pType === 'GSP') {
       if (isFirst) { 
-        const response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Gross Weight Saved: ${weight} kg. Proceed to ${truck.processType}.`) 
+        response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
+        toast.success(`Gross Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to QC Sampling.`) 
       } else { 
-        const response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Tare Weight Saved: ${weight} kg. Proceed to Gate Out.`); selectedTruck.value = null; return 
+        response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
+        toast.success(`Tare Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to Gate Out.`) 
+      }
+    } else if (pType === 'GBJ') {
+      if (isFirst) { 
+        response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
+        toast.success(`Tare Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to QC Inspection.`) 
+      } else { 
+        response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
+        toast.success(`Gross Weight (${weight} kg) saved for ${getPlateNumber(truck)}. Proceed to Gate Out.`) 
       }
     } else {
-      if (isFirst) { 
-        const response = await weighbridgeStore.submitWeighIn(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Tare Weight Saved: ${weight} kg. Proceed to QC.`) 
-      } else { 
-        const response = await weighbridgeStore.submitWeighOut(truck.id, { weight })
-        const updatedTruck = response?.data || response;
-        if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-        toast.success(`Gross Weight Saved: ${weight} kg. Proceed to Gate Out.`); selectedTruck.value = null; return 
-      }
+      toast.error(`Jenis proses '${pType || 'UNKNOWN'}' tidak valid. Penimbangan dibatalkan.`)
+      return
     }
+    
+    const updatedTruck = response?.data || response
+    if (updatedTruck) {
+      truckStore.upsertTruck(updatedTruck)
+    }
+    await truckStore.fetchTrucks()
     selectedTruck.value = null
   } catch (error) {
-    // error handled by store
+    console.error('[Weighbridge] Submit error:', error)
   } finally {
     isProcessing.value = false
   }

@@ -25,6 +25,9 @@ import { CancelTransactionDto } from '../gate/dto/cancel-transaction.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { Req } from '@nestjs/common';
+import type { Request } from 'express';
+
 @ApiTags('Transactions')
 @ApiBearerAuth()
 @Controller('transactions')
@@ -40,6 +43,35 @@ export class TransactionsController {
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.transactionsService.findAll(query, user);
+  }
+
+  @Get('reopen-matrix')
+  @ApiOperation({
+    summary: 'Get canonical REOPEN target matrix by process type',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Allowed REOPEN targets map retrieved',
+  })
+  getReopenMatrix() {
+    return {
+      success: true,
+      data: {
+        GBB: [
+          'REGISTERED',
+          'QC_VEHICLE_PENDING',
+          'QC_VEHICLE_PASSED',
+          'INCOMING_CHECK_PENDING',
+        ],
+        GSP: [
+          'REGISTERED',
+          'QC_VEHICLE_PENDING',
+          'QC_VEHICLE_PASSED',
+          'INCOMING_CHECK_PENDING',
+        ],
+        GBJ: ['REGISTERED', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_PASSED'],
+      },
+    };
   }
 
   @Get('active')

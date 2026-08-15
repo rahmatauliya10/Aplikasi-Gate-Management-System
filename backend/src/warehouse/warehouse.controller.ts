@@ -17,15 +17,28 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  BadRequestException,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator,
+} from '@nestjs/common';
+import * as multer from 'multer';
+import * as crypto from 'crypto';
+import * as path from 'path';
+
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { AttachmentsService } from '../attachments/attachments.service';
 import { WarehouseService } from './warehouse.service';
 import { StartWarehouseDto } from './dto/start-warehouse.dto';
 import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
 import { WarehouseQueryDto } from './dto/warehouse-query.dto';
+import { SubmitIncomingCheckDto } from './dto/submit-incoming-check.dto';
 
 @ApiTags('Warehouse')
 @ApiBearerAuth()
@@ -33,7 +46,10 @@ import { WarehouseQueryDto } from './dto/warehouse-query.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'WAREHOUSE')
 export class WarehouseController {
-  constructor(private readonly warehouseService: WarehouseService) {}
+  constructor(
+    private readonly warehouseService: WarehouseService,
+    private readonly attachmentsService: AttachmentsService,
+  ) {}
 
   @Get('queue')
   @HttpCode(HttpStatus.OK)
@@ -105,27 +121,10 @@ export class WarehouseController {
   })
   submitIncomingCheck(
     @Param('transactionId') transactionId: string,
-    @Body() dto: { decision: 'passed' | 'rejected'; rejectReason?: string },
+    @Body() dto: SubmitIncomingCheckDto,
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.warehouseService.submitIncomingCheck(transactionId, dto, user);
-  }
-
-  @Post('complete-qc-analysis/:transactionId')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark QC analysis as completed for GBB process' })
-  @ApiResponse({ status: 200, description: 'QC analysis marked as completed' })
-  @ApiResponse({ status: 404, description: 'Transaction not found' })
-  completeQcAnalysis(
-    @Param('transactionId') transactionId: string,
-    @Body() body: { remarks?: string },
-    @CurrentUser() user: JwtPayloadUser,
-  ) {
-    return this.warehouseService.completeQcAnalysis(
-      transactionId,
-      user,
-      body?.remarks,
-    );
   }
 
   @Get('process/:transactionId')
@@ -145,41 +144,66 @@ export class WarehouseController {
 
   @Post('attachments/:transactionId')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Upload warehouse attachment' })
+  @ApiOperation({
+    summary: 'Upload warehouse attachment via centralized pipeline',
+  })
   @UseInterceptors(
-    require('@nestjs/platform-express').FileInterceptor('file', {
-      storage: require('multer').diskStorage({
-        destination: process.env.UPLOAD_DIR || './uploads',
+    FileInterceptor('file', {
+      fileFilter: (req: any, file: any, cb: any) => {
+        const allowedMimeTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+        const ext = path.extname(file.originalname).toLowerCase();
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.pdf'];
+        if (
+          allowedMimeTypes.includes(file.mimetype) &&
+          allowedExts.includes(ext)
+        ) {
+          cb(null, true);
+        } else {
+          cb(
+            new BadRequestException(
+              'File tidak valid. Hanya JPG, PNG, dan PDF yang diizinkan (Maks 10MB).',
+            ),
+            false,
+          );
+        }
+      },
+      storage: multer.diskStorage({
+        destination: (req: any, file: any, cb: any) => {
+          const uploadDir = process.env.UPLOAD_DIR || './uploads';
+          const quarantine = path.resolve(path.join(uploadDir, 'quarantine'));
+          require('fs').mkdirSync(quarantine, { recursive: true });
+          cb(null, quarantine);
+        },
         filename: (req: any, file: any, cb: any) => {
-          const crypto = require('crypto');
-          const path = require('path');
-          const randomName = crypto.randomUUID();
-          const ext = path.extname(file.originalname);
-          cb(null, `${randomName}${ext}`);
+          const uniqueSuffix =
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(
+            null,
+            `quarantine-${uniqueSuffix}${path.extname(file.originalname)}`,
+          );
         },
       }),
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
     }),
   )
   uploadAttachment(
     @Param('transactionId') id: string,
-    @UploadedFile(
-      new (require('@nestjs/common').ParseFilePipe)({
-        validators: [
-          new (require('@nestjs/common').MaxFileSizeValidator)({
-            maxSize:
-              parseInt(process.env.MAX_FILE_SIZE_MB || '10') * 1024 * 1024,
-          }),
-          new (require('@nestjs/common').FileTypeValidator)({
-            fileType: /(jpg|jpeg|png|pdf)$/,
-          }),
-        ],
-      }),
-    )
-    file: any,
+    @UploadedFile() file: any,
     @Body() dto: any,
     @CurrentUser() user: JwtPayloadUser,
   ) {
-    return this.warehouseService.uploadAttachment(id, file, dto, user);
+    return this.attachmentsService.processQuarantineUpload(
+      file,
+      id,
+      {
+        module: 'warehouse',
+        attachmentType: dto?.attachmentType,
+        description: dto?.description,
+      },
+      user,
+    );
   }
 
   @Get('history')

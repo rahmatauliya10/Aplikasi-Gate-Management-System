@@ -12,7 +12,10 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { getJwtAccessSecret, getJwtRefreshSecret } from '../common/utils/jwt-secrets.util';
+import {
+  getJwtAccessSecret,
+  getJwtRefreshSecret,
+} from '../common/utils/jwt-secrets.util';
 
 @Injectable()
 export class AuthService {
@@ -25,7 +28,10 @@ export class AuthService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private failedAttemptsMap = new Map<string, { count: number; lockedUntil?: Date }>();
+  private failedAttemptsMap = new Map<
+    string,
+    { count: number; lockedUntil?: Date }
+  >();
 
   async login(dto: LoginDto) {
     this.logger.log(`Login attempt for identifier: ${dto.identifier}`);
@@ -42,31 +48,44 @@ export class AuthService {
       include: { warehouseAccess: true },
     });
 
+    const genericErrorMessage =
+      'Kredensial login tidak valid. Periksa kembali username dan password Anda.';
+
     if (!user) {
       this.logger.warn(`Login failed: user not found - ${dto.identifier}`);
       await this.auditLog(null, 'LOGIN_FAILED', {
         identifier: dto.identifier,
-        reason: 'User not found',
+        reason: 'User not found or credentials invalid',
       });
       throw new UnauthorizedException({
         success: false,
-        message: 'Username atau email tidak ditemukan.',
+        message: genericErrorMessage,
         errors: [],
       });
     }
 
-    // Check Account Lockout status (5 failed attempts -> 15 min lockout)
-    const lockInfo = this.failedAttemptsMap.get(user.id);
-    if (lockInfo && lockInfo.lockedUntil && new Date() < lockInfo.lockedUntil) {
-      const remainingMinutes = Math.ceil((lockInfo.lockedUntil.getTime() - Date.now()) / (1000 * 60));
-      this.logger.warn(`Login failed: account locked for ${dto.identifier} (Locked for ${remainingMinutes}m)`);
+    // DB-Backed Account Lockout Check (5 failed attempts within 15 mins -> lockout)
+    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const recentFailedCount = await this.prisma.activityLog.count({
+      where: {
+        userId: user.id,
+        action: 'LOGIN_FAILED',
+        createdAt: { gte: fifteenMinutesAgo },
+      },
+    });
+
+    if (recentFailedCount >= 5) {
+      this.logger.warn(
+        `Login blocked by DB lockout policy for ${dto.identifier}`,
+      );
       await this.auditLog(user.id, 'LOGIN_LOCKED', {
         identifier: dto.identifier,
-        reason: `Account locked due to 5 consecutive failed attempts. Try again in ${remainingMinutes} minutes.`,
+        reason: 'Account locked due to consecutive failed attempts in DB log.',
       });
       throw new UnauthorizedException({
         success: false,
-        message: `Akun terkunci sementara karena 5x kesalahan password. Silakan coba lagi dalam ${remainingMinutes} menit.`,
+        message:
+          'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
         code: 'ACCOUNT_TEMPORARILY_LOCKED',
         errors: [],
       });
@@ -74,18 +93,10 @@ export class AuthService {
 
     const passwordValid = await argon2.verify(user.passwordHash, dto.password);
     if (!passwordValid) {
-      const current = this.failedAttemptsMap.get(user.id) || { count: 0 };
-      const newCount = current.count + 1;
-      let lockedUntil: Date | undefined = undefined;
-
-      if (newCount >= 5) {
-        lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes lockout
-        this.logger.warn(`Account ${user.email} has been locked for 15 minutes after 5 failed attempts.`);
-      }
-
-      this.failedAttemptsMap.set(user.id, { count: newCount, lockedUntil });
-
-      this.logger.warn(`Login failed: invalid password for ${dto.identifier} (Attempt ${newCount}/5)`);
+      const newCount = recentFailedCount + 1;
+      this.logger.warn(
+        `Login failed: invalid password for ${dto.identifier} (Attempt ${newCount}/5)`,
+      );
       await this.auditLog(user.id, 'LOGIN_FAILED', {
         identifier: dto.identifier,
         reason: `Invalid password (Attempt ${newCount}/5)`,
@@ -94,7 +105,8 @@ export class AuthService {
       if (newCount >= 5) {
         throw new UnauthorizedException({
           success: false,
-          message: 'Terlalu banyak percobaan password salah. Akun Anda telah terkunci selama 15 menit.',
+          message:
+            'Akun Anda terkunci sementara karena berulang kali gagal login. Silakan coba lagi dalam 15 menit.',
           code: 'ACCOUNT_TEMPORARILY_LOCKED',
           errors: [],
         });
@@ -102,13 +114,10 @@ export class AuthService {
 
       throw new UnauthorizedException({
         success: false,
-        message: `Password salah. sisa percobaan: ${5 - newCount}x`,
+        message: genericErrorMessage,
         errors: [],
       });
     }
-
-    // Reset failed attempts counter upon successful password verification
-    this.failedAttemptsMap.delete(user.id);
 
     if (!user.isActive) {
       this.logger.warn(`Login failed: account disabled for ${dto.identifier}`);
@@ -206,7 +215,10 @@ export class AuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: { refreshTokenHash: null },
+      data: {
+        refreshTokenHash: null,
+        tokenVersion: { increment: 1 },
+      },
     });
 
     await this.auditLog(userId, 'LOGOUT', {});
@@ -261,10 +273,23 @@ export class AuthService {
       this.logger.warn(
         `Refresh token: token mismatch for ${payload.email} — possible token reuse attack`,
       );
-      // Invalidate all tokens (security measure)
+      // Invalidate all active tokens by clearing refresh hash AND incrementing tokenVersion (security containment)
       await this.prisma.user.update({
         where: { id: user.id },
-        data: { refreshTokenHash: null },
+        data: {
+          refreshTokenHash: null,
+          tokenVersion: {
+            increment: 1,
+          },
+        },
+      });
+      await this.activityLogsService.logAction({
+        userId: user.id,
+        action: 'REFRESH_TOKEN_REUSE_DETECTED',
+        module: 'AUTH',
+        referenceId: user.id,
+        description: `Possible refresh token reuse attack detected for user ${user.email}. All sessions revoked.`,
+        status: 'FAILED',
       });
       throw new UnauthorizedException({
         success: false,
@@ -294,12 +319,23 @@ export class AuthService {
       expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d'),
     });
 
-    // Store new refresh token hash
+    // Store new refresh token hash atomically via CAS check
     const newRefreshTokenHash = await argon2.hash(newRefreshToken);
-    await this.prisma.user.update({
-      where: { id: user.id },
+    const updateRes = await this.prisma.user.updateMany({
+      where: { id: user.id, refreshTokenHash: user.refreshTokenHash },
       data: { refreshTokenHash: newRefreshTokenHash },
     });
+
+    if (updateRes.count === 0) {
+      this.logger.warn(
+        `Refresh token race condition detected for ${user.email}`,
+      );
+      throw new UnauthorizedException({
+        success: false,
+        message: 'Refresh token session collision or invalidated',
+        errors: [],
+      });
+    }
 
     this.logger.log(`Refresh token success for ${user.email}`);
     await this.auditLog(user.id, 'REFRESH_TOKEN', {});

@@ -1,0 +1,530 @@
+# ==============================================================================
+# GMS Automated DR Failure-Injection & Operator Restore Drill Protocol (P0-02)
+# ==============================================================================
+# Purpose: Executes automated disaster recovery failure-injection simulations
+# against a dedicated staging/production-like topology.
+# Validates fail-closed behavior across 5 critical failure phases:
+#   Phase 1: Pre-promotion Checksum Corruption & Rejection
+#   Phase 2: Post-DB-Commit Failure -> Automatic DB Compensation Rollback
+#            (Verified via 16-entity PostgreSQL row_to_json MD5 DB Fingerprint & Uploads SHA)
+#   Phase 3: Attachment Swap Failure -> Uploads Tree Revert
+#   Phase 4: Live Verification Discrepancy -> Hard Fail-Closed & Maintenance Freeze
+#   Phase 5: Fail-Closed HTTP Mutating Write Rejection (503 MAINTENANCE_MODE)
+#
+# Produces exact evidence artifact:
+#   artifacts/release-proof/restore-failure-drill-evidence.json
+# ==============================================================================
+
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$DrillPort = "5436",
+
+    [Parameter(Mandatory=$false)]
+    [string]$LiveContainer = "gate-system-postgres",
+
+    [Parameter(Mandatory=$false)]
+    [string]$LiveDbName = "gms",
+
+    [Parameter(Mandatory=$false)]
+    [string]$PgUser = "postgres",
+
+    [Parameter(Mandatory=$false)]
+    [string]$ArtifactsDir = ""
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
+if (-not $ArtifactsDir) {
+    $ArtifactsDir = Join-Path -Path $ProjectRootDir -ChildPath "artifacts\release-proof"
+}
+if (-not (Test-Path -Path $ArtifactsDir -PathType Container)) {
+    New-Item -Path $ArtifactsDir -ItemType Directory -Force | Out-Null
+}
+
+[string]$LogDir = "C:\GMS_Logs"
+if (-not (Test-Path -Path $LogDir -PathType Container)) {
+    New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
+}
+[string]$LogFile = Join-Path -Path $LogDir -ChildPath "restore_failure_drills.log"
+[string]$UploadDir = if ($env:UPLOAD_DIR) { $env:UPLOAD_DIR } else { Join-Path -Path $ProjectRootDir -ChildPath "uploads" }
+
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    [string]$Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    [string]$LogEntry = "[$Timestamp] [$Level] $Message"
+    Add-Content -Path $LogFile -Value $LogEntry -ErrorAction SilentlyContinue
+    Write-Host $LogEntry
+}
+
+Write-Log "=============================================================================="
+Write-Log "Starting GMS DR Failure-Injection & Operator Resilience Drill (P0-02)..."
+Write-Log "=============================================================================="
+
+[datetime]$DrillStartTime = Get-Date
+[array]$TestResults = @()
+
+# Helper to record test result
+function Record-Drill-Phase {
+    param(
+        [string]$PhaseName,
+        [bool]$Passed,
+        [string]$Details,
+        [double]$DurationSeconds,
+        [hashtable]$EvidenceData = @{}
+    )
+    $script:TestResults += @{
+        phase = $PhaseName
+        status = if ($Passed) { "PASSED" } else { "FAILED" }
+        details = $Details
+        durationSeconds = [math]::Round($DurationSeconds, 2)
+        evidence = $EvidenceData
+    }
+    if ($Passed) {
+        Write-Log "  [PASS] $PhaseName - $Details" -Level "SUCCESS"
+    } else {
+        Write-Log "  [FAIL] $PhaseName - $Details" -Level "ERROR"
+    }
+}
+
+$RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
+$FixtureManifest = Join-Path $ProjectRootDir "tests\fixtures\historical\historical_test_manifest.json"
+$PsExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { "pwsh.exe" } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell.exe" }
+
+# Helper to compute SHA-256
+function Get-Sha256String([string]$Path) {
+    if (Test-Path -Path $Path -PathType Leaf) {
+        return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLower()
+    }
+    return ""
+}
+
+# ------------------------------------------------------------------------------
+# Fingerprinting Helpers (PostgreSQL 16 Entities + Physical Attachments Tree)
+# ------------------------------------------------------------------------------
+function Get-DatabaseFingerprint {
+    param(
+        [string]$Container = "gate-system-postgres",
+        [string]$Database = "gms",
+        [string]$User = "postgres"
+    )
+
+    $Tables = @(
+        "User",
+        "UserWarehouseAccess",
+        "Transaction",
+        "TransactionStatusHistory",
+        "WeighbridgeRecord",
+        "WarehouseProcess",
+        "QcVehicleCheck",
+        "IncomingMaterialCheck",
+        "Attachment",
+        "FraudCheck",
+        "ActivityLog",
+        "AppSetting",
+        "Announcement",
+        "SystemIssue",
+        "TransactionCorrection",
+        "TransactionCorrectionItem"
+    )
+
+    $Result = [ordered]@{}
+
+    foreach ($Table in $Tables) {
+        $Sql = @"
+SELECT CASE 
+    WHEN to_regclass('public."$Table"') IS NULL THEN 'NON_EXISTENT'
+    ELSE COALESCE(
+        md5(
+            string_agg(
+                md5(row_to_json(t)::text),
+                ','
+                ORDER BY md5(row_to_json(t)::text)
+            )
+        ),
+        'EMPTY'
+    )
+END
+FROM "$Table" t;
+"@
+
+        $Hash = ""
+        try {
+            $Hash = (& docker exec $Container psql -U $User -d $Database -t -A -c $Sql 2>&1).ToString().Trim()
+        } catch {
+            throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($Hash) -or $Hash.Contains("ERROR") -or $Hash.Contains("fatal") -or $Hash.Contains("could not connect")) {
+            throw "FATAL: Database fingerprint query returned error for table '$Table'. Output: $Hash"
+        } else {
+            $Result[$Table] = $Hash.Trim()
+        }
+    }
+
+    return $Result
+}
+
+function Get-UploadsFingerprint {
+    param([string]$UploadsDirectory)
+
+    if (-not (Test-Path -Path $UploadsDirectory -PathType Container)) {
+        return "EMPTY"
+    }
+
+    $Files = Get-ChildItem -Path $UploadsDirectory -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName
+    if (-not $Files -or $Files.Count -eq 0) {
+        return "EMPTY"
+    }
+
+    $Entries = $Files | ForEach-Object {
+        $Relative = $_.FullName.Substring($UploadsDirectory.Length).Replace('\', '/')
+        $Hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+        "$Relative|$Hash"
+    }
+
+    $Content = ($Entries -join "`n")
+    $Bytes = [System.Text.Encoding]::UTF8.GetBytes($Content)
+    $Sha = [System.Security.Cryptography.SHA256]::Create()
+
+    return [BitConverter]::ToString(
+        $Sha.ComputeHash($Bytes)
+    ).Replace("-", "").ToLower()
+}
+
+# ------------------------------------------------------------------------------
+# Phase 1: Pre-promotion Checksum Corruption Test
+# ------------------------------------------------------------------------------
+Write-Log "Executing Phase 1: Corrupted Dump SHA-256 Checksum Rejection Drill..."
+[datetime]$p1Start = Get-Date
+try {
+    # Generate a temporary dump with corrupted byte content while retaining valid manifest hash expectation
+    [string]$TempCorruptDir = Join-Path $env:TEMP ("gms_corrupt_test_" + (Get-Date).ToString("yyyyMMdd_HHmmss"))
+    New-Item -Path $TempCorruptDir -ItemType Directory -Force | Out-Null
+
+    [string]$RealDumpPath = Join-Path $ProjectRootDir "tests\fixtures\historical\historical_test.dump"
+    [string]$CorruptDumpPath = Join-Path $TempCorruptDir "corrupted_test.dump"
+    [string]$CorruptManifestPath = Join-Path $TempCorruptDir "corrupt_manifest.json"
+
+    if (-not (Test-Path -Path $RealDumpPath)) {
+        throw "MANDATORY FIXTURE MISSING: Real dump path not found ($RealDumpPath). Rehearsal drill cannot proceed."
+    }
+
+    [byte[]]$dumpBytes = [System.IO.File]::ReadAllBytes($RealDumpPath)
+    [string]$originalHash = (Get-FileHash -Path $RealDumpPath -Algorithm SHA256).Hash.ToLower()
+    if ($dumpBytes.Length -gt 100) {
+        $dumpBytes[50] = [byte]($dumpBytes[50] -bxor 0xFF) # tamper single byte
+    }
+    [System.IO.File]::WriteAllBytes($CorruptDumpPath, $dumpBytes)
+
+    $CorruptManifestObj = @{
+        manifestType = "HISTORICAL_REHEARSAL_FIXTURE"
+        backupId = "BKP-DRILL-CORRUPT-TAMPERED-BYTE"
+        createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        artifacts = @{
+            dump = "corrupted_test.dump"
+        }
+        checksums = @{
+            dump = $originalHash # Original hash does not match tampered bytes
+        }
+    }
+    Set-Content -Path $CorruptManifestPath -Value ($CorruptManifestObj | ConvertTo-Json -Depth 5) -Encoding utf8
+
+    [int]$p1Exit = 0
+    try {
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -Force 2>&1 | Out-Null
+        $p1Exit = $LASTEXITCODE
+    } catch {
+        $p1Exit = 1
+    }
+
+    [bool]$p1Passed = ($p1Exit -ne 0)
+    [string]$p1Details = if ($p1Passed) {
+        "Mismatched/corrupt dump checksum strictly rejected before DB or uploads mutation (ExitCode=$p1Exit)."
+    } else {
+        "Security vulnerability: Corrupted dump was not rejected by restore preflight check."
+    }
+
+    Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details $p1Details -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds -EvidenceData @{ exitCode = $p1Exit; rejectedBeforeMutation = $p1Passed }
+} catch {
+    Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds
+} finally {
+    if (Test-Path -Path $TempCorruptDir) {
+        Remove-Item -Path $TempCorruptDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# ------------------------------------------------------------------------------
+# Phase 2: Post-DB-Commit Failure Simulation & DB Rollback Compensation
+# ------------------------------------------------------------------------------
+Write-Log "Executing Phase 2: Post-DB-Commit Compensation Rollback Drill..."
+[datetime]$p2Start = Get-Date
+try {
+    [int]$p2Exit = 0
+    [bool]$p2Passed = $false
+    [string]$p2Details = ""
+
+    if (-not (Test-Path -Path $FixtureManifest)) {
+        throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
+    }
+
+    # Step A: Capture state BEFORE fault injection
+    $DbBefore = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
+    $UploadsBefore = Get-UploadsFingerprint -UploadsDirectory $UploadDir
+
+    # Step B: Run actual production restore with POST_DB_COMMIT fault injection
+    try {
+        $env:GMS_FAULT_INJECTION_PHASE = "POST_DB_COMMIT"
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "POST_DB_COMMIT" -Force 2>&1 | Out-Null
+        $p2Exit = $LASTEXITCODE
+    } catch {
+        $p2Exit = 1
+    } finally {
+        $env:GMS_FAULT_INJECTION_PHASE = ""
+    }
+
+    # Step C: Capture state AFTER failure & compensating rollback
+    $DbAfter = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
+    $UploadsAfter = Get-UploadsFingerprint -UploadsDirectory $UploadDir
+
+    # Step D: Compare state
+    $DbRestored = (($DbBefore | ConvertTo-Json -Compress) -eq ($DbAfter | ConvertTo-Json -Compress))
+    $UploadsRestored = ($UploadsBefore -eq $UploadsAfter)
+    $MaintenanceActive = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
+
+    $p2Passed = ($p2Exit -ne 0) -and $DbRestored -and $UploadsRestored -and $MaintenanceActive
+    $p2Details = if ($p2Passed) {
+        "Operator detected failure (ExitCode=$p2Exit) -> DB 16 entities 100% restored identical -> Physical attachments 100% restored -> Maintenance mode strictly active."
+    } else {
+        "Phase 2 check failed: ExitCode=$p2Exit, DbRestored=$DbRestored, UploadsRestored=$UploadsRestored, MaintenanceActive=$MaintenanceActive"
+    }
+
+    Record-Drill-Phase -PhaseName "Phase 2: Post-DB-Commit Compensation" `
+        -Passed $p2Passed `
+        -Details $p2Details `
+        -DurationSeconds ((Get-Date) - $p2Start).TotalSeconds `
+        -EvidenceData @{
+            operatorExitCode = $p2Exit
+            dbFingerprintBefore = $DbBefore
+            dbFingerprintAfter = $DbAfter
+            databaseRestored = $DbRestored
+            uploadsHashBefore = $UploadsBefore
+            uploadsHashAfter = $UploadsAfter
+            uploadsRestored = $UploadsRestored
+            maintenanceActive = $MaintenanceActive
+        }
+} catch {
+    Record-Drill-Phase -PhaseName "Phase 2: Post-DB-Commit Compensation" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p2Start).TotalSeconds
+}
+
+# ------------------------------------------------------------------------------
+# Phase 3: Attachment Swap Failure & Uploads Tree Revert Drill
+# ------------------------------------------------------------------------------
+Write-Log "Executing Phase 3: Attachment Promotion Failure & Uploads Tree Revert Drill..."
+[datetime]$p3Start = Get-Date
+try {
+    [int]$p3Exit = 0
+    [bool]$p3Passed = $false
+    [string]$p3Details = ""
+
+    if (-not (Test-Path -Path $FixtureManifest)) {
+        throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
+    }
+
+    # Step A: Capture baseline state BEFORE fault injection
+    $DbBeforeP3 = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
+    $UploadsBeforeP3 = Get-UploadsFingerprint -UploadsDirectory $UploadDir
+
+    try {
+        $env:GMS_FAULT_INJECTION_PHASE = "ATTACHMENT_SWAP"
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -Force 2>&1 | Out-Null
+        $p3Exit = $LASTEXITCODE
+    } catch {
+        $p3Exit = 1
+    } finally {
+        $env:GMS_FAULT_INJECTION_PHASE = ""
+    }
+
+    # Step B: Capture state AFTER failure & verify uploads and DB are preserved/reverted
+    $DbAfterP3 = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
+    $UploadsAfterP3 = Get-UploadsFingerprint -UploadsDirectory $UploadDir
+
+    $UploadsPreservedP3 = ($UploadsBeforeP3 -eq $UploadsAfterP3)
+    $DbPreservedP3 = (($DbBeforeP3 | ConvertTo-Json -Compress) -eq ($DbAfterP3 | ConvertTo-Json -Compress))
+
+    $p3Passed = ($p3Exit -ne 0) -and $UploadsPreservedP3 -and $DbPreservedP3
+    $p3Details = if ($p3Passed) {
+        "Atomic rename and staging upload rollback verified: live uploads tree ($UploadsBeforeP3 == $UploadsAfterP3) and DB preserved and reverted upon attachment promotion exception (ExitCode=$p3Exit)."
+    } else {
+        "Failure: Attachment promotion fault was not handled fail-closed (ExitCode=$p3Exit, UploadsPreserved=$UploadsPreservedP3, DbPreserved=$DbPreservedP3)."
+    }
+
+    Record-Drill-Phase -PhaseName "Phase 3: Attachment Swap Rollback" `
+        -Passed $p3Passed `
+        -Details $p3Details `
+        -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds `
+        -EvidenceData @{
+            exitCode = $p3Exit
+            uploadsHashBefore = $UploadsBeforeP3
+            uploadsHashAfter = $UploadsAfterP3
+            uploadsPreserved = $UploadsPreservedP3
+            databasePreserved = $DbPreservedP3
+        }
+} catch {
+    Record-Drill-Phase -PhaseName "Phase 3: Attachment Swap Rollback" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds
+}
+
+# ------------------------------------------------------------------------------
+# Phase 4: Live Verification Discrepancy & Maintenance Freeze Drill
+# ------------------------------------------------------------------------------
+Write-Log "Executing Phase 4: Live Verification Discrepancy & Maintenance Freeze Drill..."
+[datetime]$p4Start = Get-Date
+try {
+    [int]$p4Exit = 0
+    [bool]$p4Passed = $false
+    [string]$p4Details = ""
+
+    if (-not (Test-Path -Path $FixtureManifest)) {
+        throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
+    }
+
+    try {
+        $env:GMS_FAULT_INJECTION_PHASE = "LIVE_VERIFICATION"
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "LIVE_VERIFICATION" -Force 2>&1 | Out-Null
+        $p4Exit = $LASTEXITCODE
+    } catch {
+        $p4Exit = 1
+    } finally {
+        $env:GMS_FAULT_INJECTION_PHASE = ""
+    }
+
+    $MaintenanceFlagActive = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
+    $p4Passed = ($p4Exit -ne 0) -and $MaintenanceFlagActive
+    $p4Details = if ($p4Passed) {
+        "Maintenance flag (/maintenance/active or maintenance.flag) verified present upon live count/hash discrepancy to freeze write traffic in inconsistent state (ExitCode=$p4Exit)."
+    } else {
+        "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze (ExitCode=$p4Exit, MaintenanceFlagActive=$MaintenanceFlagActive)."
+    }
+
+    Record-Drill-Phase -PhaseName "Phase 4: Maintenance Freeze on Discrepancy" `
+        -Passed $p4Passed `
+        -Details $p4Details `
+        -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds `
+        -EvidenceData @{
+            exitCode = $p4Exit
+            maintenanceFreezeActive = $MaintenanceFlagActive
+            maintenanceActiveExists = (Test-Path "$ProjectRootDir\maintenance\active")
+            maintenanceFlagExists = (Test-Path "$ProjectRootDir\maintenance.flag")
+        }
+} catch {
+    Record-Drill-Phase -PhaseName "Phase 4: Maintenance Freeze on Discrepancy" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds
+}
+
+# ------------------------------------------------------------------------------
+# Phase 5: Fail-Closed HTTP Write Rejection during Maintenance Mode Drill
+# ------------------------------------------------------------------------------
+Write-Log "Executing Phase 5: Fail-Closed HTTP Write Rejection during Maintenance Mode Drill..."
+[datetime]$p5Start = Get-Date
+try {
+    # Ensure maintenance active flag is present
+    [string]$MaintDir = Join-Path -Path $ProjectRootDir -ChildPath "maintenance"
+    if (-not (Test-Path -Path $MaintDir -PathType Container)) {
+        New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
+    }
+    Set-Content -Path (Join-Path -Path $MaintDir -ChildPath "active") -Value "MAINTENANCE_DRILL_503" -Encoding utf8
+    Set-Content -Path (Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag") -Value "MAINTENANCE_DRILL_503" -Encoding utf8
+
+    [int]$statusCode = 0
+    [bool]$writeRejected = $false
+    [string]$codeString = "UNKNOWN"
+
+    try {
+        $response = Invoke-WebRequest `
+            -Uri "http://localhost:3001/api/gate/check-in" `
+            -Method POST `
+            -Headers @{ Authorization = "Bearer test_token" } `
+            -ContentType "application/json" `
+            -Body '{"driverName":"DrillTest"}' `
+            -TimeoutSec 3 `
+            -SkipHttpErrorCheck 2>$null
+
+        if ($response) {
+            $statusCode = $response.StatusCode
+            $writeRejected = ($statusCode -eq 503)
+            try {
+                $bodyObj = $response.Content | ConvertFrom-Json
+                if ($bodyObj.code) { $codeString = $bodyObj.code }
+            } catch {}
+        }
+    } catch {
+        # Strict fail-closed: If endpoint is unreachable, test FAILS (no source code fallback)
+        $statusCode = -1
+        $writeRejected = $false
+        $codeString = "HTTP_UNREACHABLE_OR_ERROR"
+    }
+
+    $p5Passed = $writeRejected
+    $p5Details = if ($p5Passed) {
+        "Fail-closed write freeze verified: HTTP mutating write requests are rejected with 503 ($codeString) during maintenance."
+    } else {
+        "FAIL-CLOSED violation: write API did not return 503 during maintenance (StatusCode=$statusCode, Code=$codeString)."
+    }
+
+    Record-Drill-Phase -PhaseName "Phase 5: Maintenance HTTP Write Rejection (503)" `
+        -Passed $p5Passed `
+        -Details $p5Details `
+        -DurationSeconds ((Get-Date) - $p5Start).TotalSeconds `
+        -EvidenceData @{
+            statusCode = $statusCode
+            code = $codeString
+            maintenanceActive = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
+            writeRejected = $writeRejected
+        }
+} catch {
+    Record-Drill-Phase -PhaseName "Phase 5: Maintenance HTTP Write Rejection (503)" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p5Start).TotalSeconds
+}
+
+# ------------------------------------------------------------------------------
+# Summarize and Save Evidence Artifact
+# ------------------------------------------------------------------------------
+[bool]$AllDrillsPassed = ($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count -eq 0
+[double]$TotalDuration = ((Get-Date) - $DrillStartTime).TotalSeconds
+
+[double]$CalculatedRpoMinutes = 0.0
+if (Test-Path -Path $FixtureManifest) {
+    try {
+        $manObj = Get-Content -Path $FixtureManifest -Raw | ConvertFrom-Json
+        if ($manObj.createdAt) {
+            $createdDate = [datetime]::Parse($manObj.createdAt)
+            $CalculatedRpoMinutes = [math]::Round([math]::Max(0.0, ((Get-Date).ToUniversalTime() - $createdDate.ToUniversalTime()).TotalMinutes), 4)
+        }
+    } catch {}
+}
+
+$DrillEvidenceObj = @{
+    reportTitle = "Production Operator DR Failure-Injection & Resilience Evidence (P0-02)"
+    timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+    status = if ($AllDrillsPassed) { "PASSED" } else { "FAILED" }
+    rpoMinutes = $CalculatedRpoMinutes
+    rpoDefinition = "Elapsed duration since fixture manifest creation to drill completion (rehearsal delta)"
+    rtoSeconds = [math]::Round($TotalDuration, 2)
+    drillsSummary = @{
+        totalPhases = $script:TestResults.Count
+        passedPhases = ($script:TestResults | Where-Object { $_.status -eq "PASSED" }).Count
+        failedPhases = ($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count
+    }
+    phaseResults = $script:TestResults
+}
+
+[string]$EvidenceJsonPath = Join-Path -Path $ArtifactsDir -ChildPath "restore-failure-drill-evidence.json"
+Set-Content -Path $EvidenceJsonPath -Value ($DrillEvidenceObj | ConvertTo-Json -Depth 5) -Encoding utf8
+
+Write-Log "Saved DR drill evidence artifact to $EvidenceJsonPath"
+if ($AllDrillsPassed) {
+    Write-Log "SUCCESS: All 5 DR failure-injection phases PASSED with verified fail-closed guarantees." -Level "SUCCESS"
+    exit 0
+} else {
+    Write-Log "ERROR: One or more DR failure-injection phases FAILED!" -Level "ERROR"
+    exit 1
+}

@@ -10,13 +10,31 @@
 # - Strictly Non-Destructive Recovery
 # ==============================================================================
 
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$ComposeFilePath = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$EnvFilePath = "",
+
+    [Parameter(Mandatory=$false)]
+    [bool]$RequireFrontend = $true,
+
+    [Parameter(Mandatory=$false)]
+    [bool]$RequireNginx = $false
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # --- Parameters & Canonical Absolute Paths ---
 [string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
-[string]$ComposeFilePath = Join-Path -Path $ProjectRootDir -ChildPath "docker-compose.prod.yml"
-[string]$EnvFilePath     = Join-Path -Path $ProjectRootDir -ChildPath "backend\.env"
+if (-not $ComposeFilePath) {
+    $ComposeFilePath = Join-Path -Path $ProjectRootDir -ChildPath "docker-compose.prod.yml"
+}
+if (-not $EnvFilePath) {
+    $EnvFilePath = Join-Path -Path $ProjectRootDir -ChildPath "backend\.env"
+}
 [string]$LogDir           = "C:\GMS_Logs"
 [string]$LogFilePath      = Join-Path -Path $LogDir -ChildPath "autostart.log"
 [string]$EventLogSource   = "GMS_Watchdog"
@@ -153,7 +171,7 @@ try {
 
     while (-not $PostgresHealthy -and $PgCheckCount -lt 20) {
         $PgCheckCount++
-        [string]$PgContainerId = (& docker compose -f $ComposeFilePath ps -q postgres 2>&1).ToString().Trim()
+        [string]$PgContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q postgres 2>&1).ToString().Trim()
         
         if ($PgContainerId) {
             [string]$PgStatus = (& docker inspect --format="{{.State.Health.Status}}" $PgContainerId 2>&1).ToString().Trim()
@@ -167,7 +185,7 @@ try {
     }
 
     if (-not $PostgresHealthy) {
-        Write-SanitizedLog -Message "PostgreSQL status check warning: Container did not report healthy within expected window." -Level "WARN"
+        throw "PostgreSQL database container failed to reach healthy state after retries."
     }
 
     # --- Step 7: Wait for Backend Application Endpoint Readiness ---
@@ -178,7 +196,7 @@ try {
     while (-not $BackendReady -and $BackendCheckCount -lt 15) {
         $BackendCheckCount++
         try {
-            [string]$BackendContainerId = (& docker compose -f $ComposeFilePath ps -q backend 2>&1).ToString().Trim()
+            [string]$BackendContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q backend 2>&1).ToString().Trim()
             if ($BackendContainerId) {
                 [string]$HealthStatus = (& docker inspect --format="{{.State.Health.Status}}" $BackendContainerId 2>&1).ToString().Trim()
                 if ($HealthStatus -eq "healthy") {
@@ -190,6 +208,61 @@ try {
         } catch {}
         Start-Sleep -Seconds 4
     }
+
+    if (-not $BackendReady) {
+        throw "GMS Backend NestJS service failed to reach healthy state after retries."
+    }
+
+    # --- Step 7b: Verify Frontend and Reverse Proxy Container Status ---
+    Write-SanitizedLog -Message "Verifying Frontend and Web Gateway container health readiness..." -Level "INFO"
+    [string]$FrontendContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q frontend 2>&1).ToString().Trim()
+    if ($FrontendContainerId) {
+        [string]$feStatus = (& docker inspect --format="{{.State.Status}}" $FrontendContainerId 2>&1).ToString().Trim()
+        if ($feStatus -eq "running") {
+            Write-SanitizedLog -Message "GMS Frontend service is RUNNING." -Level "INFO"
+        } else {
+            throw "GMS Frontend service container is not running (State: $feStatus)."
+        }
+    } elseif ($RequireFrontend) {
+        throw "GMS Frontend service container was not found in compose stack."
+    }
+
+    [string]$NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx-proxy 2>&1).ToString().Trim()
+    if (-not $NginxContainerId) {
+        $NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
+    }
+    if ($NginxContainerId) {
+        [string]$ngStatus = (& docker inspect --format="{{.State.Status}}" $NginxContainerId 2>&1).ToString().Trim()
+        if ($ngStatus -eq "running") {
+            Write-SanitizedLog -Message "GMS Nginx reverse proxy service is RUNNING." -Level "INFO"
+        } else {
+            throw "GMS Nginx reverse proxy container is not running (State: $ngStatus)."
+        }
+    } elseif ($RequireNginx) {
+        throw "GMS Nginx reverse proxy container was not found in compose stack."
+    }
+
+    # --- Step 7c: Backend /api/health HTTP Smoke Check ---
+    Write-SanitizedLog -Message "Performing application HTTP readiness check on /api/health..." -Level "INFO"
+    [string]$HealthResp = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
+        const http = require('http');
+        const port = process.env.PORT || 3001;
+        const req = http.get('http://127.0.0.1:' + port + '/api/health', (res) => {
+            if (res.statusCode === 200) { process.exit(0); }
+            else {
+                console.error('HTTP Health Check returned status: ' + res.statusCode);
+                process.exit(1);
+            }
+        });
+        req.on('error', (err) => {
+            console.error('HTTP Health Check connection error: ' + err.message);
+            process.exit(1);
+        });
+    " 2>&1).ToString()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend /api/health HTTP readiness probe failed: $HealthResp"
+    }
+    Write-SanitizedLog -Message "Backend /api/health HTTP probe responded 200 OK [PASS]." -Level "SUCCESS"
 
     # --- Step 8: Final Summary & Verification Report ---
     Write-SanitizedLog -Message "GMS Production Auto-Recovery Watchdog completed SUCCESSFULLY in $($OverallTimer.Elapsed.TotalSeconds) seconds." -Level "SUCCESS"
