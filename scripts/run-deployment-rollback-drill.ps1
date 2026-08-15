@@ -129,11 +129,11 @@ FROM "$Table" t;
         try {
             $Hash = (& docker exec $Container psql -U $User -d $Database -t -A -c $Sql 2>&1).ToString().Trim()
         } catch {
-            $Hash = "ERROR"
+            throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
         }
 
         if ([string]::IsNullOrWhiteSpace($Hash) -or $Hash.Contains("ERROR") -or $Hash.Contains("fatal") -or $Hash.Contains("could not connect")) {
-            $Result[$Table] = "EMPTY"
+            throw "FATAL: Database fingerprint query returned error for table '$Table'. Output: $Hash"
         } else {
             $Result[$Table] = $Hash.Trim()
         }
@@ -195,6 +195,23 @@ function Get-RunningImageDigest {
         }
     } catch {}
     return "UNKNOWN"
+}
+
+function Get-ContainerHealth {
+    param([string]$ContainerName)
+    try {
+        $health = (& docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $ContainerName 2>&1).ToString().Trim()
+        $isHealthy = ($health -eq "healthy" -or $health -eq "running")
+        return @{
+            status = $health
+            healthy = $isHealthy
+        }
+    } catch {
+        return @{
+            status = "UNREACHABLE"
+            healthy = $false
+        }
+    }
 }
 
 # ------------------------------------------------------------------------------
@@ -272,8 +289,8 @@ $AfterState = @{
 [bool]$DbRestored = (($BeforeState.databaseFingerprint | ConvertTo-Json -Compress) -eq ($AfterState.databaseFingerprint | ConvertTo-Json -Compress))
 [bool]$UploadsRestored = ($BeforeState.uploadsFingerprint -eq $AfterState.uploadsFingerprint)
 [bool]$MigrationCountRestored = ($BeforeState.migrationCount -eq $AfterState.migrationCount)
-[bool]$BackendRestored = ($BeforeState.backendImage -eq $AfterState.backendImage) -or ($BeforeState.backendImage -eq "UNKNOWN")
-[bool]$FrontendRestored = ($BeforeState.frontendImage -eq $AfterState.frontendImage) -or ($BeforeState.frontendImage -eq "UNKNOWN")
+[bool]$BackendRestored = ($BeforeState.backendImage -ne "UNKNOWN") -and ($BeforeState.backendImage -eq $AfterState.backendImage)
+[bool]$FrontendRestored = ($BeforeState.frontendImage -ne "UNKNOWN") -and ($BeforeState.frontendImage -eq $AfterState.frontendImage)
 
 Write-Log "  Database 16-entity fingerprint equal: $DbRestored"
 Write-Log "  Physical uploads hash equal: $UploadsRestored"
@@ -294,8 +311,8 @@ try {
         $SmokeOutput = (& node $SmokeScript 2>&1 | Out-String)
         $SmokePassed = ($LASTEXITCODE -eq 0)
     } else {
-        $SmokePassed = $true
-        $SmokeOutput = "ci-e2e-smoke.js not located; skipping node smoke execution."
+        $SmokePassed = $false
+        $SmokeOutput = "MANDATORY: ci-e2e-smoke.js not located at $SmokeScript. Smoke verification cannot be skipped."
     }
 } catch {
     $SmokePassed = $false
@@ -313,7 +330,18 @@ if ($SmokePassed) {
 # ------------------------------------------------------------------------------
 [double]$RtoSeconds = [math]::Round(((Get-Date) - $DrillStartTime).TotalSeconds, 2)
 
-[bool]$DrillPassed = $DbRestored -and $UploadsRestored -and $MigrationCountRestored -and $SmokePassed
+$BackendHealth = Get-ContainerHealth "gate-system-backend"
+$FrontendHealth = Get-ContainerHealth "gate-system-frontend"
+$NginxHealth = Get-ContainerHealth "gate-system-nginx"
+
+[bool]$DrillPassed = $DbRestored `
+    -and $UploadsRestored `
+    -and $MigrationCountRestored `
+    -and $BackendRestored `
+    -and $FrontendRestored `
+    -and $SmokePassed `
+    -and $BackendHealth.healthy `
+    -and $FrontendHealth.healthy
 
 $EvidenceReport = @{
     reportTitle = "Production-like Coordinated Deployment Rollback Operator Evidence (P0-03)"
@@ -337,9 +365,12 @@ $EvidenceReport = @{
         migrationStateRestored = $MigrationCountRestored
         previousBackendDigestRestored = $BackendRestored
         previousFrontendDigestRestored = $FrontendRestored
-        nginxHealthy = $true
-        backendHealthy = $true
-        frontendHealthy = $true
+        nginxHealthy = $NginxHealth.healthy
+        backendHealthy = $BackendHealth.healthy
+        frontendHealthy = $FrontendHealth.healthy
+        nginxHealthStatus = $NginxHealth.status
+        backendHealthStatus = $BackendHealth.status
+        frontendHealthStatus = $FrontendHealth.status
         loginPassed = $SmokePassed
         businessSmokePassed = $SmokePassed
     }

@@ -511,6 +511,8 @@ jobs:
           DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
           E2E_API_URL: http://localhost:3001
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TESTED_MERGE_SHA: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
           echo "Initializing full-stack staging gate environment..."
@@ -546,8 +548,10 @@ jobs:
             const fs = require('fs');
             const manifest = {
               manifestType: 'CI_TEST_EVIDENCE',
-              release: process.env.GITHUB_SHA || 'local-sha',
-              gitSha: process.env.GITHUB_SHA || 'local-sha',
+              release: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              gitSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              sourceHeadSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              testedMergeSha: process.env.TESTED_MERGE_SHA || process.env.GITHUB_SHA || 'local-sha',
               timestamp: '$CI_TIMESTAMP',
               backend: { image: 'gms-backend', digest: '$BACKEND_IMAGE_ID', ciLocalImageId: '$BACKEND_IMAGE_ID' },
               frontend: { image: 'gms-frontend', digest: '$FRONTEND_IMAGE_ID', ciLocalImageId: '$FRONTEND_IMAGE_ID' }
@@ -601,7 +605,9 @@ jobs:
               reportTitle: 'Cross-Stack CI E2E & Business Smoke Verification Report',
               timestamp: '$CI_TIMESTAMP',
               status: verdictStatus,
-              gitSha: process.env.GITHUB_SHA || 'local-sha',
+              gitSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              sourceHeadSha: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
+              testedMergeSha: process.env.TESTED_MERGE_SHA || process.env.GITHUB_SHA || 'local-sha',
               verifiedMetrics: {
                 tableCount,
                 migrationCount,

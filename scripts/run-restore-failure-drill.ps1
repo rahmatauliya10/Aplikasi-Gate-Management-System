@@ -153,11 +153,11 @@ FROM "$Table" t;
         try {
             $Hash = (& docker exec $Container psql -U $User -d $Database -t -A -c $Sql 2>&1).ToString().Trim()
         } catch {
-            $Hash = "ERROR"
+            throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
         }
 
         if ([string]::IsNullOrWhiteSpace($Hash) -or $Hash.Contains("ERROR") -or $Hash.Contains("fatal") -or $Hash.Contains("could not connect")) {
-            $Result[$Table] = "EMPTY"
+            throw "FATAL: Database fingerprint query returned error for table '$Table'. Output: $Hash"
         } else {
             $Result[$Table] = $Hash.Trim()
         }
@@ -246,7 +246,7 @@ try {
         "Security vulnerability: Corrupted dump was not rejected by restore preflight check."
     }
 
-    Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details $p1Details -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds -EvidenceData @{ exitCode = $p1Exit; rejectedBeforeMutation = $true }
+    Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details $p1Details -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds -EvidenceData @{ exitCode = $p1Exit; rejectedBeforeMutation = $p1Passed }
 } catch {
     Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds
 } finally {
@@ -332,6 +332,10 @@ try {
         throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
     }
 
+    # Step A: Capture baseline state BEFORE fault injection
+    $DbBeforeP3 = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
+    $UploadsBeforeP3 = Get-UploadsFingerprint -UploadsDirectory $UploadDir
+
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "ATTACHMENT_SWAP"
         & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -Force 2>&1 | Out-Null
@@ -342,14 +346,31 @@ try {
         $env:GMS_FAULT_INJECTION_PHASE = ""
     }
 
-    $p3Passed = ($p3Exit -ne 0)
+    # Step B: Capture state AFTER failure & verify uploads and DB are preserved/reverted
+    $DbAfterP3 = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
+    $UploadsAfterP3 = Get-UploadsFingerprint -UploadsDirectory $UploadDir
+
+    $UploadsPreservedP3 = ($UploadsBeforeP3 -eq $UploadsAfterP3)
+    $DbPreservedP3 = (($DbBeforeP3 | ConvertTo-Json -Compress) -eq ($DbAfterP3 | ConvertTo-Json -Compress))
+
+    $p3Passed = ($p3Exit -ne 0) -and $UploadsPreservedP3 -and $DbPreservedP3
     $p3Details = if ($p3Passed) {
-        "Atomic rename and staging upload rollback verified: live uploads tree preserved and reverted upon attachment promotion exception (ExitCode=$p3Exit)."
+        "Atomic rename and staging upload rollback verified: live uploads tree ($UploadsBeforeP3 == $UploadsAfterP3) and DB preserved and reverted upon attachment promotion exception (ExitCode=$p3Exit)."
     } else {
-        "Failure: Attachment promotion fault was not handled fail-closed."
+        "Failure: Attachment promotion fault was not handled fail-closed (ExitCode=$p3Exit, UploadsPreserved=$UploadsPreservedP3, DbPreserved=$DbPreservedP3)."
     }
 
-    Record-Drill-Phase -PhaseName "Phase 3: Attachment Swap Rollback" -Passed $p3Passed -Details $p3Details -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds -EvidenceData @{ exitCode = $p3Exit; uploadsPreserved = $true }
+    Record-Drill-Phase -PhaseName "Phase 3: Attachment Swap Rollback" `
+        -Passed $p3Passed `
+        -Details $p3Details `
+        -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds `
+        -EvidenceData @{
+            exitCode = $p3Exit
+            uploadsHashBefore = $UploadsBeforeP3
+            uploadsHashAfter = $UploadsAfterP3
+            uploadsPreserved = $UploadsPreservedP3
+            databasePreserved = $DbPreservedP3
+        }
 } catch {
     Record-Drill-Phase -PhaseName "Phase 3: Attachment Swap Rollback" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds
 }
@@ -378,14 +399,24 @@ try {
         $env:GMS_FAULT_INJECTION_PHASE = ""
     }
 
-    $p4Passed = ($p4Exit -ne 0)
+    $MaintenanceFlagActive = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
+    $p4Passed = ($p4Exit -ne 0) -and $MaintenanceFlagActive
     $p4Details = if ($p4Passed) {
-        "Maintenance flag (/maintenance/active) strictly maintained upon live count/hash discrepancy to freeze write traffic in inconsistent state (ExitCode=$p4Exit)."
+        "Maintenance flag (/maintenance/active or maintenance.flag) verified present upon live count/hash discrepancy to freeze write traffic in inconsistent state (ExitCode=$p4Exit)."
     } else {
-        "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze."
+        "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze (ExitCode=$p4Exit, MaintenanceFlagActive=$MaintenanceFlagActive)."
     }
 
-    Record-Drill-Phase -PhaseName "Phase 4: Maintenance Freeze on Discrepancy" -Passed $p4Passed -Details $p4Details -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds -EvidenceData @{ exitCode = $p4Exit; maintenanceFreezeActive = $true }
+    Record-Drill-Phase -PhaseName "Phase 4: Maintenance Freeze on Discrepancy" `
+        -Passed $p4Passed `
+        -Details $p4Details `
+        -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds `
+        -EvidenceData @{
+            exitCode = $p4Exit
+            maintenanceFreezeActive = $MaintenanceFlagActive
+            maintenanceActiveExists = (Test-Path "$ProjectRootDir\maintenance\active")
+            maintenanceFlagExists = (Test-Path "$ProjectRootDir\maintenance.flag")
+        }
 } catch {
     Record-Drill-Phase -PhaseName "Phase 4: Maintenance Freeze on Discrepancy" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds
 }
@@ -404,9 +435,9 @@ try {
     Set-Content -Path (Join-Path -Path $MaintDir -ChildPath "active") -Value "MAINTENANCE_DRILL_503" -Encoding utf8
     Set-Content -Path (Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag") -Value "MAINTENANCE_DRILL_503" -Encoding utf8
 
-    [int]$statusCode = 503
-    [bool]$writeRejected = $true
-    [string]$codeString = "MAINTENANCE_MODE"
+    [int]$statusCode = 0
+    [bool]$writeRejected = $false
+    [string]$codeString = "UNKNOWN"
 
     try {
         $response = Invoke-WebRequest `
@@ -427,19 +458,17 @@ try {
             } catch {}
         }
     } catch {
-        # Fallback contract verification: inspect app.config.ts middleware definition for standard 503 response
-        $appConfigPath = Join-Path $ProjectRootDir "backend\src\app.config.ts"
-        if (Test-Path $appConfigPath) {
-            $appConfigContent = Get-Content $appConfigPath -Raw
-            $writeRejected = $appConfigContent.Contains("MAINTENANCE_MODE") -and $appConfigContent.Contains("503")
-        }
+        # Strict fail-closed: If endpoint is unreachable, test FAILS (no source code fallback)
+        $statusCode = -1
+        $writeRejected = $false
+        $codeString = "HTTP_UNREACHABLE_OR_ERROR"
     }
 
     $p5Passed = $writeRejected
     $p5Details = if ($p5Passed) {
         "Fail-closed write freeze verified: HTTP mutating write requests are rejected with 503 ($codeString) during maintenance."
     } else {
-        "FAIL-CLOSED violation: write API accepted traffic or did not return 503 during maintenance."
+        "FAIL-CLOSED violation: write API did not return 503 during maintenance (StatusCode=$statusCode, Code=$codeString)."
     }
 
     Record-Drill-Phase -PhaseName "Phase 5: Maintenance HTTP Write Rejection (503)" `
@@ -449,7 +478,7 @@ try {
         -EvidenceData @{
             statusCode = $statusCode
             code = $codeString
-            maintenanceActive = $true
+            maintenanceActive = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
             writeRejected = $writeRejected
         }
 } catch {
