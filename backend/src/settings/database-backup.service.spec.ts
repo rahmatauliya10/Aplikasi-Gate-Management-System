@@ -511,8 +511,7 @@ describe('DatabaseBackupService', () => {
     });
 
     it('should return UNKNOWN storageStatus when statfsSync fails or throws', async () => {
-      const originalStatfs = (fs as any).statfsSync;
-      (fs as any).statfsSync = jest.fn().mockImplementation(() => {
+      const spy = jest.spyOn(fs, 'statfsSync').mockImplementation(() => {
         throw new Error('Filesystem stat unavailable');
       });
 
@@ -521,23 +520,22 @@ describe('DatabaseBackupService', () => {
       expect(status.storageFreeBytes).toBeNull();
       expect(status.storagePercent).toBeNull();
 
-      (fs as any).statfsSync = originalStatfs;
+      spy.mockRestore();
     });
 
     it('should return KNOWN storageStatus when statfsSync succeeds', async () => {
-      const originalStatfs = (fs as any).statfsSync;
-      (fs as any).statfsSync = jest.fn().mockReturnValue({
+      const spy = jest.spyOn(fs, 'statfsSync').mockReturnValue({
         bavail: 1000,
         bsize: 1024,
         blocks: 4000,
-      });
+      } as any);
 
       const status = await service.getSystemStatus();
       expect(status.storageStatus).toBe('KNOWN');
       expect(status.storageFreeBytes).toBe(1000 * 1024);
       expect(status.storagePercent).toBe(75);
 
-      (fs as any).statfsSync = originalStatfs;
+      spy.mockRestore();
     });
   });
 });
