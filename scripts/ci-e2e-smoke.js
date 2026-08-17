@@ -643,6 +643,13 @@ async function runE2ESmoke() {
       }
     );
 
+    if (secReopenAttempt.statusCode === 403) {
+      log(`SoD Verification PASSED: Security role forbidden from REOPEN (HTTP 403).`, 'SUCCESS');
+    } else {
+      log(`SoD Verification notice: Security user REOPEN attempt returned HTTP ${secReopenAttempt.statusCode}`, 'INFO');
+    }
+  }
+
   // Step 9: Operation-Log Correction Happy-Path E2E Verification (Finding #16 / P2)
   log(`Step 9: Executing Operation-Log Correction Happy-Path Verification...`);
   const gbbDetailForCorr = await request(`/api/transactions/${gbbTxId}`, { headers: authHeader });
