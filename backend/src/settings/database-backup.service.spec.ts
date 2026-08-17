@@ -512,8 +512,7 @@ describe('DatabaseBackupService', () => {
 
     it('should return UNKNOWN storageStatus when backup dir path throws stat error', async () => {
       const originalEnv = process.env.LOCAL_BACKUP_DIR;
-      process.env.LOCAL_BACKUP_DIR =
-        '/invalid/non_existent_mount_path_xyz_123';
+      process.env.LOCAL_BACKUP_DIR = '/invalid/non_existent_mount_path_xyz_123';
 
       const status = await service.getSystemStatus();
       expect(status.storageStatus).toBe('UNKNOWN');
