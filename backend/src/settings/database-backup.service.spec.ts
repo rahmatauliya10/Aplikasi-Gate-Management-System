@@ -511,8 +511,8 @@ describe('DatabaseBackupService', () => {
     });
 
     it('should return UNKNOWN storageStatus when backup dir path throws stat error', async () => {
-      const originalDir = (service as any).localBackupDir;
-      (service as any).localBackupDir =
+      const originalEnv = process.env.LOCAL_BACKUP_DIR;
+      process.env.LOCAL_BACKUP_DIR =
         '/invalid/non_existent_mount_path_xyz_123';
 
       const status = await service.getSystemStatus();
@@ -520,7 +520,11 @@ describe('DatabaseBackupService', () => {
       expect(status.storageFreeBytes).toBeNull();
       expect(status.storagePercent).toBeNull();
 
-      (service as any).localBackupDir = originalDir;
+      if (originalEnv !== undefined) {
+        process.env.LOCAL_BACKUP_DIR = originalEnv;
+      } else {
+        delete process.env.LOCAL_BACKUP_DIR;
+      }
     });
 
     it('should calculate and return storageStatus from localBackupDir filesystem stats', async () => {
