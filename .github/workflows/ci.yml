@@ -629,6 +629,20 @@ jobs:
             console.log('All release metric assertions PASSED with valid evidence.');
           "
 
+          echo "Executing Nginx Deliberate Failure Regression Test (P0-02 Release Gate)..."
+          docker compose -f docker-compose.yml stop nginx-proxy 2>/dev/null || docker compose -f docker-compose.yml stop nginx 2>/dev/null || true
+          node -e "
+            const http = require('http');
+            const req = http.get('http://localhost:8080/health', () => {
+              console.error('CRITICAL GATE FAILURE: Gateway responded when Nginx was stopped!');
+              process.exit(1);
+            });
+            req.on('error', (err) => {
+              console.log('Deliberate Nginx Failure Gate PASSED: Gateway is fail-closed when Nginx is stopped.');
+              process.exit(0);
+            });
+          "
+
           docker compose down --volumes --remove-orphans
 
       - name: Upload Release Proof Evidence Artifacts (P0-01, P0-06 Evidence Gate)
@@ -641,5 +655,34 @@ jobs:
             deploy/release_manifest.json
           if-no-files-found: error
           retention-days: 90
+
+  container-security-scan:
+    name: Container Vulnerability Scan & Software Bill of Materials (SBOM)
+    runs-on: ubuntu-latest
+    needs: [fullstack-staging-gate]
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Build Container Images for Scanning
+        run: |
+          docker compose -f docker-compose.yml build
+
+      - name: Scan Backend Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'aplikasi-gate-management-system-backend:latest'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Scan Frontend Image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'aplikasi-gate-management-system-frontend:latest'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
 
 

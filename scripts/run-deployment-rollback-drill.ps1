@@ -341,7 +341,8 @@ $NginxHealth = Get-ContainerHealth "gate-system-nginx"
     -and $FrontendRestored `
     -and $SmokePassed `
     -and $BackendHealth.healthy `
-    -and $FrontendHealth.healthy
+    -and $FrontendHealth.healthy `
+    -and $NginxHealth.healthy
 
 $EvidenceReport = @{
     reportTitle = "Production-like Coordinated Deployment Rollback Operator Evidence (P0-03)"

@@ -72,8 +72,9 @@ export interface BackupSystemStatus {
   offsiteBackupStatus: 'VERIFIED' | 'PENDING' | 'FAILED' | 'NONE';
   lastRestoreTestDate: string | null;
   lastRestoreTestStatus: 'PASSED' | 'FAILED' | 'NONE';
-  storageFreeBytes: number;
-  storagePercent: number;
+  storageFreeBytes: number | null;
+  storagePercent: number | null;
+  storageStatus?: 'KNOWN' | 'UNKNOWN';
 }
 
 export interface DatabaseBackupPayload {
@@ -293,25 +294,27 @@ export class DatabaseBackupService
       }
     }
 
-    // P0-01 Fix: Calculate actual filesystem disk stats
-    let storageFreeBytes = 0;
-    let storagePercent = 0;
+    // P1-05 Fix: Calculate actual filesystem disk stats (No false-green fallbacks)
+    let storageFreeBytes: number | null = null;
+    let storagePercent: number | null = null;
+    let storageStatus: 'KNOWN' | 'UNKNOWN' = 'UNKNOWN';
+
     try {
       if (typeof fs.statfsSync === 'function') {
         const stats = fs.statfsSync(this.localBackupDir);
         storageFreeBytes = stats.bavail * stats.bsize;
         const totalBytes = stats.blocks * stats.bsize;
-        storagePercent = Math.round(
-          ((totalBytes - storageFreeBytes) / totalBytes) * 100,
-        );
+        if (totalBytes > 0) {
+          storagePercent = Math.round(
+            ((totalBytes - storageFreeBytes) / totalBytes) * 100,
+          );
+          storageStatus = 'KNOWN';
+        }
       } else {
-        // Fallback default if statfsSync not supported on environment
-        storageFreeBytes = 50 * 1024 * 1024 * 1024;
-        storagePercent = 35;
+        this.logger.warn('statfsSync not available on runtime environment; storage metrics marked UNKNOWN.');
       }
     } catch (e) {
-      storageFreeBytes = 50 * 1024 * 1024 * 1024;
-      storagePercent = 35;
+      this.logger.warn(`Failed to inspect filesystem statistics for ${this.localBackupDir}: ${(e as Error).message}. Marking storage metrics as UNKNOWN.`);
     }
 
     return {
@@ -325,6 +328,7 @@ export class DatabaseBackupService
       lastRestoreTestStatus,
       storageFreeBytes,
       storagePercent,
+      storageStatus,
     };
   }
 
@@ -684,7 +688,7 @@ export class DatabaseBackupService
             err.stack,
           );
           throw new InternalServerErrorException(
-            `Gagal menyimpan file backup ke media penyimpanan server (${err.message}). Periksa izin lokasi direktori atau ruang penyimpanan disk.`,
+            'Gagal menyimpan file backup ke media penyimpanan server. Periksa izin lokasi direktori atau ruang penyimpanan disk.',
           );
         }
       } else {
@@ -693,7 +697,7 @@ export class DatabaseBackupService
           e.stack,
         );
         throw new InternalServerErrorException(
-          `Gagal menyimpan file backup ke media penyimpanan server (${e.message}). Periksa izin lokasi direktori atau ruang penyimpanan disk.`,
+          'Gagal menyimpan file backup ke media penyimpanan server. Periksa izin lokasi direktori atau ruang penyimpanan disk.',
         );
       }
     }

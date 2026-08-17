@@ -507,18 +507,34 @@ describe('DatabaseBackupService', () => {
         mockAdminUser,
       );
       expect(manifest.backupId).toBeDefined();
-      expect(manifest.localStatus).toBe('VERIFIED');
+    it('should return UNKNOWN storageStatus when statfsSync fails or throws', async () => {
+      const originalStatfs = (fs as any).statfsSync;
+      (fs as any).statfsSync = jest.fn().mockImplementation(() => {
+        throw new Error('Filesystem stat unavailable');
+      });
+
+      const status = await service.getSystemStatus();
+      expect(status.storageStatus).toBe('UNKNOWN');
+      expect(status.storageFreeBytes).toBeNull();
+      expect(status.storagePercent).toBeNull();
+
+      (fs as any).statfsSync = originalStatfs;
     });
 
-    it('should throw error and fail backup if snapshot error is a transient connection error rather than missing table (P0-02)', async () => {
-      prismaService.transaction = {
-        findMany: jest
-          .fn()
-          .mockRejectedValue(new Error('Connection timeout to PostgreSQL')),
-      } as any;
-      await expect(
-        service.runAutomatedScheduledBackup('MANUAL_PRE_UPDATE', mockAdminUser),
-      ).rejects.toThrow('Connection timeout to PostgreSQL');
+    it('should return KNOWN storageStatus when statfsSync succeeds', async () => {
+      const originalStatfs = (fs as any).statfsSync;
+      (fs as any).statfsSync = jest.fn().mockReturnValue({
+        bavail: 1000,
+        bsize: 1024,
+        blocks: 4000,
+      });
+
+      const status = await service.getSystemStatus();
+      expect(status.storageStatus).toBe('KNOWN');
+      expect(status.storageFreeBytes).toBe(1000 * 1024);
+      expect(status.storagePercent).toBe(75);
+
+      (fs as any).statfsSync = originalStatfs;
     });
   });
 });

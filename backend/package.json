@@ -99,6 +99,8 @@
       "src/**/*.service.ts",
       "src/**/*.util.ts",
       "src/**/*.guard.ts",
+      "src/**/*.validator.ts",
+      "src/**/*.filter.ts",
       "src/common/state-machine/**/*.ts"
     ],
     "coverageDirectory": "./coverage",

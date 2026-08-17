@@ -199,8 +199,12 @@ export class AttachmentsService {
             );
           }
         }
+        this.logger.error(
+          `Failed to move physical file: ${moveErr.message}`,
+          moveErr.stack,
+        );
         throw new InternalServerErrorException(
-          `Gagal memindahkan berkas fisik ke lokasi permanen: ${moveErr.message}`,
+          'Gagal memindahkan berkas fisik ke lokasi permanen.',
         );
       }
 
@@ -230,7 +234,7 @@ export class AttachmentsService {
         err.stack,
       );
       throw new InternalServerErrorException(
-        `Gagal memproses lampiran: ${err.message}`,
+        'Gagal memproses lampiran. Hubungi administrator.',
       );
     }
   }
