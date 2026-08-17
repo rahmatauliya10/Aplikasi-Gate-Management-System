@@ -666,7 +666,8 @@ jobs:
 
       - name: Build Container Images for Scanning
         run: |
-          docker compose -f docker-compose.yml build
+          docker build -t aplikasi-gate-management-system-backend:latest ./backend
+          docker build -t aplikasi-gate-management-system-frontend:latest ./frontend
 
       - name: Scan Backend Image with Trivy
         uses: aquasecurity/trivy-action@master
@@ -683,6 +684,3 @@ jobs:
           format: 'table'
           exit-code: '0'
           severity: 'CRITICAL,HIGH'
-
-
-
