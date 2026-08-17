@@ -28,7 +28,7 @@ const COMMON_BLOCKED_PASSWORDS = new Set([
 ]);
 
 export function IsStrongNistPassword(validationOptions?: ValidationOptions) {
-  return function (object: Object, propertyName: string) {
+  return function (object: object, propertyName: string) {
     registerDecorator({
       name: 'isStrongNistPassword',
       target: object.constructor,
@@ -38,7 +38,7 @@ export function IsStrongNistPassword(validationOptions?: ValidationOptions) {
         validate(value: any, _args: ValidationArguments) {
           if (typeof value !== 'string') return false;
           if (value.length < 15 || value.length > 128) return false;
-          
+
           const normalized = value.trim().toLowerCase();
           if (COMMON_BLOCKED_PASSWORDS.has(normalized)) return false;
 

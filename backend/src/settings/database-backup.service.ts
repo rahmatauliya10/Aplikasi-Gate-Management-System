@@ -311,10 +311,14 @@ export class DatabaseBackupService
           storageStatus = 'KNOWN';
         }
       } else {
-        this.logger.warn('statfsSync not available on runtime environment; storage metrics marked UNKNOWN.');
+        this.logger.warn(
+          'statfsSync not available on runtime environment; storage metrics marked UNKNOWN.',
+        );
       }
     } catch (e) {
-      this.logger.warn(`Failed to inspect filesystem statistics for ${this.localBackupDir}: ${(e as Error).message}. Marking storage metrics as UNKNOWN.`);
+      this.logger.warn(
+        `Failed to inspect filesystem statistics for ${this.localBackupDir}: ${(e as Error).message}. Marking storage metrics as UNKNOWN.`,
+      );
     }
 
     return {

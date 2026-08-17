@@ -507,6 +507,9 @@ describe('DatabaseBackupService', () => {
         mockAdminUser,
       );
       expect(manifest.backupId).toBeDefined();
+      expect(manifest.localStatus).toBe('VERIFIED');
+    });
+
     it('should return UNKNOWN storageStatus when statfsSync fails or throws', async () => {
       const originalStatfs = (fs as any).statfsSync;
       (fs as any).statfsSync = jest.fn().mockImplementation(() => {
