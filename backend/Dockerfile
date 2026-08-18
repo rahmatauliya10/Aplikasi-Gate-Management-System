@@ -69,22 +69,16 @@ RUN npm ci --omit=dev --ignore-scripts
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # ------------------------------------------------------------------------------
-# Stage 4: Production Runtime (Zero npm/npx Minimal Alpine Container)
+# Stage 4: Production Runtime (Zero npm/npx Hardened Node 22 Alpine Container)
 # ------------------------------------------------------------------------------
-FROM alpine:3.21 AS runtime
+FROM node:22-alpine AS runtime
 
 RUN apk upgrade --no-cache && apk add --no-cache \
-    libstdc++ \
-    libgcc \
     postgresql-client \
     dumb-init \
-    && addgroup -g 1000 node \
-    && adduser -u 1000 -G node -s /bin/sh -D node
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 WORKDIR /app
-
-# Copy exact Node 22 binary directly from builder (guarantees identical v8/node version with zero npm/npx footprint)
-COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 
 # Copy production runtime bundle with native chown (strictly production node_modules from prod_deps stage)
 COPY --chown=node:node --from=prod_deps /app/package*.json ./
@@ -93,7 +87,7 @@ COPY --chown=node:node --from=builder /app/dist ./dist
 COPY --chown=node:node --from=builder /app/prisma ./prisma
 COPY --chown=node:node --from=builder /app/scripts ./scripts
 
-RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/node/.cache /home/node/.npm \
+RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/node/.cache \
     && chown -R node:node /home/node /app/uploads /app/backups /app/logs
 
 EXPOSE 3001

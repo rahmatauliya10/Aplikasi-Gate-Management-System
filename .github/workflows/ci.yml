@@ -564,7 +564,7 @@ jobs:
           docker compose -f docker-compose.prod.yml up -d
           
           echo "Waiting for backend to become healthy..."
-          timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-backend 2>/dev/null)" = "healthy" ]; do sleep 2; done'
+          timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-backend 2>/dev/null)" = "healthy" ]; do sleep 2; done' || (docker logs gate-system-backend && exit 1)
           
           echo "Waiting for nginx-proxy to become healthy..."
           timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-nginx 2>/dev/null)" = "healthy" ]; do sleep 1; done'

@@ -2,7 +2,7 @@
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
     "gitSha":  "04f694843997fd73c5fe58c7503ff14349351738",
-    "timestamp":  "2026-08-18T11:29:30.278Z",
+    "timestamp":  "2026-08-18T11:37:15.808Z",
     "artifactsCount":  40,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
@@ -30,8 +30,8 @@
                                                 "sizeBytes":  3762
                                             },
                       ".github\\workflows\\ci.yml":  {
-                                                         "sha256":  "abb472aae79c5c59fb661dbd13bc0771cde0c7492ff1d26057190a6b07934f07",
-                                                         "sizeBytes":  40470
+                                                         "sha256":  "fac715dd8eda46e59495df37987d22f0701f465465d0ec90c4d34bc0cb854831",
+                                                         "sizeBytes":  40517
                                                      },
                       ".github\\workflows\\release.yml":  {
                                                               "sha256":  "677265eecf07c1d2537c22a6fbeef1383b4c18c4b2027d05c50c7711c01e2f1c",
@@ -42,8 +42,8 @@
                                                              "sizeBytes":  18843
                                                          },
                       "backend\\Dockerfile":  {
-                                                  "sha256":  "75c94ce79109cad5e59d97e9a7002c0dfa0545fbc6a650493bd0ead859d4703a",
-                                                  "sizeBytes":  3994
+                                                  "sha256":  "c115280695c343fe4dee3e97096cfe480ea92273d4e46b970db3791deca7b9fa",
+                                                  "sizeBytes":  3810
                                               },
                       "backend\\src\\common\\validators\\blocked-passwords.data.ts":  {
                                                                                           "sha256":  "fbd44860657e758813bb69fbb4f76ed266b6bab2c4803c771f307020aa55eff9",
