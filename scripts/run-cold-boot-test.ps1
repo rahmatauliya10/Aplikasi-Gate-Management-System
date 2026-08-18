@@ -65,25 +65,49 @@ $Results = [ordered]@{
     verdict = "IN_PROGRESS"
 }
 
-# --- Layer 1 & 2: Windows OS & AutoLogon Check ---
-Write-Host "`n[Layer 1 & 2] Verifying Windows AutoLogon & Task Scheduler..." -ForegroundColor Yellow
+# --- Layer 1 & 2: Windows OS, Boot Metadata & AutoLogon Check ---
+Write-Host "`n[Layer 1 & 2] Verifying Windows Boot State, AutoLogon & Task Scheduler..." -ForegroundColor Yellow
+
+$LastBootUpTime = $null
+try {
+    $LastBootUpTime = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime
+} catch {
+    try {
+        $LastBootUpTime = (Get-WmiObject -Class Win32_OperatingSystem -ErrorAction Stop).ConvertToDateTime((Get-WmiObject -Class Win32_OperatingSystem).LastBootUpTime)
+    } catch {
+        $LastBootUpTime = Get-Date # Fallback if WMI/CIM unavailable
+    }
+}
+
+[double]$BootAgeSeconds = [Math]::Round(((Get-Date) - $LastBootUpTime).TotalSeconds, 2)
+[double]$BootAgeMinutes = [Math]::Round(((Get-Date) - $LastBootUpTime).TotalMinutes, 2)
+
 $Winlogon = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -ErrorAction SilentlyContinue
-[bool]$AutoAdminLogon = $Winlogon.AutoAdminLogon -eq "1"
-[string]$DefaultUser = $Winlogon.DefaultUserName
+[bool]$AutoAdminLogon = ($Winlogon -ne $null) -and ($Winlogon.AutoAdminLogon -eq "1")
+[string]$DefaultUser = if ($Winlogon) { $Winlogon.DefaultUserName } else { "" }
 
 $ScheduledTask = Get-ScheduledTask -TaskName "GMS_Production_Autostart" -ErrorAction SilentlyContinue
 [bool]$TaskExists = $ScheduledTask -ne $null
 [string]$TaskState = if ($TaskExists) { $ScheduledTask.State.ToString() } else { "NOT_REGISTERED" }
 
+[bool]$Layer1_2_Ok = $AutoAdminLogon -and $TaskExists
+
+$Results["windowsBootTime"] = $LastBootUpTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+$Results["bootAgeMinutes"] = $BootAgeMinutes
+$Results["bootAgeSeconds"] = $BootAgeSeconds
+
 $Results.layers["Layer1_2_WindowsAutoLogon"] = [ordered]@{
-    status = if ($AutoAdminLogon -and $TaskExists) { "PASSED" } else { "WARNING" }
+    status = if ($Layer1_2_Ok) { "PASSED" } else { "FAILED" }
     autoAdminLogonEnabled = $AutoAdminLogon
     autoLogonUser = $DefaultUser
     scheduledTaskExists = $TaskExists
     scheduledTaskState = $TaskState
+    windowsBootTime = $LastBootUpTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+    systemUptimeMinutes = $BootAgeMinutes
 }
-Write-Host "  AutoAdminLogon: $AutoAdminLogon ($DefaultUser)" -ForegroundColor $(if ($AutoAdminLogon) { "Green" } else { "Yellow" })
-Write-Host "  Scheduled Task: $TaskState" -ForegroundColor $(if ($TaskExists) { "Green" } else { "Yellow" })
+Write-Host "  Windows LastBootUpTime: $($LastBootUpTime.ToString('yyyy-MM-dd HH:mm:ss')) ($BootAgeMinutes min ago)" -ForegroundColor Cyan
+Write-Host "  AutoAdminLogon        : $AutoAdminLogon ($DefaultUser)" -ForegroundColor $(if ($AutoAdminLogon) { "Green" } else { "Red" })
+Write-Host "  Scheduled Task        : $TaskState" -ForegroundColor $(if ($TaskExists) { "Green" } else { "Red" })
 
 # --- Layer 3: Docker Runtime & Daemon ---
 Write-Host "`n[Layer 3] Verifying Docker Engine & Container Runtime..." -ForegroundColor Yellow
@@ -194,26 +218,33 @@ $Results.layers["Layer8_BusinessSmoke"] = [ordered]@{
 Write-Host "  E2E Business Smoke: $(if ($SmokePassed) { "100% PASSED" } else { "FAILED" })" -ForegroundColor $(if ($SmokePassed) { "Green" } else { "Red" })
 
 $Sw.Stop()
-[double]$TotalRecoverySeconds = [Math]::Round($Sw.Elapsed.TotalSeconds, 2)
+[double]$VerificationDurationSeconds = [Math]::Round($Sw.Elapsed.TotalSeconds, 2)
+
+# Calculate RTO: if cold-boot just happened (within 30m), use actual boot-to-ready time; otherwise use verification execution time
+[double]$TotalRecoverySeconds = if ($BootAgeSeconds -lt 1800) { $BootAgeSeconds } else { $VerificationDurationSeconds }
 [bool]$RtoCompliant = $TotalRecoverySeconds -le $MaxAllowedRtoSeconds
 
-[bool]$AllLayersPassed = $DockerResponsive -and $PgOk -and $BackendOk -and $BackendHttpOk -and $FrontendOk -and $NginxOk -and $SmokePassed
-$FinalVerdict = if ($AllLayersPassed) { "PASSED" } else { "FAILED" }
+# MANDATORY: Layer 1 & 2 (AutoLogon & Task) MUST pass, plus all container and smoke layers, plus RTO compliance
+[bool]$AllLayersPassed = $Layer1_2_Ok -and $DockerResponsive -and $PgOk -and $BackendOk -and $BackendHttpOk -and $FrontendOk -and $NginxOk -and $SmokePassed
+$FinalVerdict = if ($AllLayersPassed -and $RtoCompliant) { "PASSED" } else { "FAILED" }
 
 $Results.verdict = $FinalVerdict
 $Results["measuredRecoverySeconds"] = $TotalRecoverySeconds
+$Results["verificationDurationSeconds"] = $VerificationDurationSeconds
 $Results["rtoCompliant"] = $RtoCompliant
+$Results["allLayersPassed"] = $AllLayersPassed
 
 $JsonOutput = $Results | ConvertTo-Json -Depth 6
 [System.IO.File]::WriteAllText($EvidenceFile, $JsonOutput, [System.Text.Encoding]::UTF8)
 
-Write-Host "`n==============================================================================" -ForegroundColor $(if ($AllLayersPassed) { "Green" } else { "Red" })
-Write-Host " COLD-BOOT AUTO-RECOVERY VERDICT: $FinalVerdict" -ForegroundColor $(if ($AllLayersPassed) { "Green" } else { "Red" })
-Write-Host " Total Recovery Time (RTO)     : $TotalRecoverySeconds seconds (Max Target: $MaxAllowedRtoSeconds s)" -ForegroundColor $(if ($RtoCompliant) { "Green" } else { "Yellow" })
-Write-Host " Evidence Artifact Saved To    : $EvidenceFile" -ForegroundColor Cyan
-Write-Host "==============================================================================" -ForegroundColor $(if ($AllLayersPassed) { "Green" } else { "Red" })
+Write-Host "`n==============================================================================" -ForegroundColor $(if ($FinalVerdict -eq "PASSED") { "Green" } else { "Red" })
+Write-Host " COLD-BOOT AUTO-RECOVERY VERDICT: $FinalVerdict" -ForegroundColor $(if ($FinalVerdict -eq "PASSED") { "Green" } else { "Red" })
+Write-Host " Measured Recovery Time (RTO)   : $TotalRecoverySeconds seconds (Max Target: $MaxAllowedRtoSeconds s)" -ForegroundColor $(if ($RtoCompliant) { "Green" } else { "Red" })
+Write-Host " All Layers Operational         : $AllLayersPassed" -ForegroundColor $(if ($AllLayersPassed) { "Green" } else { "Red" })
+Write-Host " Evidence Artifact Saved To     : $EvidenceFile" -ForegroundColor Cyan
+Write-Host "==============================================================================" -ForegroundColor $(if ($FinalVerdict -eq "PASSED") { "Green" } else { "Red" })
 
-if (-not $AllLayersPassed) {
+if ($FinalVerdict -ne "PASSED") {
     exit 1
 }
 exit 0

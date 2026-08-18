@@ -343,7 +343,7 @@ jobs:
         with:
           name: historical-rehearsal-evidence
           path: artifacts/release-proof/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90
 
   restore-failure-drill-gate:
@@ -416,7 +416,7 @@ jobs:
         with:
           name: restore-failure-drill-evidence
           path: artifacts/release-proof/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90
 
   post-migration-rollback-drill-gate:
@@ -489,7 +489,7 @@ jobs:
         with:
           name: post-migration-rollback-evidence
           path: artifacts/release-proof/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90
 
   fullstack-staging-gate:
@@ -660,7 +660,7 @@ jobs:
           path: |
             artifacts/release-proof/
             deploy/release_manifest.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90
 
   container-security-scan:
@@ -676,18 +676,41 @@ jobs:
           docker build -t aplikasi-gate-management-system-backend:latest ./backend
           docker build -t aplikasi-gate-management-system-frontend:latest ./frontend
 
-      - name: Scan Backend Image with Trivy
+      - name: Scan Backend Image with Trivy (Blocking Security Gate)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'aplikasi-gate-management-system-backend:latest'
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      - name: Scan Frontend Image with Trivy
+      - name: Scan Frontend Image with Trivy (Blocking Security Gate)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'aplikasi-gate-management-system-frontend:latest'
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
           severity: 'CRITICAL,HIGH'
+
+      - name: Install Syft SBOM Generator
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Generate CycloneDX SBOM for Backend & Frontend Images
+        run: |
+          mkdir -p artifacts/sbom
+          syft packages aplikasi-gate-management-system-backend:latest -o cyclonedx-json > artifacts/sbom/backend-sbom.cdx.json
+          syft packages aplikasi-gate-management-system-frontend:latest -o cyclonedx-json > artifacts/sbom/frontend-sbom.cdx.json
+          sha256sum artifacts/sbom/backend-sbom.cdx.json > artifacts/sbom/backend-sbom.cdx.json.sha256
+          sha256sum artifacts/sbom/frontend-sbom.cdx.json > artifacts/sbom/frontend-sbom.cdx.json.sha256
+          echo "Software Bill of Materials (SBOM) generated successfully:"
+          ls -la artifacts/sbom/
+
+      - name: Upload Software Bill of Materials (SBOM) Release Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-sbom-artifacts
+          path: artifacts/sbom/
+          if-no-files-found: error
+          retention-days: 90

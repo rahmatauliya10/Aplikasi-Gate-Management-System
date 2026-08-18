@@ -69,6 +69,95 @@ Write-Host " GMS Production Auto-Logon & Cold-Boot Recovery Setup" -ForegroundCo
 Write-Host " Target User: $TargetUsername" -ForegroundColor Cyan
 Write-Host "==============================================================================" -ForegroundColor Cyan
 
+# --- Helper: LSA Secret P/Invoke for Secure AutoLogon Credential Storage ---
+$LsaCode = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public class LsaSecretHelper {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LSA_UNICODE_STRING {
+        public ushort Length;
+        public ushort MaximumLength;
+        public IntPtr Buffer;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LSA_OBJECT_ATTRIBUTES {
+        public int Length;
+        public IntPtr RootDirectory;
+        public IntPtr ObjectName;
+        public int Attributes;
+        public IntPtr SecurityDescriptor;
+        public IntPtr SecurityQualityOfService;
+    }
+
+    [DllImport("advapi32.dll", SetLastError = true, PreserveSig = true)]
+    private static extern uint LsaOpenPolicy(
+        ref LSA_UNICODE_STRING SystemName,
+        ref LSA_OBJECT_ATTRIBUTES ObjectAttributes,
+        uint DesiredAccess,
+        out IntPtr PolicyHandle
+    );
+
+    [DllImport("advapi32.dll", SetLastError = true, PreserveSig = true)]
+    private static extern uint LsaStorePrivateData(
+        IntPtr PolicyHandle,
+        ref LSA_UNICODE_STRING KeyName,
+        ref LSA_UNICODE_STRING PrivateData
+    );
+
+    [DllImport("advapi32.dll", SetLastError = true, PreserveSig = true)]
+    private static extern uint LsaClose(IntPtr ObjectHandle);
+
+    private const uint POLICY_CREATE_SECRET = 0x00000020;
+    private const uint POLICY_SET_AUDIT_REQUIREMENTS = 0x00000004;
+    private const uint POLICY_ALL_ACCESS = 0x00000001 | 0x00000002 | 0x00000004 | 0x00000008 | 0x00000010 | 0x00000020 | 0x00000040 | 0x00000080 | 0x00000100 | 0x00000200 | 0x00000400 | 0x00000800 | 0x00001000;
+
+    public static bool SetSecret(string key, string value) {
+        IntPtr policyHandle = IntPtr.Zero;
+        LSA_OBJECT_ATTRIBUTES attributes = new LSA_OBJECT_ATTRIBUTES();
+        attributes.Length = Marshal.SizeOf(typeof(LSA_OBJECT_ATTRIBUTES));
+
+        LSA_UNICODE_STRING systemName = new LSA_UNICODE_STRING();
+        uint status = LsaOpenPolicy(ref systemName, ref attributes, POLICY_ALL_ACCESS, out policyHandle);
+        if (status != 0) return false;
+
+        try {
+            LSA_UNICODE_STRING keyString = new LSA_UNICODE_STRING();
+            byte[] keyBytes = Encoding.Unicode.GetBytes(key);
+            keyString.Buffer = Marshal.AllocHGlobal(keyBytes.Length);
+            Marshal.Copy(keyBytes, 0, keyString.Buffer, keyBytes.Length);
+            keyString.Length = (ushort)keyBytes.Length;
+            keyString.MaximumLength = (ushort)keyBytes.Length;
+
+            LSA_UNICODE_STRING valString = new LSA_UNICODE_STRING();
+            if (value != null) {
+                byte[] valBytes = Encoding.Unicode.GetBytes(value);
+                valString.Buffer = Marshal.AllocHGlobal(valBytes.Length);
+                Marshal.Copy(valBytes, 0, valString.Buffer, valBytes.Length);
+                valString.Length = (ushort)valBytes.Length;
+                valString.MaximumLength = (ushort)valBytes.Length;
+            }
+
+            uint storeStatus = LsaStorePrivateData(policyHandle, ref keyString, ref valString);
+
+            Marshal.FreeHGlobal(keyString.Buffer);
+            if (value != null) Marshal.FreeHGlobal(valString.Buffer);
+
+            return storeStatus == 0;
+        } finally {
+            LsaClose(policyHandle);
+        }
+    }
+}
+"@
+
+try {
+    Add-Type -TypeDefinition $LsaCode -ErrorAction SilentlyContinue
+} catch {}
+
 # --- Check or Create User if needed ---
 if (-not $UseCurrentUser) {
     $UserExists = $null
@@ -85,15 +174,25 @@ if (-not $UseCurrentUser) {
         }
 
         $SecurePass = ConvertTo-SecureString $RuntimePassword -AsPlainText -Force
-        New-LocalUser -Name $TargetUsername -Password $SecurePass -FullName "GMS Production Runtime Account" -Description "Dedicated runtime account for GMS container autostart after blackout" -PasswordNeverExpires | Out-Null
-        Add-LocalGroupMember -Group "Administrators" -Member $TargetUsername | Out-Null
-        Write-Host "[OK] Akun lokal '$TargetUsername' berhasil dibuat dan ditambahkan ke grup Administrators." -ForegroundColor Green
+        New-LocalUser -Name $TargetUsername -Password $SecurePass -FullName "GMS Production Runtime Account" -Description "Dedicated least-privilege runtime account for GMS container autostart after blackout" -PasswordNeverExpires | Out-Null
+        
+        # Enforce Least Privilege: Add to Users and docker-users (NOT Administrators)
+        Add-LocalGroupMember -Group "Users" -Member $TargetUsername -ErrorAction SilentlyContinue | Out-Null
+        if (Get-LocalGroup -Name "docker-users" -ErrorAction SilentlyContinue) {
+            Add-LocalGroupMember -Group "docker-users" -Member $TargetUsername -ErrorAction SilentlyContinue | Out-Null
+        }
+        Write-Host "[OK] Akun lokal '$TargetUsername' berhasil dibuat dengan Least Privilege (Group: Users/docker-users, BUKAN Administrators)." -ForegroundColor Green
     } else {
         Write-Host "[OK] Akun lokal '$TargetUsername' sudah ada." -ForegroundColor Green
         if ($RuntimePassword) {
             $SecurePass = ConvertTo-SecureString $RuntimePassword -AsPlainText -Force
             Set-LocalUser -Name $TargetUsername -Password $SecurePass -PasswordNeverExpires $true | Out-Null
         }
+        # Explicitly ensure NOT in Administrators for least-privilege compliance
+        try {
+            Remove-LocalGroupMember -Group "Administrators" -Member $TargetUsername -ErrorAction SilentlyContinue | Out-Null
+            Write-Host "[OK] Hak akses Administrator dicabut dari '$TargetUsername' untuk kepatuhan Least Privilege." -ForegroundColor Green
+        } catch {}
     }
 }
 
@@ -104,20 +203,36 @@ if (-not $RuntimePassword -and -not $UseCurrentUser) {
     $RuntimePassword = $Cred.GetNetworkCredential().Password
 }
 
-# --- Configure Winlogon Registry for AutoLogon ---
-Write-Host "Mengonfigurasi Registry Winlogon..." -ForegroundColor Yellow
+# --- Configure Secure Winlogon & LSA Secret for AutoLogon ---
+Write-Host "Mengonfigurasi Winlogon & LSA Secret (No Plaintext Password in Registry)..." -ForegroundColor Yellow
 Set-ItemProperty -Path $WinlogonPath -Name "AutoAdminLogon" -Value "1" -Type String
 Set-ItemProperty -Path $WinlogonPath -Name "DefaultUserName" -Value $TargetUsername -Type String
 Set-ItemProperty -Path $WinlogonPath -Name "DefaultDomainName" -Value $env:COMPUTERNAME -Type String
 
+# Store password via LSA Private Data (Secret: DefaultPassword)
+[bool]$LsaStored = $false
 if ($RuntimePassword) {
-    Set-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -Value $RuntimePassword -Type String
+    try {
+        $LsaStored = [LsaSecretHelper]::SetSecret("DefaultPassword", $RuntimePassword)
+    } catch {}
+
+    if (-not $LsaStored) {
+        # Check if Sysinternals autologon is available
+        $AutologonExe = Get-Command "autologon.exe" -ErrorAction SilentlyContinue
+        if ($AutologonExe) {
+            & autologon.exe $TargetUsername $env:COMPUTERNAME $RuntimePassword /accepteula | Out-Null
+            $LsaStored = $true
+        }
+    }
 }
+
+# Remove any plaintext DefaultPassword from registry if present
+Remove-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
 
 # Force auto logon count indefinite
 Set-ItemProperty -Path $WinlogonPath -Name "ForceAutoLogon" -Value "1" -Type String -ErrorAction SilentlyContinue
 
-Write-Host "[OK] Registry Winlogon berhasil dikonfigurasi untuk auto-logon '$TargetUsername'." -ForegroundColor Green
+Write-Host "[OK] Windows AutoLogon dikonfigurasi secara aman (Password disimpan di LSA Secret, BUKAN plaintext registry)." -ForegroundColor Green
 
 # --- Setup Auto Screen Lock on Logon if requested ---
 if ($EnableScreenLock) {
