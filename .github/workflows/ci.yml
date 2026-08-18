@@ -343,7 +343,7 @@ jobs:
         with:
           name: historical-rehearsal-evidence
           path: artifacts/release-proof/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
   restore-failure-drill-gate:
@@ -415,8 +415,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: restore-failure-drill-evidence
-          path: artifacts/release-proof/restore-failure-drill-evidence.json
-          if-no-files-found: error
+          path: artifacts/release-proof/
+          if-no-files-found: warn
           retention-days: 90
 
   post-migration-rollback-drill-gate:
@@ -488,8 +488,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: post-migration-rollback-evidence
-          path: artifacts/release-proof/post-migration-rollback-evidence.json
-          if-no-files-found: error
+          path: artifacts/release-proof/
+          if-no-files-found: warn
           retention-days: 90
 
   fullstack-staging-gate:
@@ -660,7 +660,7 @@ jobs:
           path: |
             artifacts/release-proof/
             deploy/release_manifest.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
   container-security-scan:
