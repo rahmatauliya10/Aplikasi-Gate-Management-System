@@ -517,7 +517,8 @@ jobs:
 
       - name: Set Production Mock Environment Variables
         run: |
-          mkdir -p /tmp/nas deploy/nginx/conf.d deploy/nginx/ssl
+          mkdir -p /tmp/nas deploy/nginx/conf.d deploy/nginx/ssl uploads maintenance backups/local logs
+          chmod -R 777 /tmp/nas uploads maintenance backups logs 2>/dev/null || true
           echo "BACKEND_IMAGE=gms-backend:ci-prod" >> $GITHUB_ENV
           echo "FRONTEND_IMAGE=gms-frontend:ci-prod" >> $GITHUB_ENV
           echo "MIGRATOR_IMAGE=gms-backend-migrator:ci-prod" >> $GITHUB_ENV
@@ -615,6 +616,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           echo "Initializing full-stack staging gate environment..."
+          mkdir -p /tmp/nas deploy/nginx/conf.d deploy/nginx/ssl uploads maintenance backups/local logs
+          chmod -R 777 /tmp/nas uploads maintenance backups logs 2>/dev/null || true
           cp backend/.env.example backend/.env 2>/dev/null || touch backend/.env
           echo "JWT_ACCESS_SECRET=test-jwt-access-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "JWT_REFRESH_SECRET=test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
