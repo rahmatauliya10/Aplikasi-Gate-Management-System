@@ -2,12 +2,12 @@
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
     "gitSha":  "04f694843997fd73c5fe58c7503ff14349351738",
-    "timestamp":  "2026-08-18T11:24:16.441Z",
-    "artifactsCount":  39,
+    "timestamp":  "2026-08-18T11:29:30.278Z",
+    "artifactsCount":  40,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
-                                                      "sha256":  "38460fbdeda0dca1996b949ae922072a0eb4f7e894484235dadb67025e42ca2d",
-                                                      "sizeBytes":  5723
+                                                      "sha256":  "4cb38f5b7aeb7f187572407840289b2eacfb0fbb725a90afc32fd8689305f138",
+                                                      "sizeBytes":  5834
                                                   },
                       "docker-compose.yml":  {
                                                  "sha256":  "0dca4df2ae4e7033dd8ddab0c2238f816d2dc93ca2f8dfc0b37677a06198e0b4",
@@ -21,6 +21,10 @@
                                                                                   "sha256":  "50b73e3655ba9b315268c23b310eeb623be94890c6bed5ff8cd0564af9e1a7b9",
                                                                                   "sizeBytes":  3106
                                                                               },
+                      "deploy\\postgres\\01-init-least-privilege-roles.sh":  {
+                                                                                 "sha256":  "145c0116454f32f7e5c2cd8d1bd45407d3bd34fff3ae56b26324e43a393f27df",
+                                                                                 "sizeBytes":  3076
+                                                                             },
                       ".trivyignore.yaml":  {
                                                 "sha256":  "8d0fc18fddf38f07f857e9693462c04659d22703b6a4829eccefd5cbc83deff8",
                                                 "sizeBytes":  3762

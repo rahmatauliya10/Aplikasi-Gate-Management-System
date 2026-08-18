@@ -63,6 +63,7 @@ $TargetPaths = @(
     "docker-compose.yml",
     "deploy\nginx\nginx.conf",
     "deploy\postgres\01-init-least-privilege-roles.sql",
+    "deploy\postgres\01-init-least-privilege-roles.sh",
     ".trivyignore.yaml",
     ".github\workflows\ci.yml",
     ".github\workflows\release.yml",
