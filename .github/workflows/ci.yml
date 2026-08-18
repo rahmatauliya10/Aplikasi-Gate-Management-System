@@ -704,7 +704,7 @@ jobs:
 
       - name: Install Syft SBOM Generator (Pinned Version v1.19.0)
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.19.0
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin v1.19.0
 
       - name: Generate CycloneDX SBOM for Runtime, Migrator & Frontend Images
         run: |
@@ -728,7 +728,7 @@ jobs:
 
       - name: Install Trivy Security Scanner
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.58.2
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.58.2
 
       - name: Scan Backend Runtime Image with Trivy (Blocking Security Gate)
         run: |
