@@ -540,7 +540,7 @@ jobs:
             -subj "/CN=localhost" \
             -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
-          chmod 600 deploy/nginx/ssl/server.key
+          chmod 644 deploy/nginx/ssl/server.key
           chmod 644 deploy/nginx/ssl/server.crt
 
           test -s deploy/nginx/ssl/server.crt
