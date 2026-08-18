@@ -30,11 +30,20 @@ RUN npm run build
 # ------------------------------------------------------------------------------
 # Stage 2: Migrator (Prisma CLI & Schema Deployment Operator Container)
 # ------------------------------------------------------------------------------
-FROM node:22-alpine AS migrator
+FROM alpine:3.21 AS migrator
 
-RUN apk upgrade --no-cache && apk add --no-cache postgresql-client dumb-init
+RUN apk upgrade --no-cache && apk add --no-cache \
+    libstdc++ \
+    libgcc \
+    postgresql-client \
+    dumb-init \
+    && addgroup -g 1000 node \
+    && adduser -u 1000 -G node -s /bin/sh -D node
 
 WORKDIR /app
+
+# Copy exact Node 22 binary directly from builder (zero global npm overhead)
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 
 # High-speed native chown copy avoids slow recursive layer chmod
 COPY --chown=node:node --from=builder /app/package*.json ./
@@ -49,7 +58,7 @@ RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/no
 USER node
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["npx", "prisma", "migrate", "deploy"]
+CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
 
 # ------------------------------------------------------------------------------
 # Stage 3: Production Dependencies Pruner

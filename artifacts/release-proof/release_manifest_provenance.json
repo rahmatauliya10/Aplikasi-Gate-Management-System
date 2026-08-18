@@ -2,7 +2,7 @@
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
     "gitSha":  "93d27810031bcf3dffdb571ff1827dc06381da22",
-    "timestamp":  "2026-08-18T09:34:56.183Z",
+    "timestamp":  "2026-08-18T09:44:49.161Z",
     "artifactsCount":  36,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
@@ -22,8 +22,8 @@
                                                                                   "sizeBytes":  3106
                                                                               },
                       ".trivyignore.yaml":  {
-                                                "sha256":  "5b589dba9d95b4ea1d562c36ada69219666ac0a7b85bd388b0ac32a807c85df9",
-                                                "sizeBytes":  3177
+                                                "sha256":  "cdaad8496ef9700175ba1c41c4216187cce13c01567aa415f49e132794e501b5",
+                                                "sizeBytes":  3598
                                             },
                       ".github\\workflows\\ci.yml":  {
                                                          "sha256":  "b90c91bd95f5da326714f95b87dc7e4e1fe9b4cf9831879f600b2f463f734bab",
@@ -38,8 +38,8 @@
                                                              "sizeBytes":  18843
                                                          },
                       "backend\\Dockerfile":  {
-                                                  "sha256":  "12ef431225db2390b21c141eb50cb00e09f431065c6c56d2d0bc7391cdbdd25a",
-                                                  "sizeBytes":  3630
+                                                  "sha256":  "e07dd16374059a19d6c30c774b0587742e9f0249f18bd49f1871826cde9772dc",
+                                                  "sizeBytes":  3918
                                               },
                       "frontend\\Dockerfile":  {
                                                    "sha256":  "dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b",
