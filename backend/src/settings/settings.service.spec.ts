@@ -47,7 +47,9 @@ describe('SettingsService', () => {
 
   describe('findAll', () => {
     it('should return all app settings ordered by key asc', async () => {
-      const mockSettings = [{ id: 'set-1', key: 'MAINTENANCE_MODE', value: 'false' }];
+      const mockSettings = [
+        { id: 'set-1', key: 'MAINTENANCE_MODE', value: 'false' },
+      ];
       mockPrisma.appSetting.findMany.mockResolvedValue(mockSettings);
 
       const result = await service.findAll(mockUser);
@@ -80,7 +82,7 @@ describe('SettingsService', () => {
       const mockResult = { id: 'set-2', ...dto };
       mockPrisma.appSetting.upsert.mockResolvedValue(mockResult);
 
-      const result = await service.upsert(dto as any, mockUser);
+      const result = await service.upsert(dto, mockUser);
       expect(result.success).toBe(true);
       expect(result.data).toEqual(mockResult);
       expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(

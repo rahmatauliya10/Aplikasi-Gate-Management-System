@@ -126,7 +126,7 @@ describe('AnnouncementsService', () => {
       const updatedItem = { ...oldAnnouncement, status: 'ACTIVE' };
       mockPrisma.announcement.update.mockResolvedValue(updatedItem);
 
-      const result = await service.update('ann-1', updateDto as any, mockUser);
+      const result = await service.update('ann-1', updateDto, mockUser);
       expect(result).toEqual(updatedItem);
       expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -139,7 +139,11 @@ describe('AnnouncementsService', () => {
 
   describe('remove', () => {
     it('should mark announcement INACTIVE and log action', async () => {
-      const oldAnnouncement = { id: 'ann-1', title: 'Notice', status: 'ACTIVE' };
+      const oldAnnouncement = {
+        id: 'ann-1',
+        title: 'Notice',
+        status: 'ACTIVE',
+      };
       mockPrisma.announcement.findUnique.mockResolvedValue(oldAnnouncement);
       mockPrisma.announcement.update.mockResolvedValue({
         ...oldAnnouncement,

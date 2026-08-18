@@ -58,7 +58,7 @@ describe('SystemIssuesService', () => {
 
       mockPrisma.systemIssue.create.mockResolvedValue(mockCreated);
 
-      const result = await service.create(dto as any, mockUser);
+      const result = await service.create(dto, mockUser);
 
       expect(result.success).toBe(true);
       expect(result.data).toEqual(mockCreated);
