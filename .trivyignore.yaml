@@ -16,7 +16,7 @@ vulnerabilities:
   - id: CVE-2026-40345
     purls:
       - pkg:npm/deepmerge-ts@7.1.5
-    statement: "DeepmergeTS recursive object graph stack exhaustion in dev tooling (@prisma/config). Non-exploitable in GMS runtime as deepmerge-ts is not exposed to untrusted external input and devDependencies are pruned in production."
+    statement: "DeepmergeTS recursive object graph stack exhaustion in migration tooling (@prisma/config in Prisma CLI). Non-exploitable in GMS as migrator runs exclusively trusted static schema files during migration deployment, is isolated on db-net, and is never exposed to untrusted external input. Runtime container is built with pruned production dependencies and does not contain this package."
     expired_at: 2026-11-30
 
   - id: CVE-2026-13149

@@ -3,7 +3,7 @@
 # ==============================================================================
 # Stage 1: Builder (Full build toolchain)
 # Stage 2: Migrator (Tooling container with Prisma CLI, npm, npx & Migration Preflights)
-# Stage 3: Prod-Deps (Prunes devDependencies to eliminate dev CVE surface)
+# Stage 3: Prod-Deps (Pristine production-only dependencies without dev CVE footprint)
 # Stage 4: Runtime (Ultra-minimal Alpine container with zero npm/npx attack surface)
 # ==============================================================================
 
@@ -52,11 +52,21 @@ ENTRYPOINT ["dumb-init", "--"]
 CMD ["npx", "prisma", "migrate", "deploy"]
 
 # ------------------------------------------------------------------------------
-# Stage 3: Production Dependencies Pruner
+# Stage 3: Pristine Production Dependencies (Zero devDependencies footprint)
 # ------------------------------------------------------------------------------
-FROM builder AS prod_deps
+FROM node:22-alpine AS prod_deps
+
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
-RUN npm prune --omit=dev
+
+COPY package*.json ./
+
+# Install exclusively production dependencies (eliminates @prisma/config, deepmerge-ts, etc.)
+RUN npm ci --omit=dev
+
+# Copy generated Prisma engine & client artifacts directly from builder
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # ------------------------------------------------------------------------------
 # Stage 4: Production Runtime (Zero npm/npx Minimal Alpine Container)

@@ -502,10 +502,92 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  production-compose-quality-gate:
+    name: Production Compose 3-Layer Validation & Boot Smoke Gate (P0-01 / P0-02)
+    runs-on: ubuntu-latest
+    needs: [backend-verification, frontend-verification]
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+
+      - name: Set Production Mock Environment Variables
+        run: |
+          mkdir -p /tmp/nas deploy/nginx/conf.d deploy/nginx/ssl
+          echo "BACKEND_IMAGE=gms-backend:ci-prod" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE=gms-frontend:ci-prod" >> $GITHUB_ENV
+          echo "MIGRATOR_IMAGE=gms-backend-migrator:ci-prod" >> $GITHUB_ENV
+          echo "POSTGRES_USER=postgres" >> $GITHUB_ENV
+          echo "POSTGRES_PASSWORD=testpassword_prod_gate_ci" >> $GITHUB_ENV
+          echo "POSTGRES_DB=gms" >> $GITHUB_ENV
+          echo "JWT_ACCESS_SECRET=test-jwt-access-secret-for-ci-pipeline-min-32-chars-long" >> $GITHUB_ENV
+          echo "JWT_REFRESH_SECRET=test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long" >> $GITHUB_ENV
+          echo "BACKUP_SIGNATURE_SECRET=test-backup-signature-secret-for-ci-pipeline-min-32-chars-long" >> $GITHUB_ENV
+          echo "CORS_ORIGIN=http://localhost:8080" >> $GITHUB_ENV
+          echo "NAS_MOUNT_PATH=/tmp/nas" >> $GITHUB_ENV
+          cp backend/.env.example backend/.env 2>/dev/null || touch backend/.env
+          echo "JWT_ACCESS_SECRET=test-jwt-access-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+          echo "JWT_REFRESH_SECRET=test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+          echo "BACKUP_SIGNATURE_SECRET=test-backup-signature-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+
+      - name: Gate 1 & 2 - Syntax, Variable Interpolation & Semantic Invariants Verification
+        run: |
+          echo "Step 1: Validating docker-compose.prod.yml syntax & variable interpolation..."
+          docker compose -f docker-compose.prod.yml config -q
+          echo "Step 2: Validating production compose semantic security assertions..."
+          docker compose -f docker-compose.prod.yml config --format json | node scripts/verify-production-compose.js
+
+      - name: Build Container Images for Production Compose Boot Smoke
+        run: |
+          echo "Building production container images..."
+          docker build --target runtime -t gms-backend:ci-prod ./backend
+          docker build --target migrator -t gms-backend-migrator:ci-prod ./backend
+          docker build -t gms-frontend:ci-prod ./frontend
+
+      - name: Gate 3 - Production Compose Boot Smoke Test
+        run: |
+          set -Eeuo pipefail
+          echo "Step 1: Starting PostgreSQL service in production isolation mode..."
+          docker compose -f docker-compose.prod.yml up -d postgres
+          
+          echo "Waiting for postgres to become healthy..."
+          timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-postgres 2>/dev/null)" = "healthy" ]; do sleep 1; done'
+          
+          echo "Step 2: Executing migrator in production compose..."
+          docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate deploy
+          
+          echo "Step 3: Starting production stack (backend, frontend, nginx-proxy)..."
+          docker compose -f docker-compose.prod.yml up -d
+          
+          echo "Waiting for backend to become healthy..."
+          timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-backend 2>/dev/null)" = "healthy" ]; do sleep 2; done'
+          
+          echo "Waiting for nginx-proxy to become healthy..."
+          timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-nginx 2>/dev/null)" = "healthy" ]; do sleep 1; done'
+          
+          echo "Step 4: Executing API health probe via Nginx reverse proxy..."
+          node -e "
+            const http = require('http');
+            http.get('http://localhost:8080/health', (res) => {
+              console.log('Nginx Proxy Health Status:', res.statusCode);
+              if (res.statusCode !== 200) process.exit(1);
+            }).on('error', (err) => {
+              console.error('Failed to reach gateway:', err);
+              process.exit(1);
+            });
+          "
+          
+          echo "Production compose 3-layer validation gate PASSED successfully."
+          docker compose -f docker-compose.prod.yml down --volumes --remove-orphans
+
   fullstack-staging-gate:
     name: Full-Stack Staging Stack & Cross-Stack E2E Gate (GBB / GSP / GBJ)
     runs-on: ubuntu-latest
-    needs: [backend-verification, frontend-verification, historical-migration-rehearsal-gate, restore-failure-drill-gate, post-migration-rollback-drill-gate]
+    needs: [backend-verification, frontend-verification, production-compose-quality-gate, historical-migration-rehearsal-gate, restore-failure-drill-gate, post-migration-rollback-drill-gate]
     steps:
       - name: Checkout Code Repository
         uses: actions/checkout@v4.2.2
@@ -676,7 +758,7 @@ jobs:
   container-security-scan:
     name: Container Vulnerability Scan & Software Bill of Materials (SBOM)
     runs-on: ubuntu-latest
-    needs: [fullstack-staging-gate]
+    needs: [fullstack-staging-gate, production-compose-quality-gate]
     steps:
       - name: Checkout Code Repository
         uses: actions/checkout@v4.2.2
@@ -733,6 +815,7 @@ jobs:
             --severity CRITICAL,HIGH \
             --exit-code 1 \
             --ignore-unfixed \
+            --show-suppressed \
             --ignorefile /workspace/.trivyignore.yaml \
             gms-backend:ci
 
@@ -747,6 +830,7 @@ jobs:
             --severity CRITICAL,HIGH \
             --exit-code 1 \
             --ignore-unfixed \
+            --show-suppressed \
             --ignorefile /workspace/.trivyignore.yaml \
             gms-backend-migrator:ci
 
@@ -761,5 +845,6 @@ jobs:
             --severity CRITICAL,HIGH \
             --exit-code 1 \
             --ignore-unfixed \
+            --show-suppressed \
             --ignorefile /workspace/.trivyignore.yaml \
             gms-frontend:ci
