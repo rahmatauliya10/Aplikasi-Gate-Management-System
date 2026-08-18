@@ -681,7 +681,7 @@ try {
         Write-Log "RESTORE FAILED OR INCOMPLETE! MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY." -Level "WARN"
         Write-Log "Maintenance flags ($MaintFlagPath & $MaintActivePath) have been preserved." -Level "WARN"
     }
-    
+
     # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database for security
     if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
         try {

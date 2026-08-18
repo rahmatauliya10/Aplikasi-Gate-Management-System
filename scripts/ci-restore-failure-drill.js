@@ -320,12 +320,12 @@ async function main() {
 
     const all16EntitiesMatch = mismatchedEntities.length === 0;
     const allFingerprintsMatch = mismatchedFingerprints.length === 0;
-    p2Passed = all16EntitiesMatch && allFingerprintsMatch;
-    p2Details = p2Passed
+    p3Passed = all16EntitiesMatch && allFingerprintsMatch;
+    p3Details = p3Passed
       ? 'Operator compensation logic safely caught post-DB-commit promotion exception and executed automatic DB rollback to pre-restore snapshot (100% 16-entity retention and deterministic content fingerprint equality).'
       : `Compensation rollback discrepancy detected: entities=${JSON.stringify(mismatchedEntities)}, fingerprints=${JSON.stringify(mismatchedFingerprints)}`;
 
-    p2Evidence = {
+    p3Evidence = {
       safetySnapshotCreated: fs.existsSync(tempSnapshotDump),
       preSnapshotEntities,
       postRollbackEntities,
@@ -403,20 +403,20 @@ async function main() {
     const postUploadHashMap = computeDirectoryHashMap(uploadsDir);
     const hashesMatch = JSON.stringify(preUploadHashMap) === JSON.stringify(postUploadHashMap);
 
-    p3Passed = hashesMatch && Object.keys(preUploadHashMap).length >= 2;
-    p3Details = p3Passed
+    p4Passed = hashesMatch && Object.keys(preUploadHashMap).length >= 2;
+    p4Details = p4Passed
       ? 'Atomic directory swap failure caught and entire uploads tree cleanly reverted to pre-restore snapshot with 100% hash reconciliation.'
       : 'Uploads directory hash mismatch after swap revert.';
-    p3Evidence = {
+    p4Evidence = {
       preUploadHashMap,
       postUploadHashMap,
       reconciledFileCount: Object.keys(postUploadHashMap).length,
-      uploadsPreserved: p3Passed
+      uploadsPreserved: p4Passed
     };
   } catch (err) {
-    p3Passed = false;
-    p3Details = `Phase 3 Failure: ${err.message}`;
-    p3Evidence = { error: err.message };
+    p4Passed = false;
+    p4Details = `Phase 4 Failure: ${err.message}`;
+    p4Evidence = { error: err.message };
   }
 
   const p4DurationSec = (Date.now() - p4Start) / 1000;
@@ -454,9 +454,9 @@ async function main() {
     // Fail-closed rule: upon discrepancy, maintenance flags MUST BE PRESERVED
     const maintPreserved = fs.existsSync(maintActivePath) && fs.existsSync(maintFlagPath);
 
-    p4Passed = discrepancyDetected && maintPreserved;
-    p4Details = 'Live record count discrepancy strictly triggered fail-closed rejection; maintenance freeze flags preserved to prevent inconsistent writes.';
-    p4Evidence = {
+    p5Passed = discrepancyDetected && maintPreserved;
+    p5Details = 'Live record count discrepancy strictly triggered fail-closed rejection; maintenance freeze flags preserved to prevent inconsistent writes.';
+    p5Evidence = {
       expectedCount: simulatedManifestExpectedUsers,
       actualCount: actualUsers,
       discrepancyDetected,

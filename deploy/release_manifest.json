@@ -1,0 +1,29 @@
+{
+  "manifestType": "PRODUCTION_RELEASE",
+  "release": "93d27810031bcf3dffdb571ff1827dc06381da22",
+  "gitSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
+  "ciPassedSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
+  "buildSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
+  "releaseSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
+  "timestamp": "2026-08-18T07:57:00.000Z",
+  "provenance": {
+    "sourceShaEqualsTestedSha": true,
+    "testedShaEqualsBuiltSha": true,
+    "builtShaEqualsReleaseSha": true
+  },
+  "backend": {
+    "image": "ghcr.io/rahmatauliya10/gms-backend",
+    "digest": "sha256:1460d3e06a59c942358b2aac0aa50c66f8e176805f2b5d32f09eb8eaa9dfda4e",
+    "repoDigest": "ghcr.io/rahmatauliya10/gms-backend@sha256:1460d3e06a59c942358b2aac0aa50c66f8e176805f2b5d32f09eb8eaa9dfda4e"
+  },
+  "migrator": {
+    "image": "ghcr.io/rahmatauliya10/gms-backend-migrator",
+    "digest": "sha256:1460d3e06a59c942358b2aac0aa50c66f8e176805f2b5d32f09eb8eaa9dfda4e",
+    "repoDigest": "ghcr.io/rahmatauliya10/gms-backend-migrator@sha256:1460d3e06a59c942358b2aac0aa50c66f8e176805f2b5d32f09eb8eaa9dfda4e"
+  },
+  "frontend": {
+    "image": "ghcr.io/rahmatauliya10/gms-frontend",
+    "digest": "sha256:dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b",
+    "repoDigest": "ghcr.io/rahmatauliya10/gms-frontend@sha256:dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b"
+  }
+}

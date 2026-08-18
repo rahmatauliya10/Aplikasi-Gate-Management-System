@@ -691,13 +691,13 @@ jobs:
         run: |
           echo "Verifying Node.js version in minimal runtime container..."
           docker run --rm gms-backend:ci node --version
-          
+
           echo "Verifying non-root execution user..."
           docker run --rm gms-backend:ci sh -c 'id'
-          
+
           echo "Verifying absence of npm binary in production runtime..."
           docker run --rm gms-backend:ci sh -c 'command -v npm && exit 1 || exit 0'
-          
+
           echo "Verifying absence of npx binary in production runtime..."
           docker run --rm gms-backend:ci sh -c 'command -v npx && exit 1 || exit 0'
           echo "Runtime container isolation verified: Zero-npm, Zero-npx, Non-root [PASS]"
