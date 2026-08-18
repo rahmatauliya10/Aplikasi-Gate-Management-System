@@ -12,7 +12,7 @@ ENV VITE_USE_MOCK_API=false
 RUN npm run build
 
 # Production Stage
-FROM nginx:stable-alpine as production-stage
+FROM nginx:1.27.4-alpine as production-stage
 COPY --from=build-stage /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80

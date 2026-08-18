@@ -107,10 +107,10 @@
     "testEnvironment": "node",
     "coverageThreshold": {
       "global": {
-        "statements": 40,
-        "branches": 30,
-        "functions": 40,
-        "lines": 40
+        "statements": 55,
+        "branches": 45,
+        "functions": 50,
+        "lines": 55
       },
       "./src/transactions/operation-log-correction.service.ts": {
         "statements": 78,

@@ -309,31 +309,35 @@ async function runAllScenarios() {
     const currentRev = txDetails.data.data?.revision || 1;
     const wbRecordId = txDetails.data.data?.weighbridgeRecords?.[0]?.id;
 
-    if (wbRecordId) {
-      // Simulate Admin A successful correction
-      const corrARes = await request('POST', `/api/transactions/${gbbTxId}/operation-log-corrections`, {
-        action: 'CORRECT_DATA',
-        expectedRevision: currentRev,
-        reasonCode: 'SALAH_INPUT_ANGKA',
-        remark: 'Admin A: Koreksi berat timbang awal',
-        items: [
-          { targetModule: 'WEIGHBRIDGE', targetRecordId: wbRecordId, fieldName: 'weight', newValue: 25500 }
-        ]
-      }, adminToken);
-      assertScenario('Admin A Correction Submission (Valid Revision) -> SUCCESS', corrARes.statusCode === 200 || corrARes.statusCode === 201);
+    assertScenario(
+      'Weighbridge record exists for correction test',
+      Boolean(wbRecordId),
+      { wbRecordId }
+    );
 
-      // Simulate Admin B concurrent submission with stale revision
-      const corrBRes = await request('POST', `/api/transactions/${gbbTxId}/operation-log-corrections`, {
-        action: 'CORRECT_DATA',
-        expectedRevision: currentRev, // Stale revision!
-        reasonCode: 'SALAH_INPUT_ANGKA',
-        remark: 'Admin B: Koreksi bersamaan dengan revisi lama',
-        items: [
-          { targetModule: 'WEIGHBRIDGE', targetRecordId: wbRecordId, fieldName: 'weight', newValue: 25600 }
-        ]
-      }, adminToken);
-      assertScenario('Admin B Concurrent Submission (Stale Revision) -> 409 CONFLICT', corrBRes.statusCode === 409, { status: corrBRes.statusCode });
-    }
+    // Simulate Admin A successful correction
+    const corrARes = await request('POST', `/api/transactions/${gbbTxId}/operation-log-corrections`, {
+      action: 'CORRECT_DATA',
+      expectedRevision: currentRev,
+      reasonCode: 'SALAH_INPUT_ANGKA',
+      remark: 'Admin A: Koreksi berat timbang awal',
+      items: [
+        { targetModule: 'WEIGHBRIDGE', targetRecordId: wbRecordId, fieldName: 'weight', newValue: 25500 }
+      ]
+    }, adminToken);
+    assertScenario('Admin A Correction Submission (Valid Revision) -> SUCCESS', corrARes.statusCode === 200 || corrARes.statusCode === 201);
+
+    // Simulate Admin B concurrent submission with stale revision
+    const corrBRes = await request('POST', `/api/transactions/${gbbTxId}/operation-log-corrections`, {
+      action: 'CORRECT_DATA',
+      expectedRevision: currentRev, // Stale revision!
+      reasonCode: 'SALAH_INPUT_ANGKA',
+      remark: 'Admin B: Koreksi bersamaan dengan revisi lama',
+      items: [
+        { targetModule: 'WEIGHBRIDGE', targetRecordId: wbRecordId, fieldName: 'weight', newValue: 25600 }
+      ]
+    }, adminToken);
+    assertScenario('Admin B Concurrent Submission (Stale Revision) -> 409 CONFLICT', corrBRes.statusCode === 409, { status: corrBRes.statusCode });
 
     // =========================================================================
     // --- Scenario 5: REOPEN Workflow & Re-execution to COMPLETED ---

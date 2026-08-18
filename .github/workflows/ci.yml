@@ -682,9 +682,9 @@ jobs:
           docker build -t aplikasi-gate-management-system-backend:latest ./backend
           docker build -t aplikasi-gate-management-system-frontend:latest ./frontend
 
-      - name: Install Syft SBOM Generator
+      - name: Install Syft SBOM Generator (Pinned Version v1.19.0)
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.19.0
 
       - name: Generate CycloneDX SBOM for Backend & Frontend Images
         run: |
@@ -705,7 +705,7 @@ jobs:
           retention-days: 90
 
       - name: Scan Backend Image with Trivy (Blocking Security Gate)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: 'aplikasi-gate-management-system-backend:latest'
           format: 'table'
@@ -715,7 +715,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Scan Frontend Image with Trivy (Blocking Security Gate)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: 'aplikasi-gate-management-system-frontend:latest'
           format: 'table'

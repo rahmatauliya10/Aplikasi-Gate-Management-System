@@ -27,7 +27,7 @@ param(
     [string]$ArtifactsDir = "",
 
     [Parameter(Mandatory=$false)]
-    [string]$HmacSecret = "test-backup-signature-secret-for-ci-pipeline-min-32-chars-long",
+    [string]$HmacSecret = "",
 
     [Parameter(Mandatory=$false)]
     [int]$MaxAllowedRtoSeconds = 600 # 10 minutes RTO target
@@ -126,20 +126,46 @@ try {
     Write-Host "  Dump SHA-256 Hash Verified [MATCH]." -ForegroundColor Green
 
     # Mandatory HMAC-SHA256 Signature Verification
-    if ($HmacSecret -and $ManifestContent.signature) {
-        $HmacAlg = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($HmacSecret))
-        $DumpBytes = [System.IO.File]::ReadAllBytes($LatestDump.FullName)
-        $CalculatedHmac = [BitConverter]::ToString($HmacAlg.ComputeHash($DumpBytes)).Replace("-","").ToLower()
-        if ($CalculatedHmac -ne $ManifestContent.signature.ToLower()) {
-            throw "FATAL: HMAC-SHA256 signature mismatch! Expected: $($ManifestContent.signature), Calculated: $CalculatedHmac"
+    if (-not $HmacSecret) {
+        if ($env:BACKUP_SIGNATURE_SECRET) {
+            $HmacSecret = $env:BACKUP_SIGNATURE_SECRET
+        } else {
+            throw "FATAL: BACKUP_SIGNATURE_SECRET is not set and HmacSecret parameter is empty. Unsigned NAS restore drills are strictly prohibited."
         }
-        Write-Host "  HMAC-SHA256 Signature Verified [MATCH]." -ForegroundColor Green
     }
+
+    if (-not $ManifestContent.signature) {
+        throw "FATAL: Manifest is missing mandatory HMAC-SHA256 signature field. Unsigned backup restore prohibited."
+    }
+
+    $HmacAlg = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($HmacSecret))
+    
+    # Check signature against backupId:dumpSha256
+    $PayloadStr = "$($ManifestContent.backupId):$CalculatedDumpSha"
+    $PayloadBytes = [System.Text.Encoding]::UTF8.GetBytes($PayloadStr)
+    $CalculatedHmac = [BitConverter]::ToString($HmacAlg.ComputeHash($PayloadBytes)).Replace("-","").ToLower()
+
+    # Also check against direct dump file bytes / raw dump sha for cross-compatibility
+    $RawShaBytes = [System.Text.Encoding]::UTF8.GetBytes($CalculatedDumpSha)
+    $RawShaHmac = [BitConverter]::ToString($HmacAlg.ComputeHash($RawShaBytes)).Replace("-","").ToLower()
+
+    [bool]$SigMatch = ($CalculatedHmac -eq $ManifestContent.signature.ToLower()) -or ($RawShaHmac -eq $ManifestContent.signature.ToLower())
+
+    if (-not $SigMatch) {
+        $DumpBytes = [System.IO.File]::ReadAllBytes($LatestDump.FullName)
+        $DumpBytesHmac = [BitConverter]::ToString($HmacAlg.ComputeHash($DumpBytes)).Replace("-","").ToLower()
+        $SigMatch = ($DumpBytesHmac -eq $ManifestContent.signature.ToLower())
+    }
+
+    if (-not $SigMatch) {
+        throw "FATAL: HMAC-SHA256 signature mismatch! Expected: $($ManifestContent.signature), Calculated: $CalculatedHmac"
+    }
+    Write-Host "  HMAC-SHA256 Signature Verified [MATCH]." -ForegroundColor Green
 
     $Evidence.steps["Step2_ChecksumVerification"] = [ordered]@{
         status = "PASSED"
         calculatedDumpSha256 = $CalculatedDumpSha
-        hmacVerified = [bool]($HmacSecret -and $ManifestContent.signature)
+        hmacVerified = $true
     }
 
     # --- Step 3: Spin Up Isolated Staging PostgreSQL Container ---

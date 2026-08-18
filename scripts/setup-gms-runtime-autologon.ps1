@@ -49,26 +49,6 @@ if (-not $IsAdmin) {
 
 $WinlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
 
-# --- Disable AutoLogon Mode ---
-if ($DisableAutoLogon) {
-    Write-Host "Menonaktifkan Windows AutoLogon..." -ForegroundColor Yellow
-    Set-ItemProperty -Path $WinlogonPath -Name "AutoAdminLogon" -Value "0" -Type String
-    Remove-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
-    Write-Host "[SUCCESS] Windows AutoLogon dinonaktifkan." -ForegroundColor Green
-    exit 0
-}
-
-# --- Determine Target User ---
-[string]$TargetUsername = $RuntimeUser
-if ($UseCurrentUser) {
-    $TargetUsername = [System.Environment]::UserName
-}
-
-Write-Host "==============================================================================" -ForegroundColor Cyan
-Write-Host " GMS Production Auto-Logon & Cold-Boot Recovery Setup" -ForegroundColor Cyan
-Write-Host " Target User: $TargetUsername" -ForegroundColor Cyan
-Write-Host "==============================================================================" -ForegroundColor Cyan
-
 # --- Helper: LSA Secret P/Invoke for Secure AutoLogon Credential Storage ---
 $LsaCode = @"
 using System;
@@ -158,6 +138,37 @@ try {
     Add-Type -TypeDefinition $LsaCode -ErrorAction SilentlyContinue
 } catch {}
 
+# --- Disable AutoLogon Mode ---
+if ($DisableAutoLogon) {
+    Write-Host "Menonaktifkan Windows AutoLogon & membersihkan LSA secret..." -ForegroundColor Yellow
+    Set-ItemProperty -Path $WinlogonPath -Name "AutoAdminLogon" -Value "0" -Type String
+    Remove-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+    
+    # Delete LSA Secret for DefaultPassword
+    try {
+        [LsaSecretHelper]::SetSecret("DefaultPassword", $null) | Out-Null
+    } catch {}
+
+    $AutologonExe = Get-Command "autologon.exe" -ErrorAction SilentlyContinue
+    if ($AutologonExe) {
+        try { & autologon.exe /accepteula -d 2>&1 | Out-Null } catch {}
+    }
+
+    Write-Host "[SUCCESS] Windows AutoLogon dan LSA secret berhasil dinonaktifkan/dibersihkan." -ForegroundColor Green
+    exit 0
+}
+
+# --- Determine Target User ---
+[string]$TargetUsername = $RuntimeUser
+if ($UseCurrentUser) {
+    $TargetUsername = [System.Environment]::UserName
+}
+
+Write-Host "==============================================================================" -ForegroundColor Cyan
+Write-Host " GMS Production Auto-Logon & Cold-Boot Recovery Setup" -ForegroundColor Cyan
+Write-Host " Target User: $TargetUsername" -ForegroundColor Cyan
+Write-Host "==============================================================================" -ForegroundColor Cyan
+
 # --- Check or Create User if needed ---
 if (-not $UseCurrentUser) {
     $UserExists = $null
@@ -224,10 +235,22 @@ if ($RuntimePassword) {
             $LsaStored = $true
         }
     }
+
+    if (-not $LsaStored) {
+        Remove-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+        throw "FATAL: Secure AutoLogon credential storage failed. Unable to store password in Windows LSA Secret or Sysinternals Autologon."
+    }
 }
 
 # Remove any plaintext DefaultPassword from registry if present
 Remove-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+
+# Hard verification: Ensure DefaultPassword property is absent from registry
+$ResidualPassword = Get-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+if ($ResidualPassword -and $ResidualPassword.DefaultPassword) {
+    Remove-ItemProperty -Path $WinlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
+    throw "FATAL: Plaintext DefaultPassword detected in registry after configuration. Configuration failed-closed."
+}
 
 # Force auto logon count indefinite
 Set-ItemProperty -Path $WinlogonPath -Name "ForceAutoLogon" -Value "1" -Type String -ErrorAction SilentlyContinue

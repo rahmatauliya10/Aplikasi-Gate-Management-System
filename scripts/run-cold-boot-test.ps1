@@ -75,8 +75,12 @@ try {
     try {
         $LastBootUpTime = (Get-WmiObject -Class Win32_OperatingSystem -ErrorAction Stop).ConvertToDateTime((Get-WmiObject -Class Win32_OperatingSystem).LastBootUpTime)
     } catch {
-        $LastBootUpTime = Get-Date # Fallback if WMI/CIM unavailable
+        throw "FATAL: Unable to obtain trusted Windows boot timestamp via CIM or WMI. Fail-closed cold boot verification."
     }
+}
+
+if (-not $LastBootUpTime) {
+    throw "FATAL: Windows LastBootUpTime is null or unavailable."
 }
 
 [double]$BootAgeSeconds = [Math]::Round(((Get-Date) - $LastBootUpTime).TotalSeconds, 2)
