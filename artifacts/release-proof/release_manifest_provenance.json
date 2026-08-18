@@ -2,12 +2,12 @@
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
     "gitSha":  "04f694843997fd73c5fe58c7503ff14349351738",
-    "timestamp":  "2026-08-18T11:09:23.813Z",
+    "timestamp":  "2026-08-18T11:15:11.878Z",
     "artifactsCount":  39,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
-                                                      "sha256":  "31445cd756d264aab626fb8f268cabefb9c06ed87bc889dc764f89022ca9c87e",
-                                                      "sizeBytes":  5846
+                                                      "sha256":  "2ea61184e9636a4372e62405722166311c0f412b7c8516e8974650154e7d76c3",
+                                                      "sizeBytes":  5870
                                                   },
                       "docker-compose.yml":  {
                                                  "sha256":  "0dca4df2ae4e7033dd8ddab0c2238f816d2dc93ca2f8dfc0b37677a06198e0b4",
@@ -26,7 +26,7 @@
                                                 "sizeBytes":  3762
                                             },
                       ".github\\workflows\\ci.yml":  {
-                                                         "sha256":  "629b6f44572e1a43c48eaef8263932f2f0b95ed6008a2b253b5994a79b591bd4",
+                                                         "sha256":  "abb472aae79c5c59fb661dbd13bc0771cde0c7492ff1d26057190a6b07934f07",
                                                          "sizeBytes":  40470
                                                      },
                       ".github\\workflows\\release.yml":  {

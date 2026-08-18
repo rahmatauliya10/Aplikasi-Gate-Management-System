@@ -181,6 +181,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
     logging:
       driver: "json-file"
       options:

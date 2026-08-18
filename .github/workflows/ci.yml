@@ -555,7 +555,7 @@ jobs:
           docker compose -f docker-compose.prod.yml up -d postgres
           
           echo "Waiting for postgres to become healthy..."
-          timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-postgres 2>/dev/null)" = "healthy" ]; do sleep 1; done'
+          timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-postgres 2>/dev/null)" = "healthy" ]; do sleep 1; done'
           
           echo "Step 2: Executing migrator in production compose..."
           docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate deploy
