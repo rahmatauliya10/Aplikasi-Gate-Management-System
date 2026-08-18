@@ -75,11 +75,39 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: runtime
     container_name: gate-system-backend
     restart: unless-stopped
     networks:
       - proxy-net
       - db-net
+
+  migrator:
+    image: ${MIGRATOR_IMAGE:-ghcr.io/rahmatauliya10/gms-backend-migrator:latest}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migrator
+    container_name: gate-system-migrator
+    restart: "no"
+    networks:
+      - db-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://${GMS_APP_USER:-gms_app}:${GMS_APP_PASSWORD:-${POSTGRES_PASSWORD:?POSTGRES_PASSWORD wajib diisi}}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
+      - NODE_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+      - ./backups/local:/app/backups/local
+      - audit_logs:/app/logs
     security_opt:
       - no-new-privileges:true
     cap_drop:

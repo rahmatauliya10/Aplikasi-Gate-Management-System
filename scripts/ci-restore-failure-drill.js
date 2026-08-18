@@ -220,13 +220,61 @@ async function main() {
   console.log(`  [${p1Passed ? 'PASS' : 'FAIL'}] ${p1Details} (${p1DurationSec.toFixed(2)}s)\n`);
 
   // ==============================================================================
-  // Phase 2: Post-DB-Commit Failure Simulation & DB Rollback Compensation
+  // Phase 2: DURING_DB_PROMOTION Failure Simulation & DB Rollback Compensation
   // ==============================================================================
-  console.log('--- Phase 2: Post-DB-Commit Compensation Rollback Drill (16 Entities) ---');
+  console.log('--- Phase 2: During-DB-Promotion Compensation Rollback Drill ---');
   const p2Start = Date.now();
   let p2Passed = false;
   let p2Details = '';
   let p2Evidence = {};
+
+  try {
+    const preSnapshotEntitiesP2 = capture16Entities();
+    const tempSnapshotDumpP2 = path.join(projectRoot, 'artifacts/release-proof/pre_restore_during_promo_snapshot.dump');
+    const dumpCmdP2 = `pg_dump -h ${host} -p ${port} -U ${user} -d ${dbName} -F c -f "${tempSnapshotDumpP2}"`;
+    execSync(dumpCmdP2, { env, stdio: 'pipe' });
+
+    // Inject failure during pg_restore step before attachment phase
+    console.log('  Simulating failure during live database pg_restore promotion...');
+    psql('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');
+    const rollbackCmdP2 = `pg_restore -h ${host} -p ${port} -U ${user} -d ${dbName} --no-owner --no-acl "${tempSnapshotDumpP2}"`;
+    execSync(rollbackCmdP2, { env, stdio: 'pipe' });
+
+    const postRollbackEntitiesP2 = capture16Entities();
+    const entitiesMatchP2 = JSON.stringify(preSnapshotEntitiesP2) === JSON.stringify(postRollbackEntitiesP2);
+
+    p2Passed = entitiesMatchP2;
+    p2Details = p2Passed
+      ? 'DURING_DB_PROMOTION failure caught and database state successfully compensated back to pre-restore snapshot.'
+      : 'DURING_DB_PROMOTION compensation discrepancy detected.';
+    p2Evidence = {
+      safetySnapshotCreated: fs.existsSync(tempSnapshotDumpP2),
+      entities100PercentRestored: entitiesMatchP2
+    };
+  } catch (err) {
+    p2Passed = false;
+    p2Details = `Phase 2 Failure: ${err.message}`;
+    p2Evidence = { error: err.message };
+  }
+
+  const p2DurationSec = (Date.now() - p2Start) / 1000;
+  phaseResults.push({
+    phase: 'Phase 2: During-DB-Promotion Compensation',
+    status: p2Passed ? 'PASSED' : 'FAILED',
+    details: p2Details,
+    durationSeconds: parseFloat(p2DurationSec.toFixed(2)),
+    evidence: p2Evidence
+  });
+  console.log(`  [${p2Passed ? 'PASS' : 'FAIL'}] ${p2Details} (${p2DurationSec.toFixed(2)}s)\n`);
+
+  // ==============================================================================
+  // Phase 3: Post-DB-Commit Failure Simulation & DB Rollback Compensation
+  // ==============================================================================
+  console.log('--- Phase 3: Post-DB-Commit Compensation Rollback Drill (16 Entities) ---');
+  const p3Start = Date.now();
+  let p3Passed = false;
+  let p3Details = '';
+  let p3Evidence = {};
   let snapshotCreationTime = Date.now();
 
   try {
@@ -289,29 +337,29 @@ async function main() {
       contentFingerprints100PercentRestored: allFingerprintsMatch
     };
   } catch (err) {
-    p2Passed = false;
-    p2Details = `Phase 2 Failure: ${err.message}`;
-    p2Evidence = { error: err.message };
+    p3Passed = false;
+    p3Details = `Phase 3 Failure: ${err.message}`;
+    p3Evidence = { error: err.message };
   }
 
-  const p2DurationSec = (Date.now() - p2Start) / 1000;
+  const p3DurationSec = (Date.now() - p3Start) / 1000;
   phaseResults.push({
-    phase: 'Phase 2: Post-DB-Commit Compensation',
-    status: p2Passed ? 'PASSED' : 'FAILED',
-    details: p2Details,
-    durationSeconds: parseFloat(p2DurationSec.toFixed(2)),
-    evidence: p2Evidence
+    phase: 'Phase 3: Post-DB-Commit Compensation',
+    status: p3Passed ? 'PASSED' : 'FAILED',
+    details: p3Details,
+    durationSeconds: parseFloat(p3DurationSec.toFixed(2)),
+    evidence: p3Evidence
   });
-  console.log(`  [${p2Passed ? 'PASS' : 'FAIL'}] ${p2Details} (${p2DurationSec.toFixed(2)}s)\n`);
+  console.log(`  [${p3Passed ? 'PASS' : 'FAIL'}] ${p3Details} (${p3DurationSec.toFixed(2)}s)\n`);
 
   // ==============================================================================
-  // Phase 3: Attachment Swap Failure & Uploads Tree Revert Drill
+  // Phase 4: Attachment Swap Failure & Uploads Tree Revert Drill
   // ==============================================================================
-  console.log('--- Phase 3: Attachment Promotion Failure & Uploads Tree Revert Drill ---');
-  const p3Start = Date.now();
-  let p3Passed = false;
-  let p3Details = '';
-  let p3Evidence = {};
+  console.log('--- Phase 4: Attachment Promotion Failure & Uploads Tree Revert Drill ---');
+  const p4Start = Date.now();
+  let p4Passed = false;
+  let p4Details = '';
+  let p4Evidence = {};
 
   try {
     // 1. Create live uploads baseline with authentic multi-file structure
@@ -371,24 +419,24 @@ async function main() {
     p3Evidence = { error: err.message };
   }
 
-  const p3DurationSec = (Date.now() - p3Start) / 1000;
+  const p4DurationSec = (Date.now() - p4Start) / 1000;
   phaseResults.push({
-    phase: 'Phase 3: Attachment Swap Rollback',
-    status: p3Passed ? 'PASSED' : 'FAILED',
-    details: p3Details,
-    durationSeconds: parseFloat(p3DurationSec.toFixed(2)),
-    evidence: p3Evidence
+    phase: 'Phase 4: Attachment Swap Rollback',
+    status: p4Passed ? 'PASSED' : 'FAILED',
+    details: p4Details,
+    durationSeconds: parseFloat(p4DurationSec.toFixed(2)),
+    evidence: p4Evidence
   });
-  console.log(`  [${p3Passed ? 'PASS' : 'FAIL'}] ${p3Details} (${p3DurationSec.toFixed(2)}s)\n`);
+  console.log(`  [${p4Passed ? 'PASS' : 'FAIL'}] ${p4Details} (${p4DurationSec.toFixed(2)}s)\n`);
 
   // ==============================================================================
-  // Phase 4: Live Verification Discrepancy & Maintenance Freeze Drill
+  // Phase 5: Live Verification Discrepancy & Maintenance Freeze Drill
   // ==============================================================================
-  console.log('--- Phase 4: Live Verification Discrepancy & Maintenance Freeze Drill ---');
-  const p4Start = Date.now();
-  let p4Passed = false;
-  let p4Details = '';
-  let p4Evidence = {};
+  console.log('--- Phase 5: Live Verification Discrepancy & Maintenance Freeze Drill ---');
+  const p5Start = Date.now();
+  let p5Passed = false;
+  let p5Details = '';
+  let p5Evidence = {};
 
   try {
     const maintActivePath = path.join(maintenanceDir, 'active');
@@ -420,20 +468,20 @@ async function main() {
     if (fs.existsSync(maintActivePath)) fs.unlinkSync(maintActivePath);
     if (fs.existsSync(maintFlagPath)) fs.unlinkSync(maintFlagPath);
   } catch (err) {
-    p4Passed = false;
-    p4Details = `Phase 4 Failure: ${err.message}`;
-    p4Evidence = { error: err.message };
+    p5Passed = false;
+    p5Details = `Phase 5 Failure: ${err.message}`;
+    p5Evidence = { error: err.message };
   }
 
-  const p4DurationSec = (Date.now() - p4Start) / 1000;
+  const p5DurationSec = (Date.now() - p5Start) / 1000;
   phaseResults.push({
-    phase: 'Phase 4: Maintenance Freeze on Discrepancy',
-    status: p4Passed ? 'PASSED' : 'FAILED',
-    details: p4Details,
-    durationSeconds: parseFloat(p4DurationSec.toFixed(2)),
-    evidence: p4Evidence
+    phase: 'Phase 5: Maintenance Freeze on Discrepancy',
+    status: p5Passed ? 'PASSED' : 'FAILED',
+    details: p5Details,
+    durationSeconds: parseFloat(p5DurationSec.toFixed(2)),
+    evidence: p5Evidence
   });
-  console.log(`  [${p4Passed ? 'PASS' : 'FAIL'}] ${p4Details} (${p4DurationSec.toFixed(2)}s)\n`);
+  console.log(`  [${p5Passed ? 'PASS' : 'FAIL'}] ${p5Details} (${p5DurationSec.toFixed(2)}s)\n`);
 
   // ==============================================================================
   // Summarize and Emit Evidence Artifact

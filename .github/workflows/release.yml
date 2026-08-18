@@ -1,0 +1,248 @@
+name: GMS Production Release & Supply Chain Attestation
+
+on:
+  workflow_run:
+    workflows: ["GMS Production CI & Security Quality Gate"]
+    types: [completed]
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: 'Exact Git commit SHA that passed CI quality gate'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  production-release:
+    name: Build, Publish Immutable Images & Generate Supply Chain Attestations
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch')
+    steps:
+      - name: Resolve and Verify Exact-SHA CI Passed Provenance Gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -Eeuo pipefail
+          echo "=============================================================================="
+          echo "Verifying Exact Git Commit SHA CI Status..."
+          echo "=============================================================================="
+          
+          TARGET_SHA=""
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            TARGET_SHA="$WORKFLOW_RUN_SHA"
+            echo "Triggered via workflow_run on master/main. Target SHA: $TARGET_SHA"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TARGET_SHA="$MANUAL_SHA"
+            echo "Triggered via workflow_dispatch. Validating CI status for SHA: $TARGET_SHA"
+            
+            # Query GitHub API to verify CI conclusion was 'success' for this exact commit SHA
+            API_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs?head_sha=${TARGET_SHA}&status=completed"
+            RESPONSE=$(curl -s -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" "$API_URL")
+            
+            SUCCESS_RUN=$(echo "$RESPONSE" | jq -r '.workflow_runs[] | select(.name == "GMS Production CI & Security Quality Gate" and .conclusion == "success") | .id' | head -n 1)
+            
+            if [ -z "$SUCCESS_RUN" ] || [ "$SUCCESS_RUN" = "null" ]; then
+              echo "CRITICAL SECURITY HARD FAIL: Exact commit SHA $TARGET_SHA has no successful 'GMS Production CI & Security Quality Gate' run recorded in GitHub Actions!"
+              exit 1
+            fi
+            echo "Verified successful CI run #$SUCCESS_RUN for commit $TARGET_SHA [PASS]"
+          else
+            echo "Unknown event trigger: $EVENT_NAME"
+            exit 1
+          fi
+          
+          echo "RELEASE_SHA=$TARGET_SHA" >> $GITHUB_ENV
+          echo "Target Release SHA successfully verified and bound: $TARGET_SHA"
+
+      - name: Checkout Verified Exact Git Commit
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4.2.0
+        with:
+          node-version: '22'
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set Canonical Image Identifiers
+        run: |
+          echo "IMAGE_BACKEND=ghcr.io/rahmatauliya10/gms-backend" >> $GITHUB_ENV
+          echo "IMAGE_MIGRATOR=ghcr.io/rahmatauliya10/gms-backend-migrator" >> $GITHUB_ENV
+          echo "IMAGE_FRONTEND=ghcr.io/rahmatauliya10/gms-frontend" >> $GITHUB_ENV
+
+      - name: Build & Push Backend Runtime Container Image
+        run: |
+          echo "Building minimal production backend runtime image (zero-npm)..."
+          docker build \
+            --target runtime \
+            -t ${{ env.IMAGE_BACKEND }}:${{ env.RELEASE_SHA }} \
+            -t ${{ env.IMAGE_BACKEND }}:latest \
+            ./backend
+          
+          docker push ${{ env.IMAGE_BACKEND }}:${{ env.RELEASE_SHA }}
+          docker push ${{ env.IMAGE_BACKEND }}:latest
+
+      - name: Build & Push Backend Migrator Container Image
+        run: |
+          echo "Building backend migrator image..."
+          docker build \
+            --target migrator \
+            -t ${{ env.IMAGE_MIGRATOR }}:${{ env.RELEASE_SHA }} \
+            -t ${{ env.IMAGE_MIGRATOR }}:latest \
+            ./backend
+          
+          docker push ${{ env.IMAGE_MIGRATOR }}:${{ env.RELEASE_SHA }}
+          docker push ${{ env.IMAGE_MIGRATOR }}:latest
+
+      - name: Build & Push Frontend Container Image
+        run: |
+          echo "Building production frontend image..."
+          docker build \
+            -t ${{ env.IMAGE_FRONTEND }}:${{ env.RELEASE_SHA }} \
+            -t ${{ env.IMAGE_FRONTEND }}:latest \
+            ./frontend
+          
+          docker push ${{ env.IMAGE_FRONTEND }}:${{ env.RELEASE_SHA }}
+          docker push ${{ env.IMAGE_FRONTEND }}:latest
+
+      - name: Capture Exact Immutable RepoDigests
+        run: |
+          BACKEND_REPO_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ env.IMAGE_BACKEND }}:${{ env.RELEASE_SHA }})
+          MIGRATOR_REPO_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ env.IMAGE_MIGRATOR }}:${{ env.RELEASE_SHA }})
+          FRONTEND_REPO_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ env.IMAGE_FRONTEND }}:${{ env.RELEASE_SHA }})
+          
+          BACKEND_DIGEST=$(echo "$BACKEND_REPO_DIGEST" | cut -d'@' -f2)
+          MIGRATOR_DIGEST=$(echo "$MIGRATOR_REPO_DIGEST" | cut -d'@' -f2)
+          FRONTEND_DIGEST=$(echo "$FRONTEND_REPO_DIGEST" | cut -d'@' -f2)
+          
+          echo "BACKEND_REPO_DIGEST=$BACKEND_REPO_DIGEST" >> $GITHUB_ENV
+          echo "MIGRATOR_REPO_DIGEST=$MIGRATOR_REPO_DIGEST" >> $GITHUB_ENV
+          echo "FRONTEND_REPO_DIGEST=$FRONTEND_REPO_DIGEST" >> $GITHUB_ENV
+          
+          echo "BACKEND_DIGEST=$BACKEND_DIGEST" >> $GITHUB_ENV
+          echo "MIGRATOR_DIGEST=$MIGRATOR_DIGEST" >> $GITHUB_ENV
+          echo "FRONTEND_DIGEST=$FRONTEND_DIGEST" >> $GITHUB_ENV
+          
+          echo "Captured RepoDigests:"
+          echo "  Backend:  $BACKEND_REPO_DIGEST"
+          echo "  Migrator: $MIGRATOR_REPO_DIGEST"
+          echo "  Frontend: $FRONTEND_REPO_DIGEST"
+
+      - name: Install Security Tools (Trivy & Syft)
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.58.2
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.19.0
+
+      - name: Scan Exact Pushed RepoDigests with Trivy
+        run: |
+          echo "Executing Trivy vulnerability scans on pushed images..."
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml "${{ env.BACKEND_REPO_DIGEST }}"
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml "${{ env.MIGRATOR_REPO_DIGEST }}"
+          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml "${{ env.FRONTEND_REPO_DIGEST }}"
+          echo "All published container images passed Trivy security gate."
+
+      - name: Generate CycloneDX SBOM for Published Images
+        run: |
+          mkdir -p artifacts/sbom artifacts/release-proof
+          syft packages "${{ env.BACKEND_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/backend-runtime-sbom.cdx.json
+          syft packages "${{ env.MIGRATOR_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/backend-migrator-sbom.cdx.json
+          syft packages "${{ env.FRONTEND_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/frontend-sbom.cdx.json
+          
+          sha256sum artifacts/sbom/backend-runtime-sbom.cdx.json > artifacts/sbom/backend-runtime-sbom.cdx.json.sha256
+          sha256sum artifacts/sbom/backend-migrator-sbom.cdx.json > artifacts/sbom/backend-migrator-sbom.cdx.json.sha256
+          sha256sum artifacts/sbom/frontend-sbom.cdx.json > artifacts/sbom/frontend-sbom.cdx.json.sha256
+
+      - name: Generate GitHub Artifact Attestation for Pushed Images
+        uses: actions/attest-build-provenance@v2.2.3
+        with:
+          subject-name: ${{ env.IMAGE_BACKEND }}
+          subject-digest: ${{ env.BACKEND_DIGEST }}
+          push-to-registry: true
+
+      - name: Generate GitHub Artifact Attestation for Migrator Image
+        uses: actions/attest-build-provenance@v2.2.3
+        with:
+          subject-name: ${{ env.IMAGE_MIGRATOR }}
+          subject-digest: ${{ env.MIGRATOR_DIGEST }}
+          push-to-registry: true
+
+      - name: Generate GitHub Artifact Attestation for Frontend Image
+        uses: actions/attest-build-provenance@v2.2.3
+        with:
+          subject-name: ${{ env.IMAGE_FRONTEND }}
+          subject-digest: ${{ env.FRONTEND_DIGEST }}
+          push-to-registry: true
+
+      - name: Emit Production Release Manifest & Provenance Bindings
+        run: |
+          mkdir -p deploy deploy/releases artifacts/release-proof
+          RELEASE_TIME=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          
+          node -e "
+            const fs = require('fs');
+            const manifest = {
+              manifestType: 'PRODUCTION_RELEASE',
+              release: '${{ env.RELEASE_SHA }}',
+              gitSha: '${{ env.RELEASE_SHA }}',
+              ciPassedSha: '${{ env.RELEASE_SHA }}',
+              buildSha: '${{ env.RELEASE_SHA }}',
+              releaseSha: '${{ env.RELEASE_SHA }}',
+              timestamp: '$RELEASE_TIME',
+              provenance: {
+                sourceShaEqualsTestedSha: true,
+                testedShaEqualsBuiltSha: true,
+                builtShaEqualsReleaseSha: true
+              },
+              backend: {
+                image: '${{ env.IMAGE_BACKEND }}',
+                digest: '${{ env.BACKEND_DIGEST }}',
+                repoDigest: '${{ env.BACKEND_REPO_DIGEST }}'
+              },
+              migrator: {
+                image: '${{ env.IMAGE_MIGRATOR }}',
+                digest: '${{ env.MIGRATOR_DIGEST }}',
+                repoDigest: '${{ env.MIGRATOR_REPO_DIGEST }}'
+              },
+              frontend: {
+                image: '${{ env.IMAGE_FRONTEND }}',
+                digest: '${{ env.FRONTEND_DIGEST }}',
+                repoDigest: '${{ env.FRONTEND_REPO_DIGEST }}'
+              }
+            };
+            
+            fs.writeFileSync('deploy/release_manifest.json', JSON.stringify(manifest, null, 2), 'utf8');
+            fs.writeFileSync('deploy/releases/${{ env.RELEASE_SHA }}.json', JSON.stringify(manifest, null, 2), 'utf8');
+            fs.writeFileSync('artifacts/release-proof/release_manifest.json', JSON.stringify(manifest, null, 2), 'utf8');
+            console.log('Production release manifest generated successfully:');
+            console.log(JSON.stringify(manifest, null, 2));
+          "
+
+      - name: Upload Complete Production Release Evidence Proofs
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-release-proof
+          path: |
+            deploy/release_manifest.json
+            deploy/releases/
+            artifacts/sbom/
+            artifacts/release-proof/
+          if-no-files-found: error
+          retention-days: 90

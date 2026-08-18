@@ -1,0 +1,15 @@
+# ==============================================================================
+# GMS Enterprise Vulnerability Exception & Suppression Registry (.trivyignore.yaml)
+# ==============================================================================
+# Governance Policy:
+#   Every ignored CVE entry must comply with official Trivy YAML schema:
+#     - id: CVE ID (e.g. CVE-2026-XXXXX)
+#     - purls: Specific Package URL (PURL) strings
+#     - statement: Technical justification and non-exploitability proof
+#     - expired_at: Expiry / review date (YYYY-MM-DD format)
+#
+# Usage:
+#   trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml <IMAGE>
+# ==============================================================================
+
+vulnerabilities: []
