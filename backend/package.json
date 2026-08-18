@@ -118,6 +118,7 @@
     "seed": "node dist/prisma/seed.js"
   },
   "overrides": {
-    "js-yaml": "^5.2.1"
+    "js-yaml": "^5.2.1",
+    "deepmerge-ts": "^8.0.3"
   }
 }
