@@ -201,8 +201,10 @@ jobs:
 
       - name: Install PostgreSQL Client Tools
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y postgresql-client
+          if ! command -v psql &> /dev/null || ! command -v pg_dump &> /dev/null; then
+            sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout="10" -y
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
 
       - name: Seed Historical Source DB & Generate Authenticated Test Fixtures
         env:
@@ -382,8 +384,10 @@ jobs:
 
       - name: Install PostgreSQL Client Tools
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y postgresql-client
+          if ! command -v psql &> /dev/null || ! command -v pg_dump &> /dev/null; then
+            sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout="10" -y
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
 
       - name: Seed Baseline Historical Database
         env:
@@ -455,8 +459,10 @@ jobs:
 
       - name: Install PostgreSQL Client Tools
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y postgresql-client
+          if ! command -v psql &> /dev/null || ! command -v pg_dump &> /dev/null; then
+            sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout="10" -y
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
 
       - name: Seed Baseline Historical Database
         env:
