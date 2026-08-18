@@ -36,6 +36,25 @@ describe('OWASP ASVS 5.0 (Req 6.2.4) & NIST SP 800-63B-4 Password Policy Validat
     expect(errors.length).toBe(0);
   });
 
+  it('should reject non-string values', async () => {
+    const dto = new ResetPasswordDto();
+    (dto as any).password = 123456789012345;
+
+    const errors = await validate(dto);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].constraints?.isStrongNistPassword).toContain(
+      'Password minimal 15 karakter',
+    );
+  });
+
+  it('should reject null or undefined values', async () => {
+    const dto = new ResetPasswordDto();
+    (dto as any).password = null;
+
+    const errors = await validate(dto);
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
   it('should reject passwords shorter than 15 characters', async () => {
     const dto = new ResetPasswordDto();
     dto.password = 'ShortPass123!';
@@ -43,6 +62,9 @@ describe('OWASP ASVS 5.0 (Req 6.2.4) & NIST SP 800-63B-4 Password Policy Validat
     const errors = await validate(dto);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors[0].property).toBe('password');
+    expect(errors[0].constraints?.isStrongNistPassword).toContain(
+      'NIST SP 800-63B-4 & OWASP ASVS 5.0',
+    );
   });
 
   it('should reject passwords longer than 128 characters', async () => {
