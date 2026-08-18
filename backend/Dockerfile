@@ -63,7 +63,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install exclusively production dependencies (skipping dev postinstall hook)
-RUN npm ci --omit=dev --ignore-scripts && npm rebuild --production
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy generated Prisma engine & client artifacts directly from builder
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma

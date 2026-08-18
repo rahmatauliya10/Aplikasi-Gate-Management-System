@@ -2,7 +2,7 @@
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
     "gitSha":  "04f694843997fd73c5fe58c7503ff14349351738",
-    "timestamp":  "2026-08-18T11:05:13.901Z",
+    "timestamp":  "2026-08-18T11:09:23.813Z",
     "artifactsCount":  39,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
@@ -38,8 +38,8 @@
                                                              "sizeBytes":  18843
                                                          },
                       "backend\\Dockerfile":  {
-                                                  "sha256":  "1e333d37ea5a946c64d700d865030dbdbfff12aa99a1a6a22b1e21d21c29d549",
-                                                  "sizeBytes":  4022
+                                                  "sha256":  "75c94ce79109cad5e59d97e9a7002c0dfa0545fbc6a650493bd0ead859d4703a",
+                                                  "sizeBytes":  3994
                                               },
                       "backend\\src\\common\\validators\\blocked-passwords.data.ts":  {
                                                                                           "sha256":  "fbd44860657e758813bb69fbb4f76ed266b6bab2c4803c771f307020aa55eff9",
