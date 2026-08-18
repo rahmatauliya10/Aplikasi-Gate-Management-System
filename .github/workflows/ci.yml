@@ -517,8 +517,37 @@ jobs:
 
       - name: Set Production Mock Environment Variables
         run: |
-          mkdir -p /tmp/nas deploy/nginx/conf.d deploy/nginx/ssl uploads maintenance backups/local logs
+          set -Eeuo pipefail
+          mkdir -p \
+            /tmp/nas \
+            deploy/nginx/conf.d \
+            deploy/nginx/ssl \
+            uploads \
+            maintenance \
+            backups/local \
+            logs
           chmod -R 777 /tmp/nas uploads maintenance backups logs 2>/dev/null || true
+
+          echo "Generating ephemeral TLS certificate for CI..."
+          openssl req \
+            -x509 \
+            -newkey rsa:2048 \
+            -sha256 \
+            -nodes \
+            -days 1 \
+            -keyout deploy/nginx/ssl/server.key \
+            -out deploy/nginx/ssl/server.crt \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+          chmod 600 deploy/nginx/ssl/server.key
+          chmod 644 deploy/nginx/ssl/server.crt
+
+          test -s deploy/nginx/ssl/server.crt
+          test -s deploy/nginx/ssl/server.key
+
+          echo "Ephemeral CI TLS certificate ready [PASS]"
+
           echo "BACKEND_IMAGE=gms-backend:ci-prod" >> $GITHUB_ENV
           echo "FRONTEND_IMAGE=gms-frontend:ci-prod" >> $GITHUB_ENV
           echo "MIGRATOR_IMAGE=gms-backend-migrator:ci-prod" >> $GITHUB_ENV
@@ -552,38 +581,36 @@ jobs:
       - name: Gate 3 - Production Compose Boot Smoke Test
         run: |
           set -Eeuo pipefail
-          echo "Step 1: Starting PostgreSQL service in production isolation mode..."
-          docker compose -f docker-compose.prod.yml up -d postgres
-          
-          echo "Waiting for postgres to become healthy..."
-          timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-postgres 2>/dev/null)" = "healthy" ]; do sleep 1; done'
-          
-          echo "Step 2: Executing migrator in production compose..."
-          docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate deploy
-          
-          echo "Step 3: Starting production stack (backend, frontend, nginx-proxy)..."
+          echo "Step 1: Starting entire production stack via Compose (with dependency ordering)..."
           docker compose -f docker-compose.prod.yml up -d
           
+          echo "Waiting for postgres to become healthy..."
+          timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-postgres 2>/dev/null)" = "healthy" ]; do sleep 1; done' || (docker logs gate-system-postgres && exit 1)
+
           echo "Waiting for backend to become healthy..."
           timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-backend 2>/dev/null)" = "healthy" ]; do sleep 2; done' || (docker logs gate-system-backend && exit 1)
           
+          echo "Waiting for frontend to become healthy..."
+          timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-frontend 2>/dev/null)" = "healthy" ]; do sleep 1; done' || (docker logs gate-system-frontend && exit 1)
+
           echo "Waiting for nginx-proxy to become healthy..."
-          timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-nginx 2>/dev/null)" = "healthy" ]; do sleep 1; done' || (docker logs gate-system-frontend && docker logs gate-system-nginx && exit 1)
+          timeout 45 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-nginx 2>/dev/null)" = "healthy" ]; do sleep 1; done' || (docker compose -f docker-compose.prod.yml ps && docker logs gate-system-nginx && exit 1)
           
-          echo "Step 4: Executing API health probe via Nginx reverse proxy..."
-          node -e "
-            const http = require('http');
-            http.get('http://localhost:8080/health', (res) => {
-              console.log('Nginx Proxy Health Status:', res.statusCode);
-              if (res.statusCode !== 200) process.exit(1);
-            }).on('error', (err) => {
-              console.error('Failed to reach gateway:', err);
-              process.exit(1);
-            });
-          "
-          
+          echo "Step 4A: Testing HTTP health endpoint..."
+          curl --fail --silent --show-error http://localhost:8080/health
+          echo ""
+
+          echo "Step 4B: Testing HTTPS/TLS health endpoint..."
+          curl --fail --silent --show-error --insecure https://localhost/health
+          echo ""
+
+          echo "HTTP + HTTPS production gateway probes PASSED [100% OK]."
           echo "Production compose 3-layer validation gate PASSED successfully."
-          docker compose -f docker-compose.prod.yml down --volumes --remove-orphans
+
+      - name: Cleanup Production Compose Smoke Environment
+        if: always()
+        run: |
+          docker compose -f docker-compose.prod.yml down --volumes --remove-orphans || true
 
   fullstack-staging-gate:
     name: Full-Stack Staging Stack & Cross-Stack E2E Gate (GBB / GSP / GBJ)
