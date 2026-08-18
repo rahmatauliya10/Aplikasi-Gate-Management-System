@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, master, develop, update-v1.0.0, 'update-*' ]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   backend-verification:
     name: Backend Test, Coverage, Build & Schema Validation (${{ matrix.db_state }})
@@ -134,6 +138,9 @@ jobs:
   security-vulnerability-audit:
     name: Dependency Security & Secret Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout Code Repository (Full History for Secret Scanning)
         uses: actions/checkout@v4.2.2
