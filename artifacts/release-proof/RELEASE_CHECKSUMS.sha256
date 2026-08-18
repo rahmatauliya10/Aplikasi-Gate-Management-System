@@ -1,4 +1,4 @@
-﻿aef4d6568a8726349b180d45c7775d994eb74bf9ac83b6cbbf6e268152e39494  docker-compose.prod.yml
+﻿31445cd756d264aab626fb8f268cabefb9c06ed87bc889dc764f89022ca9c87e  docker-compose.prod.yml
 0dca4df2ae4e7033dd8ddab0c2238f816d2dc93ca2f8dfc0b37677a06198e0b4  docker-compose.yml
 e0feed169ca5c06291b8834862f04852c5f45d58bdeb31e15b49c39761e28344  deploy\nginx\nginx.conf
 50b73e3655ba9b315268c23b310eeb623be94890c6bed5ff8cd0564af9e1a7b9  deploy\postgres\01-init-least-privilege-roles.sql
