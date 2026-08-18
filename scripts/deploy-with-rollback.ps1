@@ -275,12 +275,12 @@ try {
 
     # Step 1.2: Check migration checksums against canonical baseline prior to backup & execution
     Write-Host "[GMS Preflight] Validating migration history checksums and detecting schema drift..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run test:drift
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator npm run test:drift
     if ($LASTEXITCODE -ne 0) { throw "Schema migration checksum verification failed with exit code $LASTEXITCODE. Target migrations have drift!" }
 
     # Step 1.3: Trigger pre-deployment atomic database and attachment backup
     Write-Host "[GMS Preflight] Creating mandatory pre-deployment backup..." -ForegroundColor Cyan
-    $PredeployBackupLog = & docker compose -f $ComposeFile --env-file backend\.env run --rm backend node scripts/run-predeploy-backup.js 2>&1
+    $PredeployBackupLog = & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator node scripts/run-predeploy-backup.js 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Pre-deployment backup script terminated with error code $LASTEXITCODE: $PredeployBackupLog"
     }
@@ -350,14 +350,14 @@ try {
 
     # Step 1.6: Run database preflight duplicate audit
     Write-Host "[GMS Preflight] Running database preflight duplicate audit..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npm run prisma:preflight -- --report-only --fail-on-duplicates
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator npm run prisma:preflight -- --report-only --fail-on-duplicates
     if ($LASTEXITCODE -ne 0) { throw "Database preflight duplicate audit failed with exit code $LASTEXITCODE." }
 
     # Step 1.7: Execute forward database migration (Setting MigrationStarted = true right here)
     Write-Host "[GMS Migration] Applying Prisma database migrations forward (Target Release: $TargetReleaseTag)..." -ForegroundColor Cyan
     $MigrationStarted = $true
 
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm backend npx prisma migrate deploy
+    & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator npx prisma migrate deploy
     if ($LASTEXITCODE -ne 0) {
         throw "Prisma database migration deployment failed with exit code $LASTEXITCODE."
     }

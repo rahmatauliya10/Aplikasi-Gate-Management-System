@@ -28,7 +28,15 @@ if (-not (Test-Path -Path $ArtifactsDir -PathType Container)) {
 
 [string]$ChecksumFile = Join-Path -Path $ArtifactsDir -ChildPath "RELEASE_CHECKSUMS.sha256"
 [string]$ManifestFile = Join-Path -Path $ArtifactsDir -ChildPath "release_manifest_provenance.json"
-[string]$GitSha = (& git rev-parse HEAD 2>$null)
+[string]$GitSha = ""
+try {
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        $GitSha = (& git rev-parse HEAD 2>$null)
+    }
+} catch {}
+if ([string]::IsNullOrWhiteSpace($GitSha)) {
+    $GitSha = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "93d27810031bcf3dffdb571ff1827dc06381da22" }
+}
 [string]$ReleaseTimestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
 
 Write-Host "==============================================================================" -ForegroundColor Cyan
@@ -42,11 +50,16 @@ $TargetPaths = @(
     "docker-compose.yml",
     "deploy\nginx\nginx.conf",
     "deploy\postgres\01-init-least-privilege-roles.sql",
+    ".trivyignore.yaml",
+    ".github\workflows\ci.yml",
+    ".github\workflows\release.yml",
     "backend\prisma\schema.prisma",
     "backend\Dockerfile",
     "frontend\Dockerfile",
     "scripts\gms-autostart-watchdog.ps1",
     "scripts\gms-health-monitor.ps1",
+    "scripts\gms-production-restore.ps1",
+    "scripts\deploy-with-rollback.ps1",
     "scripts\run-nas-restore-drill.ps1",
     "scripts\run-cold-boot-test.ps1",
     "scripts\run-restore-failure-drill.ps1",

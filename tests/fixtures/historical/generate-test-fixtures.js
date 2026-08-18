@@ -138,7 +138,10 @@ async function main() {
     INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt")
     VALUES
       ('set-001', 'AUTO_SYNC_INTERVAL', '300', NOW(), NOW()),
-      ('set-002', 'MAINTENANCE_MODE', 'false', NOW(), NOW());
+      ('set-002', 'MAINTENANCE_MODE', 'false', NOW(), NOW()),
+      ('set-003', 'GMS_ENVIRONMENT_ID', 'GMS-PROD-SJA-01', NOW(), NOW()),
+      ('set-004', 'GMS_INSTALLATION_UUID', '4f53a720-911b-4f9e-a89b-8321481dc901', NOW(), NOW()),
+      ('set-005', 'GMS_RESTORE_ALLOWED', 'TRUE', NOW(), NOW());
 
     -- Announcement
     INSERT INTO "Announcement" ("id", "title", "message", "type", "status", "location", "speed", "priority", "createdAt", "updatedAt")

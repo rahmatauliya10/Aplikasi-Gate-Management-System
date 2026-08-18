@@ -15,6 +15,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: runtime
     ports:
       - "127.0.0.1:3001:3001"
     container_name: gate-system-backend
@@ -50,6 +51,25 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migrator
+    container_name: gate-system-migrator
+    restart: "no"
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
+      - NODE_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+      - backups_local:/app/backups/local
 
   postgres:
     image: postgres:15.12-alpine

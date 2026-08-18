@@ -1,0 +1,153 @@
+﻿{
+    "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
+    "releaseVersion":  "v1.0.0",
+    "gitSha":  "93d27810031bcf3dffdb571ff1827dc06381da22",
+    "timestamp":  "2026-08-18T09:52:06.944Z",
+    "artifactsCount":  36,
+    "artifacts":  {
+                      "docker-compose.prod.yml":  {
+                                                      "sha256":  "ffa21e6e874667ac25385bf212f4e89d7003a315380d728e38d62e9e213052e0",
+                                                      "sizeBytes":  6128
+                                                  },
+                      "docker-compose.yml":  {
+                                                 "sha256":  "0dca4df2ae4e7033dd8ddab0c2238f816d2dc93ca2f8dfc0b37677a06198e0b4",
+                                                 "sizeBytes":  2808
+                                             },
+                      "deploy\\nginx\\nginx.conf":  {
+                                                        "sha256":  "e0feed169ca5c06291b8834862f04852c5f45d58bdeb31e15b49c39761e28344",
+                                                        "sizeBytes":  904
+                                                    },
+                      "deploy\\postgres\\01-init-least-privilege-roles.sql":  {
+                                                                                  "sha256":  "50b73e3655ba9b315268c23b310eeb623be94890c6bed5ff8cd0564af9e1a7b9",
+                                                                                  "sizeBytes":  3106
+                                                                              },
+                      ".trivyignore.yaml":  {
+                                                "sha256":  "cdaad8496ef9700175ba1c41c4216187cce13c01567aa415f49e132794e501b5",
+                                                "sizeBytes":  3598
+                                            },
+                      ".github\\workflows\\ci.yml":  {
+                                                         "sha256":  "b90c91bd95f5da326714f95b87dc7e4e1fe9b4cf9831879f600b2f463f734bab",
+                                                         "sizeBytes":  35736
+                                                     },
+                      ".github\\workflows\\release.yml":  {
+                                                              "sha256":  "677265eecf07c1d2537c22a6fbeef1383b4c18c4b2027d05c50c7711c01e2f1c",
+                                                              "sizeBytes":  12201
+                                                          },
+                      "backend\\prisma\\schema.prisma":  {
+                                                             "sha256":  "0cb4c32958231585aadc09b1d660ff58da2e13e364e8b605c4a212a37b01a103",
+                                                             "sizeBytes":  18843
+                                                         },
+                      "backend\\Dockerfile":  {
+                                                  "sha256":  "d93e1e762a7bbf4d728b65c367ca2527e44996df0d0f49e57a1b06e70ed19488",
+                                                  "sizeBytes":  3640
+                                              },
+                      "frontend\\Dockerfile":  {
+                                                   "sha256":  "dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b",
+                                                   "sizeBytes":  476
+                                               },
+                      "scripts\\gms-autostart-watchdog.ps1":  {
+                                                                  "sha256":  "5f64e5a7f5aa363e31f2be0e12e6e4912b777470950b0acf1212197c2806ea6a",
+                                                                  "sizeBytes":  16206
+                                                              },
+                      "scripts\\gms-health-monitor.ps1":  {
+                                                              "sha256":  "5bae5635325233a0184f2aab821b6f603ad88bfdc4b800a7a1f11bd5bf9acdae",
+                                                              "sizeBytes":  18156
+                                                          },
+                      "scripts\\gms-production-restore.ps1":  {
+                                                                  "sha256":  "8613cbcf4fe4b37e22a7239b1e122bbacc4753a657c11d07f1bc423847450168",
+                                                                  "sizeBytes":  41807
+                                                              },
+                      "scripts\\deploy-with-rollback.ps1":  {
+                                                                "sha256":  "c56380e98b4355b0762f5b2a071e9c2a969fd060922eae155d711dcc6a0deff0",
+                                                                "sizeBytes":  24768
+                                                            },
+                      "scripts\\run-nas-restore-drill.ps1":  {
+                                                                 "sha256":  "376593c7460a59a160ef143c2ec83dc9b8262f4337e0101764c48f5bfde87fef",
+                                                                 "sizeBytes":  15218
+                                                             },
+                      "scripts\\run-cold-boot-test.ps1":  {
+                                                              "sha256":  "f0139b9ee778a7a1ea1fac3e6c68e4f937da321f9f698db69834a1659504ee0f",
+                                                              "sizeBytes":  13078
+                                                          },
+                      "scripts\\run-restore-failure-drill.ps1":  {
+                                                                     "sha256":  "692bd71f9cc92fdaf353e0cd3daa612610dbcda557d1139cf750ccefdbf62854",
+                                                                     "sizeBytes":  25915
+                                                                 },
+                      "scripts\\run-deployment-rollback-drill.ps1":  {
+                                                                         "sha256":  "5bd4ca6ca8e18c338f1c1299cce8fcb0b1475acd305b9f9c5746d8fa58969db2",
+                                                                         "sizeBytes":  16069
+                                                                     },
+                      "backend\\prisma\\migrations\\20260714030729_init\\migration.sql":  {
+                                                                                              "sha256":  "b2091e708e2f79c3d3f11c50122adc3c9bd237e20f9f47b82c235244e1eb8f76",
+                                                                                              "sizeBytes":  13800
+                                                                                          },
+                      "backend\\prisma\\migrations\\20260715000000_add_account_password_security\\migration.sql":  {
+                                                                                                                       "sha256":  "f99a3b8f405ee47e11d84d68bf5a82545928188abf59205c85b4d25387adc093",
+                                                                                                                       "sizeBytes":  259
+                                                                                                                   },
+                      "backend\\prisma\\migrations\\20260715031355_sync_indices\\migration.sql":  {
+                                                                                                      "sha256":  "b0909cdc06963c0e89045e34503884d392c132260b5eb8c544955fe551398c11",
+                                                                                                      "sizeBytes":  1401
+                                                                                                  },
+                      "backend\\prisma\\migrations\\20260715034029_add_user_is_deleted\\migration.sql":  {
+                                                                                                             "sha256":  "2c5dd595ab091b1e819dddba9a35ae778174b7b8775c7327336cda95c187534d",
+                                                                                                             "sizeBytes":  92
+                                                                                                         },
+                      "backend\\prisma\\migrations\\20260715150000_add_user_profile_fields\\migration.sql":  {
+                                                                                                                 "sha256":  "e8676d93f5fe4dbe4f46ac3eed0e119f733e5c34ce0068c6f9a6df4aec79bdb5",
+                                                                                                                 "sizeBytes":  185
+                                                                                                             },
+                      "backend\\prisma\\migrations\\20260716041815_add_system_issue\\migration.sql":  {
+                                                                                                          "sha256":  "1d6264194ccf2c1a5920a87e952dac9fb28ca011bbf62e69fe4010e358b5ae27",
+                                                                                                          "sizeBytes":  572
+                                                                                                      },
+                      "backend\\prisma\\migrations\\20260804170000_add_unique_constraints_and_corrections\\migration.sql":  {
+                                                                                                                                "sha256":  "e9c26605d2a2b19694094e726ab97c37505988d9a87a213d8376020649f7c835",
+                                                                                                                                "sizeBytes":  1626
+                                                                                                                            },
+                      "backend\\prisma\\migrations\\20260806000000_add_revision_and_correction_items\\migration.sql":  {
+                                                                                                                           "sha256":  "7e85e369d5c0e77fd4a1458f957cfcdb7685ff755e985ace83b2a39ccfb88641",
+                                                                                                                           "sizeBytes":  1646
+                                                                                                                       },
+                      "backend\\prisma\\migrations\\20260807000000_repair_correction_enums_and_constraints\\migration.sql":  {
+                                                                                                                                 "sha256":  "77c3da635e4df1b05adf049c515953f1b34ce5f2c4f2b6059d3078a2d5043471",
+                                                                                                                                 "sizeBytes":  1509
+                                                                                                                             },
+                      "backend\\prisma\\migrations\\20260808000000_add_missing_columns_to_warehouse_and_incoming\\migration.sql":  {
+                                                                                                                                       "sha256":  "b007f50fa8e1519e5f74d940cc5cf2ece4ea564771d37bd9d7055504260575b7",
+                                                                                                                                       "sizeBytes":  326
+                                                                                                                                   },
+                      "backend\\prisma\\migrations\\20260809000000_reconcile_correction_enum_and_history\\migration.sql":  {
+                                                                                                                               "sha256":  "5d4862d67e8549f2c59338d8f6209bbb0a4c26bd548caf97e89a9f1054e84315",
+                                                                                                                               "sizeBytes":  1566
+                                                                                                                           },
+                      "backend\\prisma\\migrations\\20260810000000_add_versioning_fields\\migration.sql":  {
+                                                                                                               "sha256":  "8563a2f0da90140abc8016e603ecc59721d1729640211ac54deaec2c6f712070",
+                                                                                                               "sizeBytes":  1860
+                                                                                                           },
+                      "backend\\prisma\\migrations\\20260810163000_partial_unique_is_current\\migration.sql":  {
+                                                                                                                   "sha256":  "570f662cc2c9a672932ff58debb37aa75517a322da9bd5212671b058025dcb67",
+                                                                                                                   "sizeBytes":  630
+                                                                                                               },
+                      "backend\\prisma\\migrations\\20260810180000_add_incoming_qc_start_at\\migration.sql":  {
+                                                                                                                  "sha256":  "90e23dc2f9e5956c9befe6a7b6b449eb5832a61d0d832306c7f38f3f95b0f13b",
+                                                                                                                  "sizeBytes":  99
+                                                                                                              },
+                      "backend\\prisma\\migrations\\20260811000000_fix_qc_process_scope_and_backfill\\migration.sql":  {
+                                                                                                                           "sha256":  "8a9feddc9c97726d232efeff516ff4f8fe9a1ff9b752105be8347a0a286a4852",
+                                                                                                                           "sizeBytes":  762
+                                                                                                                       },
+                      "backend\\prisma\\migrations\\20260811010000_fix_atomic_workflow_state_machine\\migration.sql":  {
+                                                                                                                           "sha256":  "f1a1193b1ca270dfc3a05d2a7946ed33b07caa803ada45d3fc2567334e15becc",
+                                                                                                                           "sizeBytes":  383
+                                                                                                                       },
+                      "backend\\prisma\\migrations\\20260811020000_production_readiness_versioning_and_invariants\\migration.sql":  {
+                                                                                                                                        "sha256":  "5ce2f0dd61a3a6530525fd52d0bc4ffcafade848f6a69a763e3b295f7f2b617e",
+                                                                                                                                        "sizeBytes":  4359
+                                                                                                                                    },
+                      "backend\\prisma\\migrations\\20260811030000_secure_attachment_lineage\\migration.sql":  {
+                                                                                                                   "sha256":  "e6c18a46827f6f728a3d0e8e0a7bfe4c458c516b982adc071973bd5024b3e4d4",
+                                                                                                                   "sizeBytes":  1287
+                                                                                                               }
+                  }
+}
