@@ -62,6 +62,7 @@ $TargetPaths = @(
     "docker-compose.prod.yml",
     "docker-compose.yml",
     "deploy\nginx\nginx.conf",
+    "deploy\nginx\conf.d\gms.conf",
     "deploy\postgres\01-init-least-privilege-roles.sql",
     "deploy\postgres\01-init-least-privilege-roles.sh",
     ".trivyignore.yaml",

@@ -2,8 +2,8 @@
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
     "gitSha":  "04f694843997fd73c5fe58c7503ff14349351738",
-    "timestamp":  "2026-08-18T11:58:07.951Z",
-    "artifactsCount":  40,
+    "timestamp":  "2026-08-18T12:04:39.758Z",
+    "artifactsCount":  41,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
                                                       "sha256":  "42b9cdcfb89e77c972478c39178f30e1c014457b21d01b8c42f53faa7cc1fa93",
@@ -17,6 +17,10 @@
                                                         "sha256":  "e0feed169ca5c06291b8834862f04852c5f45d58bdeb31e15b49c39761e28344",
                                                         "sizeBytes":  904
                                                     },
+                      "deploy\\nginx\\conf.d\\gms.conf":  {
+                                                              "sha256":  "012c0929cbf7cb7798bb06a9af0251dcea0cb6c0920923caf95b9c0a8a9b1926",
+                                                              "sizeBytes":  3365
+                                                          },
                       "deploy\\postgres\\01-init-least-privilege-roles.sql":  {
                                                                                   "sha256":  "50b73e3655ba9b315268c23b310eeb623be94890c6bed5ff8cd0564af9e1a7b9",
                                                                                   "sizeBytes":  3106
