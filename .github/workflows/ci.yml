@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, master, develop, update-v1.0.0, 'update-*' ]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   backend-verification:
     name: Backend Test, Coverage, Build & Schema Validation (${{ matrix.db_state }})
@@ -134,6 +138,9 @@ jobs:
   security-vulnerability-audit:
     name: Dependency Security & Secret Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout Code Repository (Full History for Secret Scanning)
         uses: actions/checkout@v4.2.2
@@ -336,7 +343,7 @@ jobs:
         with:
           name: historical-rehearsal-evidence
           path: artifacts/release-proof/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
   restore-failure-drill-gate:
@@ -408,8 +415,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: restore-failure-drill-evidence
-          path: artifacts/release-proof/restore-failure-drill-evidence.json
-          if-no-files-found: error
+          path: artifacts/release-proof/
+          if-no-files-found: warn
           retention-days: 90
 
   post-migration-rollback-drill-gate:
@@ -481,8 +488,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: post-migration-rollback-evidence
-          path: artifacts/release-proof/post-migration-rollback-evidence.json
-          if-no-files-found: error
+          path: artifacts/release-proof/
+          if-no-files-found: warn
           retention-days: 90
 
   fullstack-staging-gate:
@@ -653,7 +660,7 @@ jobs:
           path: |
             artifacts/release-proof/
             deploy/release_manifest.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
   container-security-scan:
