@@ -129,6 +129,8 @@ $BasePhrases = @(
     "productiondatabaseadmin",
     "dontforgetyourpassword",
     "qwertyuiopasdfghjklzxcvbnm",
+    "123456789012345",
+    "1234567890123456",
     "12345678901234567890",
     "abcdefghijklmnopqrstuvwxyz",
     "zyxwvutsrqponmlkjihgfedcba"
