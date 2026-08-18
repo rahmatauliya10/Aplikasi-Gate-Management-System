@@ -62,8 +62,8 @@ WORKDIR /app
 
 COPY package*.json ./
 
-# Install exclusively production dependencies (eliminates @prisma/config, deepmerge-ts, etc.)
-RUN npm ci --omit=dev
+# Install exclusively production dependencies (skipping dev postinstall hook)
+RUN npm ci --omit=dev --ignore-scripts && npm rebuild --production
 
 # Copy generated Prisma engine & client artifacts directly from builder
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
