@@ -23,6 +23,7 @@ function loadBlockedPasswords(): Set<string> {
   return set;
 }
 
-export const BLOCKED_PASSWORDS_SET: ReadonlySet<string> = loadBlockedPasswords();
+export const BLOCKED_PASSWORDS_SET: ReadonlySet<string> =
+  loadBlockedPasswords();
 
 export const BLOCKED_PASSWORDS_COUNT: number = BLOCKED_PASSWORDS_SET.size;
