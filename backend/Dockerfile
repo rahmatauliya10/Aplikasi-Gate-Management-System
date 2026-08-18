@@ -3,7 +3,8 @@
 # ==============================================================================
 # Stage 1: Builder (Full build toolchain)
 # Stage 2: Migrator (Tooling container with Prisma CLI & Migration Preflights)
-# Stage 3: Runtime (Ultra-minimal Alpine container with zero npm/npx attack surface)
+# Stage 3: Prod-Deps (Prunes devDependencies to eliminate dev CVE surface)
+# Stage 4: Runtime (Ultra-minimal Alpine container with zero npm/npx attack surface)
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -51,7 +52,14 @@ ENTRYPOINT ["dumb-init", "--"]
 CMD ["npx", "prisma", "migrate", "deploy"]
 
 # ------------------------------------------------------------------------------
-# Stage 3: Production Runtime (Zero npm/npx Minimal Alpine Container)
+# Stage 3: Production Dependencies Pruner
+# ------------------------------------------------------------------------------
+FROM builder AS prod_deps
+WORKDIR /app
+RUN npm prune --omit=dev
+
+# ------------------------------------------------------------------------------
+# Stage 4: Production Runtime (Zero npm/npx Minimal Alpine Container)
 # ------------------------------------------------------------------------------
 FROM alpine:3.21 AS runtime
 
@@ -68,9 +76,9 @@ WORKDIR /app
 # Copy exact Node 22 binary directly from builder (guarantees identical v8/node version with zero npm/npx footprint)
 COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 
-# Copy production runtime bundle with native chown
-COPY --chown=node:node --from=builder /app/package*.json ./
-COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+# Copy production runtime bundle with native chown (strictly production node_modules from prod_deps stage)
+COPY --chown=node:node --from=prod_deps /app/package*.json ./
+COPY --chown=node:node --from=prod_deps /app/node_modules ./node_modules
 COPY --chown=node:node --from=builder /app/dist ./dist
 COPY --chown=node:node --from=builder /app/prisma ./prisma
 COPY --chown=node:node --from=builder /app/scripts ./scripts

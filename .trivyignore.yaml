@@ -12,4 +12,9 @@
 #   trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml <IMAGE>
 # ==============================================================================
 
-vulnerabilities: []
+vulnerabilities:
+  - id: CVE-2026-40345
+    purls:
+      - pkg:npm/deepmerge-ts@7.1.5
+    statement: "DeepmergeTS recursive object graph stack exhaustion in dev tooling (@prisma/config). Non-exploitable in GMS runtime as deepmerge-ts is not exposed to untrusted external input and devDependencies are pruned in production runtime container."
+    expired_at: 2026-11-30
