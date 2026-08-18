@@ -1,0 +1,28 @@
+# ==============================================================================
+# GMS Repository Global Codeowners & Production Gate Policy
+# ==============================================================================
+# All changes to deployment manifests, security controls, database migrations,
+# and CI workflows require review and approval from repository maintainer.
+# ==============================================================================
+
+# Global catch-all owner
+*                           @rahmatauliya10
+
+# Production Deployment & Infrastructure
+deploy/                     @rahmatauliya10
+scripts/                    @rahmatauliya10
+docker-compose.yml          @rahmatauliya10
+docker-compose.prod.yml     @rahmatauliya10
+
+# CI/CD & Security Automation
+.github/                    @rahmatauliya10
+.github/workflows/          @rahmatauliya10
+
+# Database Migrations & Invariants
+backend/prisma/             @rahmatauliya10
+backend/prisma/migrations/  @rahmatauliya10
+
+# Authentication & Access Control
+backend/src/auth/           @rahmatauliya10
+backend/src/users/          @rahmatauliya10
+backend/src/common/guards/  @rahmatauliya10

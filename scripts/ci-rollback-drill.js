@@ -81,7 +81,7 @@ async function main() {
     if (!tableExists(tableName)) {
       return 'NON_EXISTENT';
     }
-    const out = psql(`SELECT COALESCE(md5(string_agg(md5(row_to_json(t)::text), ',' ORDER BY md5(row_to_json(t)::text))), 'EMPTY') FROM "${tableName}" t;`);
+    const out = psql(`SELECT COALESCE(encode(sha256(string_agg(encode(sha256(row_to_json(t)::text::bytea), 'hex'), ',' ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex'))::bytea), 'hex'), 'EMPTY') FROM "${tableName}" t;`);
     return out.trim();
   };
 

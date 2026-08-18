@@ -112,12 +112,15 @@ function Get-DatabaseFingerprint {
 SELECT CASE 
     WHEN to_regclass('public."$Table"') IS NULL THEN 'NON_EXISTENT'
     ELSE COALESCE(
-        md5(
-            string_agg(
-                md5(row_to_json(t)::text),
-                ','
-                ORDER BY md5(row_to_json(t)::text)
-            )
+        encode(
+            sha256(
+                string_agg(
+                    encode(sha256(row_to_json(t)::text::bytea), 'hex'),
+                    ','
+                    ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex')
+                )::bytea
+            ),
+            'hex'
         ),
         'EMPTY'
     )
@@ -341,7 +344,8 @@ $NginxHealth = Get-ContainerHealth "gate-system-nginx"
     -and $FrontendRestored `
     -and $SmokePassed `
     -and $BackendHealth.healthy `
-    -and $FrontendHealth.healthy
+    -and $FrontendHealth.healthy `
+    -and $NginxHealth.healthy
 
 $EvidenceReport = @{
     reportTitle = "Production-like Coordinated Deployment Rollback Operator Evidence (P0-03)"

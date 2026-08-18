@@ -17,16 +17,36 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
-    let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
+    let statusCode: HttpStatus = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = 'Terjadi kesalahan pada server. Hubungi administrator.';
     let errorCode = 'INTERNAL_SERVER_ERROR';
     let details: any = null;
+
+    const requestId = `REQ-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const exceptionResponse: any = exception.getResponse();
 
-      // Extract custom error code and message if provided
+      // For 5xx Server Errors: NEVER leak internal details/traces to the client
+      if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
+        const errStack = exception.stack || JSON.stringify(exception);
+        this.logger.error(
+          `[${request.method}] ${request.url} - ${statusCode} - RequestID: ${requestId}`,
+          errStack,
+        );
+        response.status(statusCode).json({
+          success: false,
+          statusCode,
+          errorCode: 'INTERNAL_SERVER_ERROR',
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Terjadi kesalahan pada server. Hubungi administrator.',
+          requestId,
+        });
+        return;
+      }
+
+      // Extract custom error code and message if provided for client 4xx errors
       if (exceptionResponse && typeof exceptionResponse === 'object') {
         if (exceptionResponse.code) errorCode = exceptionResponse.code;
         if (exceptionResponse.errorCode)
@@ -123,7 +143,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         }
       }
     } else {
-      // Prisma error mapping or other unknown errors
+      // Prisma error mapping or other unknown errors (non-HttpException => 500)
       const err = exception as any;
       if (err?.code) {
         if (err.code === 'P2002') {
@@ -132,12 +152,34 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           errorCode = 'CONFLICT';
         }
       }
+
+      // If unhandled error resulted in 500, sanitize output
+      if (statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
+        const unhandledStack =
+          exception instanceof Error
+            ? exception.stack
+            : JSON.stringify(exception);
+        this.logger.error(
+          `[${request.method}] ${request.url} - ${statusCode} - UnhandledException - RequestID: ${requestId}`,
+          unhandledStack,
+        );
+        response.status(statusCode).json({
+          success: false,
+          statusCode,
+          errorCode: 'INTERNAL_SERVER_ERROR',
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Terjadi kesalahan pada server. Hubungi administrator.',
+          requestId,
+        });
+        return;
+      }
     }
 
-    // Always log the actual technical error to the console
+    const logStack =
+      exception instanceof Error ? exception.stack : JSON.stringify(exception);
     this.logger.error(
-      `[${request.method}] ${request.url} - ${statusCode} - ${errorCode}`,
-      exception instanceof Error ? exception.stack : JSON.stringify(exception),
+      `[${request.method}] ${request.url} - ${statusCode} - ${errorCode} - RequestID: ${requestId}`,
+      logStack,
     );
 
     // Standardized consistent response format (mapping both code and errorCode)
@@ -148,6 +190,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       code: errorCode,
       message,
       details,
+      requestId,
     });
   }
 }

@@ -1,20 +1,25 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, Matches, MinLength } from 'class-validator';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsStrongNistPassword } from '../../common/validators/password-policy.validator';
 
 export class ChangePasswordDto {
-  @ApiProperty({ example: 'currentPassword123' })
+  @ApiProperty({ example: 'currentPassword12345' })
   @IsNotEmpty({ message: 'Current password is required' })
+  @IsString()
   currentPassword: string;
 
-  @ApiProperty({ example: 'newPassword123' })
-  @IsNotEmpty({ message: 'New password is required' })
-  @MinLength(8, { message: 'Password must be at least 8 characters' })
-  @Matches(/^(?=.*[A-Za-z])(?=.*\d).*$/, {
-    message: 'Password must contain at least one letter and one number',
+  @ApiProperty({
+    example: 'Correct-Horse-Battery-Staple-2026!',
+    description: 'New password for the user (min 15 chars, NIST SP 800-63B-4)',
   })
+  @IsNotEmpty({ message: 'New password is required' })
+  @IsString()
+  @MaxLength(128, { message: 'Password cannot exceed 128 characters' })
+  @IsStrongNistPassword()
   newPassword: string;
 
-  @ApiProperty({ example: 'newPassword123' })
+  @ApiProperty({ example: 'Correct-Horse-Battery-Staple-2026!' })
   @IsNotEmpty({ message: 'Confirm password is required' })
+  @IsString()
   confirmPassword: string;
 }

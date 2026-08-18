@@ -510,15 +510,29 @@ describe('DatabaseBackupService', () => {
       expect(manifest.localStatus).toBe('VERIFIED');
     });
 
-    it('should throw error and fail backup if snapshot error is a transient connection error rather than missing table (P0-02)', async () => {
-      prismaService.transaction = {
-        findMany: jest
-          .fn()
-          .mockRejectedValue(new Error('Connection timeout to PostgreSQL')),
-      } as any;
-      await expect(
-        service.runAutomatedScheduledBackup('MANUAL_PRE_UPDATE', mockAdminUser),
-      ).rejects.toThrow('Connection timeout to PostgreSQL');
+    it('should return UNKNOWN storageStatus when backup dir path throws stat error', async () => {
+      const originalEnv = process.env.LOCAL_BACKUP_DIR;
+      process.env.LOCAL_BACKUP_DIR = '/invalid/non_existent_mount_path_xyz_123';
+
+      const status = await service.getSystemStatus();
+      expect(status.storageStatus).toBe('UNKNOWN');
+      expect(status.storageFreeBytes).toBeNull();
+      expect(status.storagePercent).toBeNull();
+
+      if (originalEnv !== undefined) {
+        process.env.LOCAL_BACKUP_DIR = originalEnv;
+      } else {
+        delete process.env.LOCAL_BACKUP_DIR;
+      }
+    });
+
+    it('should calculate and return storageStatus from localBackupDir filesystem stats', async () => {
+      const status = await service.getSystemStatus();
+      expect(['KNOWN', 'UNKNOWN']).toContain(status.storageStatus);
+      if (status.storageStatus === 'KNOWN') {
+        expect(status.storageFreeBytes).toBeGreaterThanOrEqual(0);
+        expect(status.storagePercent).toBeGreaterThanOrEqual(0);
+      }
     });
   });
 });

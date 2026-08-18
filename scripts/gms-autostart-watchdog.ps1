@@ -213,15 +213,17 @@ try {
         throw "GMS Backend NestJS service failed to reach healthy state after retries."
     }
 
-    # --- Step 7b: Verify Frontend and Reverse Proxy Container Status ---
+    [bool]$EffectiveRequireNginx = $RequireNginx -or ($ComposeFilePath -like "*prod*")
+
+    # --- Step 7b: Verify Frontend and Reverse Proxy Container Health ---
     Write-SanitizedLog -Message "Verifying Frontend and Web Gateway container health readiness..." -Level "INFO"
     [string]$FrontendContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q frontend 2>&1).ToString().Trim()
     if ($FrontendContainerId) {
-        [string]$feStatus = (& docker inspect --format="{{.State.Status}}" $FrontendContainerId 2>&1).ToString().Trim()
-        if ($feStatus -eq "running") {
-            Write-SanitizedLog -Message "GMS Frontend service is RUNNING." -Level "INFO"
+        [string]$feHealth = (& docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $FrontendContainerId 2>&1).ToString().Trim()
+        if ($feHealth -eq "healthy" -or $feHealth -eq "running") {
+            Write-SanitizedLog -Message "GMS Frontend service is HEALTHY ($feHealth)." -Level "INFO"
         } else {
-            throw "GMS Frontend service container is not running (State: $feStatus)."
+            throw "GMS Frontend service container is not healthy (Status: $feHealth)."
         }
     } elseif ($RequireFrontend) {
         throw "GMS Frontend service container was not found in compose stack."
@@ -232,18 +234,18 @@ try {
         $NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
     }
     if ($NginxContainerId) {
-        [string]$ngStatus = (& docker inspect --format="{{.State.Status}}" $NginxContainerId 2>&1).ToString().Trim()
-        if ($ngStatus -eq "running") {
-            Write-SanitizedLog -Message "GMS Nginx reverse proxy service is RUNNING." -Level "INFO"
+        [string]$ngHealth = (& docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $NginxContainerId 2>&1).ToString().Trim()
+        if ($ngHealth -eq "healthy" -or $ngHealth -eq "running") {
+            Write-SanitizedLog -Message "GMS Nginx reverse proxy service is HEALTHY ($ngHealth)." -Level "INFO"
         } else {
-            throw "GMS Nginx reverse proxy container is not running (State: $ngStatus)."
+            throw "GMS Nginx reverse proxy container is not healthy (Status: $ngHealth)."
         }
-    } elseif ($RequireNginx) {
+    } elseif ($EffectiveRequireNginx) {
         throw "GMS Nginx reverse proxy container was not found in compose stack."
     }
 
-    # --- Step 7c: Backend /api/health HTTP Smoke Check ---
-    Write-SanitizedLog -Message "Performing application HTTP readiness check on /api/health..." -Level "INFO"
+    # --- Step 7c: Backend /api/health Direct HTTP Smoke Check ---
+    Write-SanitizedLog -Message "Performing application HTTP readiness check on /api/health directly to backend..." -Level "INFO"
     [string]$HealthResp = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
         const http = require('http');
         const port = process.env.PORT || 3001;
@@ -262,9 +264,90 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Backend /api/health HTTP readiness probe failed: $HealthResp"
     }
-    Write-SanitizedLog -Message "Backend /api/health HTTP probe responded 200 OK [PASS]." -Level "SUCCESS"
+    Write-SanitizedLog -Message "Backend /api/health direct HTTP probe responded 200 OK [PASS]." -Level "SUCCESS"
 
-    # --- Step 8: Final Summary & Verification Report ---
+    # --- Step 8: HTTPS Gateway End-to-End Release Gate (P0-01 Audit Fix) ---
+    if ($EffectiveRequireNginx -and $NginxContainerId) {
+        Write-SanitizedLog -Message "Performing end-to-end HTTPS Gateway validation (TLS, API Routing, Frontend Proxy)..." -Level "INFO"
+        
+        [string]$GatewaySmokeCheck = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
+            const https = require('https');
+            const http = require('http');
+
+            function probe(options) {
+                return new Promise((resolve, reject) => {
+                    const client = options.protocol === 'https:' ? https : http;
+                    const req = client.get(options, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => resolve({ statusCode: res.statusCode, data }));
+                    });
+                    req.on('error', reject);
+                    req.setTimeout(8000, () => {
+                        req.destroy();
+                        reject(new Error('Probe timeout for ' + options.path));
+                    });
+                });
+            }
+
+            async function runProbes() {
+                try {
+                    // 1. Gateway HTTPS /health check
+                    const healthRes = await probe({
+                        protocol: 'https:',
+                        hostname: 'nginx-proxy',
+                        port: 443,
+                        path: '/health',
+                        rejectUnauthorized: false
+                    });
+                    if (healthRes.statusCode !== 200) {
+                        throw new Error('Gateway /health returned ' + healthRes.statusCode);
+                    }
+                    console.log('PROBE_GATEWAY_HEALTH:PASS');
+
+                    // 2. Gateway HTTPS /api/health/readiness check (Reverse Proxy Routing to Backend)
+                    const apiRes = await probe({
+                        protocol: 'https:',
+                        hostname: 'nginx-proxy',
+                        port: 443,
+                        path: '/api/health/readiness',
+                        rejectUnauthorized: false
+                    });
+                    if (apiRes.statusCode !== 200) {
+                        throw new Error('Gateway /api/health/readiness returned ' + apiRes.statusCode);
+                    }
+                    console.log('PROBE_GATEWAY_API_READINESS:PASS');
+
+                    // 3. Gateway HTTPS / frontend static route check (Reverse Proxy Routing to Frontend)
+                    const feRes = await probe({
+                        protocol: 'https:',
+                        hostname: 'nginx-proxy',
+                        port: 443,
+                        path: '/',
+                        rejectUnauthorized: false
+                    });
+                    if (feRes.statusCode !== 200) {
+                        throw new Error('Gateway frontend route / returned ' + feRes.statusCode);
+                    }
+                    console.log('PROBE_GATEWAY_FRONTEND:PASS');
+
+                    process.exit(0);
+                } catch (err) {
+                    console.error('GATEWAY_PROBE_ERROR: ' + err.message);
+                    process.exit(1);
+                }
+            }
+
+            runProbes();
+        " 2>&1).ToString()
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "HTTPS Gateway validation failed: $GatewaySmokeCheck"
+        }
+        Write-SanitizedLog -Message "HTTPS Gateway validation PASSED (TLS, API Reverse Proxy, Frontend Proxy OK)." -Level "SUCCESS"
+    }
+
+    # --- Step 9: Final Summary & Verification Report ---
     Write-SanitizedLog -Message "GMS Production Auto-Recovery Watchdog completed SUCCESSFULLY in $($OverallTimer.Elapsed.TotalSeconds) seconds." -Level "SUCCESS"
     exit 0
 
