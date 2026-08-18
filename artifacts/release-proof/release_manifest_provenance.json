@@ -2,7 +2,7 @@
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
     "gitSha":  "93d27810031bcf3dffdb571ff1827dc06381da22",
-    "timestamp":  "2026-08-18T08:31:45.804Z",
+    "timestamp":  "2026-08-18T08:45:37.402Z",
     "artifactsCount":  36,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
@@ -26,12 +26,12 @@
                                                 "sizeBytes":  789
                                             },
                       ".github\\workflows\\ci.yml":  {
-                                                         "sha256":  "90e34496d028f9b5f8f604359971fb2991db521c501441540a742b60f6ba18c3",
-                                                         "sizeBytes":  35119
+                                                         "sha256":  "f3b58b1268eec665d576507e21d91996368c877033e92e0104b3561a55979ac5",
+                                                         "sizeBytes":  35484
                                                      },
                       ".github\\workflows\\release.yml":  {
-                                                              "sha256":  "db55bf341a6d29586c7b36f3d08fac000a3a7115eb8a418c7ad0a51e77181a71",
-                                                              "sizeBytes":  11486
+                                                              "sha256":  "a44d06408c7083be5d2a7444d883a30038853f87fd2fffb13123660cf5cd42dd",
+                                                              "sizeBytes":  11848
                                                           },
                       "backend\\prisma\\schema.prisma":  {
                                                              "sha256":  "0cb4c32958231585aadc09b1d660ff58da2e13e364e8b605c4a212a37b01a103",

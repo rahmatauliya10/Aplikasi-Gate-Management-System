@@ -704,7 +704,11 @@ jobs:
 
       - name: Install Syft SBOM Generator (Pinned Version v1.19.0)
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sudo sh -s -- -b /usr/local/bin v1.19.0
+          curl -sSfL "https://github.com/anchore/syft/releases/download/v1.19.0/syft_1.19.0_linux_amd64.tar.gz" -o /tmp/syft.tar.gz
+          sudo tar -xzf /tmp/syft.tar.gz -C /usr/local/bin syft
+          sudo chmod +x /usr/local/bin/syft
+          rm -f /tmp/syft.tar.gz
+          syft version
 
       - name: Generate CycloneDX SBOM for Runtime, Migrator & Frontend Images
         run: |
@@ -726,9 +730,13 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Install Trivy Security Scanner
+      - name: Install Trivy Security Scanner (Pinned Version v0.58.2)
         run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sudo sh -s -- -b /usr/local/bin v0.58.2
+          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v0.58.2/trivy_0.58.2_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz
+          sudo tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
+          sudo chmod +x /usr/local/bin/trivy
+          rm -f /tmp/trivy.tar.gz
+          trivy version
 
       - name: Scan Backend Runtime Image with Trivy (Blocking Security Gate)
         run: |
