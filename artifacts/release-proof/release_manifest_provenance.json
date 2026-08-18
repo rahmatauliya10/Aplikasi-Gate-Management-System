@@ -1,13 +1,13 @@
 ﻿{
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
-    "gitSha":  "93d27810031bcf3dffdb571ff1827dc06381da22",
-    "timestamp":  "2026-08-18T09:52:06.944Z",
-    "artifactsCount":  36,
+    "gitSha":  "04f694843997fd73c5fe58c7503ff14349351738",
+    "timestamp":  "2026-08-18T12:10:10.266Z",
+    "artifactsCount":  41,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
-                                                      "sha256":  "ffa21e6e874667ac25385bf212f4e89d7003a315380d728e38d62e9e213052e0",
-                                                      "sizeBytes":  6128
+                                                      "sha256":  "42b9cdcfb89e77c972478c39178f30e1c014457b21d01b8c42f53faa7cc1fa93",
+                                                      "sizeBytes":  5960
                                                   },
                       "docker-compose.yml":  {
                                                  "sha256":  "0dca4df2ae4e7033dd8ddab0c2238f816d2dc93ca2f8dfc0b37677a06198e0b4",
@@ -17,17 +17,25 @@
                                                         "sha256":  "e0feed169ca5c06291b8834862f04852c5f45d58bdeb31e15b49c39761e28344",
                                                         "sizeBytes":  904
                                                     },
+                      "deploy\\nginx\\conf.d\\gms.conf":  {
+                                                              "sha256":  "012c0929cbf7cb7798bb06a9af0251dcea0cb6c0920923caf95b9c0a8a9b1926",
+                                                              "sizeBytes":  3365
+                                                          },
                       "deploy\\postgres\\01-init-least-privilege-roles.sql":  {
                                                                                   "sha256":  "50b73e3655ba9b315268c23b310eeb623be94890c6bed5ff8cd0564af9e1a7b9",
                                                                                   "sizeBytes":  3106
                                                                               },
+                      "deploy\\postgres\\01-init-least-privilege-roles.sh":  {
+                                                                                 "sha256":  "145c0116454f32f7e5c2cd8d1bd45407d3bd34fff3ae56b26324e43a393f27df",
+                                                                                 "sizeBytes":  3076
+                                                                             },
                       ".trivyignore.yaml":  {
-                                                "sha256":  "cdaad8496ef9700175ba1c41c4216187cce13c01567aa415f49e132794e501b5",
-                                                "sizeBytes":  3598
+                                                "sha256":  "8d0fc18fddf38f07f857e9693462c04659d22703b6a4829eccefd5cbc83deff8",
+                                                "sizeBytes":  3762
                                             },
                       ".github\\workflows\\ci.yml":  {
-                                                         "sha256":  "b90c91bd95f5da326714f95b87dc7e4e1fe9b4cf9831879f600b2f463f734bab",
-                                                         "sizeBytes":  35736
+                                                         "sha256":  "7ccd8472756d62144aecb91dbf297abe201b745b1dee24421f278d690e5898ca",
+                                                         "sizeBytes":  41656
                                                      },
                       ".github\\workflows\\release.yml":  {
                                                               "sha256":  "677265eecf07c1d2537c22a6fbeef1383b4c18c4b2027d05c50c7711c01e2f1c",
@@ -38,13 +46,25 @@
                                                              "sizeBytes":  18843
                                                          },
                       "backend\\Dockerfile":  {
-                                                  "sha256":  "d93e1e762a7bbf4d728b65c367ca2527e44996df0d0f49e57a1b06e70ed19488",
-                                                  "sizeBytes":  3640
+                                                  "sha256":  "c115280695c343fe4dee3e97096cfe480ea92273d4e46b970db3791deca7b9fa",
+                                                  "sizeBytes":  3810
                                               },
+                      "backend\\src\\common\\validators\\blocked-passwords.data.ts":  {
+                                                                                          "sha256":  "fbd44860657e758813bb69fbb4f76ed266b6bab2c4803c771f307020aa55eff9",
+                                                                                          "sizeBytes":  1701892
+                                                                                      },
                       "frontend\\Dockerfile":  {
                                                    "sha256":  "dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b",
                                                    "sizeBytes":  476
                                                },
+                      "scripts\\verify-production-compose.js":  {
+                                                                    "sha256":  "83db3557433b16124160dab986713aee34bec105e8955df91190d231c5ec4115",
+                                                                    "sizeBytes":  6532
+                                                                },
+                      "scripts\\verify-production-compose.ps1":  {
+                                                                     "sha256":  "d6c6f6708c7a810ca929e63d0b4c58076445198913d96aae5fa3c0c8ea44f355",
+                                                                     "sizeBytes":  4827
+                                                                 },
                       "scripts\\gms-autostart-watchdog.ps1":  {
                                                                   "sha256":  "5f64e5a7f5aa363e31f2be0e12e6e4912b777470950b0acf1212197c2806ea6a",
                                                                   "sizeBytes":  16206

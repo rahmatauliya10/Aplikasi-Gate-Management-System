@@ -3,7 +3,7 @@
 # ==============================================================================
 # Stage 1: Builder (Full build toolchain)
 # Stage 2: Migrator (Tooling container with Prisma CLI, npm, npx & Migration Preflights)
-# Stage 3: Prod-Deps (Prunes devDependencies to eliminate dev CVE surface)
+# Stage 3: Prod-Deps (Pristine production-only dependencies without dev CVE footprint)
 # Stage 4: Runtime (Ultra-minimal Alpine container with zero npm/npx attack surface)
 # ==============================================================================
 
@@ -52,29 +52,33 @@ ENTRYPOINT ["dumb-init", "--"]
 CMD ["npx", "prisma", "migrate", "deploy"]
 
 # ------------------------------------------------------------------------------
-# Stage 3: Production Dependencies Pruner
+# Stage 3: Pristine Production Dependencies (Zero devDependencies footprint)
 # ------------------------------------------------------------------------------
-FROM builder AS prod_deps
+FROM node:22-alpine AS prod_deps
+
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
-RUN npm prune --omit=dev
+
+COPY package*.json ./
+
+# Install exclusively production dependencies (skipping dev postinstall hook)
+RUN npm ci --omit=dev --ignore-scripts
+
+# Copy generated Prisma engine & client artifacts directly from builder
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # ------------------------------------------------------------------------------
-# Stage 4: Production Runtime (Zero npm/npx Minimal Alpine Container)
+# Stage 4: Production Runtime (Zero npm/npx Hardened Node 22 Alpine Container)
 # ------------------------------------------------------------------------------
-FROM alpine:3.21 AS runtime
+FROM node:22-alpine AS runtime
 
 RUN apk upgrade --no-cache && apk add --no-cache \
-    libstdc++ \
-    libgcc \
     postgresql-client \
     dumb-init \
-    && addgroup -g 1000 node \
-    && adduser -u 1000 -G node -s /bin/sh -D node
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 WORKDIR /app
-
-# Copy exact Node 22 binary directly from builder (guarantees identical v8/node version with zero npm/npx footprint)
-COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 
 # Copy production runtime bundle with native chown (strictly production node_modules from prod_deps stage)
 COPY --chown=node:node --from=prod_deps /app/package*.json ./
@@ -83,7 +87,7 @@ COPY --chown=node:node --from=builder /app/dist ./dist
 COPY --chown=node:node --from=builder /app/prisma ./prisma
 COPY --chown=node:node --from=builder /app/scripts ./scripts
 
-RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/node/.cache /home/node/.npm \
+RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/node/.cache \
     && chown -R node:node /home/node /app/uploads /app/backups /app/logs
 
 EXPOSE 3001

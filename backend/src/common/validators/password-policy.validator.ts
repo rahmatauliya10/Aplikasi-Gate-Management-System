@@ -3,29 +3,16 @@ import {
   ValidationOptions,
   ValidationArguments,
 } from 'class-validator';
+import { BLOCKED_PASSWORDS_SET } from './blocked-passwords.data';
 
 // ==============================================================================
-// NIST SP 800-63B-4 Password Security Validator & Common Blocklist
+// OWASP ASVS 5.0 (Req 6.2.4) & NIST SP 800-63B-4 Password Security Validator
 // ==============================================================================
 // 1. Enforces minimum 15 characters, maximum 128 characters
-// 2. Permits all printable characters & spaces (friendly to password managers & passphrases)
-// 3. Blocks known compromised / dictionary passwords
+// 2. Permits all printable characters & spaces (friendly to passphrases & managers)
+// 3. Blocks known compromised / dictionary / context-specific passwords (>= 3,000 dataset)
+// 4. Prohibits repeated single character sequences (e.g. "aaaaaaaaaaaaaaa")
 // ==============================================================================
-
-const COMMON_BLOCKED_PASSWORDS = new Set([
-  'password12345678',
-  'administrator123',
-  'gatekeeper123456',
-  'gatemanagement123',
-  '123456789012345',
-  'qwertyuiopasdfg',
-  'adminpassword123',
-  'passwordpassword',
-  'changeme1234567',
-  'systempassword1',
-  'welcome12345678',
-  'letmein12345678',
-]);
 
 export function IsStrongNistPassword(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
@@ -40,7 +27,7 @@ export function IsStrongNistPassword(validationOptions?: ValidationOptions) {
           if (value.length < 15 || value.length > 128) return false;
 
           const normalized = value.trim().toLowerCase();
-          if (COMMON_BLOCKED_PASSWORDS.has(normalized)) return false;
+          if (BLOCKED_PASSWORDS_SET.has(normalized)) return false;
 
           // Check repeated single character (e.g. "aaaaaaaaaaaaaaa")
           if (/^(.)\1+$/.test(value)) return false;
@@ -48,7 +35,7 @@ export function IsStrongNistPassword(validationOptions?: ValidationOptions) {
           return true;
         },
         defaultMessage(_args: ValidationArguments) {
-          return 'Password minimal 15 karakter dan tidak boleh menggunakan kata sandi umum atau terkompromi (NIST SP 800-63B-4).';
+          return 'Password minimal 15 karakter dan tidak boleh menggunakan kata sandi umum atau terkompromi (NIST SP 800-63B-4 & OWASP ASVS 5.0).';
         },
       },
     });

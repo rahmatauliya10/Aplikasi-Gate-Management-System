@@ -1,0 +1,19 @@
+# ==============================================================================
+# GMS Enterprise Gitleaks Configuration & Allowlist (.gitleaks.toml)
+# ==============================================================================
+# Whitelists public dictionary datasets, test fixtures, and mock test secrets.
+# ==============================================================================
+
+[allowlist]
+description = "GMS Allowlist for password policy dictionary dataset and test fixtures"
+paths = [
+  '''backend/src/common/validators/blocked-passwords\.data\.ts''',
+  '''backend/src/common/validators/password-policy\.validator\.spec\.ts''',
+  '''tests/fixtures/.*''',
+  '''artifacts/release-proof/.*'''
+]
+regexes = [
+  '''test-jwt-access-secret-for-ci-pipeline.*''',
+  '''test-jwt-refresh-secret-for-ci-pipeline.*''',
+  '''test-backup-signature-secret-for-ci-pipeline.*'''
+]

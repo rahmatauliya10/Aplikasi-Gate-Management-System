@@ -12,13 +12,15 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$ArtifactsDir = ""
+    [string]$ArtifactsDir = "",
+    [Parameter(Mandatory=$false)]
+    [string]$GitCommitSha = ""
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
+$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
 if (-not $ArtifactsDir) {
     $ArtifactsDir = Join-Path -Path $ProjectRootDir -ChildPath "artifacts\release-proof"
 }
@@ -28,15 +30,26 @@ if (-not (Test-Path -Path $ArtifactsDir -PathType Container)) {
 
 [string]$ChecksumFile = Join-Path -Path $ArtifactsDir -ChildPath "RELEASE_CHECKSUMS.sha256"
 [string]$ManifestFile = Join-Path -Path $ArtifactsDir -ChildPath "release_manifest_provenance.json"
-[string]$GitSha = ""
-try {
-    if (Get-Command git -ErrorAction SilentlyContinue) {
-        $GitSha = (& git rev-parse HEAD 2>$null)
-    }
-} catch {}
-if ([string]::IsNullOrWhiteSpace($GitSha)) {
-    $GitSha = if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "93d27810031bcf3dffdb571ff1827dc06381da22" }
+
+[string]$GitSha = $GitCommitSha
+if (-not $GitSha -and $env:RELEASE_SHA) {
+    $GitSha = $env:RELEASE_SHA
 }
+if (-not $GitSha -and $env:GITHUB_SHA) {
+    $GitSha = $env:GITHUB_SHA
+}
+if (-not $GitSha) {
+    try {
+        if (Get-Command git -ErrorAction SilentlyContinue) {
+            $GitSha = (& git rev-parse HEAD 2>$null)
+        }
+    } catch {}
+}
+
+if ([string]::IsNullOrWhiteSpace($GitSha) -or $GitSha -eq "HEAD") {
+    throw "FATAL: Git commit SHA is unavailable. Release checksums and provenance generation aborted."
+}
+
 [string]$ReleaseTimestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
 
 Write-Host "==============================================================================" -ForegroundColor Cyan
@@ -49,13 +62,18 @@ $TargetPaths = @(
     "docker-compose.prod.yml",
     "docker-compose.yml",
     "deploy\nginx\nginx.conf",
+    "deploy\nginx\conf.d\gms.conf",
     "deploy\postgres\01-init-least-privilege-roles.sql",
+    "deploy\postgres\01-init-least-privilege-roles.sh",
     ".trivyignore.yaml",
     ".github\workflows\ci.yml",
     ".github\workflows\release.yml",
     "backend\prisma\schema.prisma",
     "backend\Dockerfile",
+    "backend\src\common\validators\blocked-passwords.data.ts",
     "frontend\Dockerfile",
+    "scripts\verify-production-compose.js",
+    "scripts\verify-production-compose.ps1",
     "scripts\gms-autostart-watchdog.ps1",
     "scripts\gms-health-monitor.ps1",
     "scripts\gms-production-restore.ps1",
