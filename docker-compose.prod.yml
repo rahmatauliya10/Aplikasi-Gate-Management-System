@@ -7,7 +7,7 @@ networks:
 
 services:
   nginx-proxy:
-    image: nginx:stable-alpine
+    image: ${NGINX_IMAGE:-nginx:stable-alpine}
     container_name: gate-system-nginx
     restart: unless-stopped
     networks:
@@ -132,7 +132,7 @@ services:
         max-file: "5"
 
   postgres:
-    image: postgres:15-alpine
+    image: ${POSTGRES_IMAGE:-postgres:15-alpine}
     container_name: gate-system-postgres
     restart: unless-stopped
     networks:
