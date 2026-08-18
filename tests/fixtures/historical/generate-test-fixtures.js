@@ -346,8 +346,11 @@ async function main() {
     recordCounts: tableCounts
   };
 
+  const hmacSecret = process.env.BACKUP_SIGNATURE_SECRET || 'test-backup-signature-secret-for-ci-pipeline-min-32-chars-long';
+  manifest.signature = crypto.createHmac('sha256', hmacSecret).update(`${manifest.backupId}:${manifest.checksums.dump}`).digest('hex');
+
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-  console.log('Generated companion manifest at:', manifestPath);
+  console.log('Generated companion manifest with HMAC signature at:', manifestPath);
   console.log('✅ Authentic historical rehearsal test fixtures generated successfully.');
 }
 

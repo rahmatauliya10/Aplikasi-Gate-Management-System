@@ -61,6 +61,7 @@ export interface BackupManifest {
     snapshot?: string;
     attachmentsArchive?: string;
   };
+  signature?: string;
 }
 
 export interface BackupSystemStatus {
@@ -917,6 +918,15 @@ export class DatabaseBackupService
       },
     };
 
+    const backupSecret =
+      process.env.BACKUP_SIGNATURE_SECRET ||
+      'test-backup-signature-secret-for-ci-pipeline-min-32-chars-long';
+    const computeManifestSignature = (m: BackupManifest): string => {
+      const payload = `${m.backupId}:${m.checksums.dump}`;
+      return createHmac('sha256', backupSecret).update(payload).digest('hex');
+    };
+    manifest.signature = computeManifestSignature(manifest);
+
     // Save manifest file
     try {
       fs.writeFileSync(localManifestPath, this.safeJsonStringify(manifest));
@@ -980,6 +990,7 @@ export class DatabaseBackupService
 
         if (isOffsiteValid) {
           manifest.offsiteStatus = 'VERIFIED';
+          manifest.signature = computeManifestSignature(manifest);
           try {
             fs.writeFileSync(
               localManifestPath,

@@ -1,7 +1,7 @@
 FROM node:22-alpine AS builder
 
 # Install build dependencies for native modules (argon2, bcrypt)
-RUN apk add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++ && npm install -g npm@latest
 
 WORKDIR /app
 
@@ -18,8 +18,8 @@ RUN npm prune --omit=dev
 
 FROM node:22-alpine
 
-# Install postgresql-client for native pg_dump backup & restore capabilities
-RUN apk add --no-cache postgresql-client
+# Install postgresql-client for native pg_dump backup & restore capabilities, upgrade packages, and update npm
+RUN apk upgrade --no-cache && apk add --no-cache postgresql-client && npm install -g npm@latest
 
 WORKDIR /app
 

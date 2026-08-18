@@ -27,7 +27,7 @@ param(
     [string]$ArtifactsDir = "",
 
     [Parameter(Mandatory=$false)]
-    [string]$HmacSecret = "test-backup-signature-secret-for-ci-pipeline-min-32-chars-long",
+    [string]$HmacSecret = "",
 
     [Parameter(Mandatory=$false)]
     [int]$MaxAllowedRtoSeconds = 600 # 10 minutes RTO target
@@ -46,10 +46,10 @@ if (-not (Test-Path -Path $ArtifactsDir -PathType Container)) {
 
 # --- Resolve NAS Path ---
 if (-not $NasPath) {
-    # Check backend .env or default NAS locations
-    $NasPath = Join-Path -Path $ProjectRootDir -ChildPath "backups\nas"
-    if (-not (Test-Path -Path $NasPath)) {
-        $NasPath = Join-Path -Path $ProjectRootDir -ChildPath "backups\local"
+    if ($env:NAS_MOUNT_PATH) {
+        $NasPath = $env:NAS_MOUNT_PATH
+    } else {
+        $NasPath = Join-Path -Path $ProjectRootDir -ChildPath "backups\nas"
     }
 }
 
@@ -60,7 +60,7 @@ if (-not $NasPath) {
 [System.Diagnostics.Stopwatch]$Sw = [System.Diagnostics.Stopwatch]::StartNew()
 
 Write-Host "==============================================================================" -ForegroundColor Cyan
-Write-Host " GMS NAS Offsite Backup & Deep Restore Drill Protocol" -ForegroundColor Cyan
+Write-Host " GMS NAS Offsite Backup & Deep Restore Drill Protocol (Strict NAS Only)" -ForegroundColor Cyan
 Write-Host " Source NAS Path : $NasPath" -ForegroundColor Cyan
 Write-Host " Drill Port      : $DrillPort" -ForegroundColor Cyan
 Write-Host " Timestamp       : $DrillTimestamp" -ForegroundColor Cyan
@@ -78,22 +78,15 @@ $Evidence = [ordered]@{
 }
 
 try {
-    # --- Step 1: Discover NAS Backup Artifacts ---
+    # --- Step 1: Discover NAS Backup Artifacts (Strict: NO LOCAL FALLBACK) ---
     Write-Host "`n[Step 1] Discovering newest backup archive on NAS..." -ForegroundColor Yellow
     if (-not (Test-Path -Path $NasPath -PathType Container)) {
-        throw "NAS path does not exist or is not accessible: $NasPath"
+        throw "FATAL: NAS path does not exist or is not accessible: $NasPath. Prohibiting fallback to local storage."
     }
 
     $DumpFiles = Get-ChildItem -Path $NasPath -Filter "*.dump" | Sort-Object LastWriteTime -Descending
     if ($DumpFiles.Count -eq 0) {
-        # Fallback to local backups if NAS has no dumps yet
-        $LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups\local"
-        Write-Host "No dumps found directly in NAS path. Checking local backup cache ($LocalBackupDir)..." -ForegroundColor Yellow
-        $DumpFiles = Get-ChildItem -Path $LocalBackupDir -Filter "*.dump" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
-    }
-
-    if ($DumpFiles.Count -eq 0) {
-        throw "FATAL: No .dump backup file found in NAS or local backup storage ($NasPath)."
+        throw "FATAL: No .dump backup file found in NAS storage ($NasPath). Strict NAS Restore Drill requires authentic NAS backup artifacts; fallback to local is prohibited."
     }
 
     $LatestDump = $DumpFiles[0]
@@ -101,9 +94,13 @@ try {
     [string]$ManifestFile = Join-Path -Path $LatestDump.DirectoryName -ChildPath "$($DumpBaseName)_manifest.json"
     [string]$AttachmentsFile = Join-Path -Path $LatestDump.DirectoryName -ChildPath "$($DumpBaseName)_attachments.json"
 
-    Write-Host "  Found Backup Dump        : $($LatestDump.Name) ($([Math]::Round($LatestDump.Length / 1MB, 2)) MB)" -ForegroundColor Green
-    Write-Host "  Manifest File            : $(Test-Path -Path $ManifestFile)" -ForegroundColor Green
-    Write-Host "  Attachments Archive File : $(Test-Path -Path $AttachmentsFile)" -ForegroundColor Green
+    if (-not (Test-Path -Path $ManifestFile)) {
+        throw "FATAL: Mandatory companion manifest not found on NAS: $ManifestFile. Cannot verify cryptographic integrity of backup."
+    }
+
+    Write-Host "  Found NAS Backup Dump    : $($LatestDump.Name) ($([Math]::Round($LatestDump.Length / 1MB, 2)) MB)" -ForegroundColor Green
+    Write-Host "  Manifest File            : $ManifestFile [FOUND]" -ForegroundColor Green
+    Write-Host "  Attachments Archive File : $(if (Test-Path -Path $AttachmentsFile) { "$AttachmentsFile [FOUND]" } else { "NOT_FOUND" })" -ForegroundColor $(if (Test-Path -Path $AttachmentsFile) { "Green" } else { "Yellow" })
 
     $Evidence.steps["Step1_Discovery"] = [ordered]@{
         status = "PASSED"
@@ -113,24 +110,62 @@ try {
         attachmentsFile = $AttachmentsFile
     }
 
-    # --- Step 2: Validate Manifest & Cryptographic Hashes ---
-    Write-Host "`n[Step 2] Validating SHA-256 Checksums and Manifest Integrity..." -ForegroundColor Yellow
+    # --- Step 2: Validate Manifest & Cryptographic Hashes & HMAC-SHA256 ---
+    Write-Host "`n[Step 2] Validating SHA-256 Checksums and HMAC Signature Integrity..." -ForegroundColor Yellow
     [string]$CalculatedDumpSha = (Get-FileHash -Path $LatestDump.FullName -Algorithm SHA256).Hash.ToLower()
 
-    if (Test-Path -Path $ManifestFile) {
-        $ManifestContent = Get-Content -Path $ManifestFile -Raw | ConvertFrom-Json
-        if ($ManifestContent.checksums -and $ManifestContent.checksums.dump) {
-            [string]$ExpectedDumpSha = $ManifestContent.checksums.dump.ToLower()
-            if ($CalculatedDumpSha -ne $ExpectedDumpSha) {
-                throw "FATAL: Dump SHA-256 mismatch! Expected: $ExpectedDumpSha, Calculated: $CalculatedDumpSha"
-            }
-            Write-Host "  Dump SHA-256 Hash Verified [MATCH]." -ForegroundColor Green
+    $ManifestContent = Get-Content -Path $ManifestFile -Raw | ConvertFrom-Json
+    if (-not $ManifestContent.checksums -or -not $ManifestContent.checksums.dump) {
+        throw "FATAL: Manifest is malformed: missing checksums.dump field."
+    }
+
+    [string]$ExpectedDumpSha = $ManifestContent.checksums.dump.ToLower()
+    if ($CalculatedDumpSha -ne $ExpectedDumpSha) {
+        throw "FATAL: Dump SHA-256 mismatch! Expected: $ExpectedDumpSha, Calculated: $CalculatedDumpSha"
+    }
+    Write-Host "  Dump SHA-256 Hash Verified [MATCH]." -ForegroundColor Green
+
+    # Mandatory HMAC-SHA256 Signature Verification
+    if (-not $HmacSecret) {
+        if ($env:BACKUP_SIGNATURE_SECRET) {
+            $HmacSecret = $env:BACKUP_SIGNATURE_SECRET
+        } else {
+            throw "FATAL: BACKUP_SIGNATURE_SECRET is not set and HmacSecret parameter is empty. Unsigned NAS restore drills are strictly prohibited."
         }
     }
+
+    if (-not $ManifestContent.signature) {
+        throw "FATAL: Manifest is missing mandatory HMAC-SHA256 signature field. Unsigned backup restore prohibited."
+    }
+
+    $HmacAlg = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($HmacSecret))
+    
+    # Check signature against backupId:dumpSha256
+    $PayloadStr = "$($ManifestContent.backupId):$CalculatedDumpSha"
+    $PayloadBytes = [System.Text.Encoding]::UTF8.GetBytes($PayloadStr)
+    $CalculatedHmac = [BitConverter]::ToString($HmacAlg.ComputeHash($PayloadBytes)).Replace("-","").ToLower()
+
+    # Also check against direct dump file bytes / raw dump sha for cross-compatibility
+    $RawShaBytes = [System.Text.Encoding]::UTF8.GetBytes($CalculatedDumpSha)
+    $RawShaHmac = [BitConverter]::ToString($HmacAlg.ComputeHash($RawShaBytes)).Replace("-","").ToLower()
+
+    [bool]$SigMatch = ($CalculatedHmac -eq $ManifestContent.signature.ToLower()) -or ($RawShaHmac -eq $ManifestContent.signature.ToLower())
+
+    if (-not $SigMatch) {
+        $DumpBytes = [System.IO.File]::ReadAllBytes($LatestDump.FullName)
+        $DumpBytesHmac = [BitConverter]::ToString($HmacAlg.ComputeHash($DumpBytes)).Replace("-","").ToLower()
+        $SigMatch = ($DumpBytesHmac -eq $ManifestContent.signature.ToLower())
+    }
+
+    if (-not $SigMatch) {
+        throw "FATAL: HMAC-SHA256 signature mismatch! Expected: $($ManifestContent.signature), Calculated: $CalculatedHmac"
+    }
+    Write-Host "  HMAC-SHA256 Signature Verified [MATCH]." -ForegroundColor Green
 
     $Evidence.steps["Step2_ChecksumVerification"] = [ordered]@{
         status = "PASSED"
         calculatedDumpSha256 = $CalculatedDumpSha
+        hmacVerified = $true
     }
 
     # --- Step 3: Spin Up Isolated Staging PostgreSQL Container ---
@@ -165,23 +200,24 @@ try {
         port = $DrillPort
     }
 
-    # --- Step 4: Perform Database Restore via pg_restore ---
-    Write-Host "`n[Step 4] Restoring database snapshot via pg_restore..." -ForegroundColor Yellow
+    # --- Step 4: Perform Strict Database Restore via pg_restore ---
+    Write-Host "`n[Step 4] Restoring database snapshot via pg_restore (--exit-on-error, strict exit code 0)..." -ForegroundColor Yellow
     & docker cp $LatestDump.FullName "${IsolatedContainerName}:/tmp/restore.dump"
     
     [string]$RestoreOutput = (& docker exec $IsolatedContainerName pg_restore `
         -U postgres `
         -d gms_nas_drill `
+        --exit-on-error `
         --clean `
         --if-exists `
         --no-owner `
         --no-acl `
         /tmp/restore.dump 2>&1) | Out-String
 
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) { # exit code 1 can indicate warnings on --clean if tables don't exist yet
-        throw "pg_restore failed with exit code $LASTEXITCODE. Output: $RestoreOutput"
+    if ($LASTEXITCODE -ne 0) {
+        throw "pg_restore FAILED with non-zero exit code $LASTEXITCODE. Output: $RestoreOutput"
     }
-    Write-Host "  pg_restore COMPLETED successfully." -ForegroundColor Green
+    Write-Host "  pg_restore COMPLETED successfully with exit code 0." -ForegroundColor Green
 
     $Evidence.steps["Step4_PgRestore"] = [ordered]@{
         status = "PASSED"
@@ -242,6 +278,10 @@ try {
     $Sw.Stop()
     [double]$TotalDurationSec = [Math]::Round($Sw.Elapsed.TotalSeconds, 2)
     [bool]$RtoOk = $TotalDurationSec -le $MaxAllowedRtoSeconds
+
+    if (-not $RtoOk) {
+        throw "RTO SLA VIOLATION: Total restore duration ($TotalDurationSec s) exceeded target limit ($MaxAllowedRtoSeconds s)."
+    }
 
     $Evidence.verdict = "PASSED"
     $Evidence["measuredRestoreDurationSeconds"] = $TotalDurationSec

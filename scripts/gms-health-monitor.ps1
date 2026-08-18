@@ -186,9 +186,10 @@ try {
 }
 
 # ------------------------------------------------------------------------------
-# 6. Backup Freshness (RPO) & NAS Accessibility
+# 6. Local Backup Freshness (RPO)
 # ------------------------------------------------------------------------------
 [string]$LocalBackupDir = Join-Path $ProjectRootDir "backups\local"
+$latestDump = $null
 if (Test-Path $LocalBackupDir) {
     $latestDump = Get-ChildItem -Path $LocalBackupDir -Filter "*.dump" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($latestDump) {
@@ -203,11 +204,115 @@ if (Test-Path $LocalBackupDir) {
     } else {
         Emit-Alert -Component "BackupRPO" -Severity "HIGH" -Message "No database backups located in $LocalBackupDir!"
         $HighCount++
+        $Results["BackupRPO"] = @{ status = "FAIL"; error = "No backups found" }
     }
 }
 
 # ------------------------------------------------------------------------------
-# 7. Summary & Persisted Monitor Status
+# 7. NAS / Offsite Storage Reachability & Writable Test
+# ------------------------------------------------------------------------------
+[string]$NasPath = if ($env:NAS_MOUNT_PATH) { $env:NAS_MOUNT_PATH } else { Join-Path $ProjectRootDir "backups\nas" }
+if (Test-Path $NasPath -PathType Container) {
+    try {
+        [string]$ProbeFile = Join-Path $NasPath ".gms_health_probe_$([Guid]::NewGuid().ToString('N')).tmp"
+        [System.IO.File]::WriteAllText($ProbeFile, "GMS_HEALTH_PROBE_$(Get-Date)")
+        Remove-Item -Path $ProbeFile -Force -ErrorAction Stop
+        Emit-Alert -Component "NASStorage" -Severity "INFO" -Message "NAS storage is REACHABLE and WRITABLE ($NasPath)."
+        $Results["NASStorage"] = @{ status = "OK"; path = $NasPath; writable = $true }
+    } catch {
+        Emit-Alert -Component "NASStorage" -Severity "HIGH" -Message "NAS storage path is accessible but WRITE test FAILED: $_"
+        $HighCount++
+        $Results["NASStorage"] = @{ status = "FAIL"; path = $NasPath; error = $_.ToString() }
+    }
+} else {
+    Emit-Alert -Component "NASStorage" -Severity "HIGH" -Message "NAS storage path is NOT accessible ($NasPath)!"
+    $HighCount++
+    $Results["NASStorage"] = @{ status = "FAIL"; path = $NasPath; error = "Path inaccessible" }
+}
+
+# ------------------------------------------------------------------------------
+# 8. Latest Backup Checksum Integrity Verification
+# ------------------------------------------------------------------------------
+if ($latestDump) {
+    [string]$DumpBaseName = [System.IO.Path]::GetFileNameWithoutExtension($latestDump.FullName)
+    [string]$ManifestPath = Join-Path $latestDump.DirectoryName "$($DumpBaseName)_manifest.json"
+    if (Test-Path $ManifestPath) {
+        try {
+            $ManifestObj = Get-Content $ManifestPath -Raw | ConvertFrom-Json
+            if ($ManifestObj.checksums -and $ManifestObj.checksums.dump) {
+                [string]$ExpectedHash = $ManifestObj.checksums.dump.ToLower()
+                [string]$ActualHash = (Get-FileHash -Path $latestDump.FullName -Algorithm SHA256).Hash.ToLower()
+                if ($ExpectedHash -eq $ActualHash) {
+                    Emit-Alert -Component "BackupChecksum" -Severity "INFO" -Message "Latest backup SHA-256 integrity verified [MATCH]."
+                    $Results["BackupChecksum"] = @{ status = "OK"; sha256 = $ActualHash }
+                } else {
+                    Emit-Alert -Component "BackupChecksum" -Severity "CRITICAL" -Message "Latest backup SHA-256 MISMATCH! Expected: $ExpectedHash, Found: $ActualHash"
+                    $CriticalCount++
+                    $Results["BackupChecksum"] = @{ status = "FAIL"; expected = $ExpectedHash; actual = $ActualHash }
+                }
+            }
+        } catch {
+            Emit-Alert -Component "BackupChecksum" -Severity "HIGH" -Message "Failed to verify backup manifest checksum: $_"
+            $HighCount++
+        }
+    } else {
+        Emit-Alert -Component "BackupChecksum" -Severity "WARNING" -Message "No companion manifest file found for latest backup ($ManifestPath)."
+        $WarningCount++
+        $Results["BackupChecksum"] = @{ status = "WARNING"; error = "Manifest missing" }
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 9. TLS Certificate Expiration Monitoring
+# ------------------------------------------------------------------------------
+[string]$TlsCertPath = Join-Path $ProjectRootDir "deploy\nginx\ssl\server.crt"
+if (Test-Path $TlsCertPath) {
+    try {
+        $Cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($TlsCertPath)
+        $DaysUntilExpiration = [Math]::Round(($Cert.NotAfter - (Get-Date)).TotalDays, 0)
+        if ($DaysUntilExpiration -le 0) {
+            Emit-Alert -Component "TLSCertificate" -Severity "CRITICAL" -Message "TLS Certificate is EXPIRED! (Expired on $($Cert.NotAfter.ToString('yyyy-MM-dd')))"
+            $CriticalCount++
+            $Results["TLSCertificate"] = @{ status = "EXPIRED"; daysUntilExpiration = $DaysUntilExpiration }
+        } elseif ($DaysUntilExpiration -le 30) {
+            Emit-Alert -Component "TLSCertificate" -Severity "WARNING" -Message "TLS Certificate expires in $DaysUntilExpiration days (Expiry: $($Cert.NotAfter.ToString('yyyy-MM-dd')))."
+            $WarningCount++
+            $Results["TLSCertificate"] = @{ status = "EXPIRING_SOON"; daysUntilExpiration = $DaysUntilExpiration }
+        } else {
+            Emit-Alert -Component "TLSCertificate" -Severity "INFO" -Message "TLS Certificate is VALID for $DaysUntilExpiration days."
+            $Results["TLSCertificate"] = @{ status = "OK"; daysUntilExpiration = $DaysUntilExpiration }
+        }
+    } catch {
+        Emit-Alert -Component "TLSCertificate" -Severity "WARNING" -Message "Failed to parse TLS Certificate ($TlsCertPath): $_"
+        $WarningCount++
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 10. Application 5xx Error Rate Analysis (Nginx / App Logs)
+# ------------------------------------------------------------------------------
+try {
+    [string]$NginxLogs = (& docker logs gate-system-nginx --since "1h" 2>&1) | Out-String
+    $Matches5xx = [regex]::Matches($NginxLogs, 'HTTP\/[0-9\.]+"\s+5[0-9]{2}\s+')
+    $MatchesAll = [regex]::Matches($NginxLogs, 'HTTP\/[0-9\.]+"\s+[0-9]{3}\s+')
+    [int]$TotalReqs = $MatchesAll.Count
+    [int]$Total5xx = $Matches5xx.Count
+    [double]$ErrorRate = if ($TotalReqs -gt 0) { [Math]::Round(($Total5xx / $TotalReqs) * 100, 2) } else { 0 }
+
+    if ($ErrorRate -gt 5.0 -and $TotalReqs -ge 20) {
+        Emit-Alert -Component "5xxErrorRate" -Severity "HIGH" -Message "High 5xx error rate in last hour: $ErrorRate% ($Total5xx / $TotalReqs requests)!"
+        $HighCount++
+        $Results["5xxErrorRate"] = @{ status = "HIGH"; errorRatePercent = $ErrorRate; total5xx = $Total5xx; totalRequests = $TotalReqs }
+    } else {
+        Emit-Alert -Component "5xxErrorRate" -Severity "INFO" -Message "Application 5xx error rate is NORMAL: $ErrorRate% ($Total5xx / $TotalReqs requests in last hour)."
+        $Results["5xxErrorRate"] = @{ status = "OK"; errorRatePercent = $ErrorRate; total5xx = $Total5xx; totalRequests = $TotalReqs }
+    }
+} catch {
+    $Results["5xxErrorRate"] = @{ status = "SKIPPED"; reason = "Could not query nginx logs" }
+}
+
+# ------------------------------------------------------------------------------
+# 11. Summary & Persisted Monitor Status
 # ------------------------------------------------------------------------------
 [string]$OverallHealth = if ($CriticalCount -gt 0) { "CRITICAL" } elseif ($HighCount -gt 0) { "DEGRADED" } elseif ($WarningCount -gt 0) { "WARNING" } else { "HEALTHY" }
 

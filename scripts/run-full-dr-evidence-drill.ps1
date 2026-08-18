@@ -56,21 +56,41 @@ Write-DrillLog "================================================================
 [datetime]$OverallDrillStartTime = Get-Date
 
 # ------------------------------------------------------------------------------
-# 1. System & Host Metadata Collection
+# 1. System & Host Metadata Collection (Fail-Closed, No Fabricated Defaults)
 # ------------------------------------------------------------------------------
 Write-DrillLog "Collecting Host & Platform Metadata..."
 
-[string]$GitSha = try { (& git rev-parse HEAD 2>&1).ToString().Trim() } catch { "LOCAL_COMMITTED" }
+[bool]$MetadataComplete = $true
+
+[string]$GitSha = try { 
+    $sha = (& git rev-parse HEAD 2>&1).ToString().Trim()
+    if ($LASTEXITCODE -eq 0 -and $sha.Length -ge 7) { $sha } else { $MetadataComplete = $false; "UNAVAILABLE" }
+} catch { $MetadataComplete = $false; "UNAVAILABLE" }
+
 [string]$OsInfo = [System.Environment]::OSVersion.ToString()
 [string]$HostName = [System.Environment]::MachineName
 [string]$EnvironmentName = if ($env:GMS_ENV) { $env:GMS_ENV } else { "Production-Windows-Rancher" }
 
-[string]$DockerVersion = try { (& docker version --format '{{.Server.Version}}' 2>&1).ToString().Trim() } catch { "Docker-Moby" }
-[string]$RancherVersion = try { (& rdctl version 2>&1).ToString().Trim() } catch { "Rancher Desktop Moby Engine" }
+[string]$DockerVersion = try { 
+    $ver = (& docker version --format '{{.Server.Version}}' 2>&1).ToString().Trim()
+    if ($LASTEXITCODE -eq 0 -and (-not [string]::IsNullOrWhiteSpace($ver))) { $ver } else { $MetadataComplete = $false; "UNAVAILABLE" }
+} catch { $MetadataComplete = $false; "UNAVAILABLE" }
+
+[string]$RancherVersion = try { 
+    $rver = (& rdctl version 2>&1).ToString().Trim()
+    if ($LASTEXITCODE -eq 0 -and (-not [string]::IsNullOrWhiteSpace($rver))) { $rver } else { "NOT_DETECTED" }
+} catch { "NOT_DETECTED" }
 
 # Extract Running Container Image Digests
-[string]$BackendDigest = try { (& docker inspect --format="{{.Image}}" gate-system-backend 2>&1).ToString().Trim() } catch { "sha256:backend" }
-[string]$FrontendDigest = try { (& docker inspect --format="{{.Image}}" gate-system-frontend 2>&1).ToString().Trim() } catch { "sha256:frontend" }
+[string]$BackendDigest = try { 
+    $bImg = (& docker inspect --format="{{.Image}}" gate-system-backend 2>&1).ToString().Trim()
+    if ($LASTEXITCODE -eq 0 -and $bImg.StartsWith("sha256:")) { $bImg } else { $MetadataComplete = $false; "UNAVAILABLE" }
+} catch { $MetadataComplete = $false; "UNAVAILABLE" }
+
+[string]$FrontendDigest = try { 
+    $fImg = (& docker inspect --format="{{.Image}}" gate-system-frontend 2>&1).ToString().Trim()
+    if ($LASTEXITCODE -eq 0 -and $fImg.StartsWith("sha256:")) { $fImg } else { $MetadataComplete = $false; "UNAVAILABLE" }
+} catch { $MetadataComplete = $false; "UNAVAILABLE" }
 
 # ------------------------------------------------------------------------------
 # 2. Execute Actual Restore Drill (run-actual-restore-drill.ps1)
@@ -110,12 +130,17 @@ try {
 Write-DrillLog "Deployment Rollback Drill Result: $(if ($RollbackDrillPassed) {'PASSED'} else {'FAILED'})"
 
 # ------------------------------------------------------------------------------
-# 4. Load Rollback Evidence Artifact
+# 4. Load Rollback Evidence Artifact (Strict: No Fabricated Defaults)
 # ------------------------------------------------------------------------------
 [string]$RollbackEvidenceFile = Join-Path $ArtifactsDir "deployment-rollback-operator-evidence.json"
 $RollbackEvidence = if (Test-Path $RollbackEvidenceFile) {
     try { Get-Content $RollbackEvidenceFile -Raw | ConvertFrom-Json } catch { $null }
 } else { $null }
+
+[bool]$NginxHealthy = if ($RollbackEvidence -and $RollbackEvidence.rollbackVerification) { [bool]$RollbackEvidence.rollbackVerification.nginxHealthy } else { $false }
+[bool]$BackendHealthy = if ($RollbackEvidence -and $RollbackEvidence.rollbackVerification) { [bool]$RollbackEvidence.rollbackVerification.backendHealthy } else { $false }
+[bool]$FrontendHealthy = if ($RollbackEvidence -and $RollbackEvidence.rollbackVerification) { [bool]$RollbackEvidence.rollbackVerification.frontendHealthy } else { $false }
+[string]$HttpsGatewayResult = if ($NginxHealthy -and $RollbackEvidence) { "PASSED" } else { "FAILED" }
 
 # ------------------------------------------------------------------------------
 # 5. Run Cross-Stack Smoke with Business Matrix (Login, GBB, GSP, GBJ, Correction)
@@ -133,10 +158,25 @@ try {
 }
 
 # ------------------------------------------------------------------------------
-# 6. Assemble Comprehensive Launch Certification Evidence
+# 6. Real RPO SLA Compliance Calculation
+# ------------------------------------------------------------------------------
+[string]$BackupSearchDir = Join-Path $ProjectRootDir "backups\local"
+[double]$LatestBackupAgeMinutes = -1
+[bool]$RpoCompliant = $false
+
+if (Test-Path $BackupSearchDir) {
+    $LatestDump = Get-ChildItem -Path $BackupSearchDir -Filter "*.dump" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($LatestDump) {
+        $LatestBackupAgeMinutes = [Math]::Round(((Get-Date) - $LatestDump.LastWriteTime).TotalMinutes, 2)
+        $RpoCompliant = ($LatestBackupAgeMinutes -ge 0 -and $LatestBackupAgeMinutes -le 360) # 6 hours SLA
+    }
+}
+
+# ------------------------------------------------------------------------------
+# 7. Assemble Comprehensive Launch Certification Evidence
 # ------------------------------------------------------------------------------
 [double]$TotalRtoSeconds = [math]::Round(((Get-Date) - $OverallDrillStartTime).TotalSeconds, 2)
-[bool]$AllPassed = $RestoreDrillPassed -and $RollbackDrillPassed -and $SmokePassed
+[bool]$AllPassed = $RestoreDrillPassed -and $RollbackDrillPassed -and $SmokePassed -and $MetadataComplete -and $RpoCompliant -and ($RollbackEvidence -ne $null)
 
 $FullEvidence = [ordered]@{
     evidenceType = "GMS_ENTERPRISE_DR_LAUNCH_CERTIFICATION"
@@ -149,6 +189,7 @@ $FullEvidence = [ordered]@{
         environment = $EnvironmentName
         dockerVersion = $DockerVersion
         rancherDesktopVersion = $RancherVersion
+        metadataComplete = $MetadataComplete
     }
     imageDigests = @{
         backendDigest = $BackendDigest
@@ -160,10 +201,11 @@ $FullEvidence = [ordered]@{
         businessSmokePassed = $SmokePassed
     }
     operationalGates = @{
-        nginxHealthy = if ($RollbackEvidence) { $RollbackEvidence.rollbackVerification.nginxHealthy } else { $true }
-        backendHealthy = if ($RollbackEvidence) { $RollbackEvidence.rollbackVerification.backendHealthy } else { $true }
-        frontendHealthy = if ($RollbackEvidence) { $RollbackEvidence.rollbackVerification.frontendHealthy } else { $true }
-        httpsGatewayResult = "PASSED"
+        rollbackEvidencePresent = ($RollbackEvidence -ne $null)
+        nginxHealthy = $NginxHealthy
+        backendHealthy = $BackendHealthy
+        frontendHealthy = $FrontendHealthy
+        httpsGatewayResult = $HttpsGatewayResult
         loginSmoke = $SmokePassed
         gbbSmoke = $SmokePassed
         gspSmoke = $SmokePassed
@@ -173,7 +215,8 @@ $FullEvidence = [ordered]@{
     slaMetrics = @{
         rtoSeconds = $TotalRtoSeconds
         rpoTargetMinutes = 360 # 6 hours RPO
-        rpoCompliance = "COMPLIANT"
+        measuredBackupAgeMinutes = $LatestBackupAgeMinutes
+        rpoCompliance = if ($RpoCompliant) { "COMPLIANT" } else { "NON_COMPLIANT" }
     }
 }
 
@@ -190,6 +233,6 @@ if ($AllPassed) {
     Write-DrillLog "OVERALL DR DRILL VERDICT: PASSED [SUCCESS] (RTO: $TotalRtoSeconds s)" -Level "SUCCESS"
     exit 0
 } else {
-    Write-DrillLog "OVERALL DR DRILL VERDICT: FAILED [ERROR]" -Level "ERROR"
+    Write-DrillLog "OVERALL DR DRILL VERDICT: FAILED [ERROR] (Restore: $RestoreDrillPassed, Rollback: $RollbackDrillPassed, Smoke: $SmokePassed, Metadata: $MetadataComplete, RPO: $RpoCompliant)" -Level "ERROR"
     exit 1
 }
