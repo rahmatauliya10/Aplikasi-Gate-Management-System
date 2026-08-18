@@ -702,20 +702,12 @@ jobs:
           docker run --rm gms-backend:ci sh -c 'command -v npx && exit 1 || exit 0'
           echo "Runtime container isolation verified: Zero-npm, Zero-npx, Non-root [PASS]"
 
-      - name: Install Syft SBOM Generator (Pinned Version v1.19.0)
-        run: |
-          curl -sSfL "https://github.com/anchore/syft/releases/download/v1.19.0/syft_1.19.0_linux_amd64.tar.gz" -o /tmp/syft.tar.gz
-          sudo tar -xzf /tmp/syft.tar.gz -C /usr/local/bin syft
-          sudo chmod +x /usr/local/bin/syft
-          rm -f /tmp/syft.tar.gz
-          syft version
-
       - name: Generate CycloneDX SBOM for Runtime, Migrator & Frontend Images
         run: |
           mkdir -p artifacts/sbom
-          syft packages gms-backend:ci -o cyclonedx-json > artifacts/sbom/backend-runtime-sbom.cdx.json
-          syft packages gms-backend-migrator:ci -o cyclonedx-json > artifacts/sbom/backend-migrator-sbom.cdx.json
-          syft packages gms-frontend:ci -o cyclonedx-json > artifacts/sbom/frontend-sbom.cdx.json
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.19.0 packages gms-backend:ci -o cyclonedx-json > artifacts/sbom/backend-runtime-sbom.cdx.json
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.19.0 packages gms-backend-migrator:ci -o cyclonedx-json > artifacts/sbom/backend-migrator-sbom.cdx.json
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.19.0 packages gms-frontend:ci -o cyclonedx-json > artifacts/sbom/frontend-sbom.cdx.json
           sha256sum artifacts/sbom/backend-runtime-sbom.cdx.json > artifacts/sbom/backend-runtime-sbom.cdx.json.sha256
           sha256sum artifacts/sbom/backend-migrator-sbom.cdx.json > artifacts/sbom/backend-migrator-sbom.cdx.json.sha256
           sha256sum artifacts/sbom/frontend-sbom.cdx.json > artifacts/sbom/frontend-sbom.cdx.json.sha256
@@ -730,25 +722,44 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Install Trivy Security Scanner (Pinned Version v0.58.2)
-        run: |
-          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v0.58.2/trivy_0.58.2_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz
-          sudo tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
-          sudo chmod +x /usr/local/bin/trivy
-          rm -f /tmp/trivy.tar.gz
-          trivy version
-
       - name: Scan Backend Runtime Image with Trivy (Blocking Security Gate)
         run: |
           echo "Executing Trivy vulnerability scan against gms-backend:ci..."
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml gms-backend:ci
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile /workspace/.trivyignore.yaml \
+            gms-backend:ci
 
       - name: Scan Backend Migrator Image with Trivy (Blocking Security Gate)
         run: |
           echo "Executing Trivy vulnerability scan against gms-backend-migrator:ci..."
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml gms-backend-migrator:ci
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile /workspace/.trivyignore.yaml \
+            gms-backend-migrator:ci
 
       - name: Scan Frontend Image with Trivy (Blocking Security Gate)
         run: |
           echo "Executing Trivy vulnerability scan against gms-frontend:ci..."
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml gms-frontend:ci
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile /workspace/.trivyignore.yaml \
+            gms-frontend:ci

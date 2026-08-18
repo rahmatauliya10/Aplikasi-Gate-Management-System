@@ -35,14 +35,15 @@ RUN apk upgrade --no-cache && apk add --no-cache postgresql-client dumb-init
 
 WORKDIR /app
 
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/scripts ./scripts
+# High-speed native chown copy avoids slow recursive layer chmod
+COPY --chown=node:node --from=builder /app/package*.json ./
+COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+COPY --chown=node:node --from=builder /app/dist ./dist
+COPY --chown=node:node --from=builder /app/prisma ./prisma
+COPY --chown=node:node --from=builder /app/scripts ./scripts
 
 RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/node/.cache /home/node/.npm \
-    && chown -R node:node /app /home/node
+    && chown -R node:node /home/node /app/uploads /app/backups /app/logs
 
 USER node
 
@@ -67,15 +68,15 @@ WORKDIR /app
 # Copy exact Node 22 binary directly from builder (guarantees identical v8/node version with zero npm/npx footprint)
 COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 
-# Copy production runtime bundle & artifacts
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/scripts ./scripts
+# Copy production runtime bundle with native chown
+COPY --chown=node:node --from=builder /app/package*.json ./
+COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+COPY --chown=node:node --from=builder /app/dist ./dist
+COPY --chown=node:node --from=builder /app/prisma ./prisma
+COPY --chown=node:node --from=builder /app/scripts ./scripts
 
 RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/node/.cache /home/node/.npm \
-    && chown -R node:node /app /home/node
+    && chown -R node:node /home/node /app/uploads /app/backups /app/logs
 
 EXPOSE 3001
 

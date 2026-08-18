@@ -146,35 +146,49 @@ jobs:
           echo "  Migrator: $MIGRATOR_REPO_DIGEST"
           echo "  Frontend: $FRONTEND_REPO_DIGEST"
 
-      - name: Install Security Tools (Trivy & Syft)
-        run: |
-          curl -sSfL "https://github.com/aquasecurity/trivy/releases/download/v0.58.2/trivy_0.58.2_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz
-          sudo tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
-          sudo chmod +x /usr/local/bin/trivy
-          rm -f /tmp/trivy.tar.gz
-          
-          curl -sSfL "https://github.com/anchore/syft/releases/download/v1.19.0/syft_1.19.0_linux_amd64.tar.gz" -o /tmp/syft.tar.gz
-          sudo tar -xzf /tmp/syft.tar.gz -C /usr/local/bin syft
-          sudo chmod +x /usr/local/bin/syft
-          rm -f /tmp/syft.tar.gz
-          
-          trivy version
-          syft version
-
       - name: Scan Exact Pushed RepoDigests with Trivy
         run: |
           echo "Executing Trivy vulnerability scans on pushed images..."
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml "${{ env.BACKEND_REPO_DIGEST }}"
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml "${{ env.MIGRATOR_REPO_DIGEST }}"
-          trivy image --severity CRITICAL,HIGH --exit-code 1 --ignore-unfixed --ignorefile .trivyignore.yaml "${{ env.FRONTEND_REPO_DIGEST }}"
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile /workspace/.trivyignore.yaml \
+            "${{ env.BACKEND_REPO_DIGEST }}"
+          
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile /workspace/.trivyignore.yaml \
+            "${{ env.MIGRATOR_REPO_DIGEST }}"
+          
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --ignorefile /workspace/.trivyignore.yaml \
+            "${{ env.FRONTEND_REPO_DIGEST }}"
           echo "All published container images passed Trivy security gate."
 
       - name: Generate CycloneDX SBOM for Published Images
         run: |
           mkdir -p artifacts/sbom artifacts/release-proof
-          syft packages "${{ env.BACKEND_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/backend-runtime-sbom.cdx.json
-          syft packages "${{ env.MIGRATOR_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/backend-migrator-sbom.cdx.json
-          syft packages "${{ env.FRONTEND_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/frontend-sbom.cdx.json
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.19.0 packages "${{ env.BACKEND_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/backend-runtime-sbom.cdx.json
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.19.0 packages "${{ env.MIGRATOR_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/backend-migrator-sbom.cdx.json
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:v1.19.0 packages "${{ env.FRONTEND_REPO_DIGEST }}" -o cyclonedx-json > artifacts/sbom/frontend-sbom.cdx.json
           
           sha256sum artifacts/sbom/backend-runtime-sbom.cdx.json > artifacts/sbom/backend-runtime-sbom.cdx.json.sha256
           sha256sum artifacts/sbom/backend-migrator-sbom.cdx.json > artifacts/sbom/backend-migrator-sbom.cdx.json.sha256
