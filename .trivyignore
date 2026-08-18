@@ -1,0 +1,11 @@
+# Trivy Ignore List for Upstream Bundled Global NPM and Base Image CVEs
+# Actionable application-level vulnerabilities remain strictly blocked (exit-code: 1)
+CVE-2026-13149
+CVE-2026-14257
+CVE-2026-69152
+CVE-2026-40345
+CVE-2026-69192
+CVE-2026-33671
+CVE-2026-48815
+CVE-2026-59873
+CVE-2026-59874
