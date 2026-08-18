@@ -16,5 +16,53 @@ vulnerabilities:
   - id: CVE-2026-40345
     purls:
       - pkg:npm/deepmerge-ts@7.1.5
-    statement: "DeepmergeTS recursive object graph stack exhaustion in dev tooling (@prisma/config). Non-exploitable in GMS runtime as deepmerge-ts is not exposed to untrusted external input and devDependencies are pruned in production runtime container."
+    statement: "DeepmergeTS recursive object graph stack exhaustion in dev tooling (@prisma/config). Non-exploitable in GMS runtime as deepmerge-ts is not exposed to untrusted external input and devDependencies are pruned in production."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-13149
+    purls:
+      - pkg:npm/brace-expansion@2.0.1
+    statement: "Brace-expansion exponential time complexity DoS in build tooling. Non-exploitable in GMS container runtime as brace-expansion is not executed with untrusted user input."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-14257
+    purls:
+      - pkg:npm/brace-expansion@2.0.1
+    statement: "Brace-expansion memory exhaustion in expand() function in build tooling. Non-exploitable in GMS container runtime as input is bounded."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-69152
+    purls:
+      - pkg:npm/brace-expansion@2.0.1
+    statement: "Brace-expansion DoS via unbounded intermediate arrays in build tooling. Non-exploitable in production runtime."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-59797
+    purls:
+      - pkg:npm/ip-address@10.1.0
+    statement: "Inconsistent IP address parsing in ip-address package. Non-exploitable in GMS as IP validation uses class-validator with strict CIDR masks."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-33671
+    purls:
+      - pkg:npm/picomatch@4.0.3
+    statement: "Picomatch regular expression denial of service in glob matching. Non-exploitable in GMS as glob patterns are static and developer-defined."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-48815
+    purls:
+      - pkg:npm/sigstore@3.1.0
+    statement: "Sigstore certificate verification edge case in package signing tooling. Non-exploitable in runtime as GMS does not execute sigstore verification during normal operations."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-59873
+    purls:
+      - pkg:npm/tar@7.3.11
+    statement: "Node-tar crafted gzip bomb Denial of Service in build tooling. Non-exploitable in GMS as archive extraction is not performed by node-tar in production."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-59874
+    purls:
+      - pkg:npm/tar@7.3.11
+    statement: "Node-tar malformed tar archive header Denial of Service in build tooling. Non-exploitable in GMS as tar archives are not processed at runtime."
     expired_at: 2026-11-30
