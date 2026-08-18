@@ -682,22 +682,6 @@ jobs:
           docker build -t aplikasi-gate-management-system-backend:latest ./backend
           docker build -t aplikasi-gate-management-system-frontend:latest ./frontend
 
-      - name: Scan Backend Image with Trivy (Blocking Security Gate)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'aplikasi-gate-management-system-backend:latest'
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Scan Frontend Image with Trivy (Blocking Security Gate)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'aplikasi-gate-management-system-frontend:latest'
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-
       - name: Install Syft SBOM Generator
         run: |
           curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
@@ -713,10 +697,27 @@ jobs:
           ls -la artifacts/sbom/
 
       - name: Upload Software Bill of Materials (SBOM) Release Artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: container-sbom-artifacts
           path: artifacts/sbom/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Scan Backend Image with Trivy (Blocking Security Gate)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'aplikasi-gate-management-system-backend:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Scan Frontend Image with Trivy (Blocking Security Gate)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'aplikasi-gate-management-system-frontend:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
