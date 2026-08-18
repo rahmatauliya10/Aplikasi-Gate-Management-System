@@ -26,15 +26,16 @@ describe('GMS Comprehensive Security Verification & Negative Access Matrix (Task
 
   describe('1. Unauthenticated & Malformed Token Rejection', () => {
     it('GET /api/transactions should return 401 Unauthorized without Bearer token', async () => {
-      await request(app.getHttpServer())
-        .get('/api/transactions')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/transactions').expect(401);
     });
 
     it('GET /api/transactions with forged/tampered JWT should return 401 Unauthorized', async () => {
       await request(app.getHttpServer())
         .get('/api/transactions')
-        .set('Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.tampered_signature')
+        .set(
+          'Authorization',
+          'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.tampered_signature',
+        )
         .expect(401);
     });
   });
