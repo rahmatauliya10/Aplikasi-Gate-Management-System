@@ -18,8 +18,8 @@ RUN npm prune --omit=dev
 
 FROM node:22-alpine
 
-# Install postgresql-client for native pg_dump backup & restore capabilities and update npm
-RUN apk add --no-cache postgresql-client && npm install -g npm@latest
+# Install postgresql-client for native pg_dump backup & restore capabilities, upgrade packages, and update npm
+RUN apk upgrade --no-cache && apk add --no-cache postgresql-client && npm install -g npm@latest
 
 WORKDIR /app
 
