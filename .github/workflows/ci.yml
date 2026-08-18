@@ -568,7 +568,7 @@ jobs:
           timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-backend 2>/dev/null)" = "healthy" ]; do sleep 2; done' || (docker logs gate-system-backend && exit 1)
           
           echo "Waiting for nginx-proxy to become healthy..."
-          timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-nginx 2>/dev/null)" = "healthy" ]; do sleep 1; done'
+          timeout 30 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-nginx 2>/dev/null)" = "healthy" ]; do sleep 1; done' || (docker logs gate-system-frontend && docker logs gate-system-nginx && exit 1)
           
           echo "Step 4: Executing API health probe via Nginx reverse proxy..."
           node -e "
