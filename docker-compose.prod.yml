@@ -150,15 +150,6 @@ services:
     restart: unless-stopped
     networks:
       - db-net
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETUID
-      - SETGID
-      - FOWNER
     # ISOLATION HIGH RISK SECURITY FIX: Port 5432/5433 NOT exposed to host network in production.
     # PostgreSQL is accessible ONLY internally by gate-system-backend over internal docker bridge network (db-net).
     environment:
