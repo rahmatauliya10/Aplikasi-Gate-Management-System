@@ -214,25 +214,25 @@ try {
 if ($AppPassword -and $OwnerPassword -and $BackupPassword -and $PostgresPassword) {
     # 15A: gms_app + correct GMS_APP_PASSWORD over TCP -> PASS
     $tcpAppPass = Run-Query -user $AppUser -password $AppPassword -sql "SELECT 1;" -useTcp $true
-    if ($tcpAppPass -ne "1") {
+    if ($tcpAppPass.Trim() -ne "1") {
         throw "TCP AUTH FAILURE: Role '$AppUser' failed TCP connection with GMS_APP_PASSWORD: $tcpAppPass"
     }
 
     # 15B: gms_app + wrong POSTGRES_PASSWORD over TCP -> MUST FAIL (Proves no fallback)
     $tcpAppFail = Run-Query -user $AppUser -password $PostgresPassword -sql "SELECT 1;" -useTcp $true
-    if ($tcpAppFail -match "1" -and -not ($tcpAppFail -match "password authentication failed")) {
+    if ($tcpAppFail.Trim() -eq "1") {
         throw "SECURITY VIOLATION: Role '$AppUser' authenticated using POSTGRES_PASSWORD! Password fallback is still active."
     }
 
     # 15C: gms_owner + GMS_OWNER_PASSWORD over TCP -> PASS
     $tcpOwnerPass = Run-Query -user $OwnerUser -password $OwnerPassword -sql "SELECT 1;" -useTcp $true
-    if ($tcpOwnerPass -ne "1") {
+    if ($tcpOwnerPass.Trim() -ne "1") {
         throw "TCP AUTH FAILURE: Role '$OwnerUser' failed TCP connection with GMS_OWNER_PASSWORD: $tcpOwnerPass"
     }
 
     # 15D: gms_backup + GMS_BACKUP_PASSWORD over TCP -> PASS
     $tcpBackupPass = Run-Query -user $BackupUser -password $BackupPassword -sql "SELECT 1;" -useTcp $true
-    if ($tcpBackupPass -ne "1") {
+    if ($tcpBackupPass.Trim() -ne "1") {
         throw "TCP AUTH FAILURE: Role '$BackupUser' failed TCP connection with GMS_BACKUP_PASSWORD: $tcpBackupPass"
     }
 
