@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -10,6 +10,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { DashboardService } from './dashboard.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { GetDashboardStatsDto } from './dto/get-dashboard-stats.dto';
 
 @ApiTags('Dashboard')
 @ApiBearerAuth()
@@ -22,10 +23,13 @@ export class DashboardController {
   @ApiOperation({
     summary: 'Get dashboard statistics',
     description:
-      'Returns active, completed, today counts and breakdowns by status/process type',
+      'Returns active, completed, period counts and breakdowns filtered by date range or preset',
   })
   @ApiResponse({ status: 200, description: 'Dashboard statistics retrieved' })
-  getStats(@CurrentUser() user: JwtPayloadUser) {
-    return this.dashboardService.getStats(user);
+  getStats(
+    @CurrentUser() user: JwtPayloadUser,
+    @Query() query: GetDashboardStatsDto,
+  ) {
+    return this.dashboardService.getStats(user, query);
   }
 }
