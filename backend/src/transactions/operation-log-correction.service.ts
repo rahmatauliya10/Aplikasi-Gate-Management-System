@@ -446,7 +446,7 @@ export class OperationLogCorrectionService {
         }
       }
 
-      // Process Root items (TRANSACTION, STATUS, REMARK)
+      // Pass 1: In-memory evaluation and summary computation
       for (const item of rootItems) {
         const extractedOldValue = tx[item.fieldName];
         txUpdateData[item.fieldName] = item.newValue;
@@ -462,54 +462,16 @@ export class OperationLogCorrectionService {
         const summaryKey = `${item.targetModule}.${tx.id}.${item.fieldName}`;
         oldValuesSummary[summaryKey] = extractedOldValue;
         newValuesSummary[summaryKey] = item.newValue;
-
-        itemInsertPayloads.push({
-          correctionId,
-          targetModule: item.targetModule,
-          targetRecordId: tx.id,
-          replacementRecordId: null,
-          fieldName: item.fieldName,
-          oldValue: extractedOldValue !== undefined ? extractedOldValue : null,
-          newValue: item.newValue !== undefined ? item.newValue : null,
-          itemRemark: item.itemRemark || null,
-        });
       }
 
-      // Process Record-level Groups (WEIGHBRIDGE, WAREHOUSE, QC_VEHICLE, INCOMING_MATERIAL, ATTACHMENT)
       for (const [, group] of recordGroups) {
         const { targetModule, targetRecord: rec, items } = group;
 
         if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
-          const superseded = await prismaTx.weighbridgeRecord.updateMany({
-            where: {
-              id: rec.id,
-              isCurrent: true,
-              revision: rec.revision,
-            },
-            data: {
-              isCurrent: false,
-              supersededAt: new Date(),
-              supersededByCorrectionId: correctionId,
-            },
-          });
-
-          if (superseded.count !== 1) {
-            throw new ConflictException(
-              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
-            );
-          }
-
-          let updatedWeight = rec.weight;
-          let updatedTicketNumber = rec.ticketNumber;
-          let updatedRemarks = rec.remarks;
-
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
             if (item.fieldName === 'weight') {
-              updatedWeight = Number(item.newValue);
-              // GBJ vs GBB/GSP mapping rules:
-              // GBJ: OUT -> grossWeight, IN -> tareWeight
-              // GBB/GSP: IN -> grossWeight, OUT -> tareWeight
+              const updatedWeight = Number(item.newValue);
               if (tx.processType === 'GBJ') {
                 if (rec.type === 'IN') {
                   txUpdateData.tareWeight = updatedWeight;
@@ -523,10 +485,6 @@ export class OperationLogCorrectionService {
                   txUpdateData.tareWeight = updatedWeight;
                 }
               }
-            } else if (item.fieldName === 'ticketNumber') {
-              updatedTicketNumber = String(item.newValue);
-            } else if (item.fieldName === 'remarks') {
-              updatedRemarks = String(item.newValue);
             }
 
             if (
@@ -539,86 +497,9 @@ export class OperationLogCorrectionService {
             oldValuesSummary[summaryKey] = extractedOldValue;
             newValuesSummary[summaryKey] = item.newValue;
           }
-
-          const newRec = await prismaTx.weighbridgeRecord.create({
-            data: {
-              transactionId: rec.transactionId,
-              type: rec.type,
-              weight: updatedWeight,
-              ticketNumber: updatedTicketNumber,
-              operatorId: rec.operatorId,
-              remarks: updatedRemarks,
-              revision: rec.revision + 1,
-              isCurrent: true,
-            },
-          });
-
-          for (const item of items) {
-            itemInsertPayloads.push({
-              correctionId,
-              targetModule: item.targetModule,
-              targetRecordId: rec.id,
-              replacementRecordId: newRec.id,
-              fieldName: item.fieldName,
-              oldValue: rec[item.fieldName] ?? null,
-              newValue: item.newValue ?? null,
-              itemRemark: item.itemRemark || null,
-            });
-          }
         } else if (targetModule === CorrectionTargetModule.WAREHOUSE) {
-          const superseded = await prismaTx.warehouseProcess.updateMany({
-            where: {
-              id: rec.id,
-              isCurrent: true,
-              revision: rec.revision,
-            },
-            data: {
-              isCurrent: false,
-              supersededAt: new Date(),
-              supersededByCorrectionId: correctionId,
-            },
-          });
-
-          if (superseded.count !== 1) {
-            throw new ConflictException(
-              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
-            );
-          }
-
-          const updatedFields: any = {
-            startAt: rec.startAt,
-            endAt: rec.endAt,
-            actualWeight: rec.actualWeight,
-            actualQuantity: rec.actualQuantity,
-            unit: rec.unit,
-            palletCount: rec.palletCount,
-            bagCount: rec.bagCount,
-            rollCount: rec.rollCount,
-            condition: rec.condition,
-            remarks: rec.remarks,
-            checklistItems: rec.checklistItems,
-          };
-
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
-            if (['startAt', 'endAt'].includes(item.fieldName)) {
-              updatedFields[item.fieldName] = new Date(item.newValue);
-            } else if (
-              [
-                'actualWeight',
-                'actualQuantity',
-                'palletCount',
-                'bagCount',
-                'rollCount',
-              ].includes(item.fieldName)
-            ) {
-              updatedFields[item.fieldName] = Number(item.newValue);
-            } else if (item.fieldName === 'remarks') {
-              updatedFields[item.fieldName] = String(item.newValue);
-            } else {
-              updatedFields[item.fieldName] = item.newValue;
-            }
-
             if (item.fieldName === 'actualWeight') {
               txUpdateData.actualWeight = Number(item.newValue);
             } else if (item.fieldName === 'actualQuantity') {
@@ -641,81 +522,9 @@ export class OperationLogCorrectionService {
             oldValuesSummary[summaryKey] = extractedOldValue;
             newValuesSummary[summaryKey] = item.newValue;
           }
-
-          const newRec = await prismaTx.warehouseProcess.create({
-            data: {
-              transactionId: rec.transactionId,
-              processType: rec.processType,
-              startAt: updatedFields.startAt,
-              endAt: updatedFields.endAt,
-              startById: rec.startById,
-              endById: rec.endById,
-              actualWeight: updatedFields.actualWeight,
-              actualQuantity: updatedFields.actualQuantity,
-              unit: updatedFields.unit,
-              palletCount: updatedFields.palletCount,
-              bagCount: updatedFields.bagCount,
-              rollCount: updatedFields.rollCount,
-              condition: updatedFields.condition,
-              remarks: updatedFields.remarks,
-              checklistItems: updatedFields.checklistItems,
-              revision: rec.revision + 1,
-              isCurrent: true,
-            },
-          });
-
-          for (const item of items) {
-            itemInsertPayloads.push({
-              correctionId,
-              targetModule: item.targetModule,
-              targetRecordId: rec.id,
-              replacementRecordId: newRec.id,
-              fieldName: item.fieldName,
-              oldValue: rec[item.fieldName] ?? null,
-              newValue: item.newValue ?? null,
-              itemRemark: item.itemRemark || null,
-            });
-          }
         } else if (targetModule === CorrectionTargetModule.QC_VEHICLE) {
-          const superseded = await prismaTx.qcVehicleCheck.updateMany({
-            where: {
-              id: rec.id,
-              isCurrent: true,
-              revision: rec.revision,
-            },
-            data: {
-              isCurrent: false,
-              supersededAt: new Date(),
-              supersededByCorrectionId: correctionId,
-            },
-          });
-
-          if (superseded.count !== 1) {
-            throw new ConflictException(
-              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
-            );
-          }
-
-          const updatedFields: any = {
-            result: rec.result,
-            vehicleCleanliness: rec.vehicleCleanliness,
-            vehicleOdor: rec.vehicleOdor,
-            pestEvidence: rec.pestEvidence,
-            vehicleCondition: rec.vehicleCondition,
-            documentCompleteness: rec.documentCompleteness,
-            sealCondition: rec.sealCondition,
-            notes: rec.notes,
-            checklistItems: rec.checklistItems,
-          };
-
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
-            if (item.fieldName === 'notes') {
-              updatedFields[item.fieldName] = String(item.newValue);
-            } else {
-              updatedFields[item.fieldName] = item.newValue;
-            }
-
             if (
               JSON.stringify(extractedOldValue) !==
               JSON.stringify(item.newValue)
@@ -726,98 +535,12 @@ export class OperationLogCorrectionService {
             oldValuesSummary[summaryKey] = extractedOldValue;
             newValuesSummary[summaryKey] = item.newValue;
           }
-
-          const newRec = await prismaTx.qcVehicleCheck.create({
-            data: {
-              transactionId: rec.transactionId,
-              result: updatedFields.result,
-              vehicleCleanliness: updatedFields.vehicleCleanliness,
-              vehicleOdor: updatedFields.vehicleOdor,
-              pestEvidence: updatedFields.pestEvidence,
-              vehicleCondition: updatedFields.vehicleCondition,
-              documentCompleteness: updatedFields.documentCompleteness,
-              sealCondition: updatedFields.sealCondition,
-              notes: updatedFields.notes,
-              checklistItems: updatedFields.checklistItems,
-              checkedById: rec.checkedById,
-              startedAt: rec.startedAt,
-              completedAt: rec.completedAt,
-              revision: rec.revision + 1,
-              isCurrent: true,
-            },
-          });
-
-          for (const item of items) {
-            itemInsertPayloads.push({
-              correctionId,
-              targetModule: item.targetModule,
-              targetRecordId: rec.id,
-              replacementRecordId: newRec.id,
-              fieldName: item.fieldName,
-              oldValue: rec[item.fieldName] ?? null,
-              newValue: item.newValue ?? null,
-              itemRemark: item.itemRemark || null,
-            });
-          }
         } else if (
           targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
           targetModule === CorrectionTargetModule.QC_MATERIAL
         ) {
-          const superseded = await prismaTx.incomingMaterialCheck.updateMany({
-            where: {
-              id: rec.id,
-              isCurrent: true,
-              revision: rec.revision,
-            },
-            data: {
-              isCurrent: false,
-              supersededAt: new Date(),
-              supersededByCorrectionId: correctionId,
-            },
-          });
-
-          if (superseded.count !== 1) {
-            throw new ConflictException(
-              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
-            );
-          }
-
-          const updatedFields: any = {
-            result: rec.result,
-            odor: rec.odor,
-            color: rec.color,
-            moisture: rec.moisture,
-            foreignMatter: rec.foreignMatter,
-            beanCondition: rec.beanCondition,
-            sampleWeight: rec.sampleWeight,
-            goodBeanPercentage: rec.goodBeanPercentage,
-            itemCondition: rec.itemCondition,
-            packagingCondition: rec.packagingCondition,
-            quantityCheck: rec.quantityCheck,
-            documentCheck: rec.documentCheck,
-            visualInspection: rec.visualInspection,
-            defectNotes: rec.defectNotes,
-            notes: rec.notes,
-            checklistItems: rec.checklistItems,
-          };
-
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
-            if (
-              [
-                'moisture',
-                'foreignMatter',
-                'sampleWeight',
-                'goodBeanPercentage',
-              ].includes(item.fieldName)
-            ) {
-              updatedFields[item.fieldName] = Number(item.newValue);
-            } else if (['defectNotes', 'notes'].includes(item.fieldName)) {
-              updatedFields[item.fieldName] = String(item.newValue);
-            } else {
-              updatedFields[item.fieldName] = item.newValue;
-            }
-
             if (
               JSON.stringify(extractedOldValue) !==
               JSON.stringify(item.newValue)
@@ -828,75 +551,9 @@ export class OperationLogCorrectionService {
             oldValuesSummary[summaryKey] = extractedOldValue;
             newValuesSummary[summaryKey] = item.newValue;
           }
-
-          const newRec = await prismaTx.incomingMaterialCheck.create({
-            data: {
-              transactionId: rec.transactionId,
-              result: updatedFields.result,
-              odor: updatedFields.odor,
-              color: updatedFields.color,
-              moisture: updatedFields.moisture,
-              foreignMatter: updatedFields.foreignMatter,
-              beanCondition: updatedFields.beanCondition,
-              sampleWeight: updatedFields.sampleWeight,
-              goodBeanPercentage: updatedFields.goodBeanPercentage,
-              itemCondition: updatedFields.itemCondition,
-              packagingCondition: updatedFields.packagingCondition,
-              quantityCheck: updatedFields.quantityCheck,
-              documentCheck: updatedFields.documentCheck,
-              visualInspection: updatedFields.visualInspection,
-              defectNotes: updatedFields.defectNotes,
-              notes: updatedFields.notes,
-              checklistItems: updatedFields.checklistItems,
-              checkedById: rec.checkedById,
-              startedAt: rec.startedAt,
-              completedAt: rec.completedAt,
-              revision: rec.revision + 1,
-              isCurrent: true,
-            },
-          });
-
-          for (const item of items) {
-            itemInsertPayloads.push({
-              correctionId,
-              targetModule: item.targetModule,
-              targetRecordId: rec.id,
-              replacementRecordId: newRec.id,
-              fieldName: item.fieldName,
-              oldValue: rec[item.fieldName] ?? null,
-              newValue: item.newValue ?? null,
-              itemRemark: item.itemRemark || null,
-            });
-          }
         } else if (targetModule === CorrectionTargetModule.ATTACHMENT) {
-          const superseded = await prismaTx.attachment.updateMany({
-            where: {
-              id: rec.id,
-              isCurrent: true,
-              revision: rec.revision,
-            },
-            data: {
-              isCurrent: false,
-              supersededAt: new Date(),
-              supersededByCorrectionId: correctionId,
-            },
-          });
-
-          if (superseded.count !== 1) {
-            throw new ConflictException(
-              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
-            );
-          }
-
-          const updatedFields: any = {
-            originalName: rec.originalName,
-            description: rec.description,
-          };
-
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
-            updatedFields[item.fieldName] = String(item.newValue);
-
             if (
               JSON.stringify(extractedOldValue) !==
               JSON.stringify(item.newValue)
@@ -906,38 +563,6 @@ export class OperationLogCorrectionService {
             const summaryKey = `ATTACHMENT.${rec.id}.${item.fieldName}`;
             oldValuesSummary[summaryKey] = extractedOldValue;
             newValuesSummary[summaryKey] = item.newValue;
-          }
-
-          const newRec = await prismaTx.attachment.create({
-            data: {
-              attachmentLineageId: rec.attachmentLineageId,
-              transactionId: rec.transactionId,
-              module: rec.module,
-              attachmentType: rec.attachmentType,
-              originalName: updatedFields.originalName,
-              fileName: rec.fileName,
-              filePath: rec.filePath,
-              mimeType: rec.mimeType,
-              size: rec.size,
-              description: updatedFields.description,
-              uploadedById: rec.uploadedById,
-              sha256: rec.sha256,
-              revision: rec.revision + 1,
-              isCurrent: true,
-            },
-          });
-
-          for (const item of items) {
-            itemInsertPayloads.push({
-              correctionId,
-              targetModule: item.targetModule,
-              targetRecordId: rec.id,
-              replacementRecordId: newRec.id,
-              fieldName: item.fieldName,
-              oldValue: rec[item.fieldName] ?? null,
-              newValue: item.newValue ?? null,
-              itemRemark: item.itemRemark || null,
-            });
           }
         }
       }
@@ -991,7 +616,7 @@ export class OperationLogCorrectionService {
         );
       }
 
-      // Step 6: Insert correction header with complete summary and items (Append-Only immutability: zero runtime UPDATEs)
+      // Step 6: Insert correction header with complete summary (Append-Only immutability: zero runtime UPDATEs)
       const correction = await prismaTx.transactionCorrection.create({
         data: {
           id: correctionId,
@@ -1012,9 +637,408 @@ export class OperationLogCorrectionService {
         },
       });
 
-      await prismaTx.transactionCorrectionItem.createMany({
-        data: itemInsertPayloads,
-      });
+      // Pass 2: Execute Database Writes with valid correction.id reference
+      for (const item of rootItems) {
+        itemInsertPayloads.push({
+          correctionId: correction.id,
+          targetModule: item.targetModule,
+          targetRecordId: tx.id,
+          replacementRecordId: null,
+          fieldName: item.fieldName,
+          oldValue: tx[item.fieldName] !== undefined ? tx[item.fieldName] : null,
+          newValue: item.newValue !== undefined ? item.newValue : null,
+          itemRemark: item.itemRemark || null,
+        });
+      }
+
+      for (const [, group] of recordGroups) {
+        const { targetModule, targetRecord: rec, items } = group;
+
+        if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
+          const superseded = await prismaTx.weighbridgeRecord.updateMany({
+            where: {
+              id: rec.id,
+              isCurrent: true,
+              revision: rec.revision,
+            },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+
+          if (superseded.count !== 1) {
+            throw new ConflictException(
+              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
+            );
+          }
+
+          let updatedWeight = rec.weight;
+          let updatedTicketNumber = rec.ticketNumber;
+          let updatedRemarks = rec.remarks;
+
+          for (const item of items) {
+            if (item.fieldName === 'weight') {
+              updatedWeight = Number(item.newValue);
+            } else if (item.fieldName === 'ticketNumber') {
+              updatedTicketNumber = String(item.newValue);
+            } else if (item.fieldName === 'remarks') {
+              updatedRemarks = String(item.newValue);
+            }
+          }
+
+          const newRec = await prismaTx.weighbridgeRecord.create({
+            data: {
+              transactionId: rec.transactionId,
+              type: rec.type,
+              weight: updatedWeight,
+              ticketNumber: updatedTicketNumber,
+              operatorId: rec.operatorId,
+              remarks: updatedRemarks,
+              revision: rec.revision + 1,
+              isCurrent: true,
+            },
+          });
+
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: rec[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
+          }
+        } else if (targetModule === CorrectionTargetModule.WAREHOUSE) {
+          const superseded = await prismaTx.warehouseProcess.updateMany({
+            where: {
+              id: rec.id,
+              isCurrent: true,
+              revision: rec.revision,
+            },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+
+          if (superseded.count !== 1) {
+            throw new ConflictException(
+              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
+            );
+          }
+
+          const updatedFields: any = {
+            startAt: rec.startAt,
+            endAt: rec.endAt,
+            actualWeight: rec.actualWeight,
+            actualQuantity: rec.actualQuantity,
+            unit: rec.unit,
+            palletCount: rec.palletCount,
+            bagCount: rec.bagCount,
+            rollCount: rec.rollCount,
+            condition: rec.condition,
+            remarks: rec.remarks,
+            checklistItems: rec.checklistItems,
+          };
+
+          for (const item of items) {
+            if (['startAt', 'endAt'].includes(item.fieldName)) {
+              updatedFields[item.fieldName] = new Date(item.newValue);
+            } else if (
+              [
+                'actualWeight',
+                'actualQuantity',
+                'palletCount',
+                'bagCount',
+                'rollCount',
+              ].includes(item.fieldName)
+            ) {
+              updatedFields[item.fieldName] = Number(item.newValue);
+            } else if (item.fieldName === 'remarks') {
+              updatedFields[item.fieldName] = String(item.newValue);
+            } else {
+              updatedFields[item.fieldName] = item.newValue;
+            }
+          }
+
+          const newRec = await prismaTx.warehouseProcess.create({
+            data: {
+              transactionId: rec.transactionId,
+              processType: rec.processType,
+              startAt: updatedFields.startAt,
+              endAt: updatedFields.endAt,
+              startById: rec.startById,
+              endById: rec.endById,
+              actualWeight: updatedFields.actualWeight,
+              actualQuantity: updatedFields.actualQuantity,
+              unit: updatedFields.unit,
+              palletCount: updatedFields.palletCount,
+              bagCount: updatedFields.bagCount,
+              rollCount: updatedFields.rollCount,
+              condition: updatedFields.condition,
+              remarks: updatedFields.remarks,
+              checklistItems: updatedFields.checklistItems,
+              revision: rec.revision + 1,
+              isCurrent: true,
+            },
+          });
+
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: rec[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
+          }
+        } else if (targetModule === CorrectionTargetModule.QC_VEHICLE) {
+          const superseded = await prismaTx.qcVehicleCheck.updateMany({
+            where: {
+              id: rec.id,
+              isCurrent: true,
+              revision: rec.revision,
+            },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+
+          if (superseded.count !== 1) {
+            throw new ConflictException(
+              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
+            );
+          }
+
+          const updatedFields: any = {
+            result: rec.result,
+            vehicleCleanliness: rec.vehicleCleanliness,
+            vehicleOdor: rec.vehicleOdor,
+            pestEvidence: rec.pestEvidence,
+            vehicleCondition: rec.vehicleCondition,
+            documentCompleteness: rec.documentCompleteness,
+            sealCondition: rec.sealCondition,
+            notes: rec.notes,
+            checklistItems: rec.checklistItems,
+          };
+
+          for (const item of items) {
+            if (item.fieldName === 'notes') {
+              updatedFields[item.fieldName] = String(item.newValue);
+            } else {
+              updatedFields[item.fieldName] = item.newValue;
+            }
+          }
+
+          const newRec = await prismaTx.qcVehicleCheck.create({
+            data: {
+              transactionId: rec.transactionId,
+              result: updatedFields.result,
+              vehicleCleanliness: updatedFields.vehicleCleanliness,
+              vehicleOdor: updatedFields.vehicleOdor,
+              pestEvidence: updatedFields.pestEvidence,
+              vehicleCondition: updatedFields.vehicleCondition,
+              documentCompleteness: updatedFields.documentCompleteness,
+              sealCondition: updatedFields.sealCondition,
+              notes: updatedFields.notes,
+              checklistItems: updatedFields.checklistItems,
+              checkedById: rec.checkedById,
+              startedAt: rec.startedAt,
+              completedAt: rec.completedAt,
+              revision: rec.revision + 1,
+              isCurrent: true,
+            },
+          });
+
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: rec[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
+          }
+        } else if (
+          targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
+          targetModule === CorrectionTargetModule.QC_MATERIAL
+        ) {
+          const superseded = await prismaTx.incomingMaterialCheck.updateMany({
+            where: {
+              id: rec.id,
+              isCurrent: true,
+              revision: rec.revision,
+            },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+
+          if (superseded.count !== 1) {
+            throw new ConflictException(
+              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
+            );
+          }
+
+          const updatedFields: any = {
+            result: rec.result,
+            odor: rec.odor,
+            color: rec.color,
+            moisture: rec.moisture,
+            foreignMatter: rec.foreignMatter,
+            beanCondition: rec.beanCondition,
+            sampleWeight: rec.sampleWeight,
+            goodBeanPercentage: rec.goodBeanPercentage,
+            itemCondition: rec.itemCondition,
+            packagingCondition: rec.packagingCondition,
+            quantityCheck: rec.quantityCheck,
+            documentCheck: rec.documentCheck,
+            visualInspection: rec.visualInspection,
+            defectNotes: rec.defectNotes,
+            notes: rec.notes,
+            checklistItems: rec.checklistItems,
+          };
+
+          for (const item of items) {
+            if (
+              [
+                'moisture',
+                'foreignMatter',
+                'sampleWeight',
+                'goodBeanPercentage',
+              ].includes(item.fieldName)
+            ) {
+              updatedFields[item.fieldName] = Number(item.newValue);
+            } else if (['defectNotes', 'notes'].includes(item.fieldName)) {
+              updatedFields[item.fieldName] = String(item.newValue);
+            } else {
+              updatedFields[item.fieldName] = item.newValue;
+            }
+          }
+
+          const newRec = await prismaTx.incomingMaterialCheck.create({
+            data: {
+              transactionId: rec.transactionId,
+              result: updatedFields.result,
+              odor: updatedFields.odor,
+              color: updatedFields.color,
+              moisture: updatedFields.moisture,
+              foreignMatter: updatedFields.foreignMatter,
+              beanCondition: updatedFields.beanCondition,
+              sampleWeight: updatedFields.sampleWeight,
+              goodBeanPercentage: updatedFields.goodBeanPercentage,
+              itemCondition: updatedFields.itemCondition,
+              packagingCondition: updatedFields.packagingCondition,
+              quantityCheck: updatedFields.quantityCheck,
+              documentCheck: updatedFields.documentCheck,
+              visualInspection: updatedFields.visualInspection,
+              defectNotes: updatedFields.defectNotes,
+              notes: updatedFields.notes,
+              checklistItems: updatedFields.checklistItems,
+              checkedById: rec.checkedById,
+              startedAt: rec.startedAt,
+              completedAt: rec.completedAt,
+              revision: rec.revision + 1,
+              isCurrent: true,
+            },
+          });
+
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: rec[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
+          }
+        } else if (targetModule === CorrectionTargetModule.ATTACHMENT) {
+          const superseded = await prismaTx.attachment.updateMany({
+            where: {
+              id: rec.id,
+              isCurrent: true,
+              revision: rec.revision,
+            },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+
+          if (superseded.count !== 1) {
+            throw new ConflictException(
+              'Record telah dikoreksi oleh proses lain. Muat ulang data.',
+            );
+          }
+
+          const updatedFields: any = {
+            originalName: rec.originalName,
+            description: rec.description,
+          };
+
+          for (const item of items) {
+            updatedFields[item.fieldName] = String(item.newValue);
+          }
+
+          const newRec = await prismaTx.attachment.create({
+            data: {
+              attachmentLineageId: rec.attachmentLineageId,
+              transactionId: rec.transactionId,
+              module: rec.module,
+              attachmentType: rec.attachmentType,
+              originalName: updatedFields.originalName,
+              fileName: rec.fileName,
+              filePath: rec.filePath,
+              mimeType: rec.mimeType,
+              size: rec.size,
+              description: updatedFields.description,
+              uploadedById: rec.uploadedById,
+              sha256: rec.sha256,
+              revision: rec.revision + 1,
+              isCurrent: true,
+            },
+          });
+
+          for (const item of items) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule: item.targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: newRec.id,
+              fieldName: item.fieldName,
+              oldValue: rec[item.fieldName] ?? null,
+              newValue: item.newValue ?? null,
+              itemRemark: item.itemRemark || null,
+            });
+          }
+        }
+      }
+
+      if (itemInsertPayloads.length > 0) {
+        await prismaTx.transactionCorrectionItem.createMany({
+          data: itemInsertPayloads,
+        });
+      }
 
       // Step 8 & 10: Auto-recalculate Net Weight if Gross/Tare changed
       if (proposedGross !== null && proposedTare !== null) {
