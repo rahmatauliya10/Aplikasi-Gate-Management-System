@@ -72,4 +72,18 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER_USER IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO $APP_USER;
   ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER_USER IN SCHEMA public GRANT SELECT ON TABLES TO $BACKUP_USER;
   ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER_USER IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO $BACKUP_USER;
+
+  -- 8. Explicitly revoke UPDATE and DELETE on immutable audit and history tables for gms_app
+  DO \$\$
+  DECLARE
+    r record;
+  BEGIN
+    FOR r IN (
+      SELECT tablename FROM pg_tables
+      WHERE schemaname = 'public'
+        AND tablename IN ('ActivityLog', 'TransactionCorrection', 'TransactionCorrectionItem', 'TransactionStatusHistory')
+    ) LOOP
+      EXECUTE format('REVOKE UPDATE, DELETE ON TABLE public.%I FROM %I', r.tablename, '$APP_USER');
+    END LOOP;
+  END \$\$;
 EOSQL

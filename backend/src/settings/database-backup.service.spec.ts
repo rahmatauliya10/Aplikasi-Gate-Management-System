@@ -443,8 +443,17 @@ describe('DatabaseBackupService', () => {
         expect(paths).toContain('qc/qc_sample.jpg');
         expect(paths).toContain('warehouse/wh_sample.pdf');
       } finally {
-        if (fs.existsSync(testUploadDir)) {
-          fs.rmSync(testUploadDir, { recursive: true, force: true });
+        try {
+          if (fs.existsSync(testUploadDir)) {
+            fs.rmSync(testUploadDir, {
+              recursive: true,
+              force: true,
+              maxRetries: 3,
+              retryDelay: 100,
+            });
+          }
+        } catch (_) {
+          // Ignore Windows file lock cleanup race
         }
       }
     });

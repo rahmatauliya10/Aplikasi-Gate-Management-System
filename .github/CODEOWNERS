@@ -2,27 +2,34 @@
 # GMS Repository Global Codeowners & Production Gate Policy
 # ==============================================================================
 # All changes to deployment manifests, security controls, database migrations,
-# and CI workflows require review and approval from repository maintainer.
+# least privilege DDL, and CI workflows require review and approval from codeowner.
 # ==============================================================================
 
 # Global catch-all owner
-*                           @rahmatauliya10
+*                                                               @rahmatauliya10
 
-# Production Deployment & Infrastructure
-deploy/                     @rahmatauliya10
-scripts/                    @rahmatauliya10
-docker-compose.yml          @rahmatauliya10
-docker-compose.prod.yml     @rahmatauliya10
+# Production Deployment, Infrastructure & Reverse Proxy
+deploy/                                                         @rahmatauliya10
+deploy/postgres/                                                @rahmatauliya10
+deploy/nginx/                                                   @rahmatauliya10
+docker-compose.yml                                              @rahmatauliya10
+docker-compose.prod.yml                                         @rahmatauliya10
 
-# CI/CD & Security Automation
-.github/                    @rahmatauliya10
-.github/workflows/          @rahmatauliya10
+# Automation, Verification & Disaster Recovery Scripts
+scripts/                                                        @rahmatauliya10
 
-# Database Migrations & Invariants
-backend/prisma/             @rahmatauliya10
-backend/prisma/migrations/  @rahmatauliya10
+# CI/CD, Quality Gates & Security Automation
+.github/                                                        @rahmatauliya10
+.github/workflows/                                              @rahmatauliya10
 
-# Authentication & Access Control
-backend/src/auth/           @rahmatauliya10
-backend/src/users/          @rahmatauliya10
-backend/src/common/guards/  @rahmatauliya10
+# Database Schema, Migrations & Invariants
+backend/prisma/                                                 @rahmatauliya10
+backend/prisma/migrations/                                      @rahmatauliya10
+
+# Authentication, Session & Authorization Controls
+backend/src/auth/                                               @rahmatauliya10
+backend/src/users/                                              @rahmatauliya10
+backend/src/common/guards/                                      @rahmatauliya10
+
+# Audit Immutability & Administrative Corrections
+backend/src/transactions/operation-log-correction.service.ts    @rahmatauliya10

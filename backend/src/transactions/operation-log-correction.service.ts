@@ -273,25 +273,8 @@ export class OperationLogCorrectionService {
         }
       }
 
-      // Step 4: Create TransactionCorrection Header first to obtain correction ID
-      const correction = await prismaTx.transactionCorrection.create({
-        data: {
-          transactionId: id,
-          correctedById: user.id,
-          correctionNumber,
-          action: dto.action || CorrectionAction.CORRECT_DATA,
-          reasonCode: dto.reasonCode,
-          reason: dto.reasonCode,
-          remark: dto.remark,
-          evidenceUrl: dto.evidenceAttachmentId
-            ? `attachment:${dto.evidenceAttachmentId}`
-            : dto.evidenceUrl || null,
-          oldValues: {},
-          newValues: {},
-          expectedRevision: dto.expectedRevision,
-          ipAddress: cleanIp,
-        },
-      });
+      // Step 4: Generate unique correction ID (Append-Only: Header inserted in Step 6 after summary is computed)
+      const correctionId = crypto.randomUUID();
 
       // Step 5: Validate Allowlist, Ownership, and Group Items by Target Record
       const oldValuesSummary: Record<string, any> = {};
@@ -463,7 +446,7 @@ export class OperationLogCorrectionService {
         }
       }
 
-      // Process Root items (TRANSACTION, STATUS, REMARK)
+      // Pass 1: In-memory evaluation and summary computation
       for (const item of rootItems) {
         const extractedOldValue = tx[item.fieldName];
         txUpdateData[item.fieldName] = item.newValue;
@@ -479,20 +462,196 @@ export class OperationLogCorrectionService {
         const summaryKey = `${item.targetModule}.${tx.id}.${item.fieldName}`;
         oldValuesSummary[summaryKey] = extractedOldValue;
         newValuesSummary[summaryKey] = item.newValue;
+      }
 
+      for (const [, group] of recordGroups) {
+        const { targetModule, targetRecord: rec, items } = group;
+
+        if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
+          for (const item of items) {
+            const extractedOldValue = rec[item.fieldName];
+            if (item.fieldName === 'weight') {
+              const updatedWeight = Number(item.newValue);
+              if (tx.processType === 'GBJ') {
+                if (rec.type === 'IN') {
+                  txUpdateData.tareWeight = updatedWeight;
+                } else if (rec.type === 'OUT') {
+                  txUpdateData.grossWeight = updatedWeight;
+                }
+              } else {
+                if (rec.type === 'IN') {
+                  txUpdateData.grossWeight = updatedWeight;
+                } else if (rec.type === 'OUT') {
+                  txUpdateData.tareWeight = updatedWeight;
+                }
+              }
+            }
+
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `WEIGHBRIDGE.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+        } else if (targetModule === CorrectionTargetModule.WAREHOUSE) {
+          for (const item of items) {
+            const extractedOldValue = rec[item.fieldName];
+            if (item.fieldName === 'actualWeight') {
+              txUpdateData.actualWeight = Number(item.newValue);
+            } else if (item.fieldName === 'actualQuantity') {
+              txUpdateData.actualQuantity = Number(item.newValue);
+            } else if (item.fieldName === 'unit') {
+              txUpdateData.warehouseUnit = item.newValue;
+            } else if (item.fieldName === 'startAt') {
+              txUpdateData.warehouseStartAt = new Date(item.newValue);
+            } else if (item.fieldName === 'endAt') {
+              txUpdateData.warehouseEndAt = new Date(item.newValue);
+            }
+
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `WAREHOUSE.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+        } else if (targetModule === CorrectionTargetModule.QC_VEHICLE) {
+          for (const item of items) {
+            const extractedOldValue = rec[item.fieldName];
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `QC_VEHICLE.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+        } else if (
+          targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
+          targetModule === CorrectionTargetModule.QC_MATERIAL
+        ) {
+          for (const item of items) {
+            const extractedOldValue = rec[item.fieldName];
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `${targetModule}.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+        } else if (targetModule === CorrectionTargetModule.ATTACHMENT) {
+          for (const item of items) {
+            const extractedOldValue = rec[item.fieldName];
+            if (
+              JSON.stringify(extractedOldValue) !==
+              JSON.stringify(item.newValue)
+            ) {
+              hasActualChanges = true;
+            }
+            const summaryKey = `ATTACHMENT.${rec.id}.${item.fieldName}`;
+            oldValuesSummary[summaryKey] = extractedOldValue;
+            newValuesSummary[summaryKey] = item.newValue;
+          }
+        }
+      }
+
+      if (
+        !hasActualChanges &&
+        !statusUpdatedTo &&
+        dto.action === CorrectionAction.CORRECT_DATA
+      ) {
+        throw new BadRequestException(
+          'Tidak ada perubahan nilai (No-Op). Seluruh nilai baru identik dengan nilai di database.',
+        );
+      }
+
+      // Step 5: Validate Business Rules (Gross >= Tare, warehouse start <= end)
+      const proposedGross =
+        txUpdateData.grossWeight !== undefined
+          ? Number(txUpdateData.grossWeight)
+          : tx.grossWeight;
+      const proposedTare =
+        txUpdateData.tareWeight !== undefined
+          ? Number(txUpdateData.tareWeight)
+          : tx.tareWeight;
+
+      if (
+        proposedGross !== null &&
+        proposedTare !== null &&
+        proposedGross < proposedTare
+      ) {
+        throw new BadRequestException(
+          'Gross weight tidak boleh lebih kecil dari Tare weight.',
+        );
+      }
+
+      const proposedStart =
+        txUpdateData.warehouseStartAt !== undefined
+          ? new Date(txUpdateData.warehouseStartAt)
+          : tx.warehouseStartAt;
+      const proposedEnd =
+        txUpdateData.warehouseEndAt !== undefined
+          ? new Date(txUpdateData.warehouseEndAt)
+          : tx.warehouseEndAt;
+
+      if (
+        proposedStart &&
+        proposedEnd &&
+        new Date(proposedStart).getTime() > new Date(proposedEnd).getTime()
+      ) {
+        throw new BadRequestException(
+          'Waktu mulai proses gudang tidak boleh melebihi waktu selesai.',
+        );
+      }
+
+      // Step 6: Insert correction header with complete summary (Append-Only immutability: zero runtime UPDATEs)
+      const correction = await prismaTx.transactionCorrection.create({
+        data: {
+          id: correctionId,
+          transactionId: id,
+          correctedById: user.id,
+          correctionNumber,
+          action: dto.action || CorrectionAction.CORRECT_DATA,
+          reasonCode: dto.reasonCode,
+          reason: dto.reasonCode,
+          remark: dto.remark,
+          evidenceUrl: dto.evidenceAttachmentId
+            ? `attachment:${dto.evidenceAttachmentId}`
+            : dto.evidenceUrl || null,
+          oldValues: oldValuesSummary as any,
+          newValues: newValuesSummary as any,
+          expectedRevision: dto.expectedRevision,
+          ipAddress: cleanIp,
+        },
+      });
+
+      // Pass 2: Execute Database Writes with valid correction.id reference
+      for (const item of rootItems) {
         itemInsertPayloads.push({
           correctionId: correction.id,
           targetModule: item.targetModule,
           targetRecordId: tx.id,
           replacementRecordId: null,
           fieldName: item.fieldName,
-          oldValue: extractedOldValue !== undefined ? extractedOldValue : null,
+          oldValue:
+            tx[item.fieldName] !== undefined ? tx[item.fieldName] : null,
           newValue: item.newValue !== undefined ? item.newValue : null,
           itemRemark: item.itemRemark || null,
         });
       }
 
-      // Process Record-level Groups (WEIGHBRIDGE, WAREHOUSE, QC_VEHICLE, INCOMING_MATERIAL, ATTACHMENT)
       for (const [, group] of recordGroups) {
         const { targetModule, targetRecord: rec, items } = group;
 
@@ -521,40 +680,13 @@ export class OperationLogCorrectionService {
           let updatedRemarks = rec.remarks;
 
           for (const item of items) {
-            const extractedOldValue = rec[item.fieldName];
             if (item.fieldName === 'weight') {
               updatedWeight = Number(item.newValue);
-              // GBJ vs GBB/GSP mapping rules:
-              // GBJ: OUT -> grossWeight, IN -> tareWeight
-              // GBB/GSP: IN -> grossWeight, OUT -> tareWeight
-              if (tx.processType === 'GBJ') {
-                if (rec.type === 'IN') {
-                  txUpdateData.tareWeight = updatedWeight;
-                } else if (rec.type === 'OUT') {
-                  txUpdateData.grossWeight = updatedWeight;
-                }
-              } else {
-                if (rec.type === 'IN') {
-                  txUpdateData.grossWeight = updatedWeight;
-                } else if (rec.type === 'OUT') {
-                  txUpdateData.tareWeight = updatedWeight;
-                }
-              }
             } else if (item.fieldName === 'ticketNumber') {
               updatedTicketNumber = String(item.newValue);
             } else if (item.fieldName === 'remarks') {
               updatedRemarks = String(item.newValue);
             }
-
-            if (
-              JSON.stringify(extractedOldValue) !==
-              JSON.stringify(item.newValue)
-            ) {
-              hasActualChanges = true;
-            }
-            const summaryKey = `WEIGHBRIDGE.${rec.id}.${item.fieldName}`;
-            oldValuesSummary[summaryKey] = extractedOldValue;
-            newValuesSummary[summaryKey] = item.newValue;
           }
 
           const newRec = await prismaTx.weighbridgeRecord.create({
@@ -617,7 +749,6 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = rec[item.fieldName];
             if (['startAt', 'endAt'].includes(item.fieldName)) {
               updatedFields[item.fieldName] = new Date(item.newValue);
             } else if (
@@ -635,28 +766,6 @@ export class OperationLogCorrectionService {
             } else {
               updatedFields[item.fieldName] = item.newValue;
             }
-
-            if (item.fieldName === 'actualWeight') {
-              txUpdateData.actualWeight = Number(item.newValue);
-            } else if (item.fieldName === 'actualQuantity') {
-              txUpdateData.actualQuantity = Number(item.newValue);
-            } else if (item.fieldName === 'unit') {
-              txUpdateData.warehouseUnit = item.newValue;
-            } else if (item.fieldName === 'startAt') {
-              txUpdateData.warehouseStartAt = new Date(item.newValue);
-            } else if (item.fieldName === 'endAt') {
-              txUpdateData.warehouseEndAt = new Date(item.newValue);
-            }
-
-            if (
-              JSON.stringify(extractedOldValue) !==
-              JSON.stringify(item.newValue)
-            ) {
-              hasActualChanges = true;
-            }
-            const summaryKey = `WAREHOUSE.${rec.id}.${item.fieldName}`;
-            oldValuesSummary[summaryKey] = extractedOldValue;
-            newValuesSummary[summaryKey] = item.newValue;
           }
 
           const newRec = await prismaTx.warehouseProcess.create({
@@ -726,22 +835,11 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = rec[item.fieldName];
             if (item.fieldName === 'notes') {
               updatedFields[item.fieldName] = String(item.newValue);
             } else {
               updatedFields[item.fieldName] = item.newValue;
             }
-
-            if (
-              JSON.stringify(extractedOldValue) !==
-              JSON.stringify(item.newValue)
-            ) {
-              hasActualChanges = true;
-            }
-            const summaryKey = `QC_VEHICLE.${rec.id}.${item.fieldName}`;
-            oldValuesSummary[summaryKey] = extractedOldValue;
-            newValuesSummary[summaryKey] = item.newValue;
           }
 
           const newRec = await prismaTx.qcVehicleCheck.create({
@@ -819,7 +917,6 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = rec[item.fieldName];
             if (
               [
                 'moisture',
@@ -834,16 +931,6 @@ export class OperationLogCorrectionService {
             } else {
               updatedFields[item.fieldName] = item.newValue;
             }
-
-            if (
-              JSON.stringify(extractedOldValue) !==
-              JSON.stringify(item.newValue)
-            ) {
-              hasActualChanges = true;
-            }
-            const summaryKey = `${targetModule}.${rec.id}.${item.fieldName}`;
-            oldValuesSummary[summaryKey] = extractedOldValue;
-            newValuesSummary[summaryKey] = item.newValue;
           }
 
           const newRec = await prismaTx.incomingMaterialCheck.create({
@@ -911,18 +998,7 @@ export class OperationLogCorrectionService {
           };
 
           for (const item of items) {
-            const extractedOldValue = rec[item.fieldName];
             updatedFields[item.fieldName] = String(item.newValue);
-
-            if (
-              JSON.stringify(extractedOldValue) !==
-              JSON.stringify(item.newValue)
-            ) {
-              hasActualChanges = true;
-            }
-            const summaryKey = `ATTACHMENT.${rec.id}.${item.fieldName}`;
-            oldValuesSummary[summaryKey] = extractedOldValue;
-            newValuesSummary[summaryKey] = item.newValue;
           }
 
           const newRec = await prismaTx.attachment.create({
@@ -959,67 +1035,11 @@ export class OperationLogCorrectionService {
         }
       }
 
-      if (
-        !hasActualChanges &&
-        !statusUpdatedTo &&
-        dto.action === CorrectionAction.CORRECT_DATA
-      ) {
-        throw new BadRequestException(
-          'Tidak ada perubahan nilai (No-Op). Seluruh nilai baru identik dengan nilai di database.',
-        );
+      if (itemInsertPayloads.length > 0) {
+        await prismaTx.transactionCorrectionItem.createMany({
+          data: itemInsertPayloads,
+        });
       }
-
-      // Step 5: Validate Business Rules (Gross >= Tare, warehouse start <= end)
-      const proposedGross =
-        txUpdateData.grossWeight !== undefined
-          ? Number(txUpdateData.grossWeight)
-          : tx.grossWeight;
-      const proposedTare =
-        txUpdateData.tareWeight !== undefined
-          ? Number(txUpdateData.tareWeight)
-          : tx.tareWeight;
-
-      if (
-        proposedGross !== null &&
-        proposedTare !== null &&
-        proposedGross < proposedTare
-      ) {
-        throw new BadRequestException(
-          'Gross weight tidak boleh lebih kecil dari Tare weight.',
-        );
-      }
-
-      const proposedStart =
-        txUpdateData.warehouseStartAt !== undefined
-          ? new Date(txUpdateData.warehouseStartAt)
-          : tx.warehouseStartAt;
-      const proposedEnd =
-        txUpdateData.warehouseEndAt !== undefined
-          ? new Date(txUpdateData.warehouseEndAt)
-          : tx.warehouseEndAt;
-
-      if (
-        proposedStart &&
-        proposedEnd &&
-        new Date(proposedStart).getTime() > new Date(proposedEnd).getTime()
-      ) {
-        throw new BadRequestException(
-          'Waktu mulai proses gudang tidak boleh melebihi waktu selesai.',
-        );
-      }
-
-      // Step 6: Insert correction items & update header summary
-      await prismaTx.transactionCorrectionItem.createMany({
-        data: itemInsertPayloads,
-      });
-
-      await prismaTx.transactionCorrection.update({
-        where: { id: correction.id },
-        data: {
-          oldValues: oldValuesSummary as any,
-          newValues: newValuesSummary as any,
-        },
-      });
 
       // Step 8 & 10: Auto-recalculate Net Weight if Gross/Tare changed
       if (proposedGross !== null && proposedTare !== null) {

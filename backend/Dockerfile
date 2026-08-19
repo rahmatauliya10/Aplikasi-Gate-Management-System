@@ -49,7 +49,7 @@ RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/no
 USER node
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["npx", "prisma", "migrate", "deploy"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node scripts/enforce-audit-immutability.js"]
 
 # ------------------------------------------------------------------------------
 # Stage 3: Pristine Production Dependencies (Zero devDependencies footprint)

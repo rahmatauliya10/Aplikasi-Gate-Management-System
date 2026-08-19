@@ -44,7 +44,17 @@ function parseSameSite(): 'strict' | 'lax' | 'none' {
   return 'lax';
 }
 
-function getRefreshCookieOptions() {
+export function getRefreshCookieOptions(nodeEnv = process.env.NODE_ENV) {
+  const isProd = nodeEnv === 'production';
+  if (isProd) {
+    return {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict' as const,
+      path: '/',
+    };
+  }
+
   return {
     httpOnly: true,
     secure: parseCookieSecure(),

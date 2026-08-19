@@ -243,13 +243,16 @@
     <!-- Active Operations In-Progress Table -->
     <div class="rounded-2xl shadow-card overflow-hidden" style="background:white;border:1px solid #E8EEF7">
       <div class="px-5 sm:px-8 py-5 sm:py-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0" style="background:#FAFBFF;border-bottom:1px solid #E8EEF7">
-        <h3 class="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center">
-          <span class="material-icons text-[#4A8BDF] mr-2">precision_manufacturing</span> 
-          Active Operations In-Progress
-        </h3>
+        <div>
+          <h3 class="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center">
+            <span class="material-icons text-[#4A8BDF] mr-2">precision_manufacturing</span> 
+            Live Active Fleet
+          </h3>
+          <p class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1">Current vehicle activity — not affected by dashboard date range.</p>
+        </div>
         <div class="flex items-center space-x-2">
           <span class="w-2 h-2 rounded-full bg-[#4A8BDF] animate-pulse"></span>
-          <span class="text-[10px] font-black text-[#4A8BDF] uppercase tracking-widest">{{ activeTruckCount }} Live</span>
+          <span class="text-[10px] font-black text-[#4A8BDF] uppercase tracking-widest px-2.5 py-1 rounded-full bg-[#4A8BDF]/10 border border-[#4A8BDF]/20">LIVE · {{ activeTruckCount }} Units</span>
         </div>
       </div>
       <div class="overflow-x-auto">
@@ -375,21 +378,31 @@ const stats = ref({
 })
 
 let pollingInterval = null
+let currentRequestId = 0
 
 const fetchDashboardStats = async (customParams = null) => {
+  const requestId = ++currentRequestId
   isFetching.value = true
   try {
     const params = customParams || filterState.value
     const res = await dashboardService.getStats(params)
+    if (requestId !== currentRequestId) {
+      // Stale response discarded to prevent race condition overwrite
+      return
+    }
     if (res.data?.data) {
       stats.value = res.data.data
     } else if (res.data) {
       stats.value = res.data
     }
   } catch (err) {
-    console.error('Failed to fetch dashboard stats', err)
+    if (requestId === currentRequestId) {
+      console.error('Failed to fetch dashboard stats', err)
+    }
   } finally {
-    isFetching.value = false
+    if (requestId === currentRequestId) {
+      isFetching.value = false
+    }
   }
 }
 
@@ -442,7 +455,7 @@ const retryFetch = () => {
   fetchDashboardStats(filterState.value)
 }
 
-const totalTrucks = computed(() => stats.value?.summary?.totalPeriod ?? stats.value?.summary?.totalToday ?? 0)
+const totalTrucks = computed(() => stats.value?.summary?.totalProcessed ?? stats.value?.summary?.totalPeriod ?? stats.value?.summary?.totalToday ?? 0)
 const activeTruckCount = computed(() => stats.value?.summary?.totalActive || 0)
 const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted || 0)
 
