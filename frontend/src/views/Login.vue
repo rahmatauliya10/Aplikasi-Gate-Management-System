@@ -134,7 +134,7 @@
       </div>
 
       <!-- Footer -->
-      <p class="login-footer">© 2026 Gate Management System — PT Santos Jaya Abadi</p>
+      <p class="login-footer">© 2026 PT Santos Jaya Abadi · Built by Rahmat Auliya</p>
     </div>
   </div>
 </template>

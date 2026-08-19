@@ -45,6 +45,9 @@ export const useAuthStore = defineStore('auth', {
         this.mustChangePassword = !!mustChangePassword
         this.isInitialized = true
 
+        localStorage.setItem('access_token', accessToken)
+        localStorage.setItem('user', JSON.stringify(user))
+
         if (mustChangePassword) {
           localStorage.setItem('mustChangePassword', '1')
         } else {
@@ -93,6 +96,7 @@ export const useAuthStore = defineStore('auth', {
         }
 
         this.user = userData
+        localStorage.setItem('user', JSON.stringify(userData))
         this.loading = false
         return { success: true, user: userData }
       } catch (err) {
@@ -123,6 +127,7 @@ export const useAuthStore = defineStore('auth', {
         }
 
         this.token = accessToken
+        localStorage.setItem('access_token', accessToken)
         
         this.loading = false
         return { success: true, accessToken }
@@ -130,7 +135,6 @@ export const useAuthStore = defineStore('auth', {
         const message = err.gmsMessage || getErrorMessage(err);
         this.error = message
         this.loading = false
-        this.clearAuth()
         return { success: false, message }
       }
     },
@@ -140,6 +144,19 @@ export const useAuthStore = defineStore('auth', {
       this.isInitialized = true;
       this.mustChangePassword = localStorage.getItem('mustChangePassword') === '1';
 
+      // 1. Recover local token and user if present
+      const savedToken = localStorage.getItem('access_token');
+      const savedUserStr = localStorage.getItem('user');
+      if (savedToken && savedUserStr) {
+        try {
+          this.token = savedToken;
+          this.user = JSON.parse(savedUserStr);
+        } catch (e) {
+          this.clearAuth();
+        }
+      }
+
+      // 2. If no token found, attempt silent refresh via HTTP-only cookie
       if (!this.token) {
         try {
           const refreshRes = await this.refreshAccessToken();
@@ -172,11 +189,17 @@ export const useAuthStore = defineStore('auth', {
     
     setToken(token) {
       this.token = token
+      if (token) {
+        localStorage.setItem('access_token', token)
+      } else {
+        localStorage.removeItem('access_token')
+      }
     },
 
     updateProfile(data) {
       if (this.user) {
         this.user = { ...this.user, ...data }
+        localStorage.setItem('user', JSON.stringify(this.user))
       }
     }
   }

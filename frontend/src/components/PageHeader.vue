@@ -19,7 +19,7 @@
       <p class="text-[10px] sm:text-xs font-black text-[#4A8BDF] uppercase tracking-[0.3em] ml-4 sm:ml-5">{{ subtitle }}</p>
     </div>
 
-    <div class="relative z-10 flex items-center space-x-2 sm:space-x-4 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
+    <div v-if="$slots.default" class="relative z-10 flex items-center space-x-2 sm:space-x-4 w-full md:w-auto overflow-x-auto pb-1 md:pb-0 hide-scrollbar">
       <slot></slot>
     </div>
   </div>

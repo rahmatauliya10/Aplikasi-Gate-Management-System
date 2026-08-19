@@ -32,7 +32,7 @@ services:
       - PORT=3001
       - NODE_ENV=production
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:8081}
-      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - UPLOAD_DIR=./uploads
       - MAX_FILE_SIZE_MB=10
       - DEFAULT_ADMIN_EMAIL=admin@gms.local
