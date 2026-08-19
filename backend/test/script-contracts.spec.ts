@@ -52,7 +52,9 @@ describe('Production Deployment & Script Contracts Gate (P0-04)', () => {
     if (fs.existsSync(rebuildBatPath)) {
       const rebuildContent = fs.readFileSync(rebuildBatPath, 'utf8');
       expect(rebuildContent).not.toMatch(/run\s+--rm\s+backend\s+(npx|npm)/i);
-      expect(rebuildContent).toMatch(/run\s+--rm\s+migrator\s+npx\s+prisma\s+migrate/i);
+      expect(rebuildContent).toMatch(
+        /run\s+--rm\s+migrator\s+npx\s+prisma\s+migrate/i,
+      );
     }
 
     if (fs.existsSync(provisionBatPath)) {
@@ -62,4 +64,3 @@ describe('Production Deployment & Script Contracts Gate (P0-04)', () => {
     }
   });
 });
-
