@@ -48,8 +48,14 @@ describe('DashboardService Date Range Filter', () => {
       providers: [
         DashboardService,
         { provide: PrismaService, useValue: prisma },
-        { provide: ActivityLogsService, useValue: { logAction: jest.fn().mockResolvedValue(null) } },
-        { provide: AuthorizationScopeService, useValue: { getTransactionScope: jest.fn().mockReturnValue({}) } },
+        {
+          provide: ActivityLogsService,
+          useValue: { logAction: jest.fn().mockResolvedValue(null) },
+        },
+        {
+          provide: AuthorizationScopeService,
+          useValue: { getTransactionScope: jest.fn().mockReturnValue({}) },
+        },
       ],
     }).compile();
 
@@ -80,17 +86,23 @@ describe('DashboardService Date Range Filter', () => {
   });
 
   it('should handle THIS_WEEK and THIS_MONTH presets', async () => {
-    const weekResult = await service.getStats(mockUser, { preset: DashboardDatePreset.THIS_WEEK });
+    const weekResult = await service.getStats(mockUser, {
+      preset: DashboardDatePreset.THIS_WEEK,
+    });
     expect(weekResult.success).toBe(true);
     expect(weekResult.data.period.preset).toBe('THIS_WEEK');
 
-    const monthResult = await service.getStats(mockUser, { preset: DashboardDatePreset.THIS_MONTH });
+    const monthResult = await service.getStats(mockUser, {
+      preset: DashboardDatePreset.THIS_MONTH,
+    });
     expect(monthResult.success).toBe(true);
     expect(monthResult.data.period.preset).toBe('THIS_MONTH');
   });
 
   it('should handle ALL preset without date restriction', async () => {
-    const result = await service.getStats(mockUser, { preset: DashboardDatePreset.ALL });
+    const result = await service.getStats(mockUser, {
+      preset: DashboardDatePreset.ALL,
+    });
     expect(result.success).toBe(true);
     expect(result.data.period.preset).toBe('ALL');
     expect(result.data.period.startDate).toBeNull();
