@@ -707,10 +707,16 @@ export class DatabaseBackupService
       }
     }
 
-    const dbUrl = process.env.DATABASE_URL;
+    const backupDbUrl = process.env.BACKUP_DATABASE_URL;
+    if (process.env.NODE_ENV === 'production' && !backupDbUrl) {
+      throw new InternalServerErrorException(
+        'BACKUP_DATABASE_URL environment variable is required in production for isolated native backup operations.',
+      );
+    }
+    const dbUrl = backupDbUrl ?? process.env.DATABASE_URL;
     if (!dbUrl) {
       throw new InternalServerErrorException(
-        'DATABASE_URL environment variable must be set for backup operations.',
+        'DATABASE_URL or BACKUP_DATABASE_URL environment variable must be set for backup operations.',
       );
     }
 

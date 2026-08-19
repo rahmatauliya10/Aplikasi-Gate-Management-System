@@ -2,12 +2,44 @@
 
 ## Pre-Deployment Requirements
 
-### 1. Migration Checksum Reconciliation (P0-01 — BLOCKING)
+### 0. Pre-Deployment Proven-Restorable Safety Backup (P0-00 — BLOCKING)
 
-Before running `prisma migrate deploy` on any database that has **previously been deployed**, you MUST run the checksum reconciliation script:
+Before any schema migration or role modification on production:
+1. Create pre-deployment backup (`MANUAL_PRE_UPDATE` type).
+2. Validate SHA-256 and manifest checksums.
+3. Rehearse restore in an isolated test database to prove status is `RESTORABLE`.
+
+### 1. Existing Database Role & Ownership Reconciliation (P0-02 -> P0-08 — BLOCKING)
+
+For existing production databases, execute the role and ownership reconciliation script to ensure `gms_owner` owns all public objects, `gms_app` has zero `CREATE` privileges, and default privileges are active:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File scripts/reconcile-production-db-roles.ps1 \
+  -Container "gate-system-postgres" \
+  -Database "gms" \
+  -PostgresUser "postgres" \
+  -PostgresPassword $env:POSTGRES_PASSWORD \
+  -OwnerUser "gms_owner" \
+  -OwnerPassword $env:GMS_OWNER_PASSWORD \
+  -AppUser "gms_app" \
+  -AppPassword $env:GMS_APP_PASSWORD \
+  -BackupUser "gms_backup" \
+  -BackupPassword $env:GMS_BACKUP_PASSWORD \
+  -RestoreUser "restore_operator" \
+  -RestorePassword $env:GMS_RESTORE_PASSWORD
+```
+
+Verify role privileges using the 15-point least privilege gate:
+```powershell
+pwsh -ExecutionPolicy Bypass -File scripts/verify-least-privilege.ps1
+```
+
+### 2. Migration Checksum Reconciliation (P0-01 — BLOCKING)
+
+Before running `prisma migrate deploy` on any database that has **previously been deployed**, you MUST run the checksum reconciliation script using the `gms_owner` migration credentials:
 
 ```bash
-DATABASE_URL="postgresql://<user>:<pass>@<host>:<port>/<dbname>" \
+DATABASE_URL="postgresql://gms_owner:<owner_pass>@<host>:<port>/<dbname>?schema=public" \
   node scripts/check-migration-checksums.js
 ```
 
@@ -40,7 +72,7 @@ DATABASE_URL="postgresql://<user>:<pass>@<host>:<port>/<dbname>" \
 **Critical migration to verify:**
 - `20260806000000_add_revision_and_correction_items` — this migration has had content changes across repository history (SHA `cdde2ed` → `d4fc484`). If the database was deployed with the older version, the checksum will not match.
 
-### 2. Save Output as Evidence
+### 3. Save Output as Evidence
 
 Save the reconciliation output to a file:
 
@@ -50,17 +82,18 @@ DATABASE_URL="..." node scripts/check-migration-checksums.js > migration-checksu
 
 This file must be archived alongside the deployment record.
 
-### 3. CI Status
+### 4. CI Status
 
 - [ ] GitHub Actions CI run is **green** on the exact SHA being deployed
 - [ ] Both `fresh` and `upgraded` database matrix variants passed
 - [ ] Migration checksum verification step passed in CI
+- [ ] 15-Point least privilege and auth isolation gate passed in CI
 
-### 4. Database Backup
+### 5. Database Backup Status
 
 - [ ] Pre-deployment backup created (`MANUAL_PRE_UPDATE` type)
 - [ ] Backup manifest shows `localStatus: VERIFIED`
-- [ ] Backup checksum recorded
+- [ ] Backup checksum recorded and restore verified in test DB
 
 ---
 

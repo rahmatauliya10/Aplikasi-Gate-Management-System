@@ -58,6 +58,7 @@ function verifyComposeConfig(configJsonStr) {
 
     const requiredEnv = [
       'DATABASE_URL',
+      'BACKUP_DATABASE_URL',
       'JWT_ACCESS_SECRET',
       'JWT_REFRESH_SECRET',
       'BACKUP_SIGNATURE_SECRET',
@@ -116,9 +117,8 @@ function verifyComposeConfig(configJsonStr) {
 
     // Check DATABASE_URL
     const envObj = migrator.environment || {};
-    const envKeys = Array.isArray(envObj)
-      ? envObj.map((e) => e.split('=')[0])
-      : Object.keys(envObj);
+    const envEntries = Array.isArray(envObj) ? envObj : Object.entries(envObj).map(([k, v]) => `${k}=${v}`);
+    const envKeys = envEntries.map((e) => e.split('=')[0]);
     if (!envKeys.includes('DATABASE_URL')) {
       errors.push('Migrator environment missing [DATABASE_URL].');
     }
@@ -141,6 +141,28 @@ function verifyComposeConfig(configJsonStr) {
   } else {
     if (postgres.ports && postgres.ports.length > 0) {
       errors.push('Postgres must NOT expose ports to the host in production compose (db-net internal isolation).');
+    }
+    const pgEnvObj = postgres.environment || {};
+    const pgEnvKeys = Array.isArray(pgEnvObj)
+      ? pgEnvObj.map((e) => e.split('=')[0])
+      : Object.keys(pgEnvObj);
+    const requiredPgEnv = [
+      'POSTGRES_USER',
+      'POSTGRES_PASSWORD',
+      'POSTGRES_DB',
+      'GMS_APP_USER',
+      'GMS_APP_PASSWORD',
+      'GMS_OWNER_USER',
+      'GMS_OWNER_PASSWORD',
+      'GMS_BACKUP_USER',
+      'GMS_BACKUP_PASSWORD',
+      'GMS_RESTORE_USER',
+      'GMS_RESTORE_PASSWORD'
+    ];
+    for (const reqKey of requiredPgEnv) {
+      if (!pgEnvKeys.includes(reqKey)) {
+        errors.push(`Postgres service is missing dedicated role environment variable [${reqKey}].`);
+      }
     }
   }
 

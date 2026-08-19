@@ -537,5 +537,42 @@ describe('DatabaseBackupService', () => {
         expect(status.storagePercent).toBeGreaterThanOrEqual(0);
       }
     });
+
+    it('should fail closed in production when BACKUP_DATABASE_URL is missing', async () => {
+      const origNodeEnv = process.env.NODE_ENV;
+      const origBackupUrl = process.env.BACKUP_DATABASE_URL;
+      process.env.NODE_ENV = 'production';
+      delete process.env.BACKUP_DATABASE_URL;
+
+      await expect(
+        service.runAutomatedScheduledBackup('MANUAL_PRE_UPDATE', mockAdminUser),
+      ).rejects.toThrow(InternalServerErrorException);
+
+      process.env.NODE_ENV = origNodeEnv;
+      if (origBackupUrl !== undefined) {
+        process.env.BACKUP_DATABASE_URL = origBackupUrl;
+      }
+    });
+
+    it('should succeed in production when BACKUP_DATABASE_URL is provided', async () => {
+      const origNodeEnv = process.env.NODE_ENV;
+      const origBackupUrl = process.env.BACKUP_DATABASE_URL;
+      process.env.NODE_ENV = 'production';
+      process.env.BACKUP_DATABASE_URL =
+        'postgresql://gms_backup:secret123@localhost:5432/gms?schema=public';
+
+      const manifest = await service.runAutomatedScheduledBackup(
+        'MANUAL_PRE_UPDATE',
+        mockAdminUser,
+      );
+      expect(manifest.backupId).toBeDefined();
+
+      process.env.NODE_ENV = origNodeEnv;
+      if (origBackupUrl !== undefined) {
+        process.env.BACKUP_DATABASE_URL = origBackupUrl;
+      } else {
+        delete process.env.BACKUP_DATABASE_URL;
+      }
+    });
   });
 });
