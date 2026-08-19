@@ -251,7 +251,7 @@ if ($BackupPassword) {
     $dumpExitCode = $LASTEXITCODE
 
     if ($dumpExitCode -ne 0) {
-        throw "BACKUP SMOKE FAILURE: pg_dump failed with exit code $dumpExitCode: $dumpExec"
+        throw "BACKUP SMOKE FAILURE: pg_dump failed with exit code ${dumpExitCode}: $dumpExec"
     }
 
     # Verify dump file is non-empty and pg_restore can list contents
