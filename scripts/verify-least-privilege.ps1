@@ -67,7 +67,20 @@ Write-Host "====================================================================
 Write-Host " GMS 15-Point Least Privilege & Authentication Isolation Gate" -ForegroundColor Cyan
 Write-Host "==============================================================================" -ForegroundColor Cyan
 
-function Run-Query([string]$user, [string]$password, [string]$sql, [bool]$useTcp = $false) {
+function Run-Query {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$user,
+
+        [Parameter(Mandatory=$false)]
+        [string]$password = "",
+
+        [Parameter(Mandatory=$true)]
+        [string]$sql,
+
+        [Parameter(Mandatory=$false)]
+        [bool]$useTcp = $false
+    )
     if ($useTcp) {
         $targetHost = if ($HostAddress) { $HostAddress } else { $Container }
         $res = & docker exec -e PGPASSWORD="$password" $Container psql -h $targetHost -p $Port -U $user -d $Database -t -A -c "$sql" 2>&1
