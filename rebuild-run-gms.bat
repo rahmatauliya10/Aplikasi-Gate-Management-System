@@ -57,7 +57,7 @@ goto WAIT_DATABASE
 :RUN_MIGRATION
 echo.
 echo Menjalankan migrasi skema database (npx prisma migrate deploy)...
-%COMPOSE_CMD% run --rm backend npx prisma migrate deploy
+%COMPOSE_CMD% run --rm migrator npx prisma migrate deploy
 if %errorlevel% neq 0 (
     echo.
     echo ERROR: Prisma migration gagal!
@@ -67,7 +67,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo Memeriksa status migrasi database (npx prisma migrate status)...
-%COMPOSE_CMD% run --rm backend npx prisma migrate status
+%COMPOSE_CMD% run --rm migrator npx prisma migrate status
 if %errorlevel% neq 0 (
     echo.
     echo ERROR: Status Prisma migration tidak valid atau ada migrasi yang tertinggal!

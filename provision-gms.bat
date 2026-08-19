@@ -37,7 +37,7 @@ goto WAIT_DATABASE
 
 :CHECK_ADMIN
 echo Memeriksa apakah akun admin sudah terdaftar...
-%COMPOSE_CMD% run --rm backend npx ts-node prisma/check-provisioned.ts >temp_check.txt 2>&1
+%COMPOSE_CMD% run --rm migrator npx ts-node prisma/check-provisioned.ts >temp_check.txt 2>&1
 findstr /C:"ADMIN_EXISTS" temp_check.txt >nul
 if %errorlevel%==0 (
     echo.
@@ -61,7 +61,7 @@ del temp_check.txt >nul 2>&1
 
 echo.
 echo Melakukan seeding database dengan akun default...
-%COMPOSE_CMD% run --rm backend npx prisma db seed
+%COMPOSE_CMD% run --rm migrator npx prisma db seed
 if %errorlevel% neq 0 (
     echo ERROR: Seeding database gagal!
     pause

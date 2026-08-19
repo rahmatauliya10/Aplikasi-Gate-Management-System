@@ -179,7 +179,7 @@
         </button>
       </div>
 
-      <!-- ROW 3: Operational Filter Cards + Dark Sort Selector -->
+      <!-- ROW 3: Operational Filter Cards + Sort Selector -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <!-- 1. Status Filter -->
         <div class="relative">
@@ -226,10 +226,10 @@
           </select>
         </div>
 
-        <!-- 5. Dark Sort Selector -->
+        <!-- 5. Sort Selector -->
         <div class="relative">
-          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-white/80 text-base pointer-events-none">schedule</span>
-          <select v-model="sortBy" class="w-full h-11 pl-10 pr-8 bg-[#0f172a] text-white border border-slate-900 shadow-md rounded-2xl text-xs font-black outline-none focus:ring-2 focus:ring-slate-700 transition-all cursor-pointer">
+          <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">schedule</span>
+          <select v-model="sortBy" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
             <option value="gateInDesc">Datang Terbaru</option>
             <option value="gateInAsc">Datang Terawal (Pertama)</option>
             <option value="tatDesc">TAT Terlama</option>
@@ -294,10 +294,10 @@
                 <!-- Plate Number & Badges -->
                 <td class="px-4 py-3 border-y border-slate-100 w-[260px] min-w-[260px]">
                   <div class="flex items-center space-x-2.5">
-                    <!-- License Plate Dark Card -->
-                    <div class="flex flex-col items-center justify-center bg-slate-900 px-2.5 py-1.5 rounded-xl border border-slate-800 shadow-inner shrink-0 min-w-[82px]">
-                      <span class="text-xs font-black text-[#4A8BDF] font-mono tracking-wider leading-none">{{ getPlateNumber(truck) }}</span>
-                      <span v-if="getVendor(truck) !== '-'" class="text-[8px] font-bold text-slate-400 mt-0.5 max-w-[75px] truncate leading-none" :title="getVendor(truck)">{{ getVendor(truck) }}</span>
+                    <!-- License Plate Clean Card -->
+                    <div class="flex flex-col items-center justify-center bg-slate-100/90 px-2.5 py-1.5 rounded-xl border border-slate-200 shadow-2xs shrink-0 min-w-[82px] group-hover:border-slate-300 group-hover:bg-slate-100 transition-colors">
+                      <span class="text-xs font-black text-slate-800 font-mono tracking-wider leading-none">{{ getPlateNumber(truck) }}</span>
+                      <span v-if="getVendor(truck) !== '-'" class="text-[8px] font-bold text-slate-500 mt-0.5 max-w-[75px] truncate leading-none" :title="getVendor(truck)">{{ getVendor(truck) }}</span>
                     </div>
 
                     <!-- Badges Column -->
@@ -672,6 +672,7 @@ import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pagination from '../components/Pagination.vue'
 import { useToast } from '../composables/useToast'
+import { generatePrintHTML, printTruckReport } from '../utils/pdfGenerator'
 
 // Stores and Composables
 const truckStore = useTruckStore()
@@ -1418,380 +1419,14 @@ const exportExcel = () => {
   toast.success('Excel Report generated and downloaded!')
 }
 
-const generatePrintHTML = (truckList) => {
-  let html = `
-    <html>
-    <head>
-      <title>PT Santos Jaya Abadi - GMS Truck Report</title>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
-      <style>
-        body {
-          font-family: 'Inter', sans-serif;
-          margin: 0;
-          padding: 20px;
-          color: #1e293b;
-          background-color: #ffffff;
-        }
-        .report-page {
-          page-break-after: always;
-          border: 1px solid #e2e8f0;
-          padding: 30px;
-          margin-bottom: 30px;
-          border-radius: 12px;
-          position: relative;
-        }
-        .report-page:last-child {
-          page-break-after: avoid;
-        }
-        .header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          border-bottom: 2px solid #1e293b;
-          padding-bottom: 20px;
-          margin-bottom: 20px;
-        }
-        .company-title {
-          font-weight: 900;
-          font-size: 18px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-          margin: 0;
-        }
-        .company-subtitle {
-          font-size: 10px;
-          color: #64748b;
-          font-weight: bold;
-          letter-spacing: 1px;
-          margin-top: 4px;
-        }
-        .doc-title {
-          font-size: 14px;
-          font-weight: 900;
-          text-align: right;
-          color: #4A8BDF;
-          margin: 0;
-        }
-        .doc-subtitle {
-          font-size: 10px;
-          color: #64748b;
-          text-align: right;
-          margin-top: 4px;
-        }
-        .grid {
-          display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 20px;
-          margin-bottom: 25px;
-        }
-        .section-box {
-          border: 1px solid #f1f5f9;
-          background-color: #f8fafc;
-          border-radius: 8px;
-          padding: 15px;
-        }
-        .section-title {
-          font-size: 10px;
-          font-weight: 900;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          color: #64748b;
-          margin-top: 0;
-          margin-bottom: 10px;
-          border-bottom: 1px solid #e2e8f0;
-          padding-bottom: 5px;
-        }
-        .field {
-          display: flex;
-          justify-content: space-between;
-          font-size: 11px;
-          margin-bottom: 6px;
-        }
-        .field-label {
-          color: #64748b;
-          font-weight: bold;
-        }
-        .field-value {
-          font-weight: bold;
-          color: #0f172a;
-        }
-        .table-data {
-          width: 100%;
-          border-collapse: collapse;
-          margin-top: 15px;
-          margin-bottom: 20px;
-        }
-        .table-data th, .table-data td {
-          border: 1px solid #e2e8f0;
-          padding: 10px;
-          text-align: left;
-          font-size: 11px;
-        }
-        .table-data th {
-          background-color: #f1f5f9;
-          color: #475569;
-          font-weight: 900;
-          text-transform: uppercase;
-          font-size: 9px;
-          letter-spacing: 0.5px;
-        }
-        .badge {
-          display: inline-block;
-          padding: 3px 8px;
-          border-radius: 4px;
-          font-size: 9px;
-          font-weight: 900;
-          text-transform: uppercase;
-        }
-        .badge-safe { background-color: #d1fae5; color: #065f46; }
-        .badge-warning { background-color: #fef3c7; color: #92400e; }
-        .badge-critical { background-color: #fee2e2; color: #991b1b; }
-        .badge-pending { background-color: #f1f5f9; color: #475569; }
-        .timeline-container {
-          margin-top: 20px;
-          border-top: 1px dashed #e2e8f0;
-          padding-top: 15px;
-        }
-        .timeline-grid {
-          display: grid;
-          grid-template-columns: repeat(6, 1fr);
-          gap: 10px;
-        }
-        .timeline-node {
-          text-align: center;
-          position: relative;
-        }
-        .timeline-node::after {
-          content: "";
-          position: absolute;
-          top: 10px;
-          left: 50%;
-          width: 100%;
-          height: 2px;
-          background-color: #cbd5e1;
-          z-index: 1;
-        }
-        .timeline-node:last-child::after {
-          display: none;
-        }
-        .node-dot {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          background-color: #4A8BDF;
-          margin: 0 auto 5px;
-          position: relative;
-          z-index: 2;
-        }
-        .node-dot.empty {
-          background-color: #cbd5e1;
-        }
-        .node-label {
-          font-size: 8px;
-          font-weight: 900;
-          color: #64748b;
-          text-transform: uppercase;
-          display: block;
-        }
-        .node-time {
-          font-size: 9px;
-          font-weight: bold;
-          color: #0f172a;
-          margin-top: 2px;
-        }
-        .footer {
-          margin-top: 30px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          font-size: 9px;
-          color: #94a3b8;
-          border-top: 1px solid #f1f5f9;
-          padding-top: 10px;
-        }
-        @media print {
-          body {
-            padding: 0;
-          }
-          .report-page {
-            border: none;
-            padding: 0;
-            margin: 0;
-            box-shadow: none;
-          }
-        }
-      </style>
-    </head>
-    <body>
-  `
-
-  const escapeHtml = (str) => {
-    if (str === null || str === undefined) return '—'
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;')
-  }
-
-  truckList.forEach(t => {
-    const timelines = getTimelineRows(t)
-    const formattedTimelines = timelines.map(node => {
-      return `
-        <div class="timeline-node">
-          <div class="node-dot ${node.value ? '' : 'empty'}"></div>
-          <span class="node-label">${escapeHtml(node.label)}</span>
-          <span class="node-time">${escapeHtml(formatTimeFull(node.value))}</span>
-        </div>
-      `
-    }).join('')
-
-    html += `
-      <div class="report-page">
-        <div class="header">
-          <div>
-            <h1 class="company-title">PT Santos Jaya Abadi</h1>
-            <div class="company-subtitle">GATE MANAGEMENT SYSTEM — OPERATIONS LOG</div>
-          </div>
-          <div>
-            <h2 class="doc-title">TRUCK AUDIT RECEIPT</h2>
-            <div class="doc-subtitle">ID: ${escapeHtml(t.id)}</div>
-          </div>
-        </div>
-
-        <div class="grid">
-          <!-- Section 1: Vehicle Info -->
-          <div class="section-box">
-            <h3 class="section-title">Vehicle & Driver Details</h3>
-            <div class="field">
-              <span class="field-label">Plate Number</span>
-              <span class="field-value">${escapeHtml(getPlateNumber(t))}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Driver Name</span>
-              <span class="field-value">${escapeHtml(t.driverName)}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Vendor</span>
-              <span class="field-value">${escapeHtml(getVendor(t))}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Destination</span>
-              <span class="field-value">${escapeHtml(getProcessType(t))}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Status</span>
-              <span class="field-value">${escapeHtml(t.status)}</span>
-            </div>
-          </div>
-
-          <!-- Section 2: Weight Info -->
-          <div class="section-box">
-            <h3 class="section-title">Weighbridge & Scale Reconciliation</h3>
-            <div class="field">
-              <span class="field-label">Scale IN (Weighbridge)</span>
-              <span class="field-value">${escapeHtml(formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.tare || t.tareWeight || t.weighInWeight) : (t.weights?.gross || t.grossWeight || t.weighInWeight)))}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Scale OUT (Weighbridge)</span>
-              <span class="field-value">${escapeHtml(formatWeightCustom(t.processType === 'GBJ' ? (t.weights?.gross || t.grossWeight || t.weighOutWeight) : (t.weights?.tare || t.tareWeight || t.weighOutWeight)))}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Net Weight</span>
-              <span class="field-value">${escapeHtml(formatWeightCustom(t.fraud?.net))}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Warehouse Realization</span>
-              <span class="field-value">${escapeHtml(formatWeightCustom(t.fraud?.roll))}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Deviation</span>
-              <span class="field-value">${escapeHtml(formatPercentage(t.fraud?.deviationPercent))}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- QC Section -->
-        <div class="section-box" style="margin-bottom: 25px;">
-          <h3 class="section-title">Quality Assurance & Lab Verdict</h3>
-          <table class="table-data" style="margin-top: 5px; margin-bottom: 5px;">
-            <thead>
-              <tr>
-                <th>Moisture (Kadar Air)</th>
-                <th>Foreign Matter (FM)</th>
-                <th>Bean Condition (Biji Baik)</th>
-                <th>QC Officer / PIC</th>
-                <th>Verdict</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${escapeHtml(t.qcDetails?.kadarAir !== null && t.qcDetails?.kadarAir !== undefined ? t.qcDetails.kadarAir + '%' : '—')}</td>
-                <td>${escapeHtml(t.qcDetails?.totalFM !== null && t.qcDetails?.totalFM !== undefined ? t.qcDetails.totalFM + '%' : '—')}</td>
-                <td>${escapeHtml(t.qcDetails?.bijiOK !== null && t.qcDetails?.bijiOK !== undefined ? t.qcDetails.bijiOK + '%' : '—')}</td>
-                <td>${escapeHtml(t.qcDetails?.pic || '—')}</td>
-                <td>
-                  <span class="badge ${t.fraud?.status === 'CRITICAL' ? 'badge-critical' : t.fraud?.status === 'WARNING' ? 'badge-warning' : t.fraud?.status === 'PENDING' ? 'badge-pending' : 'badge-safe'}">
-                    ${escapeHtml(t.fraud?.status)}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Timeline Section -->
-        <div class="timeline-container">
-          <h3 class="section-title" style="border: none; margin-bottom: 15px;">Operations Timeline</h3>
-          <div class="timeline-grid">
-            ${formattedTimelines}
-          </div>
-        </div>
-
-        <div class="footer">
-          <span>Printed on: ${new Date().toLocaleString('id-ID')} — Generated dynamically by GMS Intelligence</span>
-          <span>PT Santos Jaya Abadi — Confidential</span>
-        </div>
-      </div>
-    `
-  })
-
-  html += `
-    </body>
-    </html>
-  `
-  return html
-}
-
 const downloadSinglePDF = (truck) => {
-  const printWindow = window.open('', '_blank')
-  printWindow.document.write(generatePrintHTML([truck]))
-  printWindow.document.close()
-  
-  printWindow.onload = () => {
-    printWindow.focus()
-    printWindow.print()
-    printWindow.close()
-  }
+  printTruckReport(truck)
 }
 
 const downloadBulkPDF = () => {
   if (selectedTruckIds.value.length === 0) return
-  
   const trucksToPrint = filteredAnalyzedTrucks.value.filter(t => selectedTruckIds.value.includes(t.id))
-  
-  const printWindow = window.open('', '_blank')
-  printWindow.document.write(generatePrintHTML(trucksToPrint))
-  printWindow.document.close()
-  
-  printWindow.onload = () => {
-    printWindow.focus()
-    printWindow.print()
-    printWindow.close()
-  }
-  
-  // Clear selection after print
+  printTruckReport(trucksToPrint)
   selectedTruckIds.value = []
 }
 </script>

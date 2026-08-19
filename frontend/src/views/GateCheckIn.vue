@@ -120,9 +120,9 @@
           <div v-for="(truck, i) in paginatedRegisteredTrucks" :key="truck.id"
             class="group relative bg-white hover:bg-slate-50/80 border-b border-slate-100/80 last:border-b-0 first:rounded-t-none last:rounded-b-xl transition-all duration-200 flex flex-wrap md:flex-nowrap items-center px-6 py-4 md:py-3.5"
           >
-            <!-- COL 1: Plate Number (Dark Box) -->
+            <!-- COL 1: Plate Number (Clean Box) -->
             <div class="w-full md:w-[120px] shrink-0 flex items-center">
-              <div class="h-8 bg-[#1A1F2C] rounded-lg flex items-center justify-center text-white font-mono font-bold text-[11px] shadow-sm tracking-wider px-3 whitespace-nowrap">
+              <div class="h-8 bg-slate-100/90 border border-slate-200 rounded-lg flex items-center justify-center text-slate-800 font-mono font-bold text-[11px] shadow-2xs tracking-wider px-3 whitespace-nowrap group-hover:border-slate-300 group-hover:bg-slate-100 transition-colors">
                 {{ getPlateNumber(truck).length > 10 ? getPlateNumber(truck).substring(0,10) : getPlateNumber(truck) }}
               </div>
             </div>
