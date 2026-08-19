@@ -276,7 +276,10 @@
                             <span class="material-icons text-white text-[16px] opacity-0 peer-checked:opacity-100 transition-opacity transform scale-50 peer-checked:scale-100">check</span>
                           </div>
                         </div>
-                        <span class="text-[13px] font-bold text-slate-700 select-none leading-snug pt-0.5">{{ item }}</span>
+                        <div class="flex items-center flex-wrap gap-1.5 pt-0.5">
+                          <span class="text-[13px] font-bold text-slate-700 select-none leading-snug">{{ item.label }}</span>
+                          <span v-if="item.optional" class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md uppercase tracking-wider select-none">(Opsional)</span>
+                        </div>
                       </label>
                     </div>
                   </div>
@@ -294,7 +297,10 @@
                             <span class="material-icons text-white text-[16px] opacity-0 peer-checked:opacity-100 transition-opacity transform scale-50 peer-checked:scale-100">check</span>
                           </div>
                         </div>
-                        <span class="text-[13px] font-bold text-slate-700 select-none leading-snug pt-0.5">{{ item }}</span>
+                        <div class="flex items-center flex-wrap gap-1.5 pt-0.5">
+                          <span class="text-[13px] font-bold text-slate-700 select-none leading-snug">{{ item.label }}</span>
+                          <span v-if="item.optional" class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md uppercase tracking-wider select-none">(Opsional)</span>
+                        </div>
                       </label>
                     </div>
                   </div>
@@ -428,17 +434,17 @@ const deliveryForm = reactive({
 const productTypes = ['SIC 18 T', 'SIC 01 PC', 'SIC 25 BR', 'SIC 8590 SD', 'SIC 9010 M3', 'SIC 18 C1']
 
 const productConditionList = [
-  "Menggunakan pallet / Using pallet",
-  "Dalam kondisi baik / In good condition",
-  "Jenis dan jumlah barang sudah tepat / Product type and quantity are correct",
-  "Disusun dengan baik / Good stacking condition"
+  { label: "Menggunakan pallet / Using pallet", optional: true },
+  { label: "Dalam kondisi baik / In good condition", optional: false },
+  { label: "Jenis dan jumlah barang sudah tepat / Product type and quantity are correct", optional: false },
+  { label: "Disusun dengan baik / Good stacking condition", optional: false }
 ]
 
 const documentList = [
-  "Surat jalan / Delivery note",
-  "Dokumen hasil analisa / Certificate of Analysis",
-  "Dokumen Halal / Certificate of Halal",
-  "Surat pesanan / Purchasing order"
+  { label: "Surat jalan / Delivery note", optional: false },
+  { label: "Dokumen hasil analisa / Certificate of Analysis", optional: false },
+  { label: "Dokumen Halal / Certificate of Halal", optional: true },
+  { label: "Surat pesanan / Purchasing order", optional: false }
 ]
 
 const currentDateStr = computed(() => {
@@ -450,8 +456,10 @@ const canSaveGBJ = computed(() => {
   const isWeightValid = capturedWeight.value !== null && capturedWeight.value > 0
   const isSjValid = sjInput.value.trim().length > 0
   const isFormValid = deliveryForm.productType !== '' && deliveryForm.customer.trim().length > 0
-  const isProductConditionValid = deliveryForm.productCondition.every(val => val === true)
-  const isDocumentValid = deliveryForm.documentAvailability.every(val => val === true)
+  
+  // Hanya item wajib yang harus bernilai true (item optional bebas true/false)
+  const isProductConditionValid = productConditionList.every((item, idx) => item.optional || deliveryForm.productCondition[idx] === true)
+  const isDocumentValid = documentList.every((item, idx) => item.optional || deliveryForm.documentAvailability[idx] === true)
   
   return isWeightValid && isSjValid && isFormValid && isProductConditionValid && isDocumentValid
 })

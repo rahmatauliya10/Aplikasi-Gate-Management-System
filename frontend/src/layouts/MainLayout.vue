@@ -176,30 +176,36 @@
               <div v-if="sidebarOpen && $route.path === '/settings'" class="ml-auto w-1.5 h-1.5 rounded-full bg-[#A0006D]"></div>
             </router-link>
           </nav>
-
-          <!-- Sidebar Footer (Interactive Profile/Status) -->
-          <div class="px-4 pt-4 border-t border-slate-100 mt-4 mx-2 mb-4">
-            <div class="rounded-xl p-4 flex flex-col transition-all duration-300 hover:shadow-sm hover:bg-slate-50/80 hover:-translate-y-1 cursor-pointer group border border-transparent hover:border-slate-100 bg-transparent">
-              <div class="flex items-center space-x-2">
-                <span class="material-icons text-teal-600 text-[16px] group-hover:text-teal-500 transition-colors duration-300">eco</span>
-                <span v-if="sidebarOpen" class="text-[11px] font-black text-slate-800 tracking-wide group-hover:text-teal-700 transition-colors duration-300">Rahmat Auliya</span>
-              </div>
-              <div v-if="sidebarOpen" class="mt-1 text-[7.5px] font-black text-teal-600 uppercase tracking-[0.2em] group-hover:text-teal-500 transition-colors duration-300">
-                OPERATIONAL EXCELLENCE
-              </div>
-            </div>
-          </div>
         </div>
       </aside>
 
       <!-- Main Content -->
-      <main class="flex-1 overflow-y-auto overflow-x-hidden relative w-full" style="background-image: url('/Latar_belakang.png'); background-position: center; background-size: cover; background-repeat: no-repeat; background-attachment: fixed; background-color: #EFFAFD;">
+      <main class="flex-1 overflow-y-auto overflow-x-hidden relative w-full" style="background-color: #EFFAFD;">
+        <!-- Translucent Background Illustration Layer (Nerawang) -->
+        <div 
+          class="fixed inset-0 pointer-events-none z-0" 
+          style="
+            background-image: url('/Latar_belakang.png');
+            background-position: center;
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-attachment: fixed;
+            opacity: 0.70;
+            filter: saturate(0.95) brightness(1.0);
+          "
+        ></div>
+
         <div class="relative z-10 max-w-7xl mx-auto px-4 md:px-6 py-4 md:py-6 pb-24 min-w-0">
           <router-view v-slot="{ Component, route }">
             <transition name="page" mode="out-in">
               <component :is="Component" :key="route.path" />
             </transition>
           </router-view>
+
+          <!-- System Footer -->
+          <footer class="mt-12 text-center text-[11px] font-semibold text-slate-400">
+            © 2026 PT Santos Jaya Abadi · Built by Rahmat Auliya
+          </footer>
         </div>
       </main>
     </div>

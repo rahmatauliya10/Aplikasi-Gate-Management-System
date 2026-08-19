@@ -1,24 +1,24 @@
 <template>
   <span 
-    :class="[badgeClasses, compact ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-xs']" 
-    class="inline-flex items-center rounded-lg font-mono font-bold tracking-wide transition-all duration-300 select-none border shadow-sm"
+    :class="[badgeClasses, compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-xs']" 
+    class="inline-flex items-center rounded-xl font-mono font-bold tracking-wide transition-all duration-300 select-none border shadow-2xs"
   >
     <!-- Live pulsing dot for active timer -->
     <span 
       v-if="!endTime" 
-      class="w-1.5 h-1.5 rounded-full mr-2 shrink-0 animate-pulse" 
+      class="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0" 
       :class="dotClasses"
     ></span>
-    <span v-else class="mr-1.5 text-[10px] opacity-70">✓</span>
+    <span v-else class="mr-1.5 text-[10px] text-slate-400">✓</span>
 
     <!-- Optional Label -->
-    <span v-if="label" class="mr-1.5 font-sans font-semibold text-[10px] opacity-80 uppercase tracking-wider">{{ label }}:</span>
+    <span v-if="label" class="mr-1.5 font-sans font-bold text-[10px] uppercase tracking-wider opacity-75">{{ label }}:</span>
     
     <!-- Timer String (MM:SS or HH:MM:SS) -->
-    <span class="tabular-nums">{{ formattedDuration }}</span>
+    <span class="tabular-nums font-semibold">{{ formattedDuration }}</span>
 
-    <!-- SLA Breach warning icon -->
-    <span v-if="isBreached && !endTime" class="ml-1.5 text-[10px] font-sans px-1 py-0.5 rounded bg-red-500/20 text-red-400 font-extrabold uppercase animate-pulse">
+    <!-- SLA Breach warning tag -->
+    <span v-if="isBreached && !endTime" class="ml-1.5 text-[9px] font-sans px-1.5 py-0.5 rounded-md bg-red-100/90 text-red-700 font-black uppercase border border-red-200/70">
       OVER SLA
     </span>
   </span>
@@ -119,24 +119,24 @@ const formattedDuration = computed(() => {
 
 const badgeClasses = computed(() => {
   if (props.endTime) {
-    // Completed process style
-    return 'bg-slate-100 text-slate-700 border-slate-200 shadow-none'
+    // Completed process style (clean neutral slate)
+    return 'bg-slate-50 text-slate-600 border-slate-200/80 shadow-none'
   }
   if (isBreached.value) {
-    // SLA Breached (Industrial Crimson Alert)
-    return 'bg-[#0F172A] text-red-400 border-red-500/60 shadow-md ring-1 ring-red-500/30'
+    // SLA Breached (Soft Red / Rose matching template)
+    return 'bg-red-50/90 text-red-700 border-red-200/90'
   } else if (isCaution.value) {
-    // Nearing SLA (Industrial Amber Caution)
-    return 'bg-[#0F172A] text-amber-400 border-amber-500/50 shadow-md'
+    // Nearing SLA (Soft Amber Caution)
+    return 'bg-amber-50/90 text-amber-800 border-amber-200/90'
   } else {
-    // Normal Active Timer (Industrial Emerald Control)
-    return 'bg-[#0F172A] text-emerald-400 border-slate-700/80 shadow-md'
+    // Normal Active Timer (Soft Slate matching template)
+    return 'bg-slate-50 hover:bg-slate-100/80 text-slate-700 border-slate-200/80'
   }
 })
 
 const dotClasses = computed(() => {
-  if (isBreached.value) return 'bg-red-500 shadow-[0_0_8px_#ef4444]'
-  if (isCaution.value) return 'bg-amber-400 shadow-[0_0_8px_#fbbf24]'
-  return 'bg-emerald-400 shadow-[0_0_8px_#10b981]'
+  if (isBreached.value) return 'bg-red-500 animate-pulse'
+  if (isCaution.value) return 'bg-amber-500 animate-pulse'
+  return 'bg-emerald-500 animate-pulse'
 })
 </script>

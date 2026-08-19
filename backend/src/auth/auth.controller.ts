@@ -39,9 +39,9 @@ function parseCookieSecure(): boolean {
 
 function parseSameSite(): 'strict' | 'lax' | 'none' {
   const val = process.env.SAME_SITE?.trim().toLowerCase();
-  if (val === 'lax') return 'lax';
+  if (val === 'strict') return 'strict';
   if (val === 'none') return 'none';
-  return 'strict';
+  return 'lax';
 }
 
 function getRefreshCookieOptions() {

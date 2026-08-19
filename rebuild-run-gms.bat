@@ -19,7 +19,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [2/5] Membangun ulang (rebuild) kontainer dengan kode baru...
-%COMPOSE_CMD% build --no-cache
+%COMPOSE_CMD% build
 if %errorlevel% neq 0 (
     echo ERROR: Docker build gagal.
     exit /b 1

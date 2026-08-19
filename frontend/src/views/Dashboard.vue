@@ -1,10 +1,12 @@
 <template>
   <div class="space-y-8 pb-10">
     <!-- Header -->
-    <PageHeader title="Dashboard Center" :subtitle="currentDate" />
+    <PageHeader title="Dashboard Center" :subtitle="periodSubtitle">
+      <DashboardFilterBar v-model="filterState" :loading="isFetching" @change="handleFilterChange" />
+    </PageHeader>
 
     <!-- Metric Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5" :class="{ 'opacity-85 transition-opacity duration-300': isFetching }">
       <div class="ind-card p-4 sm:p-6 transition-all duration-500 group hover:-translate-y-1.5 animate-fadeInUp stagger-1 relative overflow-hidden">
         <div class="absolute top-0 left-0 w-1 h-full bg-slate-300 opacity-40 group-hover:bg-[#4A8BDF] transition-colors"></div>
         <div class="flex items-center justify-between mb-4">
@@ -15,7 +17,7 @@
         </div>
         <div>
           <p class="text-3xl sm:text-4xl font-black text-slate-900 tracking-tighter font-mono animate-number-pop">{{ totalTrucks }}</p>
-          <p class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 uppercase tracking-wider">Trucks Processed Today</p>
+          <p class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 uppercase tracking-wider">Trucks Processed</p>
         </div>
       </div>
 
@@ -67,7 +69,7 @@
     </div>
 
     <!-- Analytics Dashboard Grid -->
-    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6" :class="{ 'opacity-85 transition-opacity duration-300': isFetching }">
       
       <!-- Fraud Monitor -->
       <div class="xl:col-span-2 space-y-6">
@@ -238,6 +240,7 @@
       </div>
     </div>
 
+    <!-- Active Operations In-Progress Table -->
     <div class="rounded-2xl shadow-card overflow-hidden" style="background:white;border:1px solid #E8EEF7">
       <div class="px-5 sm:px-8 py-5 sm:py-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0" style="background:#FAFBFF;border-bottom:1px solid #E8EEF7">
         <h3 class="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center">
@@ -249,34 +252,33 @@
           <span class="text-[10px] font-black text-[#4A8BDF] uppercase tracking-widest">{{ activeTruckCount }} Live</span>
         </div>
       </div>
-      <div class="overflow-x-auto relative max-h-[400px] custom-scrollbar w-full px-4 sm:px-6">
-        <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
-        <table class="w-full relative z-10" style="border-collapse: separate; border-spacing: 0 12px;">
-          <thead class="sticky top-0 z-20">
-            <tr>
-              <th class="w-[14%] px-2 sm:px-4 py-3 text-left text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/90 backdrop-blur shadow-[0_1px_0_#F1F5F9]">Plate No</th>
-              <th class="w-[20%] px-2 sm:px-4 py-3 text-left text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/90 backdrop-blur shadow-[0_1px_0_#F1F5F9]">Vendor</th>
-              <th class="w-[10%] px-2 sm:px-4 py-3 text-left text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/90 backdrop-blur shadow-[0_1px_0_#F1F5F9]">Whse</th>
-              <th class="w-[25%] px-2 sm:px-4 py-3 text-left text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/90 backdrop-blur shadow-[0_1px_0_#F1F5F9]">Current Phase</th>
-              <th class="w-[12%] px-2 sm:px-4 py-3 text-left text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/90 backdrop-blur shadow-[0_1px_0_#F1F5F9]">Arrived</th>
-              <th class="w-[12%] px-2 sm:px-4 py-3 text-left text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/90 backdrop-blur shadow-[0_1px_0_#F1F5F9]">Elapsed</th>
-              <th class="w-[7%] px-2 sm:px-4 py-3 text-center text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/90 backdrop-blur shadow-[0_1px_0_#F1F5F9]">View</th>
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[700px] border-collapse">
+          <thead>
+            <tr style="background:#FAFBFF;border-bottom:1px solid #E8EEF7">
+              <th class="px-4 sm:px-6 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Plate / Driver</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Type / Vendor</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Status / Location</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Arrival</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Stage SLA</th>
+              <th class="px-3 sm:px-4 py-3.5 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">Action</th>
             </tr>
           </thead>
-          <tbody>
-            <tr v-for="truck in activeTrucks" :key="truck.id" class="transition-all duration-300 hover:-translate-y-1 hover:shadow-sm group bg-white shadow-sm" style="border-radius: 1rem;">
-              <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-l border-slate-100 rounded-l-2xl">
-                <div class="inline-flex items-center justify-center bg-slate-100/90 px-3 py-1.5 rounded-lg border border-slate-200 shadow-2xs group-hover:border-slate-300 group-hover:bg-slate-100 transition-colors">
-                  <span class="text-[10px] sm:text-[11px] font-black text-slate-800 font-mono tracking-widest">{{ truck.plateNumber }}</span>
+          <tbody class="divide-y divide-slate-100">
+            <tr v-for="truck in activeTrucks" :key="truck.id" class="transition-colors hover:bg-slate-50/80">
+              <td class="px-4 sm:px-6 py-3 border-y border-l border-slate-100 rounded-l-2xl">
+                <div>
+                  <span class="font-black text-slate-900 text-xs sm:text-sm font-mono tracking-tight block">{{ truck?.plateNumber || truck?.licensePlate || '-' }}</span>
+                  <span class="text-[10px] text-slate-600 block">{{ truck?.driverName || 'No Driver' }}</span>
                 </div>
               </td>
-              <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-slate-100">
-                <div class="text-[11px] sm:text-xs font-black text-slate-800 truncate max-w-[120px] sm:max-w-[150px]" :title="truck.vendor">{{ truck.vendor }}</div>
-              </td>
-              <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-slate-100">
-                <span class="px-2 py-1 text-[8px] sm:text-[9px] font-black rounded-lg uppercase tracking-widest border"
-                  :style="truck.processType==='GBB'?'color:#A0006D;background:rgba(160,0,109,0.05);border-color:rgba(160,0,109,0.1)':truck.processType==='GBJ'?'color: #4A8BDF;background:rgba(74,139,223,0.05);border-color:rgba(74,139,223,0.1)' : 'color: #4A8BDF;background:rgba(74,139,223,0.05);border-color:rgba(74,139,223,0.1)'">
-                  {{ truck.processType }}
+              <td class="px-2 sm:px-4 py-3 border-y border-slate-100">
+                <span class="text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-0.5" 
+                  :style="(truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType) === 'GBB' ? 'color:#A0006D;background:rgba(160,0,109,0.06)' : (truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType) === 'GBJ' ? 'color:#4A8BDF;background:rgba(74,139,223,0.06)' : 'color:#059669;background:rgba(5,150,105,0.06)'">
+                  {{ truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType || '-' }}
+                </span>
+                <span class="text-[10px] text-slate-700 block truncate max-w-[120px] sm:max-w-[150px] font-medium" :title="truck?.vendor || truck?.vendorName || truck?.cargo?.supplierOrCustomer">
+                  {{ truck?.vendor || truck?.vendorName || truck?.cargo?.supplierOrCustomer || '-' }}
                 </span>
               </td>
               <td class="px-2 sm:px-4 py-3 border-y border-slate-100">
@@ -339,14 +341,29 @@ import dashboardService from '../services/dashboardService'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
+import DashboardFilterBar from '../components/DashboardFilterBar.vue'
 
 const truckStore = useTruckStore()
 const settingsStore = useSettingsStore()
 const showDetailsModal = ref(false)
 const selectedTruck = ref(null)
+const isFetching = ref(false)
+
+const filterState = ref({
+  preset: 'TODAY',
+  startDate: '',
+  endDate: ''
+})
 
 const stats = ref({
-  summary: { totalToday: 0, totalCompleted: 0, totalActive: 0 },
+  period: {
+    startDate: '',
+    endDate: '',
+    timezone: 'Asia/Jakarta',
+    preset: 'TODAY',
+    formattedLabel: ''
+  },
+  summary: { totalPeriod: 0, totalToday: 0, totalCompleted: 0, totalActive: 0 },
   avgTotalTAT: 0,
   avgStageTimes: { waitingIn: 0, warehouse: 0, qc: 0, waitingOut: 0 },
   fraudStats: {
@@ -357,19 +374,27 @@ const stats = ref({
   activeFraudAlerts: []
 })
 
-let pollingInterval = null;
+let pollingInterval = null
 
-const fetchDashboardStats = async () => {
+const fetchDashboardStats = async (customParams = null) => {
+  isFetching.value = true
   try {
-    const res = await dashboardService.getStats();
+    const params = customParams || filterState.value
+    const res = await dashboardService.getStats(params)
     if (res.data?.data) {
-      stats.value = res.data.data;
+      stats.value = res.data.data
     } else if (res.data) {
-      stats.value = res.data;
+      stats.value = res.data
     }
   } catch (err) {
-    console.error('Failed to fetch dashboard stats', err);
+    console.error('Failed to fetch dashboard stats', err)
+  } finally {
+    isFetching.value = false
   }
+}
+
+const handleFilterChange = (newFilter) => {
+  fetchDashboardStats(newFilter)
 }
 
 onMounted(async () => {
@@ -378,31 +403,46 @@ onMounted(async () => {
   } catch (err) {
     console.warn('[Dashboard] Mount-time fetch failed, using store cache:', err.message)
   }
-  await fetchDashboardStats();
+  await fetchDashboardStats(filterState.value)
   
-  // Refresh stats every 30 seconds
+  // Refresh stats every 30 seconds respecting active filter
   pollingInterval = setInterval(() => {
-    fetchDashboardStats();
-    truckStore.fetchTrucks();
-  }, 30000);
+    fetchDashboardStats(filterState.value)
+    truckStore.fetchTrucks()
+  }, 30000)
 })
 
 onUnmounted(() => {
-  if (pollingInterval) clearInterval(pollingInterval);
+  if (pollingInterval) clearInterval(pollingInterval)
 })
 
 const targetDeviation = computed(() => settingsStore.targetDeviation)
 const targetTat = computed(() => settingsStore.targetTat)
 
-const currentDate = new Date().toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+const periodSubtitle = computed(() => {
+  if (stats.value?.period?.formattedLabel) {
+    return stats.value.period.formattedLabel
+  }
+  if (filterState.value.preset === 'ALL') {
+    return 'Periode: Seluruh Data Operasional'
+  }
+  if (filterState.value.startDate && filterState.value.endDate) {
+    if (filterState.value.startDate === filterState.value.endDate) {
+      return `Periode: ${filterState.value.startDate}`
+    }
+    return `Periode: ${filterState.value.startDate} – ${filterState.value.endDate}`
+  }
+  return 'Periode: Hari Ini'
+})
 
 const activeTrucks = computed(() => truckStore.activeTrucks)
 const storeError = computed(() => truckStore.error)
 const retryFetch = () => {
   truckStore.fetchTrucks()
-  fetchDashboardStats()
+  fetchDashboardStats(filterState.value)
 }
-const totalTrucks = computed(() => stats.value?.summary?.totalToday || 0)
+
+const totalTrucks = computed(() => stats.value?.summary?.totalPeriod ?? stats.value?.summary?.totalToday ?? 0)
 const activeTruckCount = computed(() => stats.value?.summary?.totalActive || 0)
 const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted || 0)
 
@@ -419,6 +459,7 @@ const alertList = computed(() => {
     return true
   })
 })
+
 const alertPage = ref(1)
 const alertPerPage = ref(4)
 const paginatedAlertList = computed(() => {
@@ -426,38 +467,35 @@ const paginatedAlertList = computed(() => {
   const end = start + alertPerPage.value
   return alertList.value.slice(start, end)
 })
+
 const totalAlertPages = computed(() => {
   return Math.ceil(alertList.value.length / alertPerPage.value) || 1
 })
+
 watch(() => alertList.value.length, () => {
   alertPage.value = 1
 })
+
 const defaultStat = { totalProcessed: 0, totalNet: 0, avgDiscrepancy: 0 }
 const getStatFor = (type) => stats.value?.fraudStats?.[type] || defaultStat
 const getDiscrepancyColor = (val) => { if (!val || val === 0) return 'text-slate-400'; if (val <= 2) return 'text-emerald-600'; if (val <= 5) return 'text-amber-500'; return 'text-red-500' }
 
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
 
-const getDuration = (startTime) => {
-  if (!startTime) return '-'
-  const diffMs = new Date() - new Date(startTime); const diffMins = Math.round(((diffMs % 86400000) % 3600000) / 60000); const diffHrs = Math.floor((diffMs % 86400000) / 3600000)
-  return `${diffHrs}h ${diffMins}m`
-}
-
 const getStatusDotClass = (s) => {
-  if (!s) return 'bg-slate-400';
-  if (s.includes('PASSED') || s.includes('COMPLETED') || s.includes('DONE')) return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]';
-  if (s.includes('FAILED') || s.includes('REJECTED')) return 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]';
-  if (s.includes('PENDING')) return 'bg-orange-500 shadow-[0_0_6px_rgba(249,115,22,0.4)]';
-  return 'bg-[#4A8BDF] shadow-[0_0_6px_rgba(74,139,223,0.4)]';
+  if (!s) return 'bg-slate-400'
+  if (s.includes('PASSED') || s.includes('COMPLETED') || s.includes('DONE')) return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.4)]'
+  if (s.includes('FAILED') || s.includes('REJECTED')) return 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.4)]'
+  if (s.includes('PENDING')) return 'bg-orange-500 shadow-[0_0_6px_rgba(249,115,22,0.4)]'
+  return 'bg-[#4A8BDF] shadow-[0_0_6px_rgba(74,139,223,0.4)]'
 }
 
 const getStatusTextClass = (s) => {
-  if (!s) return 'text-slate-500';
-  if (s.includes('PASSED') || s.includes('COMPLETED') || s.includes('DONE')) return 'text-emerald-700';
-  if (s.includes('FAILED') || s.includes('REJECTED')) return 'text-red-600';
-  if (s.includes('PENDING')) return 'text-orange-600';
-  return 'text-[#4A8BDF]';
+  if (!s) return 'text-slate-500'
+  if (s.includes('PASSED') || s.includes('COMPLETED') || s.includes('DONE')) return 'text-emerald-700'
+  if (s.includes('FAILED') || s.includes('REJECTED')) return 'text-red-600'
+  if (s.includes('PENDING')) return 'text-orange-600'
+  return 'text-[#4A8BDF]'
 }
 
 const viewDetails = (truck) => { selectedTruck.value = truck; showDetailsModal.value = true }
