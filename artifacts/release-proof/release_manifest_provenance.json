@@ -1,18 +1,22 @@
 ﻿{
     "generator":  "GMS_RELEASE_SUPPLY_CHAIN_PROVENANCE",
     "releaseVersion":  "v1.0.0",
-    "gitSha":  "04f694843997fd73c5fe58c7503ff14349351738",
-    "timestamp":  "2026-08-18T12:10:10.266Z",
-    "artifactsCount":  41,
+    "gitSha":  "c3a125cd92157b26b531275ca5e18a90bd90a764",
+    "timestamp":  "2026-08-19T03:19:37.331Z",
+    "artifactsCount":  45,
     "artifacts":  {
                       "docker-compose.prod.yml":  {
-                                                      "sha256":  "42b9cdcfb89e77c972478c39178f30e1c014457b21d01b8c42f53faa7cc1fa93",
-                                                      "sizeBytes":  5960
+                                                      "sha256":  "3c00f933ef528c7e73f48f66d3ae53fbf815fa48e86f38477b5ea06f6045bb14",
+                                                      "sizeBytes":  6552
                                                   },
                       "docker-compose.yml":  {
                                                  "sha256":  "0dca4df2ae4e7033dd8ddab0c2238f816d2dc93ca2f8dfc0b37677a06198e0b4",
                                                  "sizeBytes":  2808
                                              },
+                      ".env.production.example":  {
+                                                      "sha256":  "a3b7017e68ea99007b82cd518590fbe9592e2b425f0dcba0f0198832364ae868",
+                                                      "sizeBytes":  3070
+                                                  },
                       "deploy\\nginx\\nginx.conf":  {
                                                         "sha256":  "e0feed169ca5c06291b8834862f04852c5f45d58bdeb31e15b49c39761e28344",
                                                         "sizeBytes":  904
@@ -22,20 +26,24 @@
                                                               "sizeBytes":  3365
                                                           },
                       "deploy\\postgres\\01-init-least-privilege-roles.sql":  {
-                                                                                  "sha256":  "50b73e3655ba9b315268c23b310eeb623be94890c6bed5ff8cd0564af9e1a7b9",
-                                                                                  "sizeBytes":  3106
+                                                                                  "sha256":  "5dc2466d029e59b89da86d287925158a4f1390f0ce1c76020c8f588dc36d511a",
+                                                                                  "sizeBytes":  5798
                                                                               },
                       "deploy\\postgres\\01-init-least-privilege-roles.sh":  {
-                                                                                 "sha256":  "145c0116454f32f7e5c2cd8d1bd45407d3bd34fff3ae56b26324e43a393f27df",
-                                                                                 "sizeBytes":  3076
+                                                                                 "sha256":  "fd23baa48f2028b44260e7a775587cfa9c08c943e825a060d1200f1a0095e318",
+                                                                                 "sizeBytes":  4359
                                                                              },
+                      "deploy\\postgres\\reconcile-existing-role-privileges.sql":  {
+                                                                                       "sha256":  "ea1c4c8867e259eff2d2cbfa1fced59e4adc403b0c67736deef5fbff7d909dc3",
+                                                                                       "sizeBytes":  8814
+                                                                                   },
                       ".trivyignore.yaml":  {
                                                 "sha256":  "8d0fc18fddf38f07f857e9693462c04659d22703b6a4829eccefd5cbc83deff8",
                                                 "sizeBytes":  3762
                                             },
                       ".github\\workflows\\ci.yml":  {
-                                                         "sha256":  "7ccd8472756d62144aecb91dbf297abe201b745b1dee24421f278d690e5898ca",
-                                                         "sizeBytes":  41656
+                                                         "sha256":  "6489cb5b1eea1d002c11314b076482f719beccf8d297e3a92199d949eb24fbbf",
+                                                         "sizeBytes":  43205
                                                      },
                       ".github\\workflows\\release.yml":  {
                                                               "sha256":  "677265eecf07c1d2537c22a6fbeef1383b4c18c4b2027d05c50c7711c01e2f1c",
@@ -57,9 +65,17 @@
                                                    "sha256":  "dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b",
                                                    "sizeBytes":  476
                                                },
+                      "scripts\\reconcile-production-db-roles.ps1":  {
+                                                                         "sha256":  "35e507c419cc8d903285997c9bed9d031f331bf5f89a2e449ce108c0a073aa05",
+                                                                         "sizeBytes":  4759
+                                                                     },
+                      "scripts\\verify-least-privilege.ps1":  {
+                                                                  "sha256":  "2e9b9eb318c7a10716e96940b5a9ea7eadbea01545019394bb53b4290037f1d7",
+                                                                  "sizeBytes":  15282
+                                                              },
                       "scripts\\verify-production-compose.js":  {
-                                                                    "sha256":  "83db3557433b16124160dab986713aee34bec105e8955df91190d231c5ec4115",
-                                                                    "sizeBytes":  6532
+                                                                    "sha256":  "4a47360bc4ca6c9714710aab64f0e3f9a705aa28d52736b0b7e433b2223dcf29",
+                                                                    "sizeBytes":  7300
                                                                 },
                       "scripts\\verify-production-compose.ps1":  {
                                                                      "sha256":  "d6c6f6708c7a810ca929e63d0b4c58076445198913d96aae5fa3c0c8ea44f355",
