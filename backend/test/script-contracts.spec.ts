@@ -44,4 +44,22 @@ describe('Production Deployment & Script Contracts Gate (P0-04)', () => {
       }
     }
   });
+
+  it('should ensure bat scripts invoke migrator service instead of backend container for npx/npm commands', () => {
+    const rebuildBatPath = path.resolve(__dirname, '../../rebuild-run-gms.bat');
+    const provisionBatPath = path.resolve(__dirname, '../../provision-gms.bat');
+
+    if (fs.existsSync(rebuildBatPath)) {
+      const rebuildContent = fs.readFileSync(rebuildBatPath, 'utf8');
+      expect(rebuildContent).not.toMatch(/run\s+--rm\s+backend\s+(npx|npm)/i);
+      expect(rebuildContent).toMatch(/run\s+--rm\s+migrator\s+npx\s+prisma\s+migrate/i);
+    }
+
+    if (fs.existsSync(provisionBatPath)) {
+      const provisionContent = fs.readFileSync(provisionBatPath, 'utf8');
+      expect(provisionContent).not.toMatch(/run\s+--rm\s+backend\s+(npx|npm)/i);
+      expect(provisionContent).toMatch(/run\s+--rm\s+migrator\s+npx/i);
+    }
+  });
 });
+

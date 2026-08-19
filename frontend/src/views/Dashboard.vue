@@ -266,8 +266,8 @@
           <tbody>
             <tr v-for="truck in activeTrucks" :key="truck.id" class="transition-all duration-300 hover:-translate-y-1 hover:shadow-sm group bg-white shadow-sm" style="border-radius: 1rem;">
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-l border-slate-100 rounded-l-2xl">
-                <div class="inline-flex items-center justify-center bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 shadow-[inset_0_2px_8px_rgba(0,0,0,0.5)]">
-                  <span class="text-[10px] sm:text-[11px] font-black text-[#4A8BDF] font-mono tracking-widest">{{ truck.plateNumber }}</span>
+                <div class="inline-flex items-center justify-center bg-slate-100/90 px-3 py-1.5 rounded-lg border border-slate-200 shadow-2xs group-hover:border-slate-300 group-hover:bg-slate-100 transition-colors">
+                  <span class="text-[10px] sm:text-[11px] font-black text-slate-800 font-mono tracking-widest">{{ truck.plateNumber }}</span>
                 </div>
               </td>
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-slate-100">

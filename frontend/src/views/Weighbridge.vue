@@ -17,11 +17,11 @@
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
               <div v-for="row in truckInfoRows" :key="row.label" 
-                class="bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:-translate-y-0.5 hover:shadow-[0_4px_15px_rgba(74,139,223,0.08)] transition-all duration-300 backdrop-blur-sm"
-                :class="row.label === 'Plate Number' ? 'col-span-2 bg-gradient-to-r from-slate-900 to-slate-800 border-none' : ''">
+                class="p-3.5 rounded-xl border flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-300 backdrop-blur-sm"
+                :class="row.label === 'Plate Number' ? 'col-span-2 bg-slate-100/90 border-slate-200 shadow-2xs' : 'bg-white/80 border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] hover:shadow-[0_4px_15px_rgba(74,139,223,0.08)]'">
                 <span class="text-[9px] font-black uppercase tracking-[0.15em] mb-1.5"
-                  :class="row.label === 'Plate Number' ? 'text-[#4A8BDF]' : 'text-slate-600'">{{ row.label }}</span>
-                <span class="text-sm font-black truncate" :class="row.cls || (row.label === 'Plate Number' ? 'text-[#4A8BDF]' : 'text-slate-800')" :style="row.style || ''">{{ row.value }}</span>
+                  :class="row.label === 'Plate Number' ? 'text-slate-500' : 'text-slate-600'">{{ row.label }}</span>
+                <span class="text-sm font-black truncate" :class="row.cls || 'text-slate-800'" :style="row.style || ''">{{ row.value }}</span>
               </div>
             </div>
             
@@ -286,7 +286,7 @@ const truckInfoRows = computed(() => {
   if (!selectedTruck.value) return []
   const t = selectedTruck.value
   return [
-    { label: 'Plate Number', value: getPlateNumber(t), cls: 'text-[#4A8BDF] font-mono text-lg tracking-widest drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]' },
+    { label: 'Plate Number', value: getPlateNumber(t), cls: 'text-slate-900 font-mono text-lg tracking-widest' },
     { label: 'Driver', value: t.driverName || '-' },
     { label: 'Vendor', value: getVendor(t), cls: 'text-slate-700' },
     { label: 'Process', value: getProcessType(t), style: getProcessType(t)==='GBB'?'color:#A0006D':getProcessType(t)==='GBJ'?'color: #4A8BDF':'color: #4A8BDF' },

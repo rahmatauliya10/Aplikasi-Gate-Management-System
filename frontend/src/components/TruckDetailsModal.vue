@@ -39,6 +39,12 @@
             </div>
           </div>
           <div class="flex items-center space-x-2">
+            <button @click="downloadReceiptPDF"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 flex items-center space-x-1.5 transition-all shadow-sm active:scale-95"
+              title="Cetak Laporan Lengkap PDF Transaksi Ini">
+              <span class="material-icons text-sm text-rose-600">picture_as_pdf</span>
+              <span>Cetak PDF</span>
+            </button>
             <button v-if="isAdmin && (truck.status === 'COMPLETED' || truck.status === 'CANCELLED' || truck.status === 'IN_PROGRESS')" @click="openCorrectionModal"
               class="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1.5 transition-all shadow-sm active:scale-95">
               <span class="material-icons text-sm text-amber-600">edit_note</span>
@@ -1266,6 +1272,7 @@ import { useConfirm } from '../composables/useConfirm'
 import truckService from '../services/truckService'
 import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
 import { getWeightRecordTypes } from '../utils/weightHelpers'
+import { printTruckReport } from '../utils/pdfGenerator'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -1274,6 +1281,12 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'deleted'])
 const close = () => emit('close')
+
+const downloadReceiptPDF = () => {
+  if (props.truck) {
+    printTruckReport(props.truck)
+  }
+}
 
 const authStore = useAuthStore()
 const truckStore = useTruckStore()

@@ -15,9 +15,9 @@
             </div>
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
-              <div class="col-span-2 bg-gradient-to-r from-slate-900 to-slate-800 p-3.5 rounded-xl border-none flex flex-col justify-between hover:-translate-y-0.5 hover:shadow-[0_4px_15px_rgba(74,139,223,0.15)] transition-all duration-300">
-                <span class="text-[9px] font-black text-emerald-400 uppercase tracking-[0.15em] mb-1.5">Plate Number</span>
-                <span class="text-xl font-black truncate font-mono tracking-widest" style="color:#ffffff;text-shadow:0 0 12px rgba(255,255,255,0.4)">{{ getPlateNumber(selectedTruck) }}</span>
+              <div class="col-span-2 bg-slate-100/90 p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between hover:-translate-y-0.5 hover:border-slate-300 transition-all duration-300">
+                <span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.15em] mb-1.5">Plate Number</span>
+                <span class="text-xl font-black truncate font-mono tracking-widest text-slate-900">{{ getPlateNumber(selectedTruck) }}</span>
               </div>
               
               <div class="bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-300 backdrop-blur-sm">
