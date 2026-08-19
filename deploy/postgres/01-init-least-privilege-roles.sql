@@ -21,6 +21,7 @@ DECLARE
   backup_pass text := nullif(current_setting('gms.backup_password', true), '');
   restore_user text := COALESCE(nullif(current_setting('gms.restore_user', true), ''), 'restore_operator');
   restore_pass text := nullif(current_setting('gms.restore_password', true), '');
+  r record;
 BEGIN
   -- 1. Create or normalize gms_owner
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = owner_user) THEN
@@ -97,4 +98,13 @@ BEGIN
   EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I', owner_user, app_user);
   EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I', owner_user, backup_user);
   EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I', owner_user, backup_user);
+
+  -- 8. Explicitly revoke UPDATE and DELETE on immutable audit and history tables for gms_app
+  FOR r IN (
+    SELECT tablename FROM pg_tables
+    WHERE schemaname = 'public'
+      AND tablename IN ('ActivityLog', 'TransactionCorrection', 'TransactionCorrectionItem', 'TransactionStatusHistory')
+  ) LOOP
+    EXECUTE format('REVOKE UPDATE, DELETE ON TABLE public.%I FROM %I', r.tablename, app_user);
+  END LOOP;
 END $$;

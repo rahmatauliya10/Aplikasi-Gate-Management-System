@@ -39,9 +39,6 @@
         <span>RESET</span>
       </button>
     </div>
-
-    <!-- Future Extension Slot (e.g. Process Filter) -->
-    <slot name="extra-filters"></slot>
   </div>
 </template>
 

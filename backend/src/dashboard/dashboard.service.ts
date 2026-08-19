@@ -7,6 +7,7 @@ import {
   GetDashboardStatsDto,
   DashboardDatePreset,
 } from './dto/get-dashboard-stats.dto';
+import { resolveDashboardDateBounds } from './utils/dashboard-date-range.util';
 
 @Injectable()
 export class DashboardService {
@@ -18,120 +19,13 @@ export class DashboardService {
     private authorizationScopeService: AuthorizationScopeService,
   ) {}
 
-  private resolveDateBounds(query?: GetDashboardStatsDto) {
-    const preset =
-      query?.preset ||
-      (query?.startDate && query?.endDate
-        ? DashboardDatePreset.CUSTOM
-        : DashboardDatePreset.TODAY);
-
-    const tzOffset = 7 * 60; // Asia/Jakarta UTC+7 in minutes
-    const now = new Date();
-    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-    const jakartaNow = new Date(utcMs + tzOffset * 60000);
-
-    const formatYMD = (d: Date) => {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    };
-
-    let startDateStr: string | null = query?.startDate || null;
-    let endDateStr: string | null = query?.endDate || null;
-
-    if (preset === DashboardDatePreset.TODAY) {
-      startDateStr = formatYMD(jakartaNow);
-      endDateStr = formatYMD(jakartaNow);
-    } else if (preset === DashboardDatePreset.THIS_WEEK) {
-      const dayOfWeek = jakartaNow.getDay(); // 0 is Sunday
-      const distToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-      const monday = new Date(jakartaNow);
-      monday.setDate(jakartaNow.getDate() - distToMonday);
-      startDateStr = formatYMD(monday);
-      endDateStr = formatYMD(jakartaNow);
-    } else if (preset === DashboardDatePreset.THIS_MONTH) {
-      const firstDay = new Date(
-        jakartaNow.getFullYear(),
-        jakartaNow.getMonth(),
-        1,
-      );
-      startDateStr = formatYMD(firstDay);
-      endDateStr = formatYMD(jakartaNow);
-    } else if (preset === DashboardDatePreset.ALL) {
-      startDateStr = null;
-      endDateStr = null;
-    }
-
-    let dateFilter: any = {};
-    if (startDateStr && endDateStr) {
-      const startUtc = new Date(`${startDateStr}T00:00:00.000+07:00`);
-      const endNextDay = new Date(`${endDateStr}T00:00:00.000+07:00`);
-      endNextDay.setDate(endNextDay.getDate() + 1);
-
-      dateFilter = {
-        createdAt: {
-          gte: startUtc,
-          lt: endNextDay,
-        },
-      };
-    } else if (startDateStr) {
-      const startUtc = new Date(`${startDateStr}T00:00:00.000+07:00`);
-      dateFilter = { createdAt: { gte: startUtc } };
-    } else if (endDateStr) {
-      const endNextDay = new Date(`${endDateStr}T00:00:00.000+07:00`);
-      endNextDay.setDate(endNextDay.getDate() + 1);
-      dateFilter = { createdAt: { lt: endNextDay } };
-    }
-
-    // Format human readable label
-    let formattedLabel = 'Periode: Seluruh Data Operasional';
-    if (startDateStr && endDateStr) {
-      if (startDateStr === endDateStr) {
-        const d = new Date(`${startDateStr}T00:00:00.000+07:00`);
-        const day = d.toLocaleDateString('id-ID', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-          timeZone: 'Asia/Jakarta',
-        });
-        formattedLabel = `Periode: ${day}`;
-      } else {
-        const d1 = new Date(`${startDateStr}T00:00:00.000+07:00`);
-        const d2 = new Date(`${endDateStr}T00:00:00.000+07:00`);
-        const s1 = d1.toLocaleDateString('id-ID', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-          timeZone: 'Asia/Jakarta',
-        });
-        const s2 = d2.toLocaleDateString('id-ID', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric',
-          timeZone: 'Asia/Jakarta',
-        });
-        formattedLabel = `Periode: ${s1} – ${s2}`;
-      }
-    }
-
-    return {
-      preset,
-      startDate: startDateStr,
-      endDate: endDateStr,
-      timezone: 'Asia/Jakarta',
-      formattedLabel,
-      dateFilter,
-    };
-  }
-
   async getStats(user: JwtPayloadUser, query?: GetDashboardStatsDto) {
-    this.logger.log(
-      `Dashboard stats requested by ${user.email} (preset: ${query?.preset || 'DEFAULT'}, start: ${query?.startDate || '-'}, end: ${query?.endDate || '-'})`,
-    );
-
     const { preset, startDate, endDate, timezone, formattedLabel, dateFilter } =
-      this.resolveDateBounds(query);
+      resolveDashboardDateBounds(query);
+
+    this.logger.log(
+      `Dashboard stats requested by ${user.email} (preset: ${preset}, start: ${startDate || '-'}, end: ${endDate || '-'})`,
+    );
 
     const scope = this.authorizationScopeService.getTransactionScope(user);
 
@@ -374,7 +268,8 @@ export class DashboardService {
           formattedLabel,
         },
         summary: {
-          totalPeriod,
+          totalProcessed: totalPeriod,
+          totalPeriod, // Backward compatibility alias
           totalToday: totalPeriod, // Backward compatibility alias
           totalActive,
           totalCompleted,

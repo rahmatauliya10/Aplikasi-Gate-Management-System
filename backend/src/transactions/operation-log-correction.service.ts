@@ -273,25 +273,8 @@ export class OperationLogCorrectionService {
         }
       }
 
-      // Step 4: Create TransactionCorrection Header first to obtain correction ID
-      const correction = await prismaTx.transactionCorrection.create({
-        data: {
-          transactionId: id,
-          correctedById: user.id,
-          correctionNumber,
-          action: dto.action || CorrectionAction.CORRECT_DATA,
-          reasonCode: dto.reasonCode,
-          reason: dto.reasonCode,
-          remark: dto.remark,
-          evidenceUrl: dto.evidenceAttachmentId
-            ? `attachment:${dto.evidenceAttachmentId}`
-            : dto.evidenceUrl || null,
-          oldValues: {},
-          newValues: {},
-          expectedRevision: dto.expectedRevision,
-          ipAddress: cleanIp,
-        },
-      });
+      // Step 4: Generate unique correction ID (Append-Only: Header inserted in Step 6 after summary is computed)
+      const correctionId = crypto.randomUUID();
 
       // Step 5: Validate Allowlist, Ownership, and Group Items by Target Record
       const oldValuesSummary: Record<string, any> = {};
@@ -481,7 +464,7 @@ export class OperationLogCorrectionService {
         newValuesSummary[summaryKey] = item.newValue;
 
         itemInsertPayloads.push({
-          correctionId: correction.id,
+          correctionId,
           targetModule: item.targetModule,
           targetRecordId: tx.id,
           replacementRecordId: null,
@@ -506,7 +489,7 @@ export class OperationLogCorrectionService {
             data: {
               isCurrent: false,
               supersededAt: new Date(),
-              supersededByCorrectionId: correction.id,
+              supersededByCorrectionId: correctionId,
             },
           });
 
@@ -572,7 +555,7 @@ export class OperationLogCorrectionService {
 
           for (const item of items) {
             itemInsertPayloads.push({
-              correctionId: correction.id,
+              correctionId,
               targetModule: item.targetModule,
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
@@ -592,7 +575,7 @@ export class OperationLogCorrectionService {
             data: {
               isCurrent: false,
               supersededAt: new Date(),
-              supersededByCorrectionId: correction.id,
+              supersededByCorrectionId: correctionId,
             },
           });
 
@@ -683,7 +666,7 @@ export class OperationLogCorrectionService {
 
           for (const item of items) {
             itemInsertPayloads.push({
-              correctionId: correction.id,
+              correctionId,
               targetModule: item.targetModule,
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
@@ -703,7 +686,7 @@ export class OperationLogCorrectionService {
             data: {
               isCurrent: false,
               supersededAt: new Date(),
-              supersededByCorrectionId: correction.id,
+              supersededByCorrectionId: correctionId,
             },
           });
 
@@ -766,7 +749,7 @@ export class OperationLogCorrectionService {
 
           for (const item of items) {
             itemInsertPayloads.push({
-              correctionId: correction.id,
+              correctionId,
               targetModule: item.targetModule,
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
@@ -789,7 +772,7 @@ export class OperationLogCorrectionService {
             data: {
               isCurrent: false,
               supersededAt: new Date(),
-              supersededByCorrectionId: correction.id,
+              supersededByCorrectionId: correctionId,
             },
           });
 
@@ -875,7 +858,7 @@ export class OperationLogCorrectionService {
 
           for (const item of items) {
             itemInsertPayloads.push({
-              correctionId: correction.id,
+              correctionId,
               targetModule: item.targetModule,
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
@@ -895,7 +878,7 @@ export class OperationLogCorrectionService {
             data: {
               isCurrent: false,
               supersededAt: new Date(),
-              supersededByCorrectionId: correction.id,
+              supersededByCorrectionId: correctionId,
             },
           });
 
@@ -946,7 +929,7 @@ export class OperationLogCorrectionService {
 
           for (const item of items) {
             itemInsertPayloads.push({
-              correctionId: correction.id,
+              correctionId,
               targetModule: item.targetModule,
               targetRecordId: rec.id,
               replacementRecordId: newRec.id,
@@ -1008,17 +991,29 @@ export class OperationLogCorrectionService {
         );
       }
 
-      // Step 6: Insert correction items & update header summary
-      await prismaTx.transactionCorrectionItem.createMany({
-        data: itemInsertPayloads,
-      });
-
-      await prismaTx.transactionCorrection.update({
-        where: { id: correction.id },
+      // Step 6: Insert correction header with complete summary and items (Append-Only immutability: zero runtime UPDATEs)
+      const correction = await prismaTx.transactionCorrection.create({
         data: {
+          id: correctionId,
+          transactionId: id,
+          correctedById: user.id,
+          correctionNumber,
+          action: dto.action || CorrectionAction.CORRECT_DATA,
+          reasonCode: dto.reasonCode,
+          reason: dto.reasonCode,
+          remark: dto.remark,
+          evidenceUrl: dto.evidenceAttachmentId
+            ? `attachment:${dto.evidenceAttachmentId}`
+            : dto.evidenceUrl || null,
           oldValues: oldValuesSummary as any,
           newValues: newValuesSummary as any,
+          expectedRevision: dto.expectedRevision,
+          ipAddress: cleanIp,
         },
+      });
+
+      await prismaTx.transactionCorrectionItem.createMany({
+        data: itemInsertPayloads,
       });
 
       // Step 8 & 10: Auto-recalculate Net Weight if Gross/Tare changed

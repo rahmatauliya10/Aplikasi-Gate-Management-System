@@ -40,25 +40,17 @@ export const useAuthStore = defineStore('auth', {
           throw new Error('Invalid response data from server')
         }
 
+        // Memory-only storage (no localStorage / sessionStorage)
         this.token = accessToken
         this.user = user
         this.mustChangePassword = !!mustChangePassword
         this.isInitialized = true
 
-        localStorage.setItem('access_token', accessToken)
-        localStorage.setItem('user', JSON.stringify(user))
-
-        if (mustChangePassword) {
-          localStorage.setItem('mustChangePassword', '1')
-        } else {
-          localStorage.removeItem('mustChangePassword')
-        }
-
         this.loading = false
-        return { success: true, user, mustChangePassword }
+        return { success: true, user, mustChangePassword: this.mustChangePassword }
       } catch (err) {
         this.clearAuth()
-        const message = err.gmsMessage || getErrorMessage(err);
+        const message = err.gmsMessage || getErrorMessage(err)
         this.error = message
         this.loading = false
         return { success: false, message }
@@ -71,7 +63,7 @@ export const useAuthStore = defineStore('auth', {
           await authService.logout()
         }
       } catch (err) {
-        console.error('API logout failed, clearing local tokens anyway:', err)
+        console.error('API logout failed, clearing local state anyway:', err)
       } finally {
         this.clearAuth()
       }
@@ -96,11 +88,13 @@ export const useAuthStore = defineStore('auth', {
         }
 
         this.user = userData
-        localStorage.setItem('user', JSON.stringify(userData))
+        if (typeof userData.mustChangePassword === 'boolean') {
+          this.mustChangePassword = userData.mustChangePassword
+        }
         this.loading = false
         return { success: true, user: userData }
       } catch (err) {
-        const message = err.gmsMessage || getErrorMessage(err);
+        const message = err.gmsMessage || getErrorMessage(err)
         this.error = message
         this.loading = false
         return { success: false, message }
@@ -126,13 +120,14 @@ export const useAuthStore = defineStore('auth', {
           throw new Error('No access token returned from refresh request')
         }
 
+        // Save access token in Pinia memory only
         this.token = accessToken
-        localStorage.setItem('access_token', accessToken)
         
         this.loading = false
         return { success: true, accessToken }
       } catch (err) {
-        const message = err.gmsMessage || getErrorMessage(err);
+        this.clearAuth()
+        const message = err.gmsMessage || getErrorMessage(err)
         this.error = message
         this.loading = false
         return { success: false, message }
@@ -140,31 +135,19 @@ export const useAuthStore = defineStore('auth', {
     },
 
     async initializeAuth() {
-      if (this.isInitialized) return;
-      this.isInitialized = true;
-      this.mustChangePassword = localStorage.getItem('mustChangePassword') === '1';
+      if (this.isInitialized) return
+      this.isInitialized = true
 
-      // 1. Recover local token and user if present
-      const savedToken = localStorage.getItem('access_token');
-      const savedUserStr = localStorage.getItem('user');
-      if (savedToken && savedUserStr) {
-        try {
-          this.token = savedToken;
-          this.user = JSON.parse(savedUserStr);
-        } catch (e) {
-          this.clearAuth();
-        }
-      }
-
-      // 2. If no token found, attempt silent refresh via HTTP-only cookie
+      // Memory-only restore flow:
+      // No access token in memory -> attempt silent refresh via HttpOnly cookie
       if (!this.token) {
         try {
-          const refreshRes = await this.refreshAccessToken();
-          if (refreshRes.success) {
-            await this.fetchMe();
+          const refreshRes = await this.refreshAccessToken()
+          if (refreshRes && refreshRes.success) {
+            await this.fetchMe()
           }
         } catch (e) {
-          this.clearAuth();
+          this.clearAuth()
         }
       }
     },
@@ -176,30 +159,26 @@ export const useAuthStore = defineStore('auth', {
       this.error = null
       this.loading = false
 
+      // Defensively remove any legacy persistent storage
       localStorage.removeItem('access_token')
       localStorage.removeItem('user')
       localStorage.removeItem('mustChangePassword')
       sessionStorage.removeItem('access_token')
       sessionStorage.removeItem('user')
+      sessionStorage.removeItem('mustChangePassword')
       
       import('../services/api').then(({ default: api }) => {
         delete api.defaults.headers.common['Authorization']
-      })
+      }).catch(() => {})
     },
     
     setToken(token) {
       this.token = token
-      if (token) {
-        localStorage.setItem('access_token', token)
-      } else {
-        localStorage.removeItem('access_token')
-      }
     },
 
     updateProfile(data) {
       if (this.user) {
         this.user = { ...this.user, ...data }
-        localStorage.setItem('user', JSON.stringify(this.user))
       }
     }
   }

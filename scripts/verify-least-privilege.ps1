@@ -242,6 +242,24 @@ if ($AppPassword -and $OwnerPassword -and $BackupPassword -and $PostgresPassword
     Write-Host "Check 15: Skipping TCP auth gate (passwords not fully provided via environment) [WARN]" -ForegroundColor Yellow
 }
 
+# Check 16 & 17: Database Audit & History Immutability Gate
+$auditTables = @("ActivityLog", "TransactionCorrection", "TransactionCorrectionItem", "TransactionStatusHistory")
+foreach ($tbl in $auditTables) {
+    # Check 16: Positive Test - gms_app has SELECT and INSERT on audit table
+    $selectAudit = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.\"$tbl\"', 'SELECT'), has_table_privilege('$AppUser', 'public.\"$tbl\"', 'INSERT');"
+    if ($selectAudit -match "f|false") {
+        throw "IMMUTABILITY VIOLATION: Role '$AppUser' lacks SELECT or INSERT privilege on audit table '$tbl': $selectAudit"
+    }
+
+    # Check 17: Negative Test - gms_app UPDATE & DELETE MUST be denied
+    $updateAudit = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.\"$tbl\"', 'UPDATE'), has_table_privilege('$AppUser', 'public.\"$tbl\"', 'DELETE');"
+    if ($updateAudit -match "t|true") {
+        throw "IMMUTABILITY VIOLATION: Role '$AppUser' has UPDATE or DELETE privilege on immutable audit table '$tbl': $updateAudit"
+    }
+}
+Write-Host "Check 16: Positive Test - gms_app SELECT and INSERT verified on all 4 audit tables [PASS]" -ForegroundColor Green
+Write-Host "Check 17: Negative Test - gms_app UPDATE and DELETE revoked on all 4 audit tables [PASS]" -ForegroundColor Green
+
 # Post-check: Native pg_dump Smoke Test with gms_backup Credentials
 if ($BackupPassword) {
     Write-Host "Post-check: Executing native pg_dump smoke test with role [$BackupUser]..." -ForegroundColor Cyan
@@ -268,6 +286,6 @@ if ($BackupPassword) {
 }
 
 Write-Host "==============================================================================" -ForegroundColor Green
-Write-Host " ALL 15 LEAST PRIVILEGE & AUTHENTICATION CHECKS PASSED [100% SUCCESS]" -ForegroundColor Green
+Write-Host " ALL 17 LEAST PRIVILEGE, AUTHENTICATION & IMMUTABILITY CHECKS PASSED [100% SUCCESS]" -ForegroundColor Green
 Write-Host "==============================================================================" -ForegroundColor Green
 exit 0
