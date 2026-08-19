@@ -645,7 +645,8 @@ export class OperationLogCorrectionService {
           targetRecordId: tx.id,
           replacementRecordId: null,
           fieldName: item.fieldName,
-          oldValue: tx[item.fieldName] !== undefined ? tx[item.fieldName] : null,
+          oldValue:
+            tx[item.fieldName] !== undefined ? tx[item.fieldName] : null,
           newValue: item.newValue !== undefined ? item.newValue : null,
           itemRemark: item.itemRemark || null,
         });
