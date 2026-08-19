@@ -54,7 +54,7 @@ param(
     [string]$RestorePassword = $env:GMS_RESTORE_PASSWORD,
 
     [Parameter(Mandatory=$false)]
-    [string]$HostAddress = "127.0.0.1",
+    [string]$HostAddress = "",
 
     [Parameter(Mandatory=$false)]
     [string]$Port = "5432"
@@ -69,7 +69,8 @@ Write-Host "====================================================================
 
 function Run-Query([string]$user, [string]$password, [string]$sql, [bool]$useTcp = $false) {
     if ($useTcp) {
-        $res = & docker exec -e PGPASSWORD="$password" $Container psql -h $HostAddress -p $Port -U $user -d $Database -t -A -c "$sql" 2>&1
+        $targetHost = if ($HostAddress) { $HostAddress } else { $Container }
+        $res = & docker exec -e PGPASSWORD="$password" $Container psql -h $targetHost -p $Port -U $user -d $Database -t -A -c "$sql" 2>&1
     } else {
         $res = & docker exec -e PGPASSWORD="$password" $Container psql -U $user -d $Database -t -A -c "$sql" 2>&1
     }
@@ -247,7 +248,8 @@ if ($BackupPassword) {
     $testDumpPath = "/tmp/gms_backup_privilege_smoke.dump"
     
     # Execute pg_dump inside container using gms_backup credentials
-    $dumpExec = & docker exec -e PGPASSWORD="$BackupPassword" $Container pg_dump -h 127.0.0.1 -p 5432 -U $BackupUser -d $Database -F c -f "$testDumpPath" 2>&1
+    $targetHost = if ($HostAddress) { $HostAddress } else { $Container }
+    $dumpExec = & docker exec -e PGPASSWORD="$BackupPassword" $Container pg_dump -h $targetHost -p $Port -U $BackupUser -d $Database -F c -f "$testDumpPath" 2>&1
     $dumpExitCode = $LASTEXITCODE
 
     if ($dumpExitCode -ne 0) {
