@@ -259,13 +259,13 @@ if ($AppPassword -and $OwnerPassword -and $BackupPassword -and $PostgresPassword
 $auditTables = @("ActivityLog", "TransactionCorrection", "TransactionCorrectionItem", "TransactionStatusHistory")
 foreach ($tbl in $auditTables) {
     # Check 16: Positive Test - gms_app has SELECT and INSERT on audit table
-    $selectAudit = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.\"$tbl\"', 'SELECT'), has_table_privilege('$AppUser', 'public.\"$tbl\"', 'INSERT');"
+    $selectAudit = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.`"$tbl`"', 'SELECT'), has_table_privilege('$AppUser', 'public.`"$tbl`"', 'INSERT');"
     if ($selectAudit -match "f|false") {
         throw "IMMUTABILITY VIOLATION: Role '$AppUser' lacks SELECT or INSERT privilege on audit table '$tbl': $selectAudit"
     }
 
     # Check 17: Negative Test - gms_app UPDATE & DELETE MUST be denied
-    $updateAudit = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.\"$tbl\"', 'UPDATE'), has_table_privilege('$AppUser', 'public.\"$tbl\"', 'DELETE');"
+    $updateAudit = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.`"$tbl`"', 'UPDATE'), has_table_privilege('$AppUser', 'public.`"$tbl`"', 'DELETE');"
     if ($updateAudit -match "t|true") {
         throw "IMMUTABILITY VIOLATION: Role '$AppUser' has UPDATE or DELETE privilege on immutable audit table '$tbl': $updateAudit"
     }
