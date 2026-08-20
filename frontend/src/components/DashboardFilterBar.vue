@@ -33,7 +33,7 @@
       <button
         @click="resetToDefault"
         class="h-8 sm:h-9 px-2.5 sm:px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all duration-200 flex items-center space-x-1 active:scale-95 shrink-0"
-        title="Reset ke Hari Ini"
+        title="Reset ke 1 Tahun Terakhir"
       >
         <span class="material-icons text-sm" :class="{ 'animate-spin': loading }">refresh</span>
         <span>RESET</span>
@@ -49,7 +49,7 @@ import { useToast } from '../composables/useToast'
 const props = defineProps({
   modelValue: {
     type: Object,
-    default: () => ({ preset: 'TODAY', startDate: '', endDate: '' })
+    default: () => ({ preset: 'ONE_YEAR', startDate: '', endDate: '' })
   },
   loading: {
     type: Boolean,
@@ -70,6 +70,18 @@ const getJakartaTodayStr = () => {
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
   const jakarta = new Date(utcMs + tzOffset * 60000)
   const y = jakarta.getFullYear()
+  const m = String(jakarta.getMonth() + 1).padStart(2, '0')
+  const d = String(jakarta.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+// Jakarta 1 Year Ago format YYYY-MM-DD
+const getJakartaOneYearAgoStr = () => {
+  const now = new Date()
+  const tzOffset = 7 * 60
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
+  const jakarta = new Date(utcMs + tzOffset * 60000)
+  const y = jakarta.getFullYear() - 1
   const m = String(jakarta.getMonth() + 1).padStart(2, '0')
   const d = String(jakarta.getDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
@@ -110,9 +122,10 @@ const handleCustomDateChange = () => {
 
 const resetToDefault = () => {
   const today = getJakartaTodayStr()
-  internalStartDate.value = today
+  const oneYearAgo = getJakartaOneYearAgoStr()
+  internalStartDate.value = oneYearAgo
   internalEndDate.value = today
-  notifyChange('TODAY')
+  notifyChange('ONE_YEAR')
 }
 
 const notifyChange = (preset = 'CUSTOM') => {
@@ -128,7 +141,8 @@ const notifyChange = (preset = 'CUSTOM') => {
 onMounted(() => {
   if (!internalStartDate.value && !internalEndDate.value) {
     const today = getJakartaTodayStr()
-    internalStartDate.value = today
+    const oneYearAgo = getJakartaOneYearAgoStr()
+    internalStartDate.value = oneYearAgo
     internalEndDate.value = today
   }
 })

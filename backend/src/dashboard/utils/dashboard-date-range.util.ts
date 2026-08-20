@@ -78,6 +78,26 @@ export function getJakartaTodayString(): string {
 }
 
 /**
+ * Returns date string 1 year ago in Asia/Jakarta timezone (YYYY-MM-DD).
+ */
+export function getJakartaOneYearAgoString(): string {
+  const tzOffsetMinutes = 7 * 60; // UTC+7
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const jakartaNow = new Date(utcMs + tzOffsetMinutes * 60000);
+
+  const y = jakartaNow.getFullYear() - 1;
+  const month = jakartaNow.getMonth() + 1;
+  let day = jakartaNow.getDate();
+  const maxDays = getDaysInMonth(y, month);
+  if (day > maxDays) day = maxDays;
+
+  const m = String(month).padStart(2, '0');
+  const d = String(day).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
  * Converts a Jakarta date string (YYYY-MM-DD) to UTC Start Date (00:00:00 Asia/Jakarta).
  * e.g. "2026-08-01" -> 2026-07-31T17:00:00.000Z
  */
@@ -120,13 +140,14 @@ export function resolveDashboardDateBounds(
   query?: GetDashboardStatsDto,
 ): ResolvedDashboardBounds {
   const todayStr = getJakartaTodayString();
+  const oneYearAgoStr = getJakartaOneYearAgoString();
 
   let startDateStr = query?.startDate?.trim() || null;
   let endDateStr = query?.endDate?.trim() || null;
 
-  // If neither provided -> default to TODAY
+  // If neither provided -> default to 1 YEAR (oneYearAgoStr to todayStr)
   if (!startDateStr && !endDateStr) {
-    startDateStr = todayStr;
+    startDateStr = oneYearAgoStr;
     endDateStr = todayStr;
   } else if (!startDateStr || !endDateStr) {
     // If one is provided but not both -> reject
@@ -176,10 +197,12 @@ export function resolveDashboardDateBounds(
     });
   }
 
-  const preset =
-    startDateStr === todayStr && endDateStr === todayStr
-      ? DashboardDatePreset.TODAY
-      : DashboardDatePreset.CUSTOM;
+  let preset = DashboardDatePreset.CUSTOM;
+  if (startDateStr === todayStr && endDateStr === todayStr) {
+    preset = DashboardDatePreset.TODAY;
+  } else if (startDateStr === oneYearAgoStr && endDateStr === todayStr) {
+    preset = DashboardDatePreset.ONE_YEAR;
+  }
 
   const startUtc = jakartaDateToUtcStart(startDateStr);
   const endNextDayUtc = jakartaDateToUtcEndExclusive(endDateStr);

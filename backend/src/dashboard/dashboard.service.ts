@@ -43,7 +43,6 @@ export class DashboardService {
       this.prisma.transaction.count({
         where: {
           status: { notIn: ['COMPLETED', 'CANCELLED'] },
-          ...dateFilter,
           ...scope,
         },
       }),
@@ -66,7 +65,6 @@ export class DashboardService {
         _count: { id: true },
         where: {
           status: { notIn: ['COMPLETED', 'CANCELLED'] },
-          ...dateFilter,
           ...scope,
         },
       }),
