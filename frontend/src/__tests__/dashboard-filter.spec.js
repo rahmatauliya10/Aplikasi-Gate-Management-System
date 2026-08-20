@@ -66,7 +66,7 @@ describe('DashboardFilterBar Component Enterprise Compliance', () => {
     expect(lastChange.endDate).toBe('2026-08-15')
   })
 
-  it('should reset back to ONE_YEAR when reset button is clicked', async () => {
+  it('should reset back to YEAR_TO_DATE (1 Jan current year to Today) when reset button is clicked', async () => {
     const wrapper = mount(DashboardFilterBar, {
       props: {
         modelValue: { preset: 'CUSTOM', startDate: '2026-08-01', endDate: '2026-08-10' },
@@ -79,9 +79,9 @@ describe('DashboardFilterBar Component Enterprise Compliance', () => {
     await resetBtn.trigger('click')
 
     const lastChange = wrapper.emitted('change')[wrapper.emitted('change').length - 1][0]
-    expect(lastChange.preset).toBe('ONE_YEAR')
-    expect(lastChange.startDate).toBeTruthy()
+    expect(lastChange.preset).toBe('YEAR_TO_DATE')
+    expect(lastChange.startDate).toMatch(/^\d{4}-01-01$/)
     expect(lastChange.endDate).toBeTruthy()
-    expect(lastChange.startDate < lastChange.endDate).toBe(true)
+    expect(lastChange.startDate <= lastChange.endDate).toBe(true)
   })
 })

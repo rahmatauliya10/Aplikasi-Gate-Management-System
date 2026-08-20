@@ -78,23 +78,16 @@ export function getJakartaTodayString(): string {
 }
 
 /**
- * Returns date string 1 year ago in Asia/Jakarta timezone (YYYY-MM-DD).
+ * Returns date string of January 1st of the current year in Asia/Jakarta timezone (YYYY-01-01).
  */
-export function getJakartaOneYearAgoString(): string {
+export function getJakartaCurrentYearStartString(): string {
   const tzOffsetMinutes = 7 * 60; // UTC+7
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
   const jakartaNow = new Date(utcMs + tzOffsetMinutes * 60000);
 
-  const y = jakartaNow.getFullYear() - 1;
-  const month = jakartaNow.getMonth() + 1;
-  let day = jakartaNow.getDate();
-  const maxDays = getDaysInMonth(y, month);
-  if (day > maxDays) day = maxDays;
-
-  const m = String(month).padStart(2, '0');
-  const d = String(day).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  const y = jakartaNow.getFullYear();
+  return `${y}-01-01`;
 }
 
 /**
@@ -140,14 +133,14 @@ export function resolveDashboardDateBounds(
   query?: GetDashboardStatsDto,
 ): ResolvedDashboardBounds {
   const todayStr = getJakartaTodayString();
-  const oneYearAgoStr = getJakartaOneYearAgoString();
+  const yearStartStr = getJakartaCurrentYearStartString();
 
   let startDateStr = query?.startDate?.trim() || null;
   let endDateStr = query?.endDate?.trim() || null;
 
-  // If neither provided -> default to 1 YEAR (oneYearAgoStr to todayStr)
+  // If neither provided -> default to YEAR TO DATE (yearStartStr to todayStr)
   if (!startDateStr && !endDateStr) {
-    startDateStr = oneYearAgoStr;
+    startDateStr = yearStartStr;
     endDateStr = todayStr;
   } else if (!startDateStr || !endDateStr) {
     // If one is provided but not both -> reject
@@ -200,8 +193,8 @@ export function resolveDashboardDateBounds(
   let preset = DashboardDatePreset.CUSTOM;
   if (startDateStr === todayStr && endDateStr === todayStr) {
     preset = DashboardDatePreset.TODAY;
-  } else if (startDateStr === oneYearAgoStr && endDateStr === todayStr) {
-    preset = DashboardDatePreset.ONE_YEAR;
+  } else if (startDateStr === yearStartStr && endDateStr === todayStr) {
+    preset = DashboardDatePreset.YEAR_TO_DATE;
   }
 
   const startUtc = jakartaDateToUtcStart(startDateStr);
