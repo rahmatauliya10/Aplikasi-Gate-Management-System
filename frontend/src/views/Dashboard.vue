@@ -353,7 +353,7 @@ const selectedTruck = ref(null)
 const isFetching = ref(false)
 
 const filterState = ref({
-  preset: 'TODAY',
+  preset: 'ONE_YEAR',
   startDate: '',
   endDate: ''
 })
@@ -363,7 +363,7 @@ const stats = ref({
     startDate: '',
     endDate: '',
     timezone: 'Asia/Jakarta',
-    preset: 'TODAY',
+    preset: 'ONE_YEAR',
     formattedLabel: ''
   },
   summary: { totalPeriod: 0, totalToday: 0, totalCompleted: 0, totalActive: 0 },
@@ -445,7 +445,7 @@ const periodSubtitle = computed(() => {
     }
     return `Periode: ${filterState.value.startDate} – ${filterState.value.endDate}`
   }
-  return 'Periode: Hari Ini'
+  return 'Periode: 1 Tahun Terakhir'
 })
 
 const activeTrucks = computed(() => truckStore.activeTrucks)
@@ -456,7 +456,15 @@ const retryFetch = () => {
 }
 
 const totalTrucks = computed(() => stats.value?.summary?.totalProcessed ?? stats.value?.summary?.totalPeriod ?? stats.value?.summary?.totalToday ?? 0)
-const activeTruckCount = computed(() => stats.value?.summary?.totalActive || 0)
+const activeTruckCount = computed(() => {
+  if (activeTrucks.value && activeTrucks.value.length > 0) {
+    return activeTrucks.value.length
+  }
+  if (truckStore.loading && stats.value?.summary?.totalActive) {
+    return stats.value.summary.totalActive
+  }
+  return activeTrucks.value ? activeTrucks.value.length : (stats.value?.summary?.totalActive || 0)
+})
 const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted || 0)
 
 const avgTotalTAT = computed(() => stats.value?.avgTotalTAT || 0)

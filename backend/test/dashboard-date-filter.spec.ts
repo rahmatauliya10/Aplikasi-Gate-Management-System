@@ -7,6 +7,7 @@ import { AuthorizationScopeService } from '../src/auth/authorization-scope.servi
 import {
   parseCalendarDate,
   getJakartaTodayString,
+  getJakartaOneYearAgoString,
   jakartaDateToUtcStart,
   jakartaDateToUtcEndExclusive,
   resolveDashboardDateBounds,
@@ -150,14 +151,15 @@ describe('Dashboard Date Range Filter & Validation Suite', () => {
   });
 
   describe('DashboardService.getStats with Date Range Filtering & Scope', () => {
-    it('should default to TODAY preset with single-cohort Asia/Jakarta bounds when no date range provided', async () => {
+    it('should default to ONE_YEAR preset with Asia/Jakarta bounds when no date range provided', async () => {
       const todayStr = getJakartaTodayString();
+      const oneYearAgoStr = getJakartaOneYearAgoString();
       const result = await service.getStats(mockUser);
 
       expect(result.success).toBe(true);
-      expect(result.data.period.preset).toBe('TODAY');
+      expect(result.data.period.preset).toBe('ONE_YEAR');
       expect(result.data.period.timezone).toBe('Asia/Jakarta');
-      expect(result.data.period.startDate).toBe(todayStr);
+      expect(result.data.period.startDate).toBe(oneYearAgoStr);
       expect(result.data.period.endDate).toBe(todayStr);
       expect(result.data.summary.totalProcessed).toBe(15);
       expect(result.data.summary.totalPeriod).toBe(15);
@@ -168,7 +170,7 @@ describe('Dashboard Date Range Filter & Validation Suite', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             createdAt: expect.objectContaining({
-              gte: jakartaDateToUtcStart(todayStr),
+              gte: jakartaDateToUtcStart(oneYearAgoStr),
               lt: jakartaDateToUtcEndExclusive(todayStr),
             }),
             ...mockScope,

@@ -5,6 +5,7 @@ export enum DashboardDatePreset {
   TODAY = 'TODAY',
   THIS_WEEK = 'THIS_WEEK',
   THIS_MONTH = 'THIS_MONTH',
+  ONE_YEAR = 'ONE_YEAR',
   ALL = 'ALL',
   CUSTOM = 'CUSTOM',
 }
