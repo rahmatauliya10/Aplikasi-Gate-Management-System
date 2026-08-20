@@ -353,7 +353,7 @@ const selectedTruck = ref(null)
 const isFetching = ref(false)
 
 const filterState = ref({
-  preset: 'ONE_YEAR',
+  preset: 'YEAR_TO_DATE',
   startDate: '',
   endDate: ''
 })
@@ -363,7 +363,7 @@ const stats = ref({
     startDate: '',
     endDate: '',
     timezone: 'Asia/Jakarta',
-    preset: 'ONE_YEAR',
+    preset: 'YEAR_TO_DATE',
     formattedLabel: ''
   },
   summary: { totalPeriod: 0, totalToday: 0, totalCompleted: 0, totalActive: 0 },
@@ -445,7 +445,7 @@ const periodSubtitle = computed(() => {
     }
     return `Periode: ${filterState.value.startDate} – ${filterState.value.endDate}`
   }
-  return 'Periode: 1 Tahun Terakhir'
+  return 'Periode: Tahun Berjalan (YTD)'
 })
 
 const activeTrucks = computed(() => truckStore.activeTrucks)

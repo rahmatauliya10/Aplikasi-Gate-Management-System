@@ -7,7 +7,7 @@ import { AuthorizationScopeService } from '../src/auth/authorization-scope.servi
 import {
   parseCalendarDate,
   getJakartaTodayString,
-  getJakartaOneYearAgoString,
+  getJakartaCurrentYearStartString,
   jakartaDateToUtcStart,
   jakartaDateToUtcEndExclusive,
   resolveDashboardDateBounds,
@@ -80,6 +80,11 @@ describe('Dashboard Date Range Filter & Validation Suite', () => {
   });
 
   describe('Pure Date Range Utility (dashboard-date-range.util)', () => {
+    it('should correctly return Jakarta current year start string (YYYY-01-01)', () => {
+      const yearStart = getJakartaCurrentYearStartString();
+      expect(yearStart).toMatch(/^\d{4}-01-01$/);
+    });
+
     it('should correctly validate real calendar dates and reject impossible dates', () => {
       expect(parseCalendarDate('2026-08-01')).toEqual({
         year: 2026,
@@ -151,32 +156,50 @@ describe('Dashboard Date Range Filter & Validation Suite', () => {
   });
 
   describe('DashboardService.getStats with Date Range Filtering & Scope', () => {
-    it('should default to ONE_YEAR preset with Asia/Jakarta bounds when no date range provided', async () => {
+    it('should default to YEAR_TO_DATE preset with Jan 1 to Today Asia/Jakarta bounds when no date range provided', async () => {
       const todayStr = getJakartaTodayString();
-      const oneYearAgoStr = getJakartaOneYearAgoString();
+      const yearStartStr = getJakartaCurrentYearStartString();
       const result = await service.getStats(mockUser);
 
       expect(result.success).toBe(true);
-      expect(result.data.period.preset).toBe('ONE_YEAR');
+      expect(result.data.period.preset).toBe('YEAR_TO_DATE');
       expect(result.data.period.timezone).toBe('Asia/Jakarta');
-      expect(result.data.period.startDate).toBe(oneYearAgoStr);
+      expect(result.data.period.startDate).toBe(yearStartStr);
       expect(result.data.period.endDate).toBe(todayStr);
       expect(result.data.summary.totalProcessed).toBe(15);
       expect(result.data.summary.totalPeriod).toBe(15);
       expect(result.data.summary.totalToday).toBe(15);
 
-      // Verify Prisma call received exact UTC boundaries and authorization scope
+      // Verify Prisma call for totalPeriod received exact UTC boundaries and authorization scope
       expect(prisma.transaction.count).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             createdAt: expect.objectContaining({
-              gte: jakartaDateToUtcStart(oneYearAgoStr),
+              gte: jakartaDateToUtcStart(yearStartStr),
               lt: jakartaDateToUtcEndExclusive(todayStr),
             }),
             ...mockScope,
           }),
         }),
       );
+
+      // Verify totalActive (Active Inside) query DOES NOT contain createdAt filter
+      expect(prisma.transaction.count).toHaveBeenCalledWith({
+        where: {
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+          ...mockScope,
+        },
+      });
+
+      // Verify byProcessType active fleet breakdown DOES NOT contain createdAt filter
+      expect(prisma.transaction.groupBy).toHaveBeenCalledWith({
+        by: ['processType'],
+        _count: { id: true },
+        where: {
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+          ...mockScope,
+        },
+      });
     });
 
     it('should apply exact multi-day custom date range and verify exact Prisma query arguments', async () => {
