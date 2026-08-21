@@ -123,7 +123,10 @@ export function sanitizeAuditData(data: any, isAdmin = false): any {
 
       // If key is oldValues / newValues JSON object/summary
       if (
-        (key === 'oldValues' || key === 'newValues' || key === 'oldValue' || key === 'newValue') &&
+        (key === 'oldValues' ||
+          key === 'newValues' ||
+          key === 'oldValue' ||
+          key === 'newValue') &&
         value &&
         typeof value === 'object' &&
         !isAdmin

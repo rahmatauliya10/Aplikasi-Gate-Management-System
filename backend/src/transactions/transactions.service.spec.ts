@@ -2,7 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { TransactionsService } from './transactions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { VoidReasonCode } from './dto/void-transaction.dto';
 
@@ -67,7 +71,9 @@ describe('TransactionsService State Machine & Administrative Void', () => {
 
   describe('voidTransaction()', () => {
     it('should throw NotFoundException if transaction does not exist', async () => {
-      jest.spyOn(prismaService.transaction, 'findUnique').mockResolvedValue(null);
+      jest
+        .spyOn(prismaService.transaction, 'findUnique')
+        .mockResolvedValue(null);
 
       await expect(
         service.voidTransaction(
@@ -150,14 +156,16 @@ describe('TransactionsService State Machine & Administrative Void', () => {
         .spyOn(prismaService.transaction, 'findUnique')
         .mockResolvedValue(mockTx as any);
 
-      jest.spyOn(prismaService, '$transaction').mockImplementation(async (cb: any) => {
-        const prismaTx = {
-          transaction: {
-            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-          },
-        };
-        return cb(prismaTx);
-      });
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (cb: any) => {
+          const prismaTx = {
+            transaction: {
+              updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            },
+          };
+          return cb(prismaTx);
+        });
 
       await expect(
         service.voidTransaction(
@@ -197,18 +205,20 @@ describe('TransactionsService State Machine & Administrative Void', () => {
         .mockResolvedValueOnce(updatedTx as any);
 
       const mockCreateStatusHistory = jest.fn();
-      jest.spyOn(prismaService, '$transaction').mockImplementation(async (cb: any) => {
-        const prismaTx = {
-          transaction: {
-            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-            findUnique: jest.fn().mockResolvedValue(updatedTx),
-          },
-          transactionStatusHistory: {
-            create: mockCreateStatusHistory,
-          },
-        };
-        return cb(prismaTx);
-      });
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (cb: any) => {
+          const prismaTx = {
+            transaction: {
+              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+              findUnique: jest.fn().mockResolvedValue(updatedTx),
+            },
+            transactionStatusHistory: {
+              create: mockCreateStatusHistory,
+            },
+          };
+          return cb(prismaTx);
+        });
 
       const result = await service.voidTransaction(
         'tx-1',
@@ -234,7 +244,8 @@ describe('TransactionsService State Machine & Administrative Void', () => {
       });
 
       // Verify structured JSON in ActivityLog without raw email
-      expect(activityLogsService.logAction).toHaveBeenCalledWith(
+      const logActionSpy = jest.spyOn(activityLogsService, 'logAction');
+      expect(logActionSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'TRANSACTION_VOIDED',
           module: 'TRANSACTIONS',
@@ -243,7 +254,7 @@ describe('TransactionsService State Machine & Administrative Void', () => {
         expect.anything(),
       );
 
-      const loggedData = (activityLogsService.logAction as jest.Mock).mock.calls[0][0];
+      const loggedData = logActionSpy.mock.calls[0][0];
       const parsedDesc = JSON.parse(loggedData.description);
       expect(parsedDesc.reasonCode).toBe(VoidReasonCode.WRONG_REGISTRATION);
       expect(parsedDesc.reason).toBe('Wrong vendor destination selected');
@@ -278,18 +289,20 @@ describe('TransactionsService State Machine & Administrative Void', () => {
         .mockResolvedValueOnce(updatedTx as any);
 
       const mockCreateStatusHistory = jest.fn();
-      jest.spyOn(prismaService, '$transaction').mockImplementation(async (cb: any) => {
-        const prismaTx = {
-          transaction: {
-            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-            findUnique: jest.fn().mockResolvedValue(updatedTx),
-          },
-          transactionStatusHistory: {
-            create: mockCreateStatusHistory,
-          },
-        };
-        return cb(prismaTx);
-      });
+      jest
+        .spyOn(prismaService, '$transaction')
+        .mockImplementation(async (cb: any) => {
+          const prismaTx = {
+            transaction: {
+              updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+              findUnique: jest.fn().mockResolvedValue(updatedTx),
+            },
+            transactionStatusHistory: {
+              create: mockCreateStatusHistory,
+            },
+          };
+          return cb(prismaTx);
+        });
 
       const result = await service.voidTransaction(
         'tx-1',

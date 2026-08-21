@@ -36,7 +36,9 @@ export class AuditTimelineItemDto {
   @ApiPropertyOptional({ example: 'SALAH_INPUT_ANGKA' })
   reasonCode?: string;
 
-  @ApiPropertyOptional({ example: 'Koreksi berat dari nota timbang manual #992' })
+  @ApiPropertyOptional({
+    example: 'Koreksi berat dari nota timbang manual #992',
+  })
   remark?: string;
 
   @ApiPropertyOptional({ example: 'REGISTERED' })

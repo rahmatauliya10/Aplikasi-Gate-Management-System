@@ -119,7 +119,8 @@ export class TransactionsController {
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Administratively void a transaction (ADMIN only, Atomic CAS enforced)',
+    summary:
+      'Administratively void a transaction (ADMIN only, Atomic CAS enforced)',
   })
   @ApiResponse({
     status: 200,

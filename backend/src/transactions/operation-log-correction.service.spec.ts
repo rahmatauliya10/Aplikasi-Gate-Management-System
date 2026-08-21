@@ -1345,7 +1345,9 @@ describe('OperationLogCorrectionService', () => {
 
   describe('getUnifiedAuditHistory()', () => {
     it('should throw NotFoundException if transaction is outside authorization scope or not found', async () => {
-      (authorizationScopeService.getTransactionScope as jest.Mock).mockReturnValue({
+      (
+        authorizationScopeService.getTransactionScope as jest.Mock
+      ).mockReturnValue({
         processType: { in: ['GBB'] },
       });
       mockPrismaService.transaction.findFirst.mockResolvedValue(null);
@@ -1361,7 +1363,9 @@ describe('OperationLogCorrectionService', () => {
     });
 
     it('should assemble unified timeline from statusHistory, corrections, and activityLogs', async () => {
-      (authorizationScopeService.getTransactionScope as jest.Mock).mockReturnValue({});
+      (
+        authorizationScopeService.getTransactionScope as jest.Mock
+      ).mockReturnValue({});
 
       const mockTx = {
         id: 'tx-1',
@@ -1430,7 +1434,9 @@ describe('OperationLogCorrectionService', () => {
 
       expect(result.success).toBe(true);
       expect(result.attribution.isVoided).toBe(true);
-      expect(result.attribution.voidMetadata.voidReasonCode).toBe('DUPLICATE_TRANSACTION');
+      expect(result.attribution.voidMetadata.voidReasonCode).toBe(
+        'DUPLICATE_TRANSACTION',
+      );
       expect(result.attribution.originalCreatedBy).toBe('SECURITY — Budi');
       expect(result.attribution.lastCorrectedBy).toBe('ADMIN — Admin Alpha');
 
@@ -1446,7 +1452,9 @@ describe('OperationLogCorrectionService', () => {
     });
 
     it('should keep unmasked PII for ADMIN role in unified audit history', async () => {
-      (authorizationScopeService.getTransactionScope as jest.Mock).mockReturnValue({});
+      (
+        authorizationScopeService.getTransactionScope as jest.Mock
+      ).mockReturnValue({});
 
       const mockTx = {
         id: 'tx-2',

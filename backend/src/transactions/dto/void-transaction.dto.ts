@@ -23,7 +23,8 @@ export class VoidTransactionDto {
   @ApiProperty({
     enum: VoidReasonCode,
     example: 'DUPLICATE_TRANSACTION',
-    description: 'Standardized administrative reason code for voiding transaction',
+    description:
+      'Standardized administrative reason code for voiding transaction',
   })
   @IsEnum(VoidReasonCode, {
     message:
@@ -50,7 +51,9 @@ export class VoidTransactionDto {
     description:
       'Expected transaction revision number for Optimistic Concurrency Control (OCC / Atomic CAS)',
   })
-  @IsInt({ message: 'Revisi transaksi (expectedRevision) harus berupa bilangan bulat.' })
+  @IsInt({
+    message: 'Revisi transaksi (expectedRevision) harus berupa bilangan bulat.',
+  })
   @Min(1, { message: 'Revisi transaksi minimal 1.' })
   expectedRevision: number;
 }

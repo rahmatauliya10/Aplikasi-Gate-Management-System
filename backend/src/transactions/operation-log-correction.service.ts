@@ -1502,18 +1502,21 @@ export class OperationLogCorrectionService {
 
     try {
       // 1. Status History Stream
-      const statusHistories = await this.prisma.transactionStatusHistory.findMany({
-        where: { transactionId },
-        include: {
-          changedBy: {
-            select: { id: true, name: true, role: true },
+      const statusHistories =
+        await this.prisma.transactionStatusHistory.findMany({
+          where: { transactionId },
+          include: {
+            changedBy: {
+              select: { id: true, name: true, role: true },
+            },
           },
-        },
-        orderBy: { changedAt: 'asc' },
-      });
+          orderBy: { changedAt: 'asc' },
+        });
 
       // 2. Correction History Stream (with Items)
-      const corrections = await (this.prisma.transactionCorrection as any).findMany({
+      const corrections = await (
+        this.prisma.transactionCorrection as any
+      ).findMany({
         where: { transactionId },
         include: {
           correctedBy: {
@@ -1613,7 +1616,8 @@ export class OperationLogCorrectionService {
             actor: `${act.role || 'ADMIN'} — ${act.userName || 'Admin'}`,
             actorRole: act.role || 'ADMIN',
             action: act.action,
-            reasonCode: parsedDesc?.reasonCode || tx.voidReasonCode || 'ADMIN_VOID',
+            reasonCode:
+              parsedDesc?.reasonCode || tx.voidReasonCode || 'ADMIN_VOID',
             remark: parsedDesc?.reason || tx.voidReason || act.description,
             oldStatus: parsedDesc?.originalStatus || 'ACTIVE',
             newStatus: 'CANCELLED',
@@ -1622,7 +1626,10 @@ export class OperationLogCorrectionService {
       }
 
       // Sort timeline ascending by timestamp
-      timeline.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      timeline.sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
 
       // Attribution
       let origCreator = 'Operator Awal / QC Lapangan';
@@ -1636,7 +1643,8 @@ export class OperationLogCorrectionService {
         origCreator = `${tx.qcVehicleChecks[0].checkedBy.role} — ${tx.qcVehicleChecks[0].checkedBy.name}`;
       }
 
-      const lastCorrection = corrections.length > 0 ? corrections[corrections.length - 1] : null;
+      const lastCorrection =
+        corrections.length > 0 ? corrections[corrections.length - 1] : null;
 
       const rawResult = {
         success: true,

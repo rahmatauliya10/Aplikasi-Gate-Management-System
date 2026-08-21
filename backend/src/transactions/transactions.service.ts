@@ -310,7 +310,8 @@ export class TransactionsService {
     if (tx.isVoided) {
       return {
         success: true,
-        message: 'Transaksi sudah dibatalkan secara administratif (Void) sebelumnya.',
+        message:
+          'Transaksi sudah dibatalkan secara administratif (Void) sebelumnya.',
         data: tx,
       };
     }
