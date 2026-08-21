@@ -155,6 +155,7 @@ model User {
   transactionCorrections    TransactionCorrection[]
   createdTransactions       Transaction[]           @relation("CreatedByUser")
   cancelledTransactions     Transaction[]           @relation("CancelledByUser")
+  voidedTransactions        Transaction[]           @relation("VoidedByUser")
   statusHistoryChanges      TransactionStatusHistory[] @relation("StatusChangedBy")
 }
 
@@ -195,6 +196,11 @@ model Transaction {
   cancellationReason    String?
   createdById           String?
   cancelledById         String?
+  isVoided              Boolean           @default(false)
+  voidedAt              DateTime?
+  voidedById            String?
+  voidReasonCode        String?
+  voidReason            String?
   remarks               String?
   grossWeight           Float?
   tareWeight            Float?
@@ -222,6 +228,7 @@ model Transaction {
 
   createdBy              User?                      @relation("CreatedByUser", fields: [createdById], references: [id], onDelete: SetNull)
   cancelledBy            User?                      @relation("CancelledByUser", fields: [cancelledById], references: [id], onDelete: SetNull)
+  voidedBy               User?                      @relation("VoidedByUser", fields: [voidedById], references: [id], onDelete: SetNull)
   weighInBy              User?                      @relation("WeighInByUser", fields: [weighInById], references: [id], onDelete: SetNull)
   weighOutBy             User?                      @relation("WeighOutByUser", fields: [weighOutById], references: [id], onDelete: SetNull)
   warehouseStartBy       User?                      @relation("TxWarehouseStartBy", fields: [warehouseStartById], references: [id], onDelete: SetNull)
@@ -252,7 +259,7 @@ model TransactionStatusHistory {
   notes         String?
   changedAt     DateTime           @default(now())
 
-  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
   changedBy   User?       @relation("StatusChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
@@ -541,7 +548,7 @@ model TransactionCorrection {
   ipAddress        String?
   createdAt        DateTime         @default(now())
 
-  transaction                     Transaction                 @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  transaction                     Transaction                 @relation(fields: [transactionId], references: [id], onDelete: Restrict)
   correctedBy                     User                        @relation(fields: [correctedById], references: [id], onDelete: Restrict)
   items                           TransactionCorrectionItem[]
   supersededWeighbridgeRecords    WeighbridgeRecord[]         @relation("WeighbridgeSupersededBy")
@@ -567,7 +574,7 @@ model TransactionCorrectionItem {
   itemRemark          String?
   createdAt           DateTime               @default(now())
 
-  correction TransactionCorrection @relation(fields: [correctionId], references: [id], onDelete: Cascade)
+  correction TransactionCorrection @relation(fields: [correctionId], references: [id], onDelete: Restrict)
 
   @@index([correctionId])
   @@index([targetModule, targetRecordId])

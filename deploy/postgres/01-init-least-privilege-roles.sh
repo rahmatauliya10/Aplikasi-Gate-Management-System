@@ -73,7 +73,7 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
   ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER_USER IN SCHEMA public GRANT SELECT ON TABLES TO $BACKUP_USER;
   ALTER DEFAULT PRIVILEGES FOR ROLE $OWNER_USER IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO $BACKUP_USER;
 
-  -- 8. Explicitly revoke UPDATE and DELETE on immutable audit and history tables for gms_app
+  -- 8. Explicitly revoke UPDATE, DELETE, and TRUNCATE on immutable audit/history tables for gms_app
   DO \$\$
   DECLARE
     r record;
@@ -83,7 +83,12 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
       WHERE schemaname = 'public'
         AND tablename IN ('ActivityLog', 'TransactionCorrection', 'TransactionCorrectionItem', 'TransactionStatusHistory')
     ) LOOP
-      EXECUTE format('REVOKE UPDATE, DELETE ON TABLE public.%I FROM %I', r.tablename, '$APP_USER');
+      EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM %I', r.tablename, '$APP_USER');
     END LOOP;
+
+    -- 9. Explicitly revoke DELETE and TRUNCATE on Transaction for gms_app (Zero Hard-Delete architecture)
+    IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Transaction') THEN
+      EXECUTE format('REVOKE DELETE, TRUNCATE ON TABLE public."Transaction" FROM %I', '$APP_USER');
+    END IF;
   END \$\$;
 EOSQL

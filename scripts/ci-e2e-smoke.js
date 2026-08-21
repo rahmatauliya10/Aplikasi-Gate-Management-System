@@ -693,8 +693,115 @@ async function runE2ESmoke() {
   }
   log(`Operation Log Correction Happy-Path PASSED: Revision incremented from ${gbbRevBefore} -> ${gbbRevAfter} with audit history [PASS].`, 'SUCCESS');
 
+  // Step 10: Unified Audit History & Role-Scoped Access Verification (MANDATORY GATE)
+  log(`Step 10: Executing Scoped Unified Audit History Timeline Verification...`);
+  const auditRes = await request(`/api/transactions/${gbbTxId}/audit-history`, { headers: authHeader });
+  if (!isSuccessStatus(auditRes.statusCode) || !auditRes.body?.success) {
+    throw new Error(`MANDATORY Audit History Verification FAILED: HTTP ${auditRes.statusCode}. Detail: ${JSON.stringify(auditRes.body)}`);
+  }
+  if (!Array.isArray(auditRes.body?.timeline)) {
+    throw new Error(`MANDATORY Audit History Verification FAILED: timeline array missing in response. Body: ${JSON.stringify(auditRes.body)}`);
+  }
+  log(`Unified Audit History PASSED: Found ${auditRes.body.timeline.length} timeline events with proper attribution [PASS].`, 'SUCCESS');
+
+  // Verify non-admin (Security) role can also access unified audit history with PII masking
+  const secAuditRes = await request(`/api/transactions/${gbbTxId}/audit-history`, { headers: secAuthHeader });
+  if (!isSuccessStatus(secAuditRes.statusCode) || !secAuditRes.body?.success) {
+    throw new Error(`MANDATORY Scoped Audit Verification FAILED for Security role: HTTP ${secAuditRes.statusCode}. Detail: ${JSON.stringify(secAuditRes.body)}`);
+  }
+  log(`Scoped Audit History PASSED for Security role with PII masking [PASS].`, 'SUCCESS');
+
+  // Step 11: Administrative Void & Atomic CAS OCC Verification (MANDATORY GATE)
+  log(`Step 11: Executing Administrative Void & Atomic CAS OCC Verification...`);
+  // 11.1 Create fresh active transaction to void
+  const voidTruckRes = await request(
+    '/api/transactions',
+    { method: 'POST', headers: authHeader },
+    {
+      plateNumber: 'B 7777 VOID',
+      driverName: 'Void Driver Test',
+      driverPhone: '08129999888',
+      vendorName: 'CV Test Void Vendor',
+      vehicleType: 'TRONTON',
+      cargoType: 'RAW_MATERIAL',
+      cargoSubType: 'Biji Kakao Bulk',
+      processType: 'GBB',
+      suratJalanNumber: 'SJ-VOID-001',
+      poNumber: 'PO-VOID-001',
+    }
+  );
+
+  if (!isSuccessStatus(voidTruckRes.statusCode)) {
+    throw new Error(`Failed to create test transaction for Void: HTTP ${voidTruckRes.statusCode}`);
+  }
+  const voidTxId = voidTruckRes.body?.data?.id;
+  const voidTxRev = voidTruckRes.body?.data?.revision || 1;
+
+  // 11.2 Security role attempting void must get HTTP 403 Forbidden
+  const secVoidAttempt = await request(
+    `/api/transactions/${voidTxId}/void`,
+    { method: 'POST', headers: secAuthHeader },
+    {
+      reasonCode: 'TEST_DATA',
+      reason: 'Unauthorized void attempt by Security',
+      expectedRevision: voidTxRev,
+    }
+  );
+  if (secVoidAttempt.statusCode !== 403) {
+    throw new Error(`MANDATORY Void SoD FAILED: Security user void attempt returned HTTP ${secVoidAttempt.statusCode} (Expected EXACT HTTP 403 Forbidden)`);
+  }
+  log(`Void SoD PASSED: Non-admin role forbidden from administrative void (HTTP 403 verified) [PASS].`, 'SUCCESS');
+
+  // 11.3 Admin attempting void with STALE revision must get HTTP 409 Conflict (Atomic CAS)
+  const staleVoidAttempt = await request(
+    `/api/transactions/${voidTxId}/void`,
+    { method: 'POST', headers: authHeader },
+    {
+      reasonCode: 'TEST_DATA',
+      reason: 'Stale revision test',
+      expectedRevision: voidTxRev + 99,
+    }
+  );
+  if (staleVoidAttempt.statusCode !== 409) {
+    throw new Error(`MANDATORY Void OCC FAILED: Stale revision attempt returned HTTP ${staleVoidAttempt.statusCode} (Expected EXACT HTTP 409 Conflict)`);
+  }
+  log(`Void Atomic CAS PASSED: Stale revision rejected with HTTP 409 Conflict [PASS].`, 'SUCCESS');
+
+  // 11.4 Admin executing valid void must get HTTP 200 OK with isVoided=true and status=CANCELLED
+  const validVoidRes = await request(
+    `/api/transactions/${voidTxId}/void`,
+    { method: 'POST', headers: authHeader },
+    {
+      reasonCode: 'TEST_DATA',
+      reason: 'CI automated smoke test void verification',
+      expectedRevision: voidTxRev,
+    }
+  );
+  if (!isSuccessStatus(validVoidRes.statusCode) || !validVoidRes.body?.data?.isVoided) {
+    throw new Error(`MANDATORY Valid Void FAILED: HTTP ${validVoidRes.statusCode}. Detail: ${JSON.stringify(validVoidRes.body)}`);
+  }
+  if (validVoidRes.body?.data?.status !== 'CANCELLED') {
+    throw new Error(`MANDATORY Valid Void FAILED: Status is ${validVoidRes.body?.data?.status}, expected CANCELLED`);
+  }
+  log(`Administrative Void PASSED: Status set to CANCELLED, isVoided=true, atomic CAS revision incremented [PASS].`, 'SUCCESS');
+
+  // 11.5 Attempting void on COMPLETED transaction must get HTTP 400 Bad Request
+  const completedVoidAttempt = await request(
+    `/api/transactions/${gbbTxId}/void`,
+    { method: 'POST', headers: authHeader },
+    {
+      reasonCode: 'TEST_DATA',
+      reason: 'Illegal void on completed transaction',
+      expectedRevision: gbbRevAfter,
+    }
+  );
+  if (completedVoidAttempt.statusCode !== 400) {
+    throw new Error(`MANDATORY Completed Void Guard FAILED: Returned HTTP ${completedVoidAttempt.statusCode} (Expected EXACT HTTP 400 Bad Request)`);
+  }
+  log(`Void Terminal Guard PASSED: COMPLETED transaction cannot be voided (HTTP 400 Bad Request verified) [PASS].`, 'SUCCESS');
+
   log('==============================================================================', 'SUCCESS');
-  log('Full-Stack Cross-Stack E2E Gate PASSED: Auth, Complete Workflows (GBB/GSP/GBJ to COMPLETED), REOPEN Matrix, Correction Happy-Path & SoD RBAC Verified.', 'SUCCESS');
+  log('Full-Stack Cross-Stack E2E Gate PASSED: Auth, Complete Workflows (GBB/GSP/GBJ to COMPLETED), REOPEN Matrix, Correction Happy-Path, Scoped Audit Timeline & Atomic CAS Void RBAC Verified.', 'SUCCESS');
   log('==============================================================================', 'SUCCESS');
 }
 

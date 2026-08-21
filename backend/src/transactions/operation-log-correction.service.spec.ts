@@ -6,22 +6,33 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { CorrectionAction, CorrectionTargetModule } from '@prisma/client';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 describe('OperationLogCorrectionService', () => {
   let service: OperationLogCorrectionService;
   let prismaService: PrismaService;
   let activityLogsService: ActivityLogsService;
+  let authorizationScopeService: AuthorizationScopeService;
 
   const mockPrismaService = {
     $transaction: jest.fn(),
     transaction: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
     },
     transactionCorrection: {
+      findMany: jest.fn(),
+    },
+    transactionStatusHistory: {
+      findMany: jest.fn(),
+    },
+    activityLog: {
       findMany: jest.fn(),
     },
   };
@@ -103,6 +114,12 @@ describe('OperationLogCorrectionService', () => {
         OperationLogCorrectionService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
+        {
+          provide: AuthorizationScopeService,
+          useValue: {
+            getTransactionScope: jest.fn().mockReturnValue({}),
+          },
+        },
       ],
     }).compile();
 
@@ -111,6 +128,9 @@ describe('OperationLogCorrectionService', () => {
     );
     prismaService = module.get<PrismaService>(PrismaService);
     activityLogsService = module.get<ActivityLogsService>(ActivityLogsService);
+    authorizationScopeService = module.get<AuthorizationScopeService>(
+      AuthorizationScopeService,
+    );
   });
 
   afterEach(() => {
@@ -1320,6 +1340,153 @@ describe('OperationLogCorrectionService', () => {
       const result = await service.getOperationLogCorrections('tx-1');
       expect(result.success).toBe(true);
       expect(result.attribution.originalCreatedBy).toBe('SECURITY — John Doe');
+    });
+  });
+
+  describe('getUnifiedAuditHistory()', () => {
+    it('should throw NotFoundException if transaction is outside authorization scope or not found', async () => {
+      (authorizationScopeService.getTransactionScope as jest.Mock).mockReturnValue({
+        processType: { in: ['GBB'] },
+      });
+      mockPrismaService.transaction.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getUnifiedAuditHistory('tx-outside-scope', {
+          id: 'qc-user-1',
+          role: 'QC',
+          email: 'qc@plant03.com',
+          warehouseAccess: ['GBB'],
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should assemble unified timeline from statusHistory, corrections, and activityLogs', async () => {
+      (authorizationScopeService.getTransactionScope as jest.Mock).mockReturnValue({});
+
+      const mockTx = {
+        id: 'tx-1',
+        status: 'CANCELLED',
+        revision: 3,
+        isVoided: true,
+        voidedAt: new Date('2026-08-21T09:00:00Z'),
+        voidReasonCode: 'DUPLICATE_TRANSACTION',
+        voidReason: 'Double registration by driver',
+        createdBy: { id: 'sec-1', name: 'Budi', role: 'SECURITY' },
+        voidedBy: { id: 'adm-1', name: 'Admin Alpha', role: 'ADMIN' },
+      };
+
+      mockPrismaService.transaction.findFirst.mockResolvedValue(mockTx);
+
+      mockPrismaService.transactionStatusHistory.findMany.mockResolvedValue([
+        {
+          id: 'tsh-1',
+          changedAt: new Date('2026-08-21T08:00:00Z'),
+          oldStatus: null,
+          newStatus: 'REGISTERED',
+          notes: 'Initial check-in',
+          changedBy: { id: 'sec-1', name: 'Budi', role: 'SECURITY' },
+        },
+      ]);
+
+      mockPrismaService.transactionCorrection.findMany.mockResolvedValue([
+        {
+          id: 'cor-1',
+          correctionNumber: 'COR-20260821-001',
+          createdAt: new Date('2026-08-21T08:30:00Z'),
+          reasonCode: 'TYPO_CORRECTION',
+          remark: 'Corrected driver contact',
+          correctedBy: { id: 'adm-1', name: 'Admin Alpha', role: 'ADMIN' },
+          items: [
+            {
+              targetModule: 'TRANSACTION',
+              fieldName: 'driverPhone',
+              oldValue: '08123456789',
+              newValue: '08129876543',
+            },
+          ],
+        },
+      ]);
+
+      mockPrismaService.activityLog.findMany.mockResolvedValue([
+        {
+          id: 'act-1',
+          createdAt: new Date('2026-08-21T09:00:00Z'),
+          action: 'TRANSACTION_VOIDED',
+          role: 'ADMIN',
+          userName: 'Admin Alpha',
+          description: JSON.stringify({
+            reasonCode: 'DUPLICATE_TRANSACTION',
+            reason: 'Double registration by driver',
+            originalStatus: 'REGISTERED',
+          }),
+        },
+      ]);
+
+      const result = await service.getUnifiedAuditHistory('tx-1', {
+        id: 'sec-1',
+        role: 'SECURITY',
+        email: 'sec@plant03.com',
+      } as any);
+
+      expect(result.success).toBe(true);
+      expect(result.attribution.isVoided).toBe(true);
+      expect(result.attribution.voidMetadata.voidReasonCode).toBe('DUPLICATE_TRANSACTION');
+      expect(result.attribution.originalCreatedBy).toBe('SECURITY — Budi');
+      expect(result.attribution.lastCorrectedBy).toBe('ADMIN — Admin Alpha');
+
+      expect(result.timeline).toHaveLength(3);
+      // Chronological sort check
+      expect(result.timeline[0].eventType).toBe('STATUS_TRANSITION');
+      expect(result.timeline[1].eventType).toBe('DATA_CORRECTION');
+      expect(result.timeline[2].eventType).toBe('ADMIN_VOID');
+
+      // Fail-closed PII masking check for SECURITY role
+      expect(result.timeline[1].oldValue).toBe('0812****789');
+      expect(result.timeline[1].newValue).toBe('0812****543');
+    });
+
+    it('should keep unmasked PII for ADMIN role in unified audit history', async () => {
+      (authorizationScopeService.getTransactionScope as jest.Mock).mockReturnValue({});
+
+      const mockTx = {
+        id: 'tx-2',
+        status: 'IN_PROGRESS',
+        revision: 2,
+        isVoided: false,
+        createdBy: { id: 'sec-1', name: 'Budi', role: 'SECURITY' },
+      };
+
+      mockPrismaService.transaction.findFirst.mockResolvedValue(mockTx);
+      mockPrismaService.transactionStatusHistory.findMany.mockResolvedValue([]);
+      mockPrismaService.transactionCorrection.findMany.mockResolvedValue([
+        {
+          id: 'cor-2',
+          correctionNumber: 'COR-20260821-002',
+          createdAt: new Date('2026-08-21T08:45:00Z'),
+          reasonCode: 'PHONE_UPDATE',
+          remark: 'Update driver phone',
+          correctedBy: { id: 'adm-1', name: 'Admin Alpha', role: 'ADMIN' },
+          items: [
+            {
+              targetModule: 'TRANSACTION',
+              fieldName: 'driverPhone',
+              oldValue: '08123456789',
+              newValue: '08129876543',
+            },
+          ],
+        },
+      ]);
+      mockPrismaService.activityLog.findMany.mockResolvedValue([]);
+
+      const result = await service.getUnifiedAuditHistory('tx-2', {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@plant03.com',
+      } as any);
+
+      expect(result.success).toBe(true);
+      expect(result.timeline[0].oldValue).toBe('08123456789');
+      expect(result.timeline[0].newValue).toBe('08129876543');
     });
   });
 });

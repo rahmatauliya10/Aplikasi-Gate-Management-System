@@ -8,6 +8,7 @@ import {
   ProcessType,
 } from '@prisma/client';
 import { execSync } from 'child_process';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 // Ensure test database isolation before Prisma or Nest services are instantiated
 const rawTestDbUrl = process.env.DATABASE_URL_TEST?.replace(/^"|"$/g, '');
@@ -75,6 +76,12 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
         OperationLogCorrectionService,
         PrismaService,
         ActivityLogsService,
+        {
+          provide: AuthorizationScopeService,
+          useValue: {
+            getTransactionScope: jest.fn().mockReturnValue({}),
+          },
+        },
       ],
     }).compile();
 

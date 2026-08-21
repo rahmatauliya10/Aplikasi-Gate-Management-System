@@ -51,6 +51,9 @@ jobs:
         working-directory: ./backend
         run: npm run lint:check
 
+      - name: Verify Zero Runtime Transaction Hard-Delete Paths (Static Guard)
+        run: node scripts/check-hard-delete-guard.js
+
       - name: Generate Prisma Client & Validate Migrations
         working-directory: ./backend
         env:

@@ -101,18 +101,20 @@ const truckService = {
   },
 
   /**
-   * Get operation log correction history and attribution (ADMIN only)
+   * Administratively void a transaction (ADMIN only, Atomic CAS enforced)
+   * @param {Number|String} id 
+   * @param {Object} data - { reasonCode, reason, expectedRevision }
    */
-  getOperationLogCorrections(id) {
-    return api.get(`/transactions/${id}/operation-log-corrections`)
+  void(id, data) {
+    return api.post(`/transactions/${id}/void`, data)
   },
 
   /**
-   * Delete a transaction completely
-   * @param {Number|String} id 
+   * Get unified, role-scoped audit history timeline
+   * @param {Number|String} id
    */
-  delete(id) {
-    return api.delete(`/transactions/${id}`)
+  getAuditHistory(id) {
+    return api.get(`/transactions/${id}/audit-history`)
   }
 }
 

@@ -269,9 +269,22 @@ export class TransactionsService {
     };
   }
 
-  async remove(id: string, user: JwtPayloadUser) {
+  async voidTransaction(
+    id: string,
+    dto: import('./dto/void-transaction.dto').VoidTransactionDto,
+    user: JwtPayloadUser,
+  ) {
+    if (user?.role !== 'ADMIN') {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Hanya Admin yang diizinkan melakukan pembatalan administratif (Void).',
+        errors: [],
+      });
+    }
+
     this.logger.warn(
-      `Transaction deletion request for ID: ${id} by user ${user.email}`,
+      `Transaction administrative void request for ID: ${id} by user ${user.email} (Reason: [${dto.reasonCode}] ${dto.reason})`,
     );
 
     const tx = await this.prisma.transaction.findUnique({ where: { id } });
@@ -279,7 +292,7 @@ export class TransactionsService {
     if (!tx) {
       throw new NotFoundException({
         success: false,
-        message: 'Transaction not found',
+        message: 'Transaksi tidak ditemukan.',
         errors: [],
       });
     }
@@ -288,32 +301,40 @@ export class TransactionsService {
       throw new BadRequestException({
         success: false,
         message:
-          'Transaksi berstatus COMPLETED tidak dapat dihapus/dibatalkan. Gunakan alur Koreksi Data Admin.',
+          'Transaksi berstatus COMPLETED tidak dapat di-void/dibatalkan. Gunakan alur Koreksi Data Admin.',
         errors: [],
       });
     }
 
-    // If already cancelled (soft-deleted), just return success
-    if (tx.status === 'CANCELLED') {
+    // If already administratively voided, return idempotent success
+    if (tx.isVoided) {
       return {
         success: true,
-        message: 'Transaction is already deleted/cancelled (soft-delete)',
+        message: 'Transaksi sudah dibatalkan secara administratif (Void) sebelumnya.',
         data: tx,
       };
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
+      // Atomic DB-level Compare-And-Swap (CAS)
       const updateRes = await prismaTx.transaction.updateMany({
         where: {
           id,
-          revision: tx.revision,
-          status: { notIn: ['CANCELLED', 'COMPLETED'] },
+          revision: dto.expectedRevision,
+          status: { not: 'COMPLETED' },
+          isVoided: false,
         },
         data: {
           status: 'CANCELLED',
-          cancelledAt: new Date(),
-          cancelledById: user.id,
-          cancellationReason: 'Transaction deleted via API (soft-delete)',
+          isVoided: true,
+          voidedAt: new Date(),
+          voidedById: user.id,
+          voidReasonCode: dto.reasonCode,
+          voidReason: dto.reason,
+          cancellationReason:
+            tx.cancellationReason || `[VOID: ${dto.reasonCode}] ${dto.reason}`,
+          cancelledAt: tx.cancelledAt || new Date(),
+          cancelledById: tx.cancelledById || user.id,
           revision: { increment: 1 },
         },
       });
@@ -322,27 +343,39 @@ export class TransactionsService {
         throw new ConflictException({
           success: false,
           message:
-            'Transaksi gagal dihapus/dibatalkan karena telah diperbarui oleh proses lain atau sudah dalam status terminal.',
+            'Konflik Konkurensi: Transaksi telah diperbarui oleh proses lain atau revisi tidak cocok. Silakan muat ulang data.',
         });
       }
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId: id,
-          oldStatus: tx.status,
-          newStatus: 'CANCELLED',
-          changedById: user.id,
-          notes: 'Deleted via API (soft-delete)',
-        },
-      });
+      // Record status transition only if not already CANCELLED to prevent CANCELLED -> CANCELLED pseudo-transitions
+      if (tx.status !== 'CANCELLED') {
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId: id,
+            oldStatus: tx.status,
+            newStatus: 'CANCELLED',
+            changedById: user.id,
+            notes: `[ADMIN_VOID] ${dto.reasonCode}: ${dto.reason}`,
+          },
+        });
+      }
 
+      // Structured ActivityLog (Zero raw email in description)
       await this.activityLogsService.logAction(
         {
           userId: user.id,
-          action: 'TRANSACTION_DELETE',
+          action: 'TRANSACTION_VOIDED',
           module: 'TRANSACTIONS',
           referenceId: id,
-          description: `Transaction ${tx.transactionNumber} (${tx.plateNumber}) in status ${tx.status} was soft-deleted (status set to CANCELLED) by Admin ${user.email}`,
+          description: JSON.stringify({
+            transactionNumber: tx.transactionNumber,
+            plateNumber: tx.plateNumber,
+            originalStatus: tx.status,
+            reasonCode: dto.reasonCode,
+            reason: dto.reason,
+            previousRevision: tx.revision,
+            newRevision: tx.revision + 1,
+          }),
           status: 'SUCCESS',
         },
         prismaTx,
@@ -353,7 +386,7 @@ export class TransactionsService {
 
     return {
       success: true,
-      message: 'Transaction deleted successfully',
+      message: 'Transaksi berhasil dibatalkan secara administratif (Void).',
       data: updated,
     };
   }

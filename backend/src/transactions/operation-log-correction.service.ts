@@ -16,6 +16,9 @@ import {
   TransactionStatus,
 } from '@prisma/client';
 import * as crypto from 'crypto';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+import { sanitizeAuditData } from '../common/utils/mask-pii.util';
+import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   TRANSACTION: [
@@ -161,6 +164,7 @@ export class OperationLogCorrectionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLogsService: ActivityLogsService,
+    private readonly authorizationScopeService: AuthorizationScopeService,
   ) {}
 
   async correctOperationLog(
@@ -243,6 +247,12 @@ export class OperationLogCorrectionService {
       if (!['COMPLETED', 'CANCELLED'].includes(tx.status)) {
         throw new BadRequestException(
           'Koreksi Operation Log dan REOPEN hanya diizinkan untuk transaksi berstatus terminal (COMPLETED atau CANCELLED).',
+        );
+      }
+
+      if (dto.action === CorrectionAction.REOPEN_WORKFLOW && tx.isVoided) {
+        throw new BadRequestException(
+          'Transaksi yang telah di-void secara administratif tidak dapat di-reopen. Gunakan workflow pemulihan Void terpisah jika fitur tersebut disetujui di masa depan.',
         );
       }
 
@@ -1438,6 +1448,231 @@ export class OperationLogCorrectionService {
       );
       throw new InternalServerErrorException(
         'Gagal mengambil riwayat koreksi Operation Log (Layanan Audit Tidak Bersedia).',
+      );
+    }
+  }
+
+  /**
+   * Retrieves a unified, chronological audit timeline for a transaction.
+   * Enforces role-based authorization scope (QC / Warehouse process scope isolation)
+   * and fail-closed data masking for operational roles.
+   */
+  async getUnifiedAuditHistory(transactionId: string, user: JwtPayloadUser) {
+    const scope = this.authorizationScopeService.getTransactionScope(user);
+
+    const tx = await this.prisma.transaction.findFirst({
+      where: {
+        id: transactionId,
+        ...scope,
+      },
+      include: {
+        createdBy: {
+          select: { id: true, name: true, role: true },
+        },
+        weighInBy: {
+          select: { id: true, name: true, role: true },
+        },
+        warehouseStartBy: {
+          select: { id: true, name: true, role: true },
+        },
+        cancelledBy: {
+          select: { id: true, name: true, role: true },
+        },
+        voidedBy: {
+          select: { id: true, name: true, role: true },
+        },
+        qcVehicleChecks: {
+          where: { isCurrent: true },
+          include: {
+            checkedBy: {
+              select: { id: true, name: true, role: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!tx) {
+      throw new NotFoundException({
+        success: false,
+        message:
+          'Transaksi tidak ditemukan atau berada di luar batas otoritas (Scope) Anda.',
+      });
+    }
+
+    try {
+      // 1. Status History Stream
+      const statusHistories = await this.prisma.transactionStatusHistory.findMany({
+        where: { transactionId },
+        include: {
+          changedBy: {
+            select: { id: true, name: true, role: true },
+          },
+        },
+        orderBy: { changedAt: 'asc' },
+      });
+
+      // 2. Correction History Stream (with Items)
+      const corrections = await (this.prisma.transactionCorrection as any).findMany({
+        where: { transactionId },
+        include: {
+          correctedBy: {
+            select: { id: true, name: true, role: true },
+          },
+          items: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      // 3. Scoped Activity Log Stream (Fail-Closed Action Allowlist)
+      const ALLOWED_TRANSACTION_AUDIT_ACTIONS = [
+        'TRANSACTION_CREATED',
+        'TRANSACTION_STATUS_CHANGED',
+        'TRANSACTION_CORRECTED',
+        'TRANSACTION_REOPENED',
+        'TRANSACTION_CANCELLED',
+        'TRANSACTION_VOIDED',
+      ];
+      const activityLogs = await this.prisma.activityLog.findMany({
+        where: {
+          referenceId: transactionId,
+          action: { in: ALLOWED_TRANSACTION_AUDIT_ACTIONS },
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      // Unified Timeline Synthesis
+      const timeline: any[] = [];
+
+      // Add status transitions
+      for (const sh of statusHistories) {
+        timeline.push({
+          eventType: 'STATUS_TRANSITION',
+          timestamp: sh.changedAt,
+          actor: sh.changedBy
+            ? `${sh.changedBy.role} — ${sh.changedBy.name}`
+            : 'SISTEM',
+          actorRole: sh.changedBy?.role || 'SYSTEM',
+          oldStatus: sh.oldStatus,
+          newStatus: sh.newStatus,
+          notes: sh.notes,
+        });
+      }
+
+      // Add corrections and reopens
+      for (const corr of corrections) {
+        const actorName = corr.correctedBy
+          ? `${corr.correctedBy.role} — ${corr.correctedBy.name}`
+          : 'ADMIN';
+        const actorRole = corr.correctedBy?.role || 'ADMIN';
+
+        if (corr.action === 'REOPEN_WORKFLOW') {
+          timeline.push({
+            eventType: 'WORKFLOW_REOPEN',
+            timestamp: corr.createdAt,
+            actor: actorName,
+            actorRole,
+            reasonCode: corr.reasonCode,
+            remark: corr.remark || corr.reason,
+            correctionNumber: corr.correctionNumber,
+            oldValues: corr.oldValues,
+            newValues: corr.newValues,
+          });
+        }
+
+        for (const item of corr.items || []) {
+          timeline.push({
+            eventType: 'DATA_CORRECTION',
+            timestamp: corr.createdAt,
+            actor: actorName,
+            actorRole,
+            module: item.targetModule,
+            fieldName: item.fieldName,
+            oldValue: item.oldValue,
+            newValue: item.newValue,
+            reasonCode: corr.reasonCode,
+            remark: item.itemRemark || corr.remark || corr.reason,
+            correctionNumber: corr.correctionNumber,
+          });
+        }
+      }
+
+      // Add administrative void activities
+      for (const act of activityLogs) {
+        if (act.action === 'TRANSACTION_VOIDED') {
+          let parsedDesc: any = null;
+          try {
+            parsedDesc = act.description ? JSON.parse(act.description) : null;
+          } catch {
+            parsedDesc = null;
+          }
+
+          timeline.push({
+            eventType: 'ADMIN_VOID',
+            timestamp: act.createdAt,
+            actor: `${act.role || 'ADMIN'} — ${act.userName || 'Admin'}`,
+            actorRole: act.role || 'ADMIN',
+            action: act.action,
+            reasonCode: parsedDesc?.reasonCode || tx.voidReasonCode || 'ADMIN_VOID',
+            remark: parsedDesc?.reason || tx.voidReason || act.description,
+            oldStatus: parsedDesc?.originalStatus || 'ACTIVE',
+            newStatus: 'CANCELLED',
+          });
+        }
+      }
+
+      // Sort timeline ascending by timestamp
+      timeline.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+      // Attribution
+      let origCreator = 'Operator Awal / QC Lapangan';
+      if (tx.createdBy) {
+        origCreator = `${tx.createdBy.role} — ${tx.createdBy.name}`;
+      } else if (tx.weighInBy) {
+        origCreator = `${tx.weighInBy.role} — ${tx.weighInBy.name}`;
+      } else if (tx.warehouseStartBy) {
+        origCreator = `${tx.warehouseStartBy.role} — ${tx.warehouseStartBy.name}`;
+      } else if (tx.qcVehicleChecks?.[0]?.checkedBy) {
+        origCreator = `${tx.qcVehicleChecks[0].checkedBy.role} — ${tx.qcVehicleChecks[0].checkedBy.name}`;
+      }
+
+      const lastCorrection = corrections.length > 0 ? corrections[corrections.length - 1] : null;
+
+      const rawResult = {
+        success: true,
+        attribution: {
+          originalCreatedBy: origCreator,
+          lastCorrectedBy:
+            lastCorrection && lastCorrection.correctedBy
+              ? `${lastCorrection.correctedBy.role} — ${lastCorrection.correctedBy.name}`
+              : null,
+          isVoided: tx.isVoided,
+          currentStatus: tx.status,
+          currentRevision: tx.revision,
+          voidMetadata: tx.isVoided
+            ? {
+                voidedAt: tx.voidedAt,
+                voidedBy: tx.voidedBy
+                  ? `${tx.voidedBy.role} — ${tx.voidedBy.name}`
+                  : 'ADMIN',
+                voidReasonCode: tx.voidReasonCode,
+                voidReason: tx.voidReason,
+              }
+            : null,
+        },
+        timeline,
+      };
+
+      // Fail-closed PII and internal telemetry masking
+      return sanitizeAuditData(rawResult, user?.role === 'ADMIN');
+    } catch (err: any) {
+      if (err instanceof NotFoundException) throw err;
+      this.logger.error(
+        `Failed to generate unified audit history: ${err.message}`,
+        err.stack,
+      );
+      throw new InternalServerErrorException(
+        'Gagal memuat riwayat audit terpadu (Layanan Audit Tidak Bersedia).',
       );
     }
   }
