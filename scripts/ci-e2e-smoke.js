@@ -714,25 +714,26 @@ async function runE2ESmoke() {
   // Step 11: Administrative Void & Atomic CAS OCC Verification (MANDATORY GATE)
   log(`Step 11: Executing Administrative Void & Atomic CAS OCC Verification...`);
   // 11.1 Create fresh active transaction to void
+  const voidSuffix = Date.now().toString().slice(-4);
   const voidTruckRes = await request(
-    '/api/transactions',
+    '/api/gate/check-in',
     { method: 'POST', headers: authHeader },
     {
-      plateNumber: 'B 7777 VOID',
+      plateNumber: `B77${voidSuffix}VD`,
       driverName: 'Void Driver Test',
       driverPhone: '08129999888',
       vendorName: 'CV Test Void Vendor',
-      vehicleType: 'TRONTON',
-      cargoType: 'RAW_MATERIAL',
-      cargoSubType: 'Biji Kakao Bulk',
+      vehicleType: 'TRUCK',
+      cargoType: 'Raw Cocoa Beans',
+      cargoProcessType: 'INBOUND',
       processType: 'GBB',
-      suratJalanNumber: 'SJ-VOID-001',
-      poNumber: 'PO-VOID-001',
+      suratJalanNumber: `SJ-VOID-${voidSuffix}`,
+      poNumber: `PO-VOID-${voidSuffix}`,
     }
   );
 
   if (!isSuccessStatus(voidTruckRes.statusCode)) {
-    throw new Error(`Failed to create test transaction for Void: HTTP ${voidTruckRes.statusCode}`);
+    throw new Error(`Failed to create test transaction for Void: HTTP ${voidTruckRes.statusCode}, body: ${JSON.stringify(voidTruckRes.body)}`);
   }
   const voidTxId = voidTruckRes.body?.data?.id;
   const voidTxRev = voidTruckRes.body?.data?.revision || 1;
