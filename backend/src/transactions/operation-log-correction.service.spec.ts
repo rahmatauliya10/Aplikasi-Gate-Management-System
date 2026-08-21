@@ -1496,5 +1496,296 @@ describe('OperationLogCorrectionService', () => {
       expect(result.timeline[0].oldValue).toBe('08123456789');
       expect(result.timeline[0].newValue).toBe('08129876543');
     });
+
+    it('should handle creator fallback branches and legacy activity log formats', async () => {
+      (
+        authorizationScopeService.getTransactionScope as jest.Mock
+      ).mockReturnValue({});
+
+      const mockTxWeighIn = {
+        id: 'tx-fallback-1',
+        status: 'CANCELLED',
+        revision: 1,
+        isVoided: true,
+        voidedAt: new Date('2026-08-21T10:00:00Z'),
+        voidedById: 'adm-1',
+        voidReasonCode: 'OTHER',
+        voidReason: 'Manual operator void',
+        voidedBy: { id: 'adm-1', name: 'Super Admin', role: 'ADMIN' },
+        weighInBy: { id: 'wb-1', name: 'Timbang User', role: 'WEIGHBRIDGE' },
+      };
+
+      mockPrismaService.transaction.findFirst.mockResolvedValue(mockTxWeighIn);
+      mockPrismaService.transactionStatusHistory.findMany.mockResolvedValue([]);
+      mockPrismaService.transactionCorrection.findMany.mockResolvedValue([
+        {
+          id: 'cor-reopen',
+          action: 'REOPEN_WORKFLOW',
+          correctionNumber: 'COR-20260821-003',
+          createdAt: new Date('2026-08-21T08:30:00Z'),
+          reasonCode: 'REOPEN_TEST',
+          remark: 'Reopening to gate in',
+          correctedBy: null,
+          items: [],
+        },
+        {
+          id: 'cor-legacy-status',
+          action: 'CORRECT_RECORDED_STATUS',
+          correctionNumber: 'COR-20260821-004',
+          createdAt: new Date('2026-08-21T08:40:00Z'),
+          reasonCode: 'STATUS_FIX',
+          remark: 'Legacy status fix',
+          correctedBy: { id: 'adm-1', name: 'Admin Alpha', role: 'ADMIN' },
+          items: [],
+        },
+      ]);
+      mockPrismaService.activityLog.findMany.mockResolvedValue([
+        {
+          id: 'act-legacy-del',
+          createdAt: new Date('2026-08-21T09:30:00Z'),
+          action: 'TRANSACTION_DELETE',
+          role: 'ADMIN',
+          userName: 'Legacy Admin',
+          description: 'Deleted transaction manually without JSON',
+        },
+      ]);
+
+      const result = await service.getUnifiedAuditHistory('tx-fallback-1', {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@plant03.com',
+      } as any);
+
+      expect(result.success).toBe(true);
+      expect(result.attribution.originalCreatedBy).toBe(
+        'WEIGHBRIDGE — Timbang User',
+      );
+      expect(result.attribution.voidMetadata.voidedBy).toBe(
+        'ADMIN — Super Admin',
+      );
+      expect(result.timeline).toHaveLength(3);
+      expect(result.timeline[0].eventType).toBe('WORKFLOW_REOPEN');
+      expect(result.timeline[1].eventType).toBe('STATUS_CORRECTION');
+      expect(result.timeline[2].eventType).toBe('ADMIN_VOID');
+    });
+
+    it('should test warehouse and qc creator fallbacks', async () => {
+      (
+        authorizationScopeService.getTransactionScope as jest.Mock
+      ).mockReturnValue({});
+
+      const mockTxWarehouse = {
+        id: 'tx-fallback-wh',
+        status: 'IN_PROGRESS',
+        revision: 1,
+        isVoided: false,
+        warehouseStartBy: {
+          id: 'wh-1',
+          name: 'Gudang User',
+          role: 'WAREHOUSE',
+        },
+      };
+
+      mockPrismaService.transaction.findFirst.mockResolvedValue(
+        mockTxWarehouse,
+      );
+      mockPrismaService.transactionStatusHistory.findMany.mockResolvedValue([]);
+      mockPrismaService.transactionCorrection.findMany.mockResolvedValue([]);
+      mockPrismaService.activityLog.findMany.mockResolvedValue([]);
+
+      const resultWh = await service.getUnifiedAuditHistory('tx-fallback-wh', {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@plant03.com',
+      } as any);
+      expect(resultWh.attribution.originalCreatedBy).toBe(
+        'WAREHOUSE — Gudang User',
+      );
+
+      const mockTxQc = {
+        id: 'tx-fallback-qc',
+        status: 'IN_PROGRESS',
+        revision: 1,
+        isVoided: false,
+        qcVehicleChecks: [
+          { checkedBy: { id: 'qc-1', name: 'QC User', role: 'QC' } },
+        ],
+      };
+
+      mockPrismaService.transaction.findFirst.mockResolvedValue(mockTxQc);
+      const resultQc = await service.getUnifiedAuditHistory('tx-fallback-qc', {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@plant03.com',
+      } as any);
+      expect(resultQc.attribution.originalCreatedBy).toBe('QC — QC User');
+
+      const mockTxDefault = {
+        id: 'tx-fallback-def',
+        status: 'IN_PROGRESS',
+        revision: 1,
+        isVoided: false,
+      };
+
+      mockPrismaService.transaction.findFirst.mockResolvedValue(mockTxDefault);
+      const resultDef = await service.getUnifiedAuditHistory(
+        'tx-fallback-def',
+        {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@plant03.com',
+        } as any,
+      );
+      expect(resultDef.attribution.originalCreatedBy).toBe(
+        'Operator Awal / QC Lapangan',
+      );
+    });
+
+    it('should throw NotFoundException if transaction does not exist or out of scope', async () => {
+      (
+        authorizationScopeService.getTransactionScope as jest.Mock
+      ).mockReturnValue({});
+
+      mockPrismaService.transaction.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getUnifiedAuditHistory('tx-not-found', {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@plant03.com',
+        } as any),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw InternalServerErrorException on unexpected database failure', async () => {
+      (
+        authorizationScopeService.getTransactionScope as jest.Mock
+      ).mockReturnValue({});
+
+      mockPrismaService.transaction.findFirst.mockRejectedValue(
+        new Error('DB Connection Dropped'),
+      );
+
+      await expect(
+        service.getUnifiedAuditHistory('tx-err', {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@plant03.com',
+        } as any),
+      ).rejects.toThrow(InternalServerErrorException);
+    });
+  });
+
+  describe('correctOperationLog - Invariants & Validations', () => {
+    it('should reject CORRECT_RECORDED_STATUS with BadRequestException', async () => {
+      await expect(
+        service.correctOperationLog(
+          'tx-1',
+          {
+            action: CorrectionAction.CORRECT_RECORDED_STATUS,
+            reasonCode: 'DATA_ENTRY_ERROR',
+            remark: 'Test fix',
+            expectedRevision: 1,
+          } as any,
+          { id: 'adm-1', role: 'ADMIN' } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject REOPEN_WORKFLOW if reopenTargetStatus is missing', async () => {
+      await expect(
+        service.correctOperationLog(
+          'tx-1',
+          {
+            action: CorrectionAction.REOPEN_WORKFLOW,
+            reasonCode: 'OTHER',
+            remark: 'Reopen without target status',
+            expectedRevision: 1,
+          } as any,
+          { id: 'adm-1', role: 'ADMIN' } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject REOPEN_WORKFLOW if items are combined with REOPEN_WORKFLOW', async () => {
+      await expect(
+        service.correctOperationLog(
+          'tx-1',
+          {
+            action: CorrectionAction.REOPEN_WORKFLOW,
+            reopenTargetStatus: 'GATE_IN',
+            items: [{ targetModule: 'TRANSACTION', fieldName: 'plateNumber' }],
+            reasonCode: 'OTHER',
+            remark: 'Reopen with items',
+            expectedRevision: 1,
+          } as any,
+          { id: 'adm-1', role: 'ADMIN' } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject if reopenTargetStatus provided with non-REOPEN action', async () => {
+      await expect(
+        service.correctOperationLog(
+          'tx-1',
+          {
+            action: CorrectionAction.UPDATE_VALUES,
+            reopenTargetStatus: 'GATE_IN',
+            items: [{ targetModule: 'TRANSACTION', fieldName: 'plateNumber' }],
+            reasonCode: 'OTHER',
+            remark: 'Invalid combo',
+            expectedRevision: 1,
+          } as any,
+          { id: 'adm-1', role: 'ADMIN' } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject if items are empty for non-REOPEN action', async () => {
+      await expect(
+        service.correctOperationLog(
+          'tx-1',
+          {
+            action: CorrectionAction.UPDATE_VALUES,
+            items: [],
+            reasonCode: 'OTHER',
+            remark: 'Empty items',
+            expectedRevision: 1,
+          } as any,
+          { id: 'adm-1', role: 'ADMIN' } as any,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject REOPEN_WORKFLOW on administratively voided transaction (tx.isVoided === true)', async () => {
+      mockPrismaService.$transaction.mockImplementation(async (callback) => {
+        return callback({
+          transaction: {
+            findUnique: jest.fn().mockResolvedValue({
+              id: 'tx-voided',
+              status: 'CANCELLED',
+              isVoided: true,
+              revision: 1,
+            }),
+          },
+        });
+      });
+
+      await expect(
+        service.correctOperationLog(
+          'tx-voided',
+          {
+            action: CorrectionAction.REOPEN_WORKFLOW,
+            reopenTargetStatus: 'GATE_IN',
+            reasonCode: 'OTHER',
+            remark: 'Attempting to reopen voided transaction',
+            expectedRevision: 1,
+          } as any,
+          { id: 'adm-1', role: 'ADMIN' } as any,
+        ),
+      ).rejects.toThrow(
+        'Transaksi yang telah di-void secara administratif tidak dapat di-reopen',
+      );
+    });
   });
 });

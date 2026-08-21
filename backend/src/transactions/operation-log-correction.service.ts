@@ -1457,112 +1457,84 @@ export class OperationLogCorrectionService {
    * Enforces role-based authorization scope (QC / Warehouse process scope isolation)
    * and fail-closed data masking for operational roles.
    */
-  async getUnifiedAuditHistory(transactionId: string, user: JwtPayloadUser) {
-    const scope = this.authorizationScopeService.getTransactionScope(user);
+  async getUnifiedAuditHistory(id: string, user: JwtPayloadUser) {
+    try {
+      const scopeWhere =
+        this.authorizationScopeService.getTransactionScope(user);
 
-    const tx = await this.prisma.transaction.findFirst({
-      where: {
-        id: transactionId,
-        ...scope,
-      },
-      include: {
-        createdBy: {
-          select: { id: true, name: true, role: true },
-        },
-        weighInBy: {
-          select: { id: true, name: true, role: true },
-        },
-        warehouseStartBy: {
-          select: { id: true, name: true, role: true },
-        },
-        cancelledBy: {
-          select: { id: true, name: true, role: true },
-        },
-        voidedBy: {
-          select: { id: true, name: true, role: true },
-        },
-        qcVehicleChecks: {
-          where: { isCurrent: true },
-          include: {
-            checkedBy: {
-              select: { id: true, name: true, role: true },
+      const tx = await this.prisma.transaction.findFirst({
+        where: { id, ...scopeWhere },
+        include: {
+          createdBy: { select: { id: true, name: true, role: true } },
+          weighInBy: { select: { id: true, name: true, role: true } },
+          warehouseStartBy: { select: { id: true, name: true, role: true } },
+          cancelledBy: { select: { id: true, name: true, role: true } },
+          voidedBy: { select: { id: true, name: true, role: true } },
+          qcVehicleChecks: {
+            where: { isCurrent: true },
+            include: {
+              checkedBy: { select: { id: true, name: true, role: true } },
             },
+            take: 1,
           },
         },
-      },
-    });
-
-    if (!tx) {
-      throw new NotFoundException({
-        success: false,
-        message:
-          'Transaksi tidak ditemukan atau berada di luar batas otoritas (Scope) Anda.',
       });
-    }
 
-    try {
-      // 1. Status History Stream
+      if (!tx) {
+        throw new NotFoundException(
+          'Transaksi tidak ditemukan atau berada di luar wewenang Anda.',
+        );
+      }
+
+      // Fetch all status transitions
       const statusHistories =
         await this.prisma.transactionStatusHistory.findMany({
-          where: { transactionId },
+          where: { transactionId: id },
           include: {
-            changedBy: {
-              select: { id: true, name: true, role: true },
-            },
+            changedBy: { select: { id: true, name: true, role: true } },
           },
-          orderBy: { changedAt: 'asc' },
+          orderBy: { createdAt: 'asc' },
         });
 
-      // 2. Correction History Stream (with Items)
+      // Fetch all operation log corrections (including items and diffs)
       const corrections = await (
         this.prisma.transactionCorrection as any
       ).findMany({
-        where: { transactionId },
+        where: { transactionId: id },
         include: {
-          correctedBy: {
-            select: { id: true, name: true, role: true },
-          },
+          correctedBy: { select: { id: true, name: true, role: true } },
           items: true,
         },
         orderBy: { createdAt: 'asc' },
       });
 
-      // 3. Scoped Activity Log Stream (Fail-Closed Action Allowlist)
-      const ALLOWED_TRANSACTION_AUDIT_ACTIONS = [
-        'TRANSACTION_CREATED',
-        'TRANSACTION_STATUS_CHANGED',
-        'TRANSACTION_CORRECTED',
-        'TRANSACTION_REOPENED',
-        'TRANSACTION_CANCELLED',
-        'TRANSACTION_VOIDED',
-      ];
+      // Fetch void and delete actions from ActivityLog
       const activityLogs = await this.prisma.activityLog.findMany({
         where: {
-          referenceId: transactionId,
-          action: { in: ALLOWED_TRANSACTION_AUDIT_ACTIONS },
+          referenceId: id,
+          action: { in: ['TRANSACTION_VOIDED', 'TRANSACTION_DELETE'] },
         },
         orderBy: { createdAt: 'asc' },
       });
 
-      // Unified Timeline Synthesis
       const timeline: any[] = [];
 
       // Add status transitions
       for (const sh of statusHistories) {
         timeline.push({
           eventType: 'STATUS_TRANSITION',
-          timestamp: sh.changedAt,
+          timestamp: sh.createdAt,
           actor: sh.changedBy
             ? `${sh.changedBy.role} — ${sh.changedBy.name}`
-            : 'SISTEM',
+            : 'Sistem Gate Otomatis',
           actorRole: sh.changedBy?.role || 'SYSTEM',
           oldStatus: sh.oldStatus,
           newStatus: sh.newStatus,
-          notes: sh.notes,
+          remarks: sh.notes,
         });
       }
 
-      // Add corrections and reopens
+      // Add data corrections and reopen actions
       for (const corr of corrections) {
         const actorName = corr.correctedBy
           ? `${corr.correctedBy.role} — ${corr.correctedBy.name}`
@@ -1572,6 +1544,18 @@ export class OperationLogCorrectionService {
         if (corr.action === 'REOPEN_WORKFLOW') {
           timeline.push({
             eventType: 'WORKFLOW_REOPEN',
+            timestamp: corr.createdAt,
+            actor: actorName,
+            actorRole,
+            reasonCode: corr.reasonCode,
+            remark: corr.remark || corr.reason,
+            correctionNumber: corr.correctionNumber,
+            oldValues: corr.oldValues,
+            newValues: corr.newValues,
+          });
+        } else if (corr.action === 'CORRECT_RECORDED_STATUS') {
+          timeline.push({
+            eventType: 'STATUS_CORRECTION',
             timestamp: corr.createdAt,
             actor: actorName,
             actorRole,
@@ -1602,7 +1586,10 @@ export class OperationLogCorrectionService {
 
       // Add administrative void activities
       for (const act of activityLogs) {
-        if (act.action === 'TRANSACTION_VOIDED') {
+        if (
+          act.action === 'TRANSACTION_VOIDED' ||
+          act.action === 'TRANSACTION_DELETE'
+        ) {
           let parsedDesc: any = null;
           try {
             parsedDesc = act.description ? JSON.parse(act.description) : null;
