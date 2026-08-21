@@ -99,12 +99,17 @@ BEGIN
   EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT SELECT ON TABLES TO %I', owner_user, backup_user);
   EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO %I', owner_user, backup_user);
 
-  -- 8. Explicitly revoke UPDATE and DELETE on immutable audit and history tables for gms_app
+  -- 8. Explicitly revoke UPDATE, DELETE, and TRUNCATE on immutable audit/history tables for gms_app
   FOR r IN (
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public'
       AND tablename IN ('ActivityLog', 'TransactionCorrection', 'TransactionCorrectionItem', 'TransactionStatusHistory')
   ) LOOP
-    EXECUTE format('REVOKE UPDATE, DELETE ON TABLE public.%I FROM %I', r.tablename, app_user);
+    EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM %I', r.tablename, app_user);
   END LOOP;
+
+  -- 9. Explicitly revoke DELETE and TRUNCATE on Transaction for gms_app (Zero Hard-Delete architecture)
+  IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Transaction') THEN
+    EXECUTE format('REVOKE DELETE, TRUNCATE ON TABLE public."Transaction" FROM %I', app_user);
+  END IF;
 END $$;

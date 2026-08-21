@@ -148,6 +148,7 @@ services:
       - ALL
     environment:
       - DATABASE_URL=postgresql://${GMS_OWNER_USER:-gms_owner}:${GMS_OWNER_PASSWORD:?GMS_OWNER_PASSWORD wajib diisi di .env}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
+      - GMS_APP_USER=${GMS_APP_USER:-gms_app}
       - NODE_ENV=production
     depends_on:
       postgres:

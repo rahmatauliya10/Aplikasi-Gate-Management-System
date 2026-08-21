@@ -273,6 +273,13 @@ foreach ($tbl in $auditTables) {
 Write-Host "Check 16: Positive Test - gms_app SELECT and INSERT verified on all 4 audit tables [PASS]" -ForegroundColor Green
 Write-Host "Check 17: Negative Test - gms_app UPDATE and DELETE revoked on all 4 audit tables [PASS]" -ForegroundColor Green
 
+# Check 18: Transaction Hard-Delete & Truncate Immutability Gate
+$txDeleteCheck = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.`"Transaction`"', 'DELETE'), has_table_privilege('$AppUser', 'public.`"Transaction`"', 'TRUNCATE');"
+if ($txDeleteCheck -match "t|true") {
+    throw "IMMUTABILITY VIOLATION: Role '$AppUser' has DELETE or TRUNCATE privilege on 'Transaction' table: $txDeleteCheck"
+}
+Write-Host "Check 18: Negative Test - gms_app DELETE and TRUNCATE revoked on Transaction table [PASS]" -ForegroundColor Green
+
 # Post-check: Native pg_dump Smoke Test with gms_backup Credentials
 if ($BackupPassword) {
     Write-Host "Post-check: Executing native pg_dump smoke test with role [$BackupUser]..." -ForegroundColor Cyan

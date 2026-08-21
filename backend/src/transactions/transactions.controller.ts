@@ -115,12 +115,35 @@ export class TransactionsController {
     return this.transactionsService.cancel(id, dto.cancellationReason, user);
   }
 
-  @Delete(':id')
+  @Post(':id/void')
   @Roles('ADMIN')
-  @ApiOperation({ summary: 'Delete a transaction completely' })
-  @ApiResponse({ status: 200, description: 'Transaction deleted successfully' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Administratively void a transaction (ADMIN only, Atomic CAS enforced)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Transaction voided successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Transaction is COMPLETED or validation failed',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - ADMIN role required',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - Stale revision / OCC CAS failure',
+  })
   @ApiResponse({ status: 404, description: 'Transaction not found' })
-  remove(@Param('id') id: string, @CurrentUser() user: JwtPayloadUser) {
-    return this.transactionsService.remove(id, user);
+  voidTransaction(
+    @Param('id') id: string,
+    @Body() dto: import('./dto/void-transaction.dto').VoidTransactionDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.transactionsService.voidTransaction(id, dto, user);
   }
 }

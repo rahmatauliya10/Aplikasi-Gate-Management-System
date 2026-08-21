@@ -48,6 +48,31 @@ export class OperationLogCorrectionController {
     return this.correctionService.getOperationLogCorrections(id);
   }
 
+  @Get(':id/audit-history')
+  @Roles('ADMIN', 'SECURITY', 'QC', 'WAREHOUSE')
+  @ApiOperation({
+    summary:
+      'Get unified, role-scoped, and sanitized transaction audit timeline',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Unified transaction audit history timeline retrieved',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Role or scope unauthorized',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Transaction not found or out of authorized scope',
+  })
+  getUnifiedAuditHistory(
+    @Param('id') id: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.correctionService.getUnifiedAuditHistory(id, user);
+  }
+
   @Post(':id/operation-log-corrections')
   @Roles('ADMIN')
   @HttpCode(HttpStatus.OK)

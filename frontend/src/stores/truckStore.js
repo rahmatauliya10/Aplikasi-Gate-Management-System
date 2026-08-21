@@ -87,20 +87,34 @@ export const useTruckStore = defineStore('truck', () => {
         }
     }
 
-    const deleteTruck = async (id) => {
+    const voidTruck = async (id, voidPayload) => {
         loading.value = true;
         error.value = null;
         try {
-            await truckService.delete(id);
-            trucks.value = trucks.value.filter(t => String(t.id) !== String(id));
+            const response = await truckService.void(id, voidPayload);
+            const updated = response.data?.data;
+            if (updated) {
+                upsertTruck(updated);
+            } else {
+                const target = trucks.value.find(t => String(t.id) === String(id));
+                if (target) {
+                    target.status = 'CANCELLED';
+                    target.isVoided = true;
+                }
+            }
             const notificationStore = useNotificationStore();
-            notificationStore.addNotification('Data Deleted', `Truck record has been deleted permanently.`, 'info');
+            notificationStore.addNotification('Transaksi Dibatalkan (Void)', 'Transaksi berhasil dibatalkan secara administratif. Seluruh riwayat audit dan data tetap tersimpan.', 'warning');
+            return updated;
         } catch (err) {
             error.value = err.gmsMessage || getErrorMessage(err);
             throw err;
         } finally {
             loading.value = false;
         }
+    }
+
+    const deleteTruck = async (id, voidPayload) => {
+        return voidTruck(id, voidPayload);
     }
 
     const correctTruck = async (id, correctionData) => {
@@ -207,6 +221,7 @@ export const useTruckStore = defineStore('truck', () => {
         addTruck,
         updateTruckStatus,
         cancelTruck,
+        voidTruck,
         deleteTruck,
         correctTruck,
         correctOperationLogTruck,

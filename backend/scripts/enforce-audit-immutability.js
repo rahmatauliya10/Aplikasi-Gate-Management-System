@@ -31,12 +31,17 @@ async function main() {
     );
 
     if (!roleCheck || roleCheck.length === 0) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          `Production Security Error: Configured application role [${appUser}] does not exist in PostgreSQL!`,
+        );
+      }
       console.log(`ℹ️  Role [${appUser}] does not exist in this database environment. Skipping.`);
       await prisma.$disconnect();
       return;
     }
 
-    // 2. Revoke UPDATE and DELETE on each immutable audit table for app role
+    // 2. Revoke UPDATE, DELETE, and TRUNCATE on each immutable audit table for app role
     for (const table of AUDIT_TABLES) {
       // Check if table exists in public schema
       const tableCheck = await prisma.$queryRawUnsafe(
@@ -46,12 +51,23 @@ async function main() {
 
       if (tableCheck && tableCheck.length > 0) {
         await prisma.$executeRawUnsafe(
-          `REVOKE UPDATE, DELETE ON TABLE public."${table}" FROM "${appUser}";`,
+          `REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public."${table}" FROM "${appUser}";`,
         );
-        console.log(`  ✓ Revoked UPDATE, DELETE on [public."${table}"] from role [${appUser}]`);
+        console.log(`  ✓ Revoked UPDATE, DELETE, TRUNCATE on [public."${table}"] from role [${appUser}]`);
       } else {
         console.log(`  ℹ️ Table [public."${table}"] not found yet. Skipping.`);
       }
+    }
+
+    // 3. Defense-in-depth: Revoke DELETE and TRUNCATE on Transaction table for app role
+    const txTableCheck = await prisma.$queryRawUnsafe(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Transaction';`,
+    );
+    if (txTableCheck && txTableCheck.length > 0) {
+      await prisma.$executeRawUnsafe(
+        `REVOKE DELETE, TRUNCATE ON TABLE public."Transaction" FROM "${appUser}";`,
+      );
+      console.log(`  ✓ Revoked DELETE, TRUNCATE on [public."Transaction"] from role [${appUser}]`);
     }
 
     console.log('✅ Audit & history table immutability privileges successfully enforced.\n');

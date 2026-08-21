@@ -457,19 +457,32 @@
           </div>
 
           <!-- Full-Width Audit Trail & Correction History (Admin Only / When Available) -->
-          <div v-if="isAdmin && (historyLoading || correctionCount > 0 || historyError)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
+          <!-- Full-Width Unified Audit Trail & Correction History (Accessible by Scoped Authenticated Users) -->
+          <div v-if="(isAdmin || isSecurity || isQc || isWarehouse) && (historyLoading || timelineData.length > 0 || correctionCount > 0 || historyError)" class="mt-3.5 rounded-xl overflow-hidden bg-white border border-slate-200/90 shadow-sm">
             <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/80">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-amber-600 text-[16px]">history_edu</span>
                 <h3 class="text-[11px] font-black text-slate-700 uppercase tracking-[0.15em]">Audit Trail & Operation Log History</h3>
-                <span class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[9px] font-black font-mono">{{ correctionCount }} Koreksi</span>
+                <span class="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[9px] font-black font-mono">{{ timelineData.length || correctionCount }} Entri</span>
               </div>
               <button @click="fetchCorrectionHistory" class="text-[10px] font-bold text-slate-500 hover:text-amber-600 flex items-center gap-1 transition-colors">
                 <span class="material-icons text-[13px]">refresh</span> Reload
               </button>
             </div>
 
-            <!-- Attribution Banner (Original Creator vs Last Corrected - Clean Light Theme) -->
+            <!-- Void Status Banner if Voided -->
+            <div v-if="attributionData?.isVoided" class="px-4 py-2 bg-rose-50 border-b border-rose-200 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-rose-800">
+              <div class="flex items-center gap-1.5">
+                <span class="material-icons text-sm text-rose-600">block</span>
+                <span class="uppercase tracking-wider font-black">Transaksi Void:</span>
+                <span class="font-bold text-rose-950">[{{ attributionData.voidMetadata?.voidReasonCode || 'ADMIN_VOID' }}] {{ attributionData.voidMetadata?.voidReason || 'Dibatalkan secara administratif' }}</span>
+              </div>
+              <div v-if="attributionData.voidMetadata?.voidedBy" class="text-[10px] text-rose-700 font-mono">
+                Oleh: {{ attributionData.voidMetadata.voidedBy }}
+              </div>
+            </div>
+
+            <!-- Attribution Banner (Original Creator vs Last Corrected) -->
             <div v-if="attributionData" class="px-4 py-2 bg-slate-50 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-slate-600">
               <div class="flex items-center gap-1.5">
                 <span class="material-icons text-xs text-slate-400">person_outline</span>
@@ -486,14 +499,14 @@
             <!-- Loading state -->
             <div v-if="historyLoading" class="p-6 flex flex-col items-center justify-center text-slate-400 space-y-2">
               <span class="material-icons animate-spin text-2xl text-amber-600">sync</span>
-              <span class="text-xs font-bold">Memuat riwayat koreksi dan audit trail...</span>
+              <span class="text-xs font-bold">Memuat riwayat audit terpadu...</span>
             </div>
 
             <!-- Error state -->
             <div v-else-if="historyError" class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center justify-between m-3">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-rose-600 text-base">error_outline</span>
-                <span class="font-bold">{{ correctionCount > 0 ? 'Riwayat koreksi tersedia tetapi gagal dimuat. Silakan Reload.' : 'Riwayat koreksi gagal dimuat. Silakan Reload.' }}</span>
+                <span class="font-bold">{{ historyError }}</span>
               </div>
               <button @click="fetchCorrectionHistory" type="button" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all">
                 <span class="material-icons text-xs">refresh</span> Reload
@@ -501,46 +514,60 @@
             </div>
 
             <!-- Empty state -->
-            <div v-else-if="!auditHistory.length" class="p-6 text-center text-slate-400">
-              <p class="text-xs font-medium">Belum ada catatan koreksi log operasi pada transaksi ini.</p>
+            <div v-else-if="!timelineData.length && !auditHistory.length" class="p-6 text-center text-slate-400">
+              <p class="text-xs font-medium">Belum ada catatan audit atau koreksi log operasi pada transaksi ini.</p>
             </div>
 
-            <!-- History List -->
-            <div v-else class="divide-y divide-slate-100 max-h-60 overflow-y-auto custom-scrollbar">
-              <div v-for="(log, idx) in auditHistory" :key="idx" class="p-3 hover:bg-slate-50/60 transition-colors text-xs space-y-2">
+            <!-- Unified Timeline List -->
+            <div v-else class="divide-y divide-slate-100 max-h-64 overflow-y-auto custom-scrollbar">
+              <div v-for="(item, idx) in (timelineData.length ? timelineData : auditHistory)" :key="idx" class="p-3 hover:bg-slate-50/60 transition-colors text-xs space-y-2">
                 <div class="flex items-center justify-between">
                   <div class="flex items-center space-x-2">
-                    <span class="px-2 py-0.5 rounded text-[10px] font-black tracking-wider text-white"
-                      :class="log.action === 'MODIFY_FIELD' ? 'bg-amber-600' : log.action === 'OVERRIDE_STATUS' ? 'bg-red-600' : 'bg-blue-600'">
-                      {{ log.action || 'MODIFY' }}
+                    <span class="px-2 py-0.5 rounded text-[9px] font-black tracking-wider text-white uppercase font-mono"
+                      :class="item.eventType === 'DATA_CORRECTION' ? 'bg-amber-600' : item.eventType === 'WORKFLOW_REOPEN' ? 'bg-purple-600' : item.eventType === 'ADMIN_VOID' ? 'bg-rose-600' : 'bg-blue-600'">
+                      {{ item.eventType ? item.eventType.replace('_', ' ') : (item.action || 'MODIFY') }}
                     </span>
-                    <span class="font-bold text-slate-700 font-mono text-[11px]">{{ log.module || 'TRANSACTION' }}</span>
+                    <span v-if="item.module" class="font-bold text-slate-700 font-mono text-[11px]">{{ item.module }}</span>
+                    <span v-if="item.correctionNumber" class="text-[9px] text-slate-400 font-mono">{{ item.correctionNumber }}</span>
                   </div>
-                  <span class="text-[10px] text-slate-400 font-mono">{{ formatTimeFull(log.createdAt) }}</span>
+                  <span class="text-[10px] text-slate-400 font-mono">{{ formatTimeFull(item.timestamp || item.createdAt) }}</span>
                 </div>
                 
                 <div class="flex items-center justify-between text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-100">
                   <div class="flex items-center gap-2">
-                    <span class="text-slate-500 font-bold">Oleh Admin:</span>
-                    <span class="font-black text-slate-800">{{ log.user?.name || log.userId || 'System Admin' }}</span>
+                    <span class="text-slate-500 font-bold">Oleh:</span>
+                    <span class="font-black text-slate-800">{{ item.actor || item.user?.name || item.userId || 'Sistem' }}</span>
                   </div>
-                  <div v-if="log.evidenceUrl" class="flex items-center gap-1 text-[#4A8BDF] font-bold">
-                    <span class="material-icons text-[13px]">attachment</span>
-                    <a :href="log.evidenceUrl" target="_blank" class="hover:underline">Bukti Lampiran</a>
+                  <div v-if="item.reasonCode" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200/80 text-slate-700 font-bold">
+                    {{ item.reasonCode }}
                   </div>
-                  <span v-else class="text-slate-400 italic text-[10px]">Tanpa Lampiran</span>
                 </div>
 
-                <div class="text-slate-700 text-xs font-medium bg-white p-2 rounded border border-slate-100 shadow-2xs">
-                  <span class="font-black text-slate-900">Alasan:</span> {{ log.reason || 'Koreksi operasional log admin.' }}
+                <div v-if="item.remark || item.notes || item.reason" class="text-slate-700 text-xs font-medium bg-white p-2 rounded border border-slate-100 shadow-2xs">
+                  <span class="font-black text-slate-900">Keterangan:</span> {{ item.remark || item.notes || item.reason }}
                 </div>
 
-                <!-- Field Level Diff Item if available -->
-                <div v-if="log.items && log.items.length" class="mt-1 space-y-1">
-                  <div v-for="(item, iIdx) in log.items" :key="iIdx" class="grid grid-cols-3 gap-2 bg-slate-50/90 border border-slate-200/70 rounded-lg p-2 text-[10px] font-mono items-center">
-                    <div class="text-slate-600 font-bold truncate">Field: <span class="text-slate-900 font-black text-[11px]">{{ item.fieldName }}</span></div>
-                    <div class="text-red-700 font-medium truncate">Old: <span class="line-through">{{ item.oldValue || '-' }}</span></div>
-                    <div class="text-emerald-700 font-bold truncate">New: <span>{{ item.newValue || '-' }}</span></div>
+                <!-- Status Transition Details -->
+                <div v-if="item.eventType === 'STATUS_TRANSITION' || (item.oldStatus && item.newStatus)" class="flex items-center gap-2 text-[10px] font-mono bg-blue-50/60 p-2 rounded border border-blue-100">
+                  <span class="text-slate-500 font-bold">Transisi Status:</span>
+                  <span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{{ item.oldStatus || 'NONE' }}</span>
+                  <span class="material-icons text-xs text-blue-600">arrow_forward</span>
+                  <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white font-bold">{{ item.newStatus }}</span>
+                </div>
+
+                <!-- Field Level Diff if single item -->
+                <div v-if="item.fieldName" class="grid grid-cols-3 gap-2 bg-slate-50/90 border border-slate-200/70 rounded-lg p-2 text-[10px] font-mono items-center">
+                  <div class="text-slate-600 font-bold truncate">Field: <span class="text-slate-900 font-black text-[11px]">{{ item.fieldName }}</span></div>
+                  <div class="text-rose-700 font-medium truncate">Old: <span class="line-through">{{ item.oldValue !== undefined ? item.oldValue : '-' }}</span></div>
+                  <div class="text-emerald-700 font-bold truncate">New: <span>{{ item.newValue !== undefined ? item.newValue : '-' }}</span></div>
+                </div>
+
+                <!-- Multi-item correction diffs if legacy items list -->
+                <div v-if="item.items && item.items.length" class="mt-1 space-y-1">
+                  <div v-for="(subItem, iIdx) in item.items" :key="iIdx" class="grid grid-cols-3 gap-2 bg-slate-50/90 border border-slate-200/70 rounded-lg p-2 text-[10px] font-mono items-center">
+                    <div class="text-slate-600 font-bold truncate">Field: <span class="text-slate-900 font-black text-[11px]">{{ subItem.fieldName }}</span></div>
+                    <div class="text-rose-700 font-medium truncate">Old: <span class="line-through">{{ subItem.oldValue !== undefined ? subItem.oldValue : '-' }}</span></div>
+                    <div class="text-emerald-700 font-bold truncate">New: <span>{{ subItem.newValue !== undefined ? subItem.newValue : '-' }}</span></div>
                   </div>
                 </div>
               </div>
@@ -550,10 +577,13 @@
 
         <!-- Footer (Compact) -->
         <div class="px-4 py-2.5 flex justify-between shrink-0" style="background: #FAFBFF; border-top: 1px solid #E8EEF7;">
-          <button v-if="authStore.isAdmin && props.truck?.status !== 'COMPLETED' && props.truck?.status !== 'CANCELLED'" @click="handleDelete" class="group relative overflow-hidden flex items-center space-x-1.5 px-5 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
+          <button v-if="authStore.isAdmin && !props.truck?.isVoided && props.truck?.status !== 'COMPLETED'" 
+            @click="openVoidModal" 
+            title="Mengeluarkan transaksi dari operasional tanpa menghapus data historis (Void / Soft-Delete)"
+            class="group relative overflow-hidden flex items-center space-x-1.5 px-4 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
             style="background: linear-gradient(135deg, #EF4444, #B91C1C); box-shadow: 0 2px 8px rgba(239,68,68,0.25);">
-            <span class="material-icons text-white/80 text-[14px]">delete_forever</span>
-            <span class="text-[10px] font-black text-white uppercase tracking-[0.12em]">Delete</span>
+            <span class="material-icons text-white/90 text-[14px]">block</span>
+            <span class="text-[10px] font-black text-white uppercase tracking-[0.12em]">Void Transaksi</span>
           </button>
           <div v-else></div>
           <button @click="close" class="group relative overflow-hidden flex items-center space-x-1.5 px-5 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
@@ -1257,6 +1287,72 @@
           </div>
         </div>
       </transition>
+
+      <!-- Admin Void Modal Overlay (Fail-Closed & High-Accountability UI) -->
+      <transition name="modal">
+        <div v-if="showVoidModal" class="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" @click.self="showVoidModal = false">
+          <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div class="flex items-center space-x-2">
+                <span class="material-icons text-red-600">block</span>
+                <h3 class="text-base font-black text-slate-800">Void Transaksi (Pembatalan Administratif)</h3>
+              </div>
+              <button @click="showVoidModal = false" class="text-slate-400 hover:text-slate-600 transition-colors">
+                <span class="material-icons">close</span>
+              </button>
+            </div>
+
+            <div class="p-3 bg-red-50 border border-red-200 text-red-800 rounded-xl text-xs space-y-1">
+              <div class="flex items-center gap-1.5 font-black text-red-900">
+                <span class="material-icons text-base text-red-600">info</span>
+                <span>Perhatian Audit & Keamanan</span>
+              </div>
+              <p class="text-[11px] leading-relaxed">
+                Transaksi akan dikeluarkan dari antrean aktif dan ditandai sebagai <b>DIBATALKAN (VOID)</b>. Seluruh data historis, timbangan, QC, lampiran, dan Audit Trail <b>tetap tersimpan permanen</b> untuk kepatuhan ISO 27001/27002.
+              </p>
+            </div>
+
+            <!-- Error Banner -->
+            <div v-if="voidError" class="p-3 bg-red-100 border border-red-300 text-red-800 rounded-xl text-xs font-bold flex items-start gap-2">
+              <span class="material-icons text-base text-red-600 shrink-0">error_outline</span>
+              <span>{{ voidError }}</span>
+            </div>
+
+            <form @submit.prevent="executeVoidSubmission" class="space-y-4">
+              <div class="space-y-1.5">
+                <label class="block text-xs font-bold text-slate-700">Kode Alasan Void <span class="text-red-500">*</span></label>
+                <select v-model="voidForm.reasonCode" required class="w-full text-xs font-bold p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-red-500 outline-none">
+                  <option value="" disabled>-- Pilih Alasan Void --</option>
+                  <option value="DUPLICATE_TRANSACTION">DUPLICATE_TRANSACTION (Registrasi Ganda)</option>
+                  <option value="WRONG_REGISTRATION">WRONG_REGISTRATION (Salah Registrasi/Tujuan)</option>
+                  <option value="OPERATOR_INPUT_ERROR">OPERATOR_INPUT_ERROR (Kesalahan Input Operator)</option>
+                  <option value="TEST_DATA">TEST_DATA (Data Uji Coba)</option>
+                  <option value="INVALID_TRANSACTION">INVALID_TRANSACTION (Transaksi Tidak Sah)</option>
+                  <option value="OTHER">OTHER (Alasan Lainnya)</option>
+                </select>
+              </div>
+
+              <div class="space-y-1.5">
+                <label class="block text-xs font-bold text-slate-700">Penjelasan Lengkap Alasan <span class="text-red-500">*</span></label>
+                <textarea v-model="voidForm.reason" rows="3" required placeholder="Tuliskan keterangan detail mengapa transaksi ini di-void (min. 5 karakter)..."
+                  class="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-red-500 outline-none"></textarea>
+              </div>
+
+              <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+                <span class="text-[10px] font-mono text-slate-400">OCC Rev: #{{ props.truck?.revision || 1 }}</span>
+                <div class="flex space-x-2">
+                  <button type="button" @click="showVoidModal = false" class="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Batal</button>
+                  <button type="submit" :disabled="voidLoading || !voidForm.reasonCode || voidForm.reason.trim().length < 5"
+                    class="px-4 py-2 text-xs font-black text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm">
+                    <span v-if="voidLoading" class="material-icons animate-spin text-sm">sync</span>
+                    <span>{{ voidLoading ? 'Memproses...' : 'Konfirmasi Void Transaksi' }}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </transition>
   
   </teleport>
 </template>
@@ -1300,6 +1396,21 @@ const isAdmin = computed(() => {
   return role === 'ADMIN'
 })
 
+const isSecurity = computed(() => {
+  const role = authStore.user?.role || authStore.role
+  return role === 'SECURITY'
+})
+
+const isQc = computed(() => {
+  const role = authStore.user?.role || authStore.role
+  return role === 'QC'
+})
+
+const isWarehouse = computed(() => {
+  const role = authStore.user?.role || authStore.role
+  return role === 'WAREHOUSE'
+})
+
 const activeStageStartTime = computed(() => {
   const t = props.truck
   if (!t) return null
@@ -1326,10 +1437,19 @@ const correctionError = ref(null)
 const occConflictError = ref(null)
 const showSensitiveConfirm = ref(false)
 const auditHistory = ref([])
+const timelineData = ref([])
 const historyLoading = ref(false)
 const historyError = ref(null)
 const activeCorrectionTab = ref('WEIGHBRIDGE')
 const attributionData = ref(null)
+
+const showVoidModal = ref(false)
+const voidLoading = ref(false)
+const voidError = ref(null)
+const voidForm = ref({
+  reasonCode: '',
+  reason: ''
+})
 
 const normalizeQcResult = (val) => {
   if (!val) return 'APPROVED'
@@ -1556,15 +1676,18 @@ const handleEvidenceUpload = (event) => {
 }
 
 const fetchCorrectionHistory = async () => {
-  if (!props.truck?.id || !isAdmin.value) return
+  if (!props.truck?.id) return
   historyLoading.value = true
   historyError.value = null
   try {
-    const res = await truckStore.fetchOperationLogCorrections(props.truck.id)
-    auditHistory.value = res?.data || []
-    attributionData.value = res?.attribution || null
+    const res = await truckService.getAuditHistory(props.truck.id)
+    const resData = res?.data || res
+    timelineData.value = resData?.timeline || []
+    auditHistory.value = resData?.data || []
+    attributionData.value = resData?.attribution || null
   } catch (err) {
-    historyError.value = err?.message || 'Gagal memuat riwayat koreksi'
+    historyError.value = err?.message || 'Gagal memuat riwayat audit'
+    timelineData.value = []
     auditHistory.value = []
     attributionData.value = null
   } finally {
@@ -1888,17 +2011,41 @@ const executeCorrectionSubmission = async () => {
   }
 }
 
-const handleDelete = async () => {
-  const ok = await confirm({
-    title: 'Delete Data?',
-    message: 'Are you sure you want to completely delete this truck data? This action cannot be undone!',
-    type: 'danger',
-    confirmText: 'Yes, Delete'
-  })
-  if (ok) {
-    await truckStore.deleteTruck(props.truck.id)
+const openVoidModal = () => {
+  voidError.value = null
+  voidForm.value = {
+    reasonCode: '',
+    reason: ''
+  }
+  showVoidModal.value = true
+}
+
+const executeVoidSubmission = async () => {
+  if (!voidForm.value.reasonCode || voidForm.value.reason.trim().length < 5) {
+    voidError.value = 'Kode alasan dan penjelasan detail (minimal 5 karakter) wajib diisi.'
+    return
+  }
+  voidLoading.value = true
+  voidError.value = null
+  try {
+    const payload = {
+      reasonCode: voidForm.value.reasonCode,
+      reason: voidForm.value.reason.trim(),
+      expectedRevision: props.truck?.revision || 1
+    }
+    const updatedRecord = await truckStore.voidTruck(props.truck.id, payload)
+    if (updatedRecord && typeof updatedRecord === 'object') {
+      Object.assign(props.truck, updatedRecord)
+    }
+    showVoidModal.value = false
+    await fetchCorrectionHistory()
+    await truckStore.fetchTrucks()
     emit('deleted', props.truck.id)
     close()
+  } catch (err) {
+    voidError.value = err.gmsMessage || err.response?.data?.message || err.message || 'Gagal membatalkan transaksi (Void).'
+  } finally {
+    voidLoading.value = false
   }
 }
 

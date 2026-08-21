@@ -335,7 +335,7 @@ async function main() {
     backupId: 'BKP-HISTORICAL-REHEARSAL-FIXTURE',
     sourceVersion: '0.5.0-historical',
     sourceMigrationCount: HISTORICAL_MIGRATIONS.length,
-    targetMigrationCount: 18,
+    targetMigrationCount: 19,
     sourceMigrations: HISTORICAL_MIGRATIONS,
     createdAt: new Date().toISOString(),
     artifacts: {

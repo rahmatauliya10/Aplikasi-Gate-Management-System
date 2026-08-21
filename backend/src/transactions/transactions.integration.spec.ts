@@ -5,6 +5,8 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { ConflictException } from '@nestjs/common';
 import { CorrectionTargetModule } from '@prisma/client';
 
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+
 describe('OperationLogCorrectionService PostgreSQL OCC & Audit Integration', () => {
   let service: OperationLogCorrectionService;
   let prismaService: PrismaService;
@@ -28,6 +30,12 @@ describe('OperationLogCorrectionService PostgreSQL OCC & Audit Integration', () 
           provide: ActivityLogsService,
           useValue: {
             logAction: jest.fn(),
+          },
+        },
+        {
+          provide: AuthorizationScopeService,
+          useValue: {
+            getTransactionScope: jest.fn().mockReturnValue({}),
           },
         },
       ],
