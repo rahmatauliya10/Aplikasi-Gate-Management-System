@@ -1493,7 +1493,7 @@ export class OperationLogCorrectionService {
           include: {
             changedBy: { select: { id: true, name: true, role: true } },
           },
-          orderBy: { createdAt: 'asc' },
+          orderBy: { changedAt: 'asc' },
         });
 
       // Fetch all operation log corrections (including items and diffs)
@@ -1523,7 +1523,7 @@ export class OperationLogCorrectionService {
       for (const sh of statusHistories) {
         timeline.push({
           eventType: 'STATUS_TRANSITION',
-          timestamp: sh.createdAt,
+          timestamp: sh.changedAt,
           actor: sh.changedBy
             ? `${sh.changedBy.role} — ${sh.changedBy.name}`
             : 'Sistem Gate Otomatis',
