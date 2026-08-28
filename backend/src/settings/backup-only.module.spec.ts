@@ -21,7 +21,9 @@ describe('BackupOnlyModule Isolation Test', () => {
       })
       .compile();
 
-    const backupService = moduleRef.get<DatabaseBackupService>(DatabaseBackupService);
+    const backupService = moduleRef.get<DatabaseBackupService>(
+      DatabaseBackupService,
+    );
     expect(backupService).toBeDefined();
     expect(typeof backupService.runAutomatedScheduledBackup).toBe('function');
   });

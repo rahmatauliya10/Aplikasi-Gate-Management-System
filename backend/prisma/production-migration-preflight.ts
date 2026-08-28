@@ -362,7 +362,9 @@ export async function main(): Promise<void> {
     JSON.stringify(report, null, 2),
   );
   if (!report.isReadyForMigration) {
-    console.error('❌ PREFLIGHT BLOCKER DETECTED: Database is NOT ready for migration.');
+    console.error(
+      '❌ PREFLIGHT BLOCKER DETECTED: Database is NOT ready for migration.',
+    );
     process.exit(1);
   } else {
     console.log('✅ PREFLIGHT PASSED: Database is ready for migration.');
