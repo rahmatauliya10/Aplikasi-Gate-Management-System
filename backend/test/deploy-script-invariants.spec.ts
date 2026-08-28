@@ -3,8 +3,16 @@ import * as path from 'path';
 
 describe('Deploy Script & Production Invariants Gate (P0-05, P1-05, P2-04)', () => {
   const projectRoot = path.resolve(__dirname, '..', '..');
-  const deployScriptPath = path.join(projectRoot, 'scripts', 'deploy-with-rollback.ps1');
-  const watchdogScriptPath = path.join(projectRoot, 'scripts', 'gms-autostart-watchdog.ps1');
+  const deployScriptPath = path.join(
+    projectRoot,
+    'scripts',
+    'deploy-with-rollback.ps1',
+  );
+  const watchdogScriptPath = path.join(
+    projectRoot,
+    'scripts',
+    'gms-autostart-watchdog.ps1',
+  );
   const composeProdPath = path.join(projectRoot, 'docker-compose.prod.yml');
 
   let deployScriptContent: string;
@@ -87,24 +95,38 @@ describe('Deploy Script & Production Invariants Gate (P0-05, P1-05, P2-04)', () 
 
   describe('3. Production Compose Migrator Backup Isolation & Persistence', () => {
     it('should configure BACKUP_DATABASE_URL with gms_backup role in migrator service', () => {
-      expect(composeProdContent).toContain('BACKUP_DATABASE_URL=postgresql://${GMS_BACKUP_USER:-gms_backup}');
+      expect(composeProdContent).toContain(
+        'BACKUP_DATABASE_URL=postgresql://${GMS_BACKUP_USER:-gms_backup}',
+      );
     });
 
     it('should configure backup directories and secrets in migrator service', () => {
-      expect(composeProdContent).toContain('BACKUP_SIGNATURE_SECRET=${BACKUP_SIGNATURE_SECRET:?');
-      expect(composeProdContent).toContain('LOCAL_BACKUP_DIR=/app/backups/local');
-      expect(composeProdContent).toContain('OFFSITE_BACKUP_DIR=/app/backups/nas');
+      expect(composeProdContent).toContain(
+        'BACKUP_SIGNATURE_SECRET=${BACKUP_SIGNATURE_SECRET:?',
+      );
+      expect(composeProdContent).toContain(
+        'LOCAL_BACKUP_DIR=/app/backups/local',
+      );
+      expect(composeProdContent).toContain(
+        'OFFSITE_BACKUP_DIR=/app/backups/nas',
+      );
       expect(composeProdContent).toContain('UPLOAD_DIR=/app/uploads');
     });
 
     it('should mount host backup and upload volumes to migrator service', () => {
-      expect(composeProdContent).toContain('./backups/local:/app/backups/local');
+      expect(composeProdContent).toContain(
+        './backups/local:/app/backups/local',
+      );
       expect(composeProdContent).toContain('./uploads:/app/uploads:ro');
-      expect(composeProdContent).toContain('${NAS_MOUNT_PATH:?NAS_MOUNT_PATH must be set to a remote offsite/NAS mount directory}:/app/backups/nas');
+      expect(composeProdContent).toContain(
+        '${NAS_MOUNT_PATH:?NAS_MOUNT_PATH must be set to a remote offsite/NAS mount directory}:/app/backups/nas',
+      );
     });
 
     it('should NOT provide JWT secrets to the migrator service', () => {
-      const migratorSection = composeProdContent.split('migrator:')[1].split('postgres:')[0];
+      const migratorSection = composeProdContent
+        .split('migrator:')[1]
+        .split('postgres:')[0];
       expect(migratorSection).not.toContain('JWT_ACCESS_SECRET');
       expect(migratorSection).not.toContain('JWT_REFRESH_SECRET');
     });
