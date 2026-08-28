@@ -1,7 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 
 export interface PreflightReport {
   timestamp: string;
@@ -376,19 +375,10 @@ export const isDirectExecution = (): boolean => {
   if (typeof process === 'undefined' || !process.argv || !process.argv[1]) {
     return false;
   }
-  try {
-    if (typeof import.meta !== 'undefined' && import.meta.url) {
-      const currentFilePath = fileURLToPath(import.meta.url);
-      const executedPath = path.resolve(process.argv[1]);
-      if (executedPath === currentFilePath) {
-        return true;
-      }
-    }
-  } catch {
-    // Fallback if import.meta is unavailable
-  }
   const argv1 = (process.argv[1] || '').replace(/\\/g, '/');
   return (
+    argv1.endsWith('/production-migration-preflight.ts') ||
+    argv1.endsWith('/production-migration-preflight.js') ||
     argv1.endsWith('production-migration-preflight.ts') ||
     argv1.endsWith('production-migration-preflight.js')
   );
