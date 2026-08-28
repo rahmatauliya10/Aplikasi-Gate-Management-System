@@ -161,6 +161,7 @@ async function main() {
   }
 
   // 3. Check for local migrations not in DB
+  let pendingCount = 0;
   if (fs.existsSync(migrationsDir)) {
     const localDirs = fs.readdirSync(migrationsDir).filter((d) => {
       const fullPath = path.join(migrationsDir, d);
@@ -172,6 +173,7 @@ async function main() {
 
     const dbNames = new Set(dbMigrations.map((m) => m.migration_name));
     const pendingMigrations = localDirs.filter((d) => !dbNames.has(d));
+    pendingCount = pendingMigrations.length;
 
     if (pendingMigrations.length > 0) {
       console.log(`\n📋 Pending migrations (in repo but not applied to DB):`);
@@ -180,6 +182,40 @@ async function main() {
       }
       console.log('');
     }
+  }
+
+  // Parse optional CLI arguments for pending count enforcement
+  const args = process.argv.slice(2);
+  const expectPendingArgIdx = args.findIndex(
+    (a) => a === '--expect-pending' || a.startsWith('--expect-pending='),
+  );
+  if (expectPendingArgIdx !== -1) {
+    const arg = args[expectPendingArgIdx];
+    let expectedCount = null;
+    if (arg.includes('=')) {
+      expectedCount = parseInt(arg.split('=')[1], 10);
+    } else if (args[expectPendingArgIdx + 1] !== undefined) {
+      expectedCount = parseInt(args[expectPendingArgIdx + 1], 10);
+    }
+    if (expectedCount !== null && !isNaN(expectedCount)) {
+      if (pendingCount !== expectedCount) {
+        console.error(
+          `❌ PENDING MIGRATIONS MISMATCH: Expected ${expectedCount} pending migration(s), but found ${pendingCount}.`,
+        );
+        hasFailure = true;
+      } else {
+        console.log(
+          `✅ Expected pending migrations count (${expectedCount}) verified.`,
+        );
+      }
+    }
+  }
+
+  if (args.includes('--fail-on-pending') && pendingCount > 0) {
+    console.error(
+      `❌ UNAPPLIED MIGRATIONS DETECTED: Found ${pendingCount} pending migration(s) when --fail-on-pending was specified.`,
+    );
+    hasFailure = true;
   }
 
   // 4. Summary

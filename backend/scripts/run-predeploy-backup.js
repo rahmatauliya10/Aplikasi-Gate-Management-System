@@ -7,16 +7,32 @@
  */
 
 const { NestFactory } = require('@nestjs/core');
-const { AppModule } = require('../dist/src/app.module');
-const { DatabaseBackupService } = require('../dist/src/settings/database-backup.service');
 const fs = require('fs');
 const path = require('path');
+
+let BackupOnlyModule;
+let DatabaseBackupService;
+try {
+  BackupOnlyModule = require('../dist/src/settings/backup-only.module').BackupOnlyModule;
+  DatabaseBackupService = require('../dist/src/settings/database-backup.service').DatabaseBackupService;
+} catch (e) {
+  try {
+    require('ts-node/register');
+    BackupOnlyModule = require('../src/settings/backup-only.module').BackupOnlyModule;
+    DatabaseBackupService = require('../src/settings/database-backup.service').DatabaseBackupService;
+  } catch (err) {
+    console.error('Failed to load BackupOnlyModule:', err.message);
+  }
+}
 
 async function main() {
   console.log('\n=== GMS Pre-Deployment Backup Hard-Gate ===\n');
   let app;
   try {
-    app = await NestFactory.createApplicationContext(AppModule, { logger: ['error', 'warn', 'log'] });
+    if (!BackupOnlyModule) {
+      throw new Error('BackupOnlyModule could not be loaded.');
+    }
+    app = await NestFactory.createApplicationContext(BackupOnlyModule, { logger: ['error', 'warn', 'log'] });
     const backupService = app.get(DatabaseBackupService);
 
     console.log('📦 Triggering mandatory pre-update backup (MANUAL_PRE_UPDATE)...');
@@ -28,6 +44,7 @@ async function main() {
       warehouseAccess: [],
     });
 
+    console.log(`BACKUP_CREATED_ID: ${manifest.backupId}`);
     console.log(`✅ Backup Created: ${manifest.backupId}`);
     console.log(`   Local Status: ${manifest.localStatus}`);
     console.log(`   Offsite Status: ${manifest.offsiteStatus}`);

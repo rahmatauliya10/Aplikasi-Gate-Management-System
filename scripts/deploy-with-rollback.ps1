@@ -24,10 +24,16 @@ param(
     [string]$FrontendDigest = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$MigratorDigest = "",
+
+    [Parameter(Mandatory=$false)]
     [string]$PreviousBackendDigest = "",
 
     [Parameter(Mandatory=$false)]
     [string]$PreviousFrontendDigest = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$PreviousMigratorDigest = "",
 
     [Parameter(Mandatory=$false)]
     [string]$TargetManifestPath = "",
@@ -37,6 +43,9 @@ param(
 
     [Parameter(Mandatory=$false)]
     [string]$ComposeFile = "docker-compose.prod.yml",
+
+    [Parameter(Mandatory=$false)]
+    [string]$ProjectName = "gms",
 
     [Parameter(Mandatory=$false)]
     [switch]$RollbackOnly,
@@ -84,11 +93,12 @@ function Verify-Image-Digest {
 }
 
 function Verify-Image-Exists {
-    param([string]$Tag, [string]$BackendDig = "", [string]$FrontendDig = "")
-    if ($BackendDig -or $FrontendDig) {
+    param([string]$Tag, [string]$BackendDig = "", [string]$FrontendDig = "", [string]$MigratorDig = "")
+    if ($BackendDig -or $FrontendDig -or $MigratorDig) {
         $backendOk = Verify-Image-Digest -ImageName "gms-backend" -ExpectedDigest $BackendDig
         $frontendOk = Verify-Image-Digest -ImageName "gms-frontend" -ExpectedDigest $FrontendDig
-        return ($backendOk -and $frontendOk)
+        $migratorOk = if ($MigratorDig) { Verify-Image-Digest -ImageName "gms-backend-migrator" -ExpectedDigest $MigratorDig } else { $true }
+        return ($backendOk -and $frontendOk -and $migratorOk)
     }
     $backendImg = & docker images -q "gms-backend:$Tag" 2>$null
     $frontendImg = & docker images -q "gms-frontend:$Tag" 2>$null
@@ -125,11 +135,17 @@ if ($ResolvedTargetManifest) {
         if (-not $FrontendDigest -and $ManifestObj.frontend) {
             $FrontendDigest = if ($ManifestObj.frontend.digest) { $ManifestObj.frontend.digest } else { $ManifestObj.frontend.ciLocalImageId }
         }
+        if (-not $MigratorDigest -and $ManifestObj.migrator) {
+            $MigratorDigest = if ($ManifestObj.migrator.digest) { $ManifestObj.migrator.digest } else { $ManifestObj.migrator.ciLocalImageId }
+        }
         if (-not $PreviousBackendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.backend) {
             $PreviousBackendDigest = if ($ManifestObj.previousRelease.backend.digest) { $ManifestObj.previousRelease.backend.digest } else { $ManifestObj.previousRelease.backend.ciLocalImageId }
         }
         if (-not $PreviousFrontendDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.frontend) {
             $PreviousFrontendDigest = if ($ManifestObj.previousRelease.frontend.digest) { $ManifestObj.previousRelease.frontend.digest } else { $ManifestObj.previousRelease.frontend.ciLocalImageId }
+        }
+        if (-not $PreviousMigratorDigest -and $ManifestObj.previousRelease -and $ManifestObj.previousRelease.migrator) {
+            $PreviousMigratorDigest = if ($ManifestObj.previousRelease.migrator.digest) { $ManifestObj.previousRelease.migrator.digest } else { $ManifestObj.previousRelease.migrator.ciLocalImageId }
         }
     } catch {}
 }
@@ -139,7 +155,9 @@ function Execute-Rollback {
         [string]$PrevTag,
         [string]$PrevBackendDig,
         [string]$PrevFrontendDig,
+        [string]$PrevMigratorDig = "",
         [string]$CompFile,
+        [string]$ProjName = "gms",
         [bool]$IsStrictProd,
         [string]$RollbackManifestPath = "",
         [bool]$RequireDbRollback = $false,
@@ -185,13 +203,14 @@ function Execute-Rollback {
         $env:RELEASE_TAG = $PrevTag
         $env:BACKEND_IMAGE = if ($PrevBackendDig) { "gms-backend@$PrevBackendDig" } else { "gms-backend:$PrevTag" }
         $env:FRONTEND_IMAGE = if ($PrevFrontendDig) { "gms-frontend@$PrevFrontendDig" } else { "gms-frontend:$PrevTag" }
+        $env:MIGRATOR_IMAGE = if ($PrevMigratorDig) { "gms-backend-migrator@$PrevMigratorDig" } else { "gms-backend-migrator:$PrevTag" }
 
-        if (-not (Verify-Image-Exists -Tag $PrevTag -BackendDig $PrevBackendDig -FrontendDig $PrevFrontendDig)) {
-            throw "Previous release image pair [gms-backend:$PrevTag, gms-frontend:$PrevTag] does not exist locally. Cannot perform safe rollback."
+        if (-not (Verify-Image-Exists -Tag $PrevTag -BackendDig $PrevBackendDig -FrontendDig $PrevFrontendDig -MigratorDig $PrevMigratorDig)) {
+            throw "Previous release image set [gms-backend:$PrevTag, gms-frontend:$PrevTag] does not exist locally. Cannot perform safe rollback."
         }
 
         Write-Host "[GMS AUTOMATED ROLLBACK] Booting previous stable release containers ($env:BACKEND_IMAGE, $env:FRONTEND_IMAGE)..." -ForegroundColor Cyan
-        & docker compose -f $CompFile --env-file backend\.env up -d --no-build --remove-orphans
+        & docker compose -p $ProjName -f $CompFile --env-file backend\.env up -d --no-build --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
 
         Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
@@ -221,7 +240,7 @@ if ($RollbackOnly) {
     }
     [bool]$dbRollbackRequired = [bool](-not [string]::IsNullOrWhiteSpace($RollbackManifestPath))
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $RollbackManifestPath -RequireDbRollback $dbRollbackRequired -EnforceNginx $EffectiveRequireNginx
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -PrevMigratorDig $PreviousMigratorDigest -CompFile $ComposeFile -ProjName $ProjectName -IsStrictProd $IsProductionMode -RollbackManifestPath $RollbackManifestPath -RequireDbRollback $dbRollbackRequired -EnforceNginx $EffectiveRequireNginx
         exit 0
     }
     catch {
@@ -243,6 +262,12 @@ if (-not $FrontendDigest) {
         $FrontendDigest = $inspectFrontend.Split("@")[1]
     }
 }
+if (-not $MigratorDigest) {
+    [string]$inspectMigrator = & docker inspect --format="{{index .RepoDigests 0}}" "gms-backend-migrator:$TargetReleaseTag" 2>$null
+    if ($inspectMigrator -and $inspectMigrator.Contains("@")) {
+        $MigratorDigest = $inspectMigrator.Split("@")[1]
+    }
+}
 
 # Strict Production Immutability Verification Gate
 if ($IsProductionMode) {
@@ -255,11 +280,14 @@ if ($IsProductionMode) {
 $env:RELEASE_TAG = $TargetReleaseTag
 $env:BACKEND_IMAGE = if ($BackendDigest) { "gms-backend@$BackendDigest" } else { "gms-backend:$TargetReleaseTag" }
 $env:FRONTEND_IMAGE = if ($FrontendDigest) { "gms-frontend@$FrontendDigest" } else { "gms-frontend:$TargetReleaseTag" }
+$env:MIGRATOR_IMAGE = if ($MigratorDigest) { "gms-backend-migrator@$MigratorDigest" } else { "gms-backend-migrator:$TargetReleaseTag" }
 
 Write-Host "==============================================================================" -ForegroundColor Cyan
 Write-Host "Starting GMS Immutable Deployment Process: Target Release [$TargetReleaseTag]" -ForegroundColor Cyan
+Write-Host "Project Name:   $ProjectName" -ForegroundColor Gray
 Write-Host "Backend Image:  $env:BACKEND_IMAGE" -ForegroundColor Gray
 Write-Host "Frontend Image: $env:FRONTEND_IMAGE" -ForegroundColor Gray
+Write-Host "Migrator Image: $env:MIGRATOR_IMAGE" -ForegroundColor Gray
 Write-Host "==============================================================================" -ForegroundColor Cyan
 
 [string]$CapturedManifestPath = ""
@@ -269,18 +297,18 @@ Write-Host "====================================================================
 try {
     # Step 1.1: Verify target image availability and immutability before altering any services
     Write-Host "[GMS Preflight] Validating image presence and digest immutability..." -ForegroundColor Cyan
-    if (-not (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest)) {
-        throw "Target release image pair [gms-backend:$TargetReleaseTag, gms-frontend:$TargetReleaseTag] is not present or digest mismatched. Aborting deploy."
+    if (-not (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest -MigratorDig $MigratorDigest)) {
+        throw "Target release image set [gms-backend:$TargetReleaseTag, gms-frontend:$TargetReleaseTag] is not present or digest mismatched. Aborting deploy."
     }
 
     # Step 1.2: Check migration checksums against canonical baseline prior to backup & execution
     Write-Host "[GMS Preflight] Validating migration history checksums and detecting schema drift..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator npm run test:drift
+    & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator npm run test:drift
     if ($LASTEXITCODE -ne 0) { throw "Schema migration checksum verification failed with exit code $LASTEXITCODE. Target migrations have drift!" }
 
     # Step 1.3: Trigger pre-deployment atomic database and attachment backup
     Write-Host "[GMS Preflight] Creating mandatory pre-deployment backup..." -ForegroundColor Cyan
-    $PredeployBackupLog = & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator node scripts/run-predeploy-backup.js 2>&1
+    $PredeployBackupLog = & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator node scripts/run-predeploy-backup.js 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Pre-deployment backup script terminated with error code $LASTEXITCODE: $PredeployBackupLog"
     }
@@ -350,14 +378,14 @@ try {
 
     # Step 1.6: Run database preflight duplicate audit
     Write-Host "[GMS Preflight] Running database preflight duplicate audit..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator npm run prisma:preflight -- --report-only --fail-on-duplicates
+    & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator npm run prisma:preflight -- --report-only --fail-on-duplicates
     if ($LASTEXITCODE -ne 0) { throw "Database preflight duplicate audit failed with exit code $LASTEXITCODE." }
 
     # Step 1.7: Execute forward database migration (Setting MigrationStarted = true right here)
     Write-Host "[GMS Migration] Applying Prisma database migrations forward (Target Release: $TargetReleaseTag)..." -ForegroundColor Cyan
     $MigrationStarted = $true
 
-    & docker compose -f $ComposeFile --env-file backend\.env run --rm migrator npx prisma migrate deploy
+    & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator npx prisma migrate deploy
     if ($LASTEXITCODE -ne 0) {
         throw "Prisma database migration deployment failed with exit code $LASTEXITCODE."
     }
@@ -368,7 +396,7 @@ try {
     }
 
     Write-Host "[GMS Deploy] Booting containers for release [$TargetReleaseTag] (--no-build)..." -ForegroundColor Cyan
-    & docker compose -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
+    & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env up -d --no-build --remove-orphans
     if ($LASTEXITCODE -ne 0) { throw "Docker compose up terminated with error code $LASTEXITCODE." }
 
     if ($FaultInjectionPhase -eq "AFTER_CONTAINER_SWITCH" -or $env:GMS_FAULT_INJECTION_PHASE -eq "AFTER_CONTAINER_SWITCH") {
@@ -433,10 +461,15 @@ try {
             image = "gms-frontend"
             digest = $FrontendDigest
         }
+        migrator = @{
+            image = "gms-backend-migrator"
+            digest = $MigratorDigest
+        }
         previousRelease = @{
             tag = $PreviousReleaseTag
             backend = @{ digest = $PreviousBackendDigest }
             frontend = @{ digest = $PreviousFrontendDigest }
+            migrator = @{ digest = $PreviousMigratorDigest }
         }
     }
     [string]$ManifestJson = $ReleaseManifest | ConvertTo-Json -Depth 5
@@ -448,7 +481,7 @@ try {
 catch {
     Write-Host "[GMS DEPLOYMENT FAILED] Error detected: $_" -ForegroundColor Red
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -CompFile $ComposeFile -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted -EnforceNginx $EffectiveRequireNginx
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -PrevMigratorDig $PreviousMigratorDigest -CompFile $ComposeFile -ProjName $ProjectName -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted -EnforceNginx $EffectiveRequireNginx
     }
     catch {
         Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover during rollback to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red

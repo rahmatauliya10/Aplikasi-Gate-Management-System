@@ -354,23 +354,39 @@ export async function runProductionMigrationPreflight(
   }
 }
 
-if (require.main === module) {
-  runProductionMigrationPreflight()
-    .then((report) => {
-      fs.writeFileSync(
-        'migration_preflight_report.json',
-        JSON.stringify(report, null, 2),
-      );
-      if (!report.isReadyForMigration) {
-        console.error('❌ PREFLIGHT BLOCKER DETECTED: Database is NOT ready for migration.');
-        process.exit(1);
-      } else {
-        console.log('✅ PREFLIGHT PASSED: Database is ready for migration.');
-        process.exit(0);
-      }
-    })
-    .catch((err) => {
-      console.error('Preflight script fatal error:', err);
-      process.exit(1);
-    });
+export async function main(): Promise<void> {
+  const report = await runProductionMigrationPreflight();
+  fs.writeFileSync(
+    'migration_preflight_report.json',
+    JSON.stringify(report, null, 2),
+  );
+  if (!report.isReadyForMigration) {
+    console.error(
+      '❌ PREFLIGHT BLOCKER DETECTED: Database is NOT ready for migration.',
+    );
+    process.exit(1);
+  } else {
+    console.log('✅ PREFLIGHT PASSED: Database is ready for migration.');
+    process.exit(0);
+  }
+}
+
+export const isDirectExecution = (): boolean => {
+  if (typeof process === 'undefined' || !process.argv || !process.argv[1]) {
+    return false;
+  }
+  const argv1 = (process.argv[1] || '').replace(/\\/g, '/');
+  return (
+    argv1.endsWith('/production-migration-preflight.ts') ||
+    argv1.endsWith('/production-migration-preflight.js') ||
+    argv1.endsWith('production-migration-preflight.ts') ||
+    argv1.endsWith('production-migration-preflight.js')
+  );
+};
+
+if (isDirectExecution()) {
+  main().catch((err) => {
+    console.error('Preflight script fatal error:', err);
+    process.exit(1);
+  });
 }
