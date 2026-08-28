@@ -110,8 +110,10 @@ export class DatabaseBackupService
 
   onApplicationBootstrap() {
     this.ensureBackupDirectories();
-    this.scheduleIntervalBackups();
-    void this.performSlaCatchUpCheck();
+    if (process.env.GMS_DISABLE_BACKUP_SCHEDULER !== 'true') {
+      this.scheduleIntervalBackups();
+      void this.performSlaCatchUpCheck();
+    }
   }
 
   onModuleDestroy() {
@@ -469,6 +471,27 @@ export class DatabaseBackupService
             `Non-critical snapshot table [${tableName}] fetch skipped (e.g. legacy schema table missing): ${err.message}`,
           );
           return [];
+        }
+        const msg = (err.message || '').toLowerCase();
+        if (
+          err.code === 'P2022' ||
+          err.code === '42703' ||
+          msg.includes('column') ||
+          msg.includes('does not exist')
+        ) {
+          try {
+            this.logger.warn(
+              `Prisma schema column mismatch on table [${tableName}] (pre-migration database state). Falling back to raw SQL table snapshot...`,
+            );
+            return await this.prisma.$queryRawUnsafe<any[]>(
+              `SELECT * FROM public."${tableName}";`,
+            );
+          } catch (rawErr: any) {
+            this.logger.error(
+              `Critical error fetching table [${tableName}] via raw fallback: ${rawErr.message}`,
+            );
+            throw rawErr;
+          }
         }
         this.logger.error(
           `Critical error fetching table [${tableName}] during backup snapshot: ${err.message}`,

@@ -25,6 +25,8 @@ try {
   }
 }
 
+process.env.GMS_DISABLE_BACKUP_SCHEDULER = 'true';
+
 async function main() {
   console.log('\n=== GMS Pre-Deployment Backup Hard-Gate ===\n');
   let app;
