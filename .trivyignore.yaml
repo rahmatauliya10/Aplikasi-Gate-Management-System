@@ -77,3 +77,18 @@ vulnerabilities:
       - pkg:npm/tar@7.3.11
     statement: "Node-tar malformed tar archive header Denial of Service in build tooling. Non-exploitable in GMS as tar archives are not processed at runtime."
     expired_at: 2026-11-30
+
+  - id: CVE-2026-73566
+    purls:
+      - pkg:npm/tar@7.5.11
+      - pkg:npm/tar@7.3.11
+    statement: "Node-tar Denial of Service via crafted long-path tar archive in build tooling. Non-exploitable in GMS as archive extraction is not performed by node-tar in production."
+    expired_at: 2026-11-30
+
+  - id: CVE-2026-9496
+    purls:
+      - pkg:npm/pacote@19.0.2
+      - pkg:npm/pacote@20.0.1
+    statement: "Pacote tarball fetching vulnerability in build tooling. Non-exploitable in GMS container runtime as migrator runs exclusively trusted static schema files and is never exposed to untrusted external tarball fetches. Runtime container is built with pruned production dependencies and does not contain this package."
+    expired_at: 2026-11-30
+

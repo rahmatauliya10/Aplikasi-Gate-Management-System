@@ -275,8 +275,16 @@ async function runAllScenarios() {
 
     const gbjQcV = await request('POST', `/api/qc/vehicle-result/${gbjTxId}`, {
       result: 'PASS',
-      vehicleCleanliness: true,
-      vehicleOdor: true,
+      decisionMode: 'NORMAL_PASS',
+      checklistItems: {
+        items: [
+          { label: 'Tidak ditemukan hama atau tanda-tanda infestasi', ok: true },
+          { label: 'Bebas dari bahan non-halal / kontaminasi najis', ok: true },
+          { label: 'Truk bersih, kering, dan tidak berbau asing', ok: true },
+          { label: 'Bebas bahan kimia berbahaya & kontaminan lain', ok: true },
+          { label: 'Kondisi lantai & dinding truk baik (terpal/alas memadai)', ok: true },
+        ],
+      },
     }, qcToken);
     assertScenario('GBJ QC Vehicle Check PASSED', gbjQcV.statusCode === 200 || gbjQcV.statusCode === 201);
 

@@ -83,6 +83,12 @@ enum CheckResult {
   NA
 }
 
+enum QcVehicleDecisionMode {
+  NORMAL_PASS
+  APPROVED_WITH_DEVIATION
+  REJECTED
+}
+
 enum AttachmentType {
   PHOTO
   DOCUMENT
@@ -320,9 +326,12 @@ model WarehouseProcess {
 }
 
 model QcVehicleCheck {
-  id                   String       @id @default(uuid())
+  id                   String                 @id @default(uuid())
   transactionId        String
   result               QcResult?
+  decisionMode         QcVehicleDecisionMode?
+  hasDeviation         Boolean?
+  deviationReason      String?
   vehicleCleanliness   CheckResult?
   vehicleOdor          CheckResult?
   pestEvidence         CheckResult?

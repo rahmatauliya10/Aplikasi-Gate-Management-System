@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { TransactionStatus, ProcessType, CheckResult } from '@prisma/client';
+import {
+  TransactionStatus,
+  ProcessType,
+  CheckResult,
+  QcVehicleDecisionMode,
+} from '@prisma/client';
 import { StartQcDto } from './dto/start-qc.dto';
 import { VehicleCheckResultDto } from './dto/vehicle-check-result.dto';
 import { IncomingCheckResultDto } from './dto/incoming-check-result.dto';
@@ -18,6 +23,14 @@ import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 import { QC_HISTORY_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
+import {
+  GBJ_CHECKLIST_ITEMS,
+  GBJ_CHECKLIST_SEVERITY,
+  GBJ_CHECKLIST_COUNT,
+  MAX_PHOTO_DECODED_BYTES,
+  ALLOWED_PHOTO_MIMES,
+  MIN_DEVIATION_REASON_LENGTH,
+} from './constants/gbj-checklist-policy';
 
 @Injectable()
 export class QcService {
@@ -211,13 +224,45 @@ export class QcService {
         'Result has already been submitted for this transaction',
       );
 
+    // If GBJ, route to authoritative submitGbjVehicleCheck
+    if (tx.processType === 'GBJ') {
+      return this.submitGbjVehicleCheck(tx as any, dto, userId);
+    }
+
+    // ─── GBB/GSP legacy path (CAS-first, atomic ActivityLog) ───
     const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
     const nextStatus =
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
 
     assertValidStatusTransition(tx.status, nextStatus);
 
+    const now = new Date();
     const updated = await this.prisma.$transaction(async (prisma) => {
+      // 1. CAS claim FIRST
+      const claimed = await prisma.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: tx.status,
+          revision: tx.revision,
+        },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+          qcStartAt: tx.qcStartAt || now,
+          qcEndAt: now,
+        },
+      });
+
+      if (claimed.count !== 1) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+          errors: [],
+        });
+      }
+
+      // 2. Create QcVehicleCheck
       const maxRev = await prisma.qcVehicleCheck.aggregate({
         where: { transactionId },
         _max: { revision: true },
@@ -240,22 +285,268 @@ export class QcService {
           notes: dto.notes,
           checklistItems: dto.checklistItems || null,
           checkedById: userId,
-          startedAt: tx.qcStartAt || new Date(),
-          completedAt: new Date(),
+          startedAt: tx.qcStartAt || now,
+          completedAt: now,
         },
       });
 
+      // 3. Status history
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Vehicle Check: ${result}`,
+        },
+      });
+
+      // 4. Activity log (atomic)
+      await this.activityLogsService.logAction(
+        {
+          userId,
+          action: 'QC_VEHICLE_RESULT',
+          module: 'QC',
+          referenceId: transactionId,
+          description: { result },
+          status: 'SUCCESS',
+        },
+        prisma,
+      );
+
+      return prisma.transaction.findUnique({
+        where: { id: transactionId },
+        include: { qcVehicleChecks: true },
+      });
+    });
+
+    return {
+      success: true,
+      message: `Vehicle QC result submitted (${result})`,
+      data: updated,
+    };
+  }
+
+  private async submitGbjVehicleCheck(
+    tx: any,
+    dto: VehicleCheckResultDto,
+    userId: string,
+  ) {
+    // ═══════════════════════════════════════════
+    // STEP 1: Structural Validation of Checklist
+    // ═══════════════════════════════════════════
+    const rawItems: unknown[] = dto.checklistItems?.items;
+
+    if (!Array.isArray(rawItems)) {
+      throw new BadRequestException({
+        success: false,
+        message: 'checklistItems.items harus berupa array.',
+        errors: [],
+      });
+    }
+
+    if (rawItems.length !== GBJ_CHECKLIST_COUNT) {
+      throw new BadRequestException({
+        success: false,
+        message: `Checklist GBJ harus ${GBJ_CHECKLIST_COUNT} item, diterima ${rawItems.length}.`,
+        errors: [],
+      });
+    }
+
+    // Strict boolean validation — "false" string = truthy, would bypass
+    const validatedItems: Array<{ ok: boolean; photo: string | null }> = [];
+
+    for (let i = 0; i < rawItems.length; i++) {
+      const raw = rawItems[i] as any;
+
+      if (typeof raw?.ok !== 'boolean') {
+        throw new BadRequestException({
+          success: false,
+          message: `checklistItems.items[${i}].ok harus bertipe boolean, diterima ${typeof raw?.ok} ("${raw?.ok}").`,
+          errors: [],
+        });
+      }
+
+      let photo: string | null = null;
+
+      if (!raw.ok) {
+        // NOT OK item — photo evidence required
+        if (!raw.photo || typeof raw.photo !== 'string') {
+          throw new BadRequestException({
+            success: false,
+            message: `Item ${i + 1} ("${GBJ_CHECKLIST_ITEMS[i]}") ditandai NOT OK tetapi tidak memiliki bukti foto.`,
+            errors: [],
+          });
+        }
+
+        // Photo MIME validation
+        const mimeMatch = raw.photo.match(
+          /^data:(image\/[a-zA-Z0-9+.-]+);base64,/,
+        );
+        if (!mimeMatch) {
+          throw new BadRequestException({
+            success: false,
+            message: `Foto item ${i + 1} bukan format data URI base64 yang valid.`,
+            errors: [],
+          });
+        }
+
+        const detectedMime = mimeMatch[1].toLowerCase();
+        if (!ALLOWED_PHOTO_MIMES.includes(detectedMime)) {
+          throw new BadRequestException({
+            success: false,
+            message: `Foto item ${i + 1} MIME "${detectedMime}" tidak diizinkan. Hanya ${ALLOWED_PHOTO_MIMES.join(', ')} yang diterima.`,
+            errors: [],
+          });
+        }
+
+        // Base64 decoded size estimation (base64 is ~4/3 of raw)
+        const base64Data = raw.photo.substring(raw.photo.indexOf(',') + 1);
+        const estimatedBytes = Math.ceil((base64Data.length * 3) / 4);
+        if (estimatedBytes > MAX_PHOTO_DECODED_BYTES) {
+          throw new BadRequestException({
+            success: false,
+            message: `Foto item ${i + 1} terlalu besar (${Math.round(estimatedBytes / 1024)}KB). Maksimum ${MAX_PHOTO_DECODED_BYTES / 1024}KB.`,
+            errors: [],
+          });
+        }
+
+        photo = raw.photo;
+      }
+
+      validatedItems.push({ ok: raw.ok, photo });
+    }
+
+    // ═══════════════════════════════════════════
+    // STEP 2: Server Computes Checklist State
+    // ═══════════════════════════════════════════
+    const notOkIndices = validatedItems
+      .map((item, idx) => (!item.ok ? idx : -1))
+      .filter((idx) => idx >= 0);
+
+    const serverHasDeviation = notOkIndices.length > 0;
+
+    const hasCriticalNotOk = notOkIndices.some(
+      (idx) => GBJ_CHECKLIST_SEVERITY[idx] === 'CRITICAL',
+    );
+
+    // ═══════════════════════════════════════════
+    // STEP 3: Determine Effective Decision Mode
+    // ═══════════════════════════════════════════
+    let effectiveDecisionMode: QcVehicleDecisionMode;
+
+    if (dto.decisionMode) {
+      effectiveDecisionMode = dto.decisionMode;
+    } else {
+      // Safe legacy derivation — NOT a bypass
+      if (dto.result === 'PASS' && !serverHasDeviation) {
+        effectiveDecisionMode = 'NORMAL_PASS';
+      } else if (dto.result === 'REJECT' && serverHasDeviation) {
+        effectiveDecisionMode = 'REJECTED';
+      } else {
+        throw new BadRequestException({
+          success: false,
+          message: `Kombinasi result="${dto.result}" tidak valid dengan kondisi checklist (hasDeviation=${serverHasDeviation}). Gunakan field decisionMode untuk kontrol eksplisit.`,
+          errors: [],
+        });
+      }
+    }
+
+    // ═══════════════════════════════════════════
+    // STEP 4: Validate Decision Matrix
+    // ═══════════════════════════════════════════
+    if (effectiveDecisionMode === 'NORMAL_PASS') {
+      if (serverHasDeviation) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'NORMAL_PASS tidak diperbolehkan jika terdapat item NOT OK pada checklist.',
+          errors: [],
+        });
+      }
+    }
+
+    if (effectiveDecisionMode === 'APPROVED_WITH_DEVIATION') {
+      if (!serverHasDeviation) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'APPROVED_WITH_DEVIATION tidak valid jika seluruh checklist OK. Gunakan NORMAL_PASS.',
+          errors: [],
+        });
+      }
+      if (hasCriticalNotOk) {
+        const criticalLabels = notOkIndices
+          .filter((idx) => GBJ_CHECKLIST_SEVERITY[idx] === 'CRITICAL')
+          .map((idx) => `${idx + 1}. ${GBJ_CHECKLIST_ITEMS[idx]}`);
+        throw new BadRequestException({
+          success: false,
+          message: `APPROVED_WITH_DEVIATION tidak diperbolehkan karena terdapat temuan CRITICAL: ${criticalLabels.join('; ')}. Kendaraan wajib ditolak (REJECTED).`,
+          errors: [],
+        });
+      }
+      if (
+        !dto.deviationReason ||
+        dto.deviationReason.trim().length < MIN_DEVIATION_REASON_LENGTH
+      ) {
+        throw new BadRequestException({
+          success: false,
+          message: `Alasan deviation (deviationReason) wajib diisi minimal ${MIN_DEVIATION_REASON_LENGTH} karakter.`,
+          errors: [],
+        });
+      }
+    }
+
+    if (effectiveDecisionMode === 'REJECTED') {
+      if (!serverHasDeviation) {
+        throw new BadRequestException({
+          success: false,
+          message: 'REJECTED tidak valid jika seluruh checklist OK.',
+          errors: [],
+        });
+      }
+    }
+
+    // ═══════════════════════════════════════════
+    // STEP 5: Server Determines Result & Status
+    // ═══════════════════════════════════════════
+    const serverResult: 'PASS' | 'REJECT' =
+      effectiveDecisionMode === 'NORMAL_PASS' ||
+      effectiveDecisionMode === 'APPROVED_WITH_DEVIATION'
+        ? 'PASS'
+        : 'REJECT';
+
+    const nextStatus: TransactionStatus =
+      serverResult === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
+
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    // ═══════════════════════════════════════════
+    // STEP 6: Atomic Prisma Transaction (CAS-first)
+    // ═══════════════════════════════════════════
+    const now = new Date();
+    const serverChecklistItems = {
+      items: validatedItems.map((item, idx) => ({
+        label: GBJ_CHECKLIST_ITEMS[idx],
+        ok: item.ok,
+        photo: item.photo,
+        severity: GBJ_CHECKLIST_SEVERITY[idx],
+      })),
+    };
+
+    const updated = await this.prisma.$transaction(async (prisma) => {
+      // 1. CAS claim FIRST
       const claimed = await prisma.transaction.updateMany({
         where: {
-          id: transactionId,
+          id: tx.id,
           status: tx.status,
           revision: tx.revision,
         },
         data: {
           status: nextStatus,
           revision: { increment: 1 },
-          qcStartAt: tx.qcStartAt || new Date(),
-          qcEndAt: new Date(),
+          qcStartAt: tx.qcStartAt || now,
+          qcEndAt: now,
         },
       });
 
@@ -268,34 +559,99 @@ export class QcService {
         });
       }
 
-      await prisma.transactionStatusHistory.create({
+      // 2. Create QcVehicleCheck
+      const maxRev = await prisma.qcVehicleCheck.aggregate({
+        where: { transactionId: tx.id },
+        _max: { revision: true },
+      });
+      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+
+      await prisma.qcVehicleCheck.create({
         data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: nextStatus,
-          changedById: userId,
-          notes: `Vehicle Check: ${result}`,
+          transactionId: tx.id,
+          revision: nextRevision,
+          result: serverResult,
+          decisionMode: effectiveDecisionMode,
+          hasDeviation: serverHasDeviation,
+          deviationReason:
+            effectiveDecisionMode === 'APPROVED_WITH_DEVIATION'
+              ? dto.deviationReason!.trim()
+              : null,
+          vehicleCleanliness: this.booleanToCheckResult(dto.vehicleCleanliness),
+          vehicleOdor: this.booleanToCheckResult(dto.vehicleOdor),
+          pestEvidence: this.booleanToCheckResult(dto.pestEvidence),
+          vehicleCondition: this.booleanToCheckResult(dto.vehicleCondition),
+          documentCompleteness: this.booleanToCheckResult(
+            dto.documentCompleteness,
+          ),
+          sealCondition: this.booleanToCheckResult(dto.sealCondition),
+          notes: dto.notes,
+          checklistItems: serverChecklistItems,
+          checkedById: userId,
+          startedAt: tx.qcStartAt || now,
+          completedAt: now,
         },
       });
 
+      // 3. Status History
+      await prisma.transactionStatusHistory.create({
+        data: {
+          transactionId: tx.id,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: userId,
+          notes: `Vehicle Check: ${effectiveDecisionMode} → ${serverResult}`,
+        },
+      });
+
+      // 4. Activity Log — Atomic within this transaction
+      const activityAction =
+        effectiveDecisionMode === 'NORMAL_PASS'
+          ? 'QC_VEHICLE_APPROVED'
+          : effectiveDecisionMode === 'APPROVED_WITH_DEVIATION'
+            ? 'QC_VEHICLE_APPROVED_WITH_DEVIATION'
+            : 'QC_VEHICLE_REJECTED';
+
+      const activityDescription: Record<string, any> = {
+        decisionMode: effectiveDecisionMode,
+        plateNumber: tx.plateNumber,
+        checklistItemCount: GBJ_CHECKLIST_COUNT,
+        notOkCount: notOkIndices.length,
+      };
+
+      if (notOkIndices.length > 0) {
+        activityDescription.notOkItems = notOkIndices.map((idx) => ({
+          index: idx,
+          label: GBJ_CHECKLIST_ITEMS[idx],
+          severity: GBJ_CHECKLIST_SEVERITY[idx],
+        }));
+      }
+
+      if (effectiveDecisionMode === 'APPROVED_WITH_DEVIATION') {
+        activityDescription.deviationReason = dto.deviationReason!.trim();
+      }
+
+      await this.activityLogsService.logAction(
+        {
+          userId,
+          action: activityAction,
+          module: 'QC',
+          referenceId: tx.id,
+          description: activityDescription,
+          status: 'SUCCESS',
+        },
+        prisma,
+      );
+
       return prisma.transaction.findUnique({
-        where: { id: transactionId },
+        where: { id: tx.id },
         include: { qcVehicleChecks: true },
       });
     });
 
-    await this.activityLogsService.logAction({
-      userId,
-      action: 'QC_VEHICLE_RESULT',
-      module: 'QC',
-      referenceId: transactionId,
-      description: { result },
-      status: 'SUCCESS',
-    });
-
     return {
       success: true,
-      message: `Vehicle QC result submitted (${result})`,
+      message: `Vehicle QC result submitted (${effectiveDecisionMode})`,
       data: updated,
     };
   }

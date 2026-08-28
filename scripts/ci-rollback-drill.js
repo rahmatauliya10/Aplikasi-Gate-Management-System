@@ -184,19 +184,19 @@ async function main() {
   console.log(`  Pre-deployment backup generated: ${backupId} (${dumpSha256})`);
 
   // ------------------------------------------------------------------------------
-  // Step 3: Advance Schema to 19 Migrations via Prisma Migrate Deploy
+  // Step 3: Advance Schema to 20 Migrations via Prisma Migrate Deploy
   // ------------------------------------------------------------------------------
-  console.log('\nStep 3: Upgrading schema forward to 19 migrations (prisma migrate deploy)...');
+  console.log('\nStep 3: Upgrading schema forward to 20 migrations (prisma migrate deploy)...');
   const backendDir = path.join(projectRoot, 'backend');
   execSync('npx prisma migrate deploy', { cwd: backendDir, env: { ...env, DATABASE_URL: dbUrl }, stdio: 'pipe' });
 
   const postMigrationEntities = capture16Entities();
   console.log('Post-migration state (Target):', postMigrationEntities);
 
-  if (postMigrationEntities.migrations !== 19) {
-    throw new Error(`Expected exactly 19 migrations post-deploy, got ${postMigrationEntities.migrations}`);
+  if (postMigrationEntities.migrations !== 20) {
+    throw new Error(`Expected exactly 20 migrations post-deploy, got ${postMigrationEntities.migrations}`);
   }
-  console.log('  Forward schema migration successfully verified (19 migrations applied).');
+  console.log('  Forward schema migration successfully verified (20 migrations applied).');
 
   // ------------------------------------------------------------------------------
   // Step 4: Inject Failure Trigger & Execute Coordinated Rollback

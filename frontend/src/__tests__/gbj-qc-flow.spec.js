@@ -135,4 +135,110 @@ describe('GBJ QC Payload Builder Semantics (buildGbjQcPayload)', () => {
     expect(payload.sealCondition).toBeUndefined()
     expect(payload.checklistItems.items).toHaveLength(5)
   })
+
+  it('should include decisionMode and deviationReason when provided in options', () => {
+    const states = [
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'not_ok', photo: 'data:image/jpeg;base64,mockphoto' },
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null }
+    ]
+    const payload = buildGbjQcPayload(states, GBJ_VEHICLE_CHECKLIST, {
+      decisionMode: 'APPROVED_WITH_DEVIATION',
+      deviationReason: 'Truk dibersihkan dan dilapisi terpal bersih'
+    })
+
+    expect(payload.decisionMode).toBe('APPROVED_WITH_DEVIATION')
+    expect(payload.deviationReason).toBe('Truk dibersihkan dan dilapisi terpal bersih')
+    expect(payload.hasDeviation).toBeUndefined() // Server computes hasDeviation
+  })
+
+  it('should omit deviationReason when decisionMode is NORMAL_PASS or REJECTED', () => {
+    const states = [
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null }
+    ]
+    const payload = buildGbjQcPayload(states, GBJ_VEHICLE_CHECKLIST, {
+      decisionMode: 'NORMAL_PASS'
+    })
+
+    expect(payload.decisionMode).toBe('NORMAL_PASS')
+    expect(payload.deviationReason).toBeUndefined()
+  })
 })
+
+describe('GBJ Severity Policy & Deviation Evaluation (gbjQcFlow.js)', () => {
+  it('should allow deviation approval when NOT OK items are CONDITIONAL only (item 2 and/or item 4)', () => {
+    const states = [
+      { status: 'ok', photo: null },                                     // 0. Hama (CRITICAL) - OK
+      { status: 'ok', photo: null },                                     // 1. Haram/najis (CRITICAL) - OK
+      { status: 'not_ok', photo: 'data:image/jpeg;base64,mockphoto' },   // 2. Bersih/bau (CONDITIONAL) - NOT OK
+      { status: 'ok', photo: null },                                     // 3. Kimia (CRITICAL) - OK
+      { status: 'not_ok', photo: 'data:image/jpeg;base64,mockphoto' },   // 4. Alas (CONDITIONAL) - NOT OK
+    ]
+    const res = evaluateGbjChecklist(states, GBJ_VEHICLE_CHECKLIST)
+
+    expect(res.isComplete).toBe(true)
+    expect(res.hasNotOk).toBe(true)
+    expect(res.hasCriticalNotOk).toBe(false)
+    expect(res.hasConditionalNotOk).toBe(true)
+    expect(res.canApproveWithDeviation).toBe(true)
+    expect(res.notOkItems).toHaveLength(2)
+    expect(res.notOkItems[0].severity).toBe('CONDITIONAL')
+    expect(res.notOkItems[1].severity).toBe('CONDITIONAL')
+  })
+
+  it('should DISALLOW deviation approval when any CRITICAL item is NOT OK (e.g., item 0 Hama)', () => {
+    const states = [
+      { status: 'not_ok', photo: 'data:image/jpeg;base64,mockphoto' },   // 0. Hama (CRITICAL) - NOT OK
+      { status: 'ok', photo: null },
+      { status: 'not_ok', photo: 'data:image/jpeg;base64,mockphoto' },   // 2. Bersih (CONDITIONAL) - NOT OK
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+    ]
+    const res = evaluateGbjChecklist(states, GBJ_VEHICLE_CHECKLIST)
+
+    expect(res.isComplete).toBe(true)
+    expect(res.hasNotOk).toBe(true)
+    expect(res.hasCriticalNotOk).toBe(true)
+    expect(res.canApproveWithDeviation).toBe(false)
+  })
+
+  it('should DISALLOW deviation approval when Haram/Najis (item 1) or Chemical (item 3) is NOT OK', () => {
+    const statesHaram = [
+      { status: 'ok', photo: null },
+      { status: 'not_ok', photo: 'data:image/jpeg;base64,mockphoto' },   // 1. Haram (CRITICAL)
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+    ]
+    expect(evaluateGbjChecklist(statesHaram, GBJ_VEHICLE_CHECKLIST).canApproveWithDeviation).toBe(false)
+
+    const statesChemical = [
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'not_ok', photo: 'data:image/jpeg;base64,mockphoto' },   // 3. Kimia (CRITICAL)
+      { status: 'ok', photo: null },
+    ]
+    expect(evaluateGbjChecklist(statesChemical, GBJ_VEHICLE_CHECKLIST).canApproveWithDeviation).toBe(false)
+  })
+
+  it('should return canApproveWithDeviation = false if checklist is incomplete', () => {
+    const states = [
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+      { status: 'not_ok', photo: null }, // Missing photo -> incomplete
+      { status: 'ok', photo: null },
+      { status: 'ok', photo: null },
+    ]
+    const res = evaluateGbjChecklist(states, GBJ_VEHICLE_CHECKLIST)
+    expect(res.isComplete).toBe(false)
+    expect(res.canApproveWithDeviation).toBe(false)
+  })
+})
+

@@ -137,7 +137,7 @@ async function main() {
   console.log(`Attachment reconciliation summary: DB=${actualCounts.attachments}, Reconciled=${reconciledFiles}, Missing=${missingFiles}`);
 
   const passed = (tableCount >= 14) &&
-                 (migrationCount === 19) &&
+                 (migrationCount === 20) &&
                  (totalDupes === 0) &&
                  (totalOrphans === 0) &&
                  (gbbCompleted > 0) &&
