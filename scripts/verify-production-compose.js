@@ -115,12 +115,22 @@ function verifyComposeConfig(configJsonStr) {
       errors.push('Migrator missing cap_drop [ALL].');
     }
 
-    // Check DATABASE_URL
+    // Check DATABASE_URL and backup environment variables
     const envObj = migrator.environment || {};
     const envEntries = Array.isArray(envObj) ? envObj : Object.entries(envObj).map(([k, v]) => `${k}=${v}`);
     const envKeys = envEntries.map((e) => e.split('=')[0]);
-    if (!envKeys.includes('DATABASE_URL')) {
-      errors.push('Migrator environment missing [DATABASE_URL].');
+    const requiredMigratorEnv = [
+      'DATABASE_URL',
+      'BACKUP_DATABASE_URL',
+      'BACKUP_SIGNATURE_SECRET',
+      'LOCAL_BACKUP_DIR',
+      'OFFSITE_BACKUP_DIR',
+      'UPLOAD_DIR',
+    ];
+    for (const reqKey of requiredMigratorEnv) {
+      if (!envKeys.includes(reqKey)) {
+        errors.push(`Migrator environment is missing required variable [${reqKey}].`);
+      }
     }
 
     // Ensure migrator does NOT have backend-specific secret envs

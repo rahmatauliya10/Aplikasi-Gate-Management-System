@@ -18,6 +18,15 @@ param(
     [string]$PreviousReleaseTag = "stable",
 
     [Parameter(Mandatory=$false)]
+    [string]$BackendRepository = "ghcr.io/rahmatauliya10/gms-backend",
+
+    [Parameter(Mandatory=$false)]
+    [string]$FrontendRepository = "ghcr.io/rahmatauliya10/gms-frontend",
+
+    [Parameter(Mandatory=$false)]
+    [string]$MigratorRepository = "ghcr.io/rahmatauliya10/gms-backend-migrator",
+
+    [Parameter(Mandatory=$false)]
     [string]$BackendDigest = "",
 
     [Parameter(Mandatory=$false)]
@@ -45,7 +54,7 @@ param(
     [string]$ComposeFile = "docker-compose.prod.yml",
 
     [Parameter(Mandatory=$false)]
-    [string]$ProjectName = "gms",
+    [string]$ProjectName = "aplikasigatemanagementsystem",
 
     [Parameter(Mandatory=$false)]
     [switch]$RollbackOnly,
@@ -81,28 +90,52 @@ Set-Location -Path $WorkspaceRoot
 $PsExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { "pwsh.exe" } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell.exe" }
 
 function Verify-Image-Digest {
-    param([string]$ImageName, [string]$ExpectedDigest)
+    param(
+        [string]$ImageRepo,
+        [string]$ExpectedDigest
+    )
     if (-not $ExpectedDigest) { return $true }
-    [string]$foundDigest = & docker images --digests --format "{{.Digest}}" $ImageName 2>$null | Where-Object { $_ -eq $ExpectedDigest }
-    if (-not $foundDigest) {
-        # Strict NO TAG FALLBACK rule: Digest mismatch is a hard deployment failure!
-        Write-Host "[GMS IMMUTABILITY FAILURE] Image [$ImageName] digest mismatch! Expected: $ExpectedDigest" -ForegroundColor Red
-        return $false
+    
+    # Check RepoDigests across inspect metadata (matches exact repo@sha256:...)
+    [string]$inspectDigests = (& docker inspect --format="{{range .RepoDigests}}{{.}} {{end}}" "$ImageRepo" 2>$null).ToString().Trim()
+    if ($inspectDigests -and ($inspectDigests -match [regex]::Escape($ExpectedDigest))) {
+        return $true
     }
-    return $true
+    
+    # Fallback to checking docker images output matching exact repository name and digest
+    [string[]]$foundLines = & docker images --digests --format "{{.Repository}}@{{.Digest}}" 2>$null
+    if ($foundLines) {
+        foreach ($line in $foundLines) {
+            if ($line -match [regex]::Escape($ExpectedDigest) -and ($line.StartsWith($ImageRepo) -or $line.Contains($ImageRepo))) {
+                return $true
+            }
+        }
+    }
+
+    Write-Host "[GMS IMMUTABILITY FAILURE] Image [$ImageRepo] exact RepoDigest mismatch or image not found! Expected: $ExpectedDigest" -ForegroundColor Red
+    return $false
 }
 
 function Verify-Image-Exists {
-    param([string]$Tag, [string]$BackendDig = "", [string]$FrontendDig = "", [string]$MigratorDig = "")
+    param(
+        [string]$Tag,
+        [string]$BackendDig = "",
+        [string]$FrontendDig = "",
+        [string]$MigratorDig = "",
+        [string]$BackendRepo = $BackendRepository,
+        [string]$FrontendRepo = $FrontendRepository,
+        [string]$MigratorRepo = $MigratorRepository
+    )
     if ($BackendDig -or $FrontendDig -or $MigratorDig) {
-        $backendOk = Verify-Image-Digest -ImageName "gms-backend" -ExpectedDigest $BackendDig
-        $frontendOk = Verify-Image-Digest -ImageName "gms-frontend" -ExpectedDigest $FrontendDig
-        $migratorOk = if ($MigratorDig) { Verify-Image-Digest -ImageName "gms-backend-migrator" -ExpectedDigest $MigratorDig } else { $true }
+        $backendOk = if ($BackendDig) { Verify-Image-Digest -ImageRepo "$BackendRepo" -ExpectedDigest $BackendDig } else { $false }
+        $frontendOk = if ($FrontendDig) { Verify-Image-Digest -ImageRepo "$FrontendRepo" -ExpectedDigest $FrontendDig } else { $false }
+        $migratorOk = if ($MigratorDig) { Verify-Image-Digest -ImageRepo "$MigratorRepo" -ExpectedDigest $MigratorDig } else { $false }
         return ($backendOk -and $frontendOk -and $migratorOk)
     }
-    $backendImg = & docker images -q "gms-backend:$Tag" 2>$null
-    $frontendImg = & docker images -q "gms-frontend:$Tag" 2>$null
-    return ((-not [string]::IsNullOrWhiteSpace($backendImg)) -and (-not [string]::IsNullOrWhiteSpace($frontendImg)))
+    $backendImg = & docker images -q "${BackendRepo}:$Tag" 2>$null
+    $frontendImg = & docker images -q "${FrontendRepo}:$Tag" 2>$null
+    $migratorImg = & docker images -q "${MigratorRepo}:$Tag" 2>$null
+    return ((-not [string]::IsNullOrWhiteSpace($backendImg)) -and (-not [string]::IsNullOrWhiteSpace($frontendImg)) -and (-not [string]::IsNullOrWhiteSpace($migratorImg)))
 }
 
 # Auto-resolve digests from target release manifest or local docker image inspect if not explicitly provided
@@ -155,19 +188,22 @@ function Execute-Rollback {
         [string]$PrevTag,
         [string]$PrevBackendDig,
         [string]$PrevFrontendDig,
-        [string]$PrevMigratorDig = "",
+        [string]$PrevMigratorDig,
         [string]$CompFile,
-        [string]$ProjName = "gms",
-        [bool]$IsStrictProd,
+        [string]$ProjName = "aplikasigatemanagementsystem",
+        [bool]$IsStrictProd = $false,
         [string]$RollbackManifestPath = "",
         [bool]$RequireDbRollback = $false,
-        [bool]$EnforceNginx = $false
+        [bool]$EnforceNginx = $false,
+        [string]$BackendRepo = $BackendRepository,
+        [string]$FrontendRepo = $FrontendRepository,
+        [string]$MigratorRepo = $MigratorRepository
     )
     Write-Host "[GMS AUTOMATED ROLLBACK] Initiating schema-aware coordinated rollback sequence to previous stable release tag: [$PrevTag]..." -ForegroundColor Magenta
 
     if ($IsStrictProd -or $RequireDigest) {
-        if (-not $PrevBackendDig -or -not $PrevFrontendDig) {
-            throw "[GMS IMMUTABILITY VIOLATION] Rollback aborted! Production rollback requires explicit SHA-256 digests for previous images (PreviousBackendDigest and PreviousFrontendDigest). Refusing to fall back to target failed image digests."
+        if (-not $PrevBackendDig -or -not $PrevFrontendDig -or -not $PrevMigratorDig) {
+            throw "[GMS IMMUTABILITY VIOLATION] Rollback aborted! Production rollback requires explicit SHA-256 digests for ALL previous images (PreviousBackendDigest, PreviousFrontendDigest, and PreviousMigratorDigest). Refusing to fall back to unverified tags."
         }
     }
 
@@ -201,12 +237,12 @@ function Execute-Rollback {
         }
 
         $env:RELEASE_TAG = $PrevTag
-        $env:BACKEND_IMAGE = if ($PrevBackendDig) { "gms-backend@$PrevBackendDig" } else { "gms-backend:$PrevTag" }
-        $env:FRONTEND_IMAGE = if ($PrevFrontendDig) { "gms-frontend@$PrevFrontendDig" } else { "gms-frontend:$PrevTag" }
-        $env:MIGRATOR_IMAGE = if ($PrevMigratorDig) { "gms-backend-migrator@$PrevMigratorDig" } else { "gms-backend-migrator:$PrevTag" }
+        $env:BACKEND_IMAGE = if ($PrevBackendDig) { "${BackendRepo}@$PrevBackendDig" } else { "${BackendRepo}:$PrevTag" }
+        $env:FRONTEND_IMAGE = if ($PrevFrontendDig) { "${FrontendRepo}@$PrevFrontendDig" } else { "${FrontendRepo}:$PrevTag" }
+        $env:MIGRATOR_IMAGE = if ($PrevMigratorDig) { "${MigratorRepo}@$PrevMigratorDig" } else { "${MigratorRepo}:$PrevTag" }
 
-        if (-not (Verify-Image-Exists -Tag $PrevTag -BackendDig $PrevBackendDig -FrontendDig $PrevFrontendDig -MigratorDig $PrevMigratorDig)) {
-            throw "Previous release image set [gms-backend:$PrevTag, gms-frontend:$PrevTag] does not exist locally. Cannot perform safe rollback."
+        if (-not (Verify-Image-Exists -Tag $PrevTag -BackendDig $PrevBackendDig -FrontendDig $PrevFrontendDig -MigratorDig $PrevMigratorDig -BackendRepo $BackendRepo -FrontendRepo $FrontendRepo -MigratorRepo $MigratorRepo)) {
+            throw "Previous release image set [${BackendRepo}:$PrevTag, ${FrontendRepo}:$PrevTag, ${MigratorRepo}:$PrevTag] does not exist locally. Cannot perform safe rollback."
         }
 
         Write-Host "[GMS AUTOMATED ROLLBACK] Booting previous stable release containers ($env:BACKEND_IMAGE, $env:FRONTEND_IMAGE)..." -ForegroundColor Cyan
@@ -215,7 +251,7 @@ function Execute-Rollback {
 
         Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-        & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$EnforceNginx
+        & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$EnforceNginx -ProjectName $ProjName
         if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
 
         $RollbackSucceeded = $true
@@ -240,7 +276,7 @@ if ($RollbackOnly) {
     }
     [bool]$dbRollbackRequired = [bool](-not [string]::IsNullOrWhiteSpace($RollbackManifestPath))
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -PrevMigratorDig $PreviousMigratorDigest -CompFile $ComposeFile -ProjName $ProjectName -IsStrictProd $IsProductionMode -RollbackManifestPath $RollbackManifestPath -RequireDbRollback $dbRollbackRequired -EnforceNginx $EffectiveRequireNginx
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -PrevMigratorDig $PreviousMigratorDigest -CompFile $ComposeFile -ProjName $ProjectName -IsStrictProd $IsProductionMode -RollbackManifestPath $RollbackManifestPath -RequireDbRollback $dbRollbackRequired -EnforceNginx $EffectiveRequireNginx -BackendRepo $BackendRepository -FrontendRepo $FrontendRepository -MigratorRepo $MigratorRepository
         exit 0
     }
     catch {
@@ -251,19 +287,19 @@ if ($RollbackOnly) {
 
 # If still missing, inspect local image digest if available
 if (-not $BackendDigest) {
-    [string]$inspectBackend = & docker inspect --format="{{index .RepoDigests 0}}" "gms-backend:$TargetReleaseTag" 2>$null
+    [string]$inspectBackend = & docker inspect --format="{{index .RepoDigests 0}}" "${BackendRepository}:$TargetReleaseTag" 2>$null
     if ($inspectBackend -and $inspectBackend.Contains("@")) {
         $BackendDigest = $inspectBackend.Split("@")[1]
     }
 }
 if (-not $FrontendDigest) {
-    [string]$inspectFrontend = & docker inspect --format="{{index .RepoDigests 0}}" "gms-frontend:$TargetReleaseTag" 2>$null
+    [string]$inspectFrontend = & docker inspect --format="{{index .RepoDigests 0}}" "${FrontendRepository}:$TargetReleaseTag" 2>$null
     if ($inspectFrontend -and $inspectFrontend.Contains("@")) {
         $FrontendDigest = $inspectFrontend.Split("@")[1]
     }
 }
 if (-not $MigratorDigest) {
-    [string]$inspectMigrator = & docker inspect --format="{{index .RepoDigests 0}}" "gms-backend-migrator:$TargetReleaseTag" 2>$null
+    [string]$inspectMigrator = & docker inspect --format="{{index .RepoDigests 0}}" "${MigratorRepository}:$TargetReleaseTag" 2>$null
     if ($inspectMigrator -and $inspectMigrator.Contains("@")) {
         $MigratorDigest = $inspectMigrator.Split("@")[1]
     }
@@ -271,16 +307,16 @@ if (-not $MigratorDigest) {
 
 # Strict Production Immutability Verification Gate
 if ($IsProductionMode) {
-    if (-not $BackendDigest -or -not $FrontendDigest) {
-        throw "[GMS IMMUTABILITY VIOLATION] Production deployment strictly requires SHA-256 image digests for gms-backend and gms-frontend. Tag fallbacks are strictly prohibited for Level 9 production readiness."
+    if (-not $BackendDigest -or -not $FrontendDigest -or -not $MigratorDigest) {
+        throw "[GMS IMMUTABILITY VIOLATION] Production deployment strictly requires SHA-256 image digests for BackendDigest, FrontendDigest, and MigratorDigest. Tag fallbacks are strictly prohibited for Level 9 production readiness."
     }
 }
 
 # Export compose environment variables with fallback tag or digest
 $env:RELEASE_TAG = $TargetReleaseTag
-$env:BACKEND_IMAGE = if ($BackendDigest) { "gms-backend@$BackendDigest" } else { "gms-backend:$TargetReleaseTag" }
-$env:FRONTEND_IMAGE = if ($FrontendDigest) { "gms-frontend@$FrontendDigest" } else { "gms-frontend:$TargetReleaseTag" }
-$env:MIGRATOR_IMAGE = if ($MigratorDigest) { "gms-backend-migrator@$MigratorDigest" } else { "gms-backend-migrator:$TargetReleaseTag" }
+$env:BACKEND_IMAGE = if ($BackendDigest) { "${BackendRepository}@$BackendDigest" } else { "${BackendRepository}:$TargetReleaseTag" }
+$env:FRONTEND_IMAGE = if ($FrontendDigest) { "${FrontendRepository}@$FrontendDigest" } else { "${FrontendRepository}:$TargetReleaseTag" }
+$env:MIGRATOR_IMAGE = if ($MigratorDigest) { "${MigratorRepository}@$MigratorDigest" } else { "${MigratorRepository}:$TargetReleaseTag" }
 
 Write-Host "==============================================================================" -ForegroundColor Cyan
 Write-Host "Starting GMS Immutable Deployment Process: Target Release [$TargetReleaseTag]" -ForegroundColor Cyan
@@ -410,7 +446,7 @@ try {
     # Step 2: Execute automated health watchdog check
     Write-Host "[GMS Deploy] Verifying post-deployment service health via watchdog..." -ForegroundColor Cyan
     $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
-    & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$EffectiveRequireNginx
+    & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$EffectiveRequireNginx -ProjectName $ProjectName
     if ($LASTEXITCODE -ne 0) { throw "Health check verification failed during post-deploy watchdog test." }
 
     Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] successfully deployed and verified healthy." -ForegroundColor Green
@@ -454,15 +490,15 @@ try {
         preDeployBackupId = $PreDeployBackupId
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
         backend = @{
-            image = "gms-backend"
+            image = $BackendRepository
             digest = $BackendDigest
         }
         frontend = @{
-            image = "gms-frontend"
+            image = $FrontendRepository
             digest = $FrontendDigest
         }
         migrator = @{
-            image = "gms-backend-migrator"
+            image = $MigratorRepository
             digest = $MigratorDigest
         }
         previousRelease = @{
@@ -481,7 +517,7 @@ try {
 catch {
     Write-Host "[GMS DEPLOYMENT FAILED] Error detected: $_" -ForegroundColor Red
     try {
-        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -PrevMigratorDig $PreviousMigratorDigest -CompFile $ComposeFile -ProjName $ProjectName -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted -EnforceNginx $EffectiveRequireNginx
+        Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -PrevMigratorDig $PreviousMigratorDigest -CompFile $ComposeFile -ProjName $ProjectName -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted -EnforceNginx $EffectiveRequireNginx -BackendRepo $BackendRepository -FrontendRepo $FrontendRepository -MigratorRepo $MigratorRepository
     }
     catch {
         Write-Host "[CRITICAL ROLLBACK FAILURE] System failed to recover during rollback to tag [$PreviousReleaseTag]! Immediate manual emergency intervention required: $_" -ForegroundColor Red
