@@ -275,7 +275,7 @@ jobs:
           PGPASSWORD=testpassword psql -h localhost -p 5432 -U postgres -d postgres -c "CREATE DATABASE gms_rehearsal_db;"
           PGPASSWORD=testpassword pg_restore -h localhost -p 5432 -U postgres -d gms_rehearsal_db --clean --if-exists --no-owner --no-acl tests/fixtures/historical/historical_test.dump
 
-          echo "Step 2.5: Verifying historical baseline migration count (< 19)..."
+          echo "Step 2.5: Verifying historical baseline migration count (< 20)..."
           node -e "
             const { execSync } = require('child_process');
             const fs = require('fs');
@@ -283,7 +283,7 @@ jobs:
             const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
             const baselineCount = parseInt(out, 10);
             console.log('Restored baseline migration count:', baselineCount, 'Expected:', manifest.sourceMigrationCount);
-            if (baselineCount >= 19 || baselineCount !== manifest.sourceMigrationCount) {
+            if (baselineCount >= 20 || baselineCount !== manifest.sourceMigrationCount) {
               console.error('FATAL: Historical dump does not have authentic pre-migration count (found ' + baselineCount + ', expected ' + manifest.sourceMigrationCount + ')');
               process.exit(1);
             }
@@ -308,21 +308,21 @@ jobs:
           echo "Step 3: Running production preflight duplicate audit on rehearsal DB..."
           cd backend
           npm run prisma:preflight -- --report-only --fail-on-duplicates
-          echo "Step 4: Executing Prisma migration deployment on rehearsal DB (upgrading schema 6 -> 19)..."
+          echo "Step 4: Executing Prisma migration deployment on rehearsal DB (upgrading schema 6 -> 20)..."
           npx prisma migrate deploy
           cd ..
 
-          echo "Step 4.5: Verifying upgraded migration count (= 19)..."
+          echo "Step 4.5: Verifying upgraded migration count (= 20)..."
           node -e "
             const { execSync } = require('child_process');
             const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
             const postUpgradeCount = parseInt(out, 10);
             console.log('Post-upgrade migration count:', postUpgradeCount);
-            if (postUpgradeCount !== 19) {
-              console.error('FATAL: Post-upgrade migration count is not 19! Found: ' + postUpgradeCount);
+            if (postUpgradeCount !== 20) {
+              console.error('FATAL: Post-upgrade migration count is not 20! Found: ' + postUpgradeCount);
               process.exit(1);
             }
-            console.log('Schema upgrade from historical baseline to 19 migrations succeeded [PASS].');
+            console.log('Schema upgrade from historical baseline to 20 migrations succeeded [PASS].');
           "
 
           echo "Step 5: Verifying migration checksums..."
