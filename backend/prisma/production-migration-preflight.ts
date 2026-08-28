@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 
 export interface PreflightReport {
   timestamp: string;
@@ -354,23 +355,46 @@ export async function runProductionMigrationPreflight(
   }
 }
 
-if (require.main === module) {
-  runProductionMigrationPreflight()
-    .then((report) => {
-      fs.writeFileSync(
-        'migration_preflight_report.json',
-        JSON.stringify(report, null, 2),
-      );
-      if (!report.isReadyForMigration) {
-        console.error('❌ PREFLIGHT BLOCKER DETECTED: Database is NOT ready for migration.');
-        process.exit(1);
-      } else {
-        console.log('✅ PREFLIGHT PASSED: Database is ready for migration.');
-        process.exit(0);
+export async function main(): Promise<void> {
+  const report = await runProductionMigrationPreflight();
+  fs.writeFileSync(
+    'migration_preflight_report.json',
+    JSON.stringify(report, null, 2),
+  );
+  if (!report.isReadyForMigration) {
+    console.error('❌ PREFLIGHT BLOCKER DETECTED: Database is NOT ready for migration.');
+    process.exit(1);
+  } else {
+    console.log('✅ PREFLIGHT PASSED: Database is ready for migration.');
+    process.exit(0);
+  }
+}
+
+export const isDirectExecution = (): boolean => {
+  if (typeof process === 'undefined' || !process.argv || !process.argv[1]) {
+    return false;
+  }
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.url) {
+      const currentFilePath = fileURLToPath(import.meta.url);
+      const executedPath = path.resolve(process.argv[1]);
+      if (executedPath === currentFilePath) {
+        return true;
       }
-    })
-    .catch((err) => {
-      console.error('Preflight script fatal error:', err);
-      process.exit(1);
-    });
+    }
+  } catch {
+    // Fallback if import.meta is unavailable
+  }
+  const argv1 = (process.argv[1] || '').replace(/\\/g, '/');
+  return (
+    argv1.endsWith('production-migration-preflight.ts') ||
+    argv1.endsWith('production-migration-preflight.js')
+  );
+};
+
+if (isDirectExecution()) {
+  main().catch((err) => {
+    console.error('Preflight script fatal error:', err);
+    process.exit(1);
+  });
 }

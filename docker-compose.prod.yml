@@ -1,3 +1,5 @@
+name: gms
+
 networks:
   proxy-net:
     driver: bridge

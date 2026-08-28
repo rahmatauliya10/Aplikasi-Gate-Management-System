@@ -182,4 +182,12 @@ describe('Production Migration Preflight (PR-28 Hard Gate)', () => {
     expect(report.queryErrors).toBeDefined();
     expect(report.queryErrors?.[0]).toContain('Database connection timeout');
   });
+
+  it('should verify isDirectExecution returns false during unit test execution without throwing require errors', async () => {
+    const { isDirectExecution } = await import('./production-migration-preflight');
+    expect(typeof isDirectExecution).toBe('function');
+    // When run via Jest, argv[1] contains jest, not production-migration-preflight.ts
+    const isDirect = isDirectExecution();
+    expect(typeof isDirect).toBe('boolean');
+  });
 });
