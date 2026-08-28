@@ -164,15 +164,24 @@
             </div>
           </div>
 
-          <button type="submit" class="btn-login" :disabled="isLoading" id="change-password-submit">
-            <span v-if="isLoading" class="btn-loader">
-              <span class="spinner"></span>
-              <span>Memproses...</span>
-            </span>
-            <span v-else class="btn-content">
-              <span>Simpan & Lanjutkan</span>
-            </span>
-          </button>
+          <div class="actions-wrapper">
+            <button type="submit" class="btn-login" :disabled="isLoading" id="change-password-submit">
+              <span v-if="isLoading" class="btn-loader">
+                <span class="spinner"></span>
+                <span>Memproses...</span>
+              </span>
+              <span v-else class="btn-content">
+                <span>Simpan & Lanjutkan</span>
+              </span>
+            </button>
+
+            <button type="button" class="btn-back-login" @click="handleBackToLogin" :disabled="isLoading" id="change-password-cancel">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7"/>
+              </svg>
+              <span>Batal & Kembali ke Login</span>
+            </button>
+          </div>
         </form>
       </div>
 
@@ -275,6 +284,19 @@ const handleChangePassword = async () => {
     shakeCard.value = true
     setTimeout(() => { shakeCard.value = false }, 600)
   } finally {
+    isLoading.value = false
+  }
+}
+
+const handleBackToLogin = async () => {
+  isLoading.value = true
+  try {
+    await authStore.logout()
+  } catch (e) {
+    console.error('Logout error:', e)
+  } finally {
+    authStore.clearAuth()
+    router.replace('/login')
     isLoading.value = false
   }
 }
@@ -499,6 +521,44 @@ const handleChangePassword = async () => {
 .btn-login:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(37, 99, 235, 0.5); }
 .btn-login:active:not(:disabled) { transform: translateY(0) scale(0.98); }
 .btn-login:disabled { opacity: 0.7; cursor: not-allowed; }
+
+.actions-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.btn-back-login {
+  width: 100%;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: rgba(148, 197, 255, 0.85);
+  background: rgba(255, 255, 255, 0.04);
+  transition: all 0.25s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.btn-back-login:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(148, 197, 255, 0.35);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+.btn-back-login:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+.btn-back-login:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .btn-content, .btn-loader { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .spinner { width: 16px; height: 16px; border: 2.5px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; }
