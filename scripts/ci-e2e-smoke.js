@@ -367,11 +367,20 @@ async function runE2ESmoke() {
   log(`  2. GBJ Weigh-In SUCCESS (Tare: 4,000 kg, Status: QC_VEHICLE_PENDING)`);
 
   // 6c. QC Vehicle Check
-  const gbjQcV = await request(`/api/qc/vehicle-result/${gbjTxId}`, { method: 'POST', headers: authHeader }, {
+  const gbjQcPayload = {
     result: 'PASS',
-    vehicleCleanliness: true,
-    vehicleOdor: true,
-  });
+    decisionMode: 'NORMAL_PASS',
+    checklistItems: {
+      items: [
+        { label: 'Tidak ditemukan hama atau tanda-tanda infestasi', ok: true },
+        { label: 'Bebas dari bahan non-halal / kontaminasi najis', ok: true },
+        { label: 'Truk bersih, kering, dan tidak berbau asing', ok: true },
+        { label: 'Bebas bahan kimia berbahaya & kontaminan lain', ok: true },
+        { label: 'Kondisi lantai & dinding truk baik (terpal/alas memadai)', ok: true },
+      ],
+    },
+  };
+  const gbjQcV = await request(`/api/qc/vehicle-result/${gbjTxId}`, { method: 'POST', headers: authHeader }, gbjQcPayload);
   if (!isSuccessStatus(gbjQcV.statusCode)) {
     throw new Error(`GBJ QC Vehicle Check FAILED: Status ${gbjQcV.statusCode}, Body: ${JSON.stringify(gbjQcV.body)}`);
   }
@@ -418,16 +427,30 @@ async function runE2ESmoke() {
 
   // Helper function to re-run workflow from target status back to COMPLETED
   async function rerunToCompleted(txId, processType, targetStatus, authHeader, suffix) {
+    const qcVehPayload = processType === 'GBJ' ? {
+      result: 'PASS',
+      decisionMode: 'NORMAL_PASS',
+      checklistItems: {
+        items: [
+          { label: 'Tidak ditemukan hama atau tanda-tanda infestasi', ok: true },
+          { label: 'Bebas dari bahan non-halal / kontaminasi najis', ok: true },
+          { label: 'Truk bersih, kering, dan tidak berbau asing', ok: true },
+          { label: 'Bebas bahan kimia berbahaya & kontaminan lain', ok: true },
+          { label: 'Kondisi lantai & dinding truk baik (terpal/alas memadai)', ok: true },
+        ],
+      },
+    } : {
+      result: 'PASS',
+      vehicleCleanliness: true,
+      vehicleOdor: true,
+    };
+
     if (targetStatus === 'REGISTERED') {
       await stepOk(request(`/api/weighbridge/in/${txId}`, { method: 'POST', headers: authHeader }, {
         weight: processType === 'GBJ' ? 4000 : 15000,
         ticketNumber: `WB-IN-${processType}-RERUN-${suffix}`,
       }), 'Weighbridge In');
-      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, {
-        result: 'PASS',
-        vehicleCleanliness: true,
-        vehicleOdor: true,
-      }), 'QC Vehicle Result');
+      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
       await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
       await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
@@ -448,11 +471,7 @@ async function runE2ESmoke() {
       }), 'Weighbridge Out');
       await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
     } else if (targetStatus === 'QC_VEHICLE_PENDING') {
-      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, {
-        result: 'PASS',
-        vehicleCleanliness: true,
-        vehicleOdor: true,
-      }), 'QC Vehicle Result');
+      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
       await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
       await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
