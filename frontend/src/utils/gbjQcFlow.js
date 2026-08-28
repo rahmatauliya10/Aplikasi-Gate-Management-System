@@ -7,8 +7,26 @@ export const GBJ_VEHICLE_CHECKLIST = [
   "Tidak ditemukan hama / No pest found",
   "Bebas dari barang haram dan najis / Free of haram and najis material",
   "Truk dalam kondisi bersih dan tidak berbau / Truck in clean condition and odour free",
-  "Tidak ditemukan bahan kimia atau kontaminan lain / No chemical or other contaminent found",
+  "Tidak ditemukan bahan kimia atau kontaminan lain / No chemical or other contaminant found",
   "Terdapat alas jika lantai truk kotor atau berlubang / There is a cover if the floor is holey or dirty"
+]
+
+/**
+ * GBJ Vehicle Checklist — CRITICAL/CONDITIONAL Severity Policy
+ * 
+ * TEMPORARY BUSINESS POLICY
+ * Pending formal QC/SOP owner confirmation.
+ * Do NOT document as "Sesuai SOP QC SJA" until SOP is formally verified.
+ * 
+ * CRITICAL    = Hard Reject. Approve With Deviation NOT allowed.
+ * CONDITIONAL = Mitigatable. Approve With Deviation allowed with valid reason.
+ */
+export const GBJ_CHECKLIST_SEVERITY = [
+  'CRITICAL',      // 0: Hama
+  'CRITICAL',      // 1: Haram/najis
+  'CONDITIONAL',   // 2: Bersih & tidak berbau
+  'CRITICAL',      // 3: Bahan kimia/kontaminan
+  'CONDITIONAL',   // 4: Alas lantai
 ]
 
 /**
@@ -41,9 +59,24 @@ export function evaluateGbjChecklist(states, checklistLabels = GBJ_VEHICLE_CHECK
   const hasNotOk = safeStates.some(s => s?.status === 'not_ok')
   const passed = isComplete && !hasNotOk
 
-  const notOkLabels = safeStates
-    .map((s, idx) => s?.status === 'not_ok' ? `${idx + 1}. ${checklistLabels[idx] || 'Checklist item'}` : null)
+  const notOkItems = safeStates
+    .map((s, idx) => {
+      if (s?.status !== 'not_ok') return null
+      return {
+        index: idx,
+        label: checklistLabels[idx] || 'Checklist item',
+        severity: GBJ_CHECKLIST_SEVERITY[idx] || 'CONDITIONAL',
+        hasPhoto: Boolean(s?.photo),
+        photo: s?.photo || null,
+      }
+    })
     .filter(Boolean)
+
+  const hasCriticalNotOk = notOkItems.some(item => item.severity === 'CRITICAL')
+  const hasConditionalNotOk = notOkItems.some(item => item.severity === 'CONDITIONAL')
+  const canApproveWithDeviation = isComplete && hasNotOk && !hasCriticalNotOk
+
+  const notOkLabels = notOkItems.map(item => `${item.index + 1}. ${item.label}`)
 
   const defaultNotes = passed
     ? 'Lolos QC Vehicle Checklist GBJ'
@@ -57,6 +90,10 @@ export function evaluateGbjChecklist(states, checklistLabels = GBJ_VEHICLE_CHECK
     passed,
     result: passed ? 'PASS' : 'REJECT',
     notOkLabels,
+    notOkItems,
+    hasCriticalNotOk,
+    hasConditionalNotOk,
+    canApproveWithDeviation,
     defaultNotes
   }
 }
@@ -70,12 +107,19 @@ export function evaluateGbjChecklist(states, checklistLabels = GBJ_VEHICLE_CHECK
  * - vehicleCondition: overall passed boolean
  * - documentCompleteness: undefined (omitted)
  * - sealCondition: undefined (omitted)
+ * 
+ * Server is the authority for computing hasDeviation and validating decisionMode.
+ * hasDeviation is NOT sent in client payload.
  */
-export function buildGbjQcPayload(states, checklistLabels = GBJ_VEHICLE_CHECKLIST) {
+export function buildGbjQcPayload(
+  states,
+  checklistLabels = GBJ_VEHICLE_CHECKLIST,
+  { decisionMode = undefined, deviationReason = undefined } = {}
+) {
   const safeStates = Array.isArray(states) ? states : []
   const evaluation = evaluateGbjChecklist(safeStates, checklistLabels)
 
-  return {
+  const payload = {
     result: evaluation.result,
     pestEvidence: safeStates[0]?.status === 'ok',
     vehicleCleanliness: safeStates[2]?.status === 'ok',
@@ -93,4 +137,14 @@ export function buildGbjQcPayload(states, checklistLabels = GBJ_VEHICLE_CHECKLIS
     },
     notes: evaluation.defaultNotes
   }
+
+  if (decisionMode) {
+    payload.decisionMode = decisionMode
+  }
+
+  if (decisionMode === 'APPROVED_WITH_DEVIATION' && deviationReason) {
+    payload.deviationReason = deviationReason.trim()
+  }
+
+  return payload
 }

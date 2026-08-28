@@ -262,6 +262,15 @@
                     </div>
                   </div>
 
+                  <!-- Deviation Reason Note Banner -->
+                  <div v-if="parsedChecklist?.deviationReason" class="rounded-xl p-3 bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
+                    <div class="flex items-center space-x-1.5 font-black text-xs text-amber-800">
+                      <span class="material-icons text-sm text-amber-600">verified</span>
+                      <span>Dispensasi / Deviation Reason:</span>
+                    </div>
+                    <p class="text-[11px] font-medium italic text-amber-900 pl-5">"{{ parsedChecklist.deviationReason }}"</p>
+                  </div>
+
                   <!-- 3. Rejection Banner (only show if isWarehouseRejection is true) -->
                   <div v-if="isWarehouseRejection && qcDetails" class="rounded-xl p-3 text-white relative overflow-hidden bg-gradient-to-r from-red-500 to-red-600 shadow-sm">
                     <div class="flex items-center space-x-2">
@@ -2368,7 +2377,15 @@ const parsedChecklist = computed(() => {
         items.push({ label: 'Leakage & Condition', ok: check.vehicleCondition === 'PASS' })
       }
     }
-    return { hasIssue: check.result === 'REJECT', samplings: [], items }
+    const hasIssue = check.result === 'REJECT' || check.hasDeviation === true || items.some(i => !i.ok)
+    return {
+      hasIssue,
+      samplings: [],
+      items,
+      decisionMode: check.decisionMode,
+      hasDeviation: check.hasDeviation,
+      deviationReason: check.deviationReason,
+    }
   }
 
   const remarksStr = props.truck.remarks || props.truck.compiledChecklist || props.truck.warehouseProcesses?.[0]?.remarks || ''
@@ -2446,6 +2463,18 @@ const checklistStatusInfo = computed(() => {
   }
 
   const checklist = parsedChecklist.value
+  if (checklist?.decisionMode === 'APPROVED_WITH_DEVIATION') {
+    return {
+      status: 'APPROVED_WITH_DEVIATION',
+      label: 'APPROVED WITH DEVIATION',
+      badgeClass: 'bg-amber-50 text-amber-700 border border-amber-200',
+      headerStyle: { background: 'rgba(245, 158, 11, 0.06)' },
+      iconStyle: 'color: #D97706',
+      titleStyle: 'color: #92400E',
+      icon: 'warning'
+    }
+  }
+
   const hasIssue = checklist?.hasIssue || 
                    checklist?.samplings?.some(s => !s.compliant) || 
                    checklist?.items?.some(i => !i.ok)

@@ -458,20 +458,142 @@
 
             <!-- Footer -->
             <div class="px-8 py-5 border-t border-slate-100 bg-white shrink-0">
+              <!-- State 1: Incomplete -->
               <div v-if="!isChecklistComplete" class="flex flex-col items-center justify-center p-3 rounded-xl bg-slate-100 border border-slate-200 text-slate-400">
                 <span class="material-icons text-xl mb-1 animate-pulse">lock</span>
                 <span class="text-[11px] font-black uppercase tracking-widest">Complete {{ checklistRemaining }} Checklist Items</span>
                 <p class="text-[9px] font-bold mt-1 text-center">All items must be answered OK or NOT OK + photo attachment to proceed.</p>
               </div>
-              <button v-else-if="!hasNotOkItem" @click="submitGbjChecklist" :disabled="isProcessing" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(16,185,129,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#10B981,#059669);color:white;">
-                <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-                <span class="text-sm font-black uppercase tracking-widest text-white">{{ isProcessing ? 'PROCESSING...' : 'Accept & Pass Verification' }}</span>
-                <span v-if="!isProcessing" class="material-icons text-lg animate-bounce-right">arrow_forward</span>
+
+              <!-- State 2: Complete + All OK -->
+              <div v-else-if="!gbjEvaluation.hasNotOk" class="space-y-3">
+                <div class="flex items-center space-x-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
+                  <span class="material-icons text-base text-emerald-600">check_circle</span>
+                  <span>5 / 5 CHECKLIST COMPLETE &bull; NO DEVIATION FOUND</span>
+                </div>
+                <button @click="submitGbjChecklist('NORMAL_PASS')" :disabled="isProcessing" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(16,185,129,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#10B981,#059669);color:white;">
+                  <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
+                  <span class="text-sm font-black uppercase tracking-widest text-white">{{ isProcessing ? 'PROCESSING...' : 'Accept & Pass Verification' }}</span>
+                  <span v-if="!isProcessing" class="material-icons text-lg animate-bounce-right">arrow_forward</span>
+                </button>
+              </div>
+
+              <!-- State 3: Complete + Conditional NOT OK only -->
+              <div v-else-if="gbjEvaluation.canApproveWithDeviation" class="space-y-3">
+                <div class="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 space-y-1.5">
+                  <div class="flex items-center space-x-2 font-black text-xs text-amber-700">
+                    <span class="material-icons text-base text-amber-600">warning</span>
+                    <span>{{ gbjEvaluation.notOkItems.length }} DEVIATION FOUND (CONDITIONAL)</span>
+                  </div>
+                  <div v-for="item in gbjEvaluation.notOkItems" :key="item.index" class="text-[11px] font-semibold text-amber-900 flex items-center justify-between pl-6">
+                    <span>{{ item.index + 1 }}. {{ item.label }}</span>
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-200/70 text-amber-800">📷 Evidence attached</span>
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button @click="submitGbjChecklist('REJECTED')" :disabled="isProcessing" class="flex justify-center items-center py-3.5 px-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(239,68,68,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#EF4444,#B91C1C);color:white;">
+                    <span v-if="isProcessing" class="material-icons text-base animate-spin">autorenew</span>
+                    <span class="text-xs font-black uppercase tracking-wider text-white">Reject Vehicle</span>
+                    <span v-if="!isProcessing" class="material-icons text-base">cancel</span>
+                  </button>
+                  <button @click="submitGbjChecklist('APPROVED_WITH_DEVIATION')" :disabled="isProcessing" class="flex justify-center items-center py-3.5 px-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(245,158,11,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#F59E0B,#D97706);color:white;">
+                    <span v-if="isProcessing" class="material-icons text-base animate-spin">autorenew</span>
+                    <span class="text-xs font-black uppercase tracking-wider text-white">Approve With Deviation</span>
+                    <span v-if="!isProcessing" class="material-icons text-base">verified</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- State 4: Complete + Critical NOT OK -->
+              <div v-else class="space-y-3">
+                <div class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 space-y-1.5">
+                  <div class="flex items-center space-x-2 font-black text-xs text-red-700">
+                    <span class="material-icons text-base text-red-600">block</span>
+                    <span>⛔ CRITICAL NON-CONFORMITY DETECTED</span>
+                  </div>
+                  <div v-for="item in gbjEvaluation.notOkItems.filter(i => i.severity === 'CRITICAL')" :key="item.index" class="text-[11px] font-semibold text-red-900 flex items-center justify-between pl-6">
+                    <span>{{ item.index + 1 }}. {{ item.label }}</span>
+                    <span class="text-[10px] font-black px-2 py-0.5 rounded bg-red-200 text-red-800 uppercase">CRITICAL</span>
+                  </div>
+                  <p class="text-[10px] font-bold text-red-600 pl-6 pt-1">Vehicle cannot be approved. Hard rejection required.</p>
+                </div>
+                <button @click="submitGbjChecklist('REJECTED')" :disabled="isProcessing" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(239,68,68,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#EF4444,#B91C1C);color:white;">
+                  <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
+                  <span class="text-sm font-black uppercase tracking-widest text-white">{{ isProcessing ? 'PROCESSING...' : 'Submit QC Rejection' }}</span>
+                  <span v-if="!isProcessing" class="material-icons text-lg">cancel</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </teleport>
+
+    <!-- Deviation Reason Modal -->
+    <teleport to="body">
+      <transition name="modal">
+        <div v-if="showDeviationModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6" style="background:rgba(2,8,23,0.7);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);" @click.self="showDeviationModal = false">
+          <div class="relative w-[95vw] sm:max-w-lg mx-auto flex flex-col rounded-3xl shadow-2xl overflow-hidden bg-white">
+            <div class="px-6 py-4 flex justify-between items-center bg-amber-50 border-b border-amber-100">
+              <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-100 text-amber-700">
+                  <span class="material-icons text-lg">warning</span>
+                </div>
+                <div>
+                  <h3 class="text-sm font-black text-slate-800 tracking-tight">Approve With Deviation</h3>
+                  <p class="text-[10px] font-bold text-amber-700 uppercase tracking-wider">QC Vehicle GBJ</p>
+                </div>
+              </div>
+              <button @click="showDeviationModal = false" class="w-7 h-7 rounded-full flex items-center justify-center transition-all hover:bg-amber-100 text-slate-500">
+                <span class="material-icons text-base">close</span>
               </button>
-              <button v-else @click="submitGbjChecklist" :disabled="isProcessing" class="w-full flex justify-center items-center py-4 rounded-xl space-x-2 transition-all hover:shadow-[0_8px_25px_rgba(239,68,68,0.3)] active:scale-[0.98] cursor-pointer" style="background:linear-gradient(135deg,#EF4444,#B91C1C);color:white;">
-                <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-                <span class="text-sm font-black uppercase tracking-widest text-white">{{ isProcessing ? 'PROCESSING...' : 'Submit QC Rejection (Item NOT OK Found)' }}</span>
-                <span v-if="!isProcessing" class="material-icons text-lg">cancel</span>
+            </div>
+            
+            <div class="p-6 space-y-4">
+              <!-- Summary of Findings -->
+              <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <span class="text-[11px] font-black text-slate-600 uppercase tracking-wider">Temuan Non-Conformity ({{ gbjEvaluation.notOkItems.length }} item):</span>
+                <div v-for="item in gbjEvaluation.notOkItems" :key="item.index" class="text-xs text-slate-700 pl-3 border-l-2 border-amber-400">
+                  <p class="font-bold">{{ item.index + 1 }}. {{ item.label }}</p>
+                  <div class="flex items-center space-x-2 mt-0.5">
+                    <span class="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">Severity: {{ item.severity }}</span>
+                    <span class="text-[10px] text-emerald-600 font-bold">✓ Bukti foto terlampir</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Reason Input -->
+              <div class="space-y-1.5">
+                <label class="text-xs font-black text-slate-700 flex justify-between items-center">
+                  <span>Alasan Kendaraan Tetap Diterima (Dispensasi) *</span>
+                  <span class="text-[10px] font-bold" :class="deviationReason.trim().length >= 10 ? 'text-emerald-600' : 'text-slate-400'">
+                    {{ deviationReason.trim().length }}/10 min char
+                  </span>
+                </label>
+                <textarea
+                  v-model="deviationReason"
+                  rows="3"
+                  class="w-full px-3.5 py-2.5 rounded-xl border text-xs font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all custom-scrollbar resize-none"
+                  :class="deviationReason.trim().length > 0 && deviationReason.trim().length < 10 ? 'border-red-300 bg-red-50/30' : 'border-slate-200 bg-white'"
+                  placeholder="Jelaskan alasan/justifikasi penerimaan kendaraan meskipun terdapat temuan deviasi (contoh: Area kotor telah dibersihkan di tempat dan dilapisi terpal bersih baru)..."
+                ></textarea>
+                <p v-if="deviationReason.trim().length > 0 && deviationReason.trim().length < 10" class="text-[10px] text-red-500 font-bold">
+                  Alasan deviasi wajib diisi minimal 10 karakter.
+                </p>
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end space-x-3">
+              <button @click="showDeviationModal = false" :disabled="isProcessing" class="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition-all">
+                Batal
+              </button>
+              <button @click="confirmDeviation" :disabled="isProcessing || deviationReason.trim().length < 10"
+                class="px-5 py-2.5 rounded-xl text-xs font-black text-white flex items-center space-x-2 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                style="background:linear-gradient(135deg,#F59E0B,#D97706);">
+                <span v-if="isProcessing" class="material-icons text-sm animate-spin">autorenew</span>
+                <span class="material-icons text-sm" v-else>verified</span>
+                <span>{{ isProcessing ? 'Memproses...' : 'Konfirmasi Approve With Deviation' }}</span>
               </button>
             </div>
           </div>
@@ -637,6 +759,43 @@ const showChecklistModal = ref(false)
 const checklistStates = ref([])
 const vehicleChecklist = GBJ_VEHICLE_CHECKLIST
 
+const showDeviationModal = ref(false)
+const deviationReason = ref('')
+
+const handlePhotoUpload = (event, index) => {
+  const file = event.target.files[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      let width = img.width
+      let height = img.height
+      
+      const MAX_SIZE = 800
+      if (width > height && width > MAX_SIZE) {
+        height *= MAX_SIZE / width
+        width = MAX_SIZE
+      } else if (height > MAX_SIZE) {
+        width *= MAX_SIZE / height
+        height = MAX_SIZE
+      }
+      
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, width, height)
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.6)
+      checklistStates.value[index].photo = dataUrl
+    }
+    img.src = e.target.result
+  }
+  reader.readAsDataURL(file)
+}
+
 const gbjEvaluation = computed(() => {
   return evaluateGbjChecklist(checklistStates.value, vehicleChecklist)
 })
@@ -646,55 +805,74 @@ const checklistDoneCount = computed(() => gbjEvaluation.value.doneCount)
 const checklistRemaining = computed(() => gbjEvaluation.value.remainingCount)
 const hasNotOkItem = computed(() => gbjEvaluation.value.hasNotOk)
 
-const submitGbjChecklist = async () => {
-  if (isProcessing.value || !selectedTruck.value) return;
+const submitGbjChecklist = async (decisionMode = 'NORMAL_PASS') => {
+  if (isProcessing.value || !selectedTruck.value) return
 
-  const evalRes = evaluateGbjChecklist(checklistStates.value, vehicleChecklist);
+  const evalRes = evaluateGbjChecklist(checklistStates.value, vehicleChecklist)
   if (!evalRes.isComplete) {
-    toast.error('Lengkapi semua 5 item checklist terlebih dahulu!');
-    return;
+    toast.error('Lengkapi semua 5 item checklist terlebih dahulu!')
+    return
   }
 
-  const passed = evalRes.passed;
-  const notOkLabels = evalRes.notOkLabels;
+  if (decisionMode === 'APPROVED_WITH_DEVIATION') {
+    deviationReason.value = ''
+    showDeviationModal.value = true
+    return
+  }
 
-  const actionText = passed ? 'Approve QC Vehicle' : 'Reject QC Vehicle';
+  const isPass = decisionMode === 'NORMAL_PASS'
+  const actionText = isPass ? 'Approve QC Vehicle' : 'Reject QC Vehicle'
   const ok = await confirm({
     title: `${actionText}?`,
-    message: passed
+    message: isPass
       ? `Konfirmasi QC Vehicle Checklist PASS untuk armada ${getPlateNumber(selectedTruck.value)}? Truk akan dapat diproses ke Loading GBJ.`
-      : `Konfirmasi DITOLAK (REJECT) untuk armada ${getPlateNumber(selectedTruck.value)} karena terdapat ${notOkLabels.length} temuan item NOT OK?`,
-    type: passed ? 'success' : 'danger',
-    confirmText: passed ? 'Ya, Pass Verification' : 'Ya, Reject Truk'
-  });
+      : `Konfirmasi DITOLAK (REJECT) untuk armada ${getPlateNumber(selectedTruck.value)} karena terdapat ${evalRes.notOkItems.length} temuan item NOT OK?`,
+    type: isPass ? 'success' : 'danger',
+    confirmText: isPass ? 'Ya, Pass Verification' : 'Ya, Reject Truk'
+  })
 
   if (ok) {
-    isProcessing.value = true;
-    try {
-      const payload = buildGbjQcPayload(checklistStates.value, vehicleChecklist);
-
-      const response = await qcStore.submitVehicleResult(selectedTruck.value.id, payload);
-      const updatedTruck = response?.data || response;
-      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-
-      if (passed) {
-        toast.success(`QC Vehicle Checklist ${getPlateNumber(selectedTruck.value)} DISATUJUI (PASS). Truk siap masuk ke Loading GBJ.`);
-      } else {
-        toast.error(`QC Vehicle Checklist ${getPlateNumber(selectedTruck.value)} DITOLAK (REJECT).`);
-      }
-
-      selectedTruck.value = null;
-      showChecklistModal.value = false;
-    } catch (e) {
-      toast.error('Gagal menyimpan hasil QC Vehicle Checklist GBJ');
-    } finally {
-      isProcessing.value = false;
-    }
+    await executeGbjSubmit(decisionMode, null)
   }
-};
+}
 
-const acceptChecklistAndStart = () => {
-  submitGbjChecklist()
+const confirmDeviation = async () => {
+  if (deviationReason.value.trim().length < 10) {
+    toast.error('Alasan deviation wajib diisi minimal 10 karakter.')
+    return
+  }
+  await executeGbjSubmit('APPROVED_WITH_DEVIATION', deviationReason.value)
+}
+
+const executeGbjSubmit = async (decisionMode, reason) => {
+  if (isProcessing.value || !selectedTruck.value) return
+  isProcessing.value = true
+  try {
+    const payload = buildGbjQcPayload(checklistStates.value, vehicleChecklist, {
+      decisionMode,
+      deviationReason: reason,
+    })
+
+    const response = await qcStore.submitVehicleResult(selectedTruck.value.id, payload)
+    const updatedTruck = response?.data || response
+    if (updatedTruck) truckStore.upsertTruck(updatedTruck)
+
+    if (decisionMode === 'NORMAL_PASS') {
+      toast.success(`QC Vehicle Checklist ${getPlateNumber(selectedTruck.value)} DISATUJUI (PASS). Truk siap masuk ke Loading GBJ.`)
+    } else if (decisionMode === 'APPROVED_WITH_DEVIATION') {
+      toast.success(`QC Vehicle Checklist ${getPlateNumber(selectedTruck.value)} DISATUJUI DENGAN DEVIASI. Truk siap masuk ke Loading GBJ.`)
+    } else {
+      toast.error(`QC Vehicle Checklist ${getPlateNumber(selectedTruck.value)} DITOLAK (REJECT).`)
+    }
+
+    selectedTruck.value = null
+    showChecklistModal.value = false
+    showDeviationModal.value = false
+  } catch (e) {
+    toast.error('Gagal menyimpan hasil QC Vehicle Checklist GBJ')
+  } finally {
+    isProcessing.value = false
+  }
 }
 
 const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
@@ -887,73 +1065,5 @@ const verifyIncomingDecision = async (truck, decisionType) => {
     }
   }
 };
-
-const verifyTruck = async (truck, passed) => {
-  if (isProcessing.value) return;
-  const isStage3Incoming = truck.status === 'INCOMING_CHECK_IN_PROGRESS' || truck.status === 'INCOMING_CHECK_PENDING';
-
-  if (isStage3Incoming && passed) {
-    if (!qcForm.value.bau || !qcForm.value.warna || qcForm.value.kadarAir === null || qcForm.value.kadarAir === '' || qcForm.value.totalFM === null || qcForm.value.totalFM === '' || !qcForm.value.status) {
-      toast.error('Validasi gagal. Mohon lengkapi semua field yang wajib diisi (*)!');
-      return;
-    }
-  }
-
-  const actionText = passed ? 'Approve' : 'Reject';
-  const result = passed ? 'PASS' : 'REJECT';
-  
-  const ok = await confirm({ title: `${actionText} Verification?`, message: `${actionText} verification for ${getPlateNumber(truck)}?`, type: passed ? 'success' : 'danger', confirmText: passed ? 'Approve' : 'Yes, Reject' })
-  if (ok) { 
-    isProcessing.value = true;
-    try {
-      let response;
-      if (isStage3Incoming) {
-        response = await qcStore.submitIncomingResult(truck.id, { 
-          result,
-          odor: qcForm.value.bau,
-          color: qcForm.value.warna,
-          moisture: Number(qcForm.value.kadarAir),
-          foreignMatter: Number(qcForm.value.totalFM),
-          goodBeanPercentage: Number(qcForm.value.bijiOK || 0),
-          sampleWeight: qcForm.value.sampleWeight ? Number(qcForm.value.sampleWeight) : null,
-          beanCondition: Number(qcForm.value.bijiOK || 100) >= 80,
-          notes: qcForm.value.note
-        })
-      } else {
-        const payload = { 
-          result,
-          pestEvidence: checklistStates.value[0]?.status === 'ok',
-          documentCompleteness: checklistStates.value[1]?.status === 'ok',
-          vehicleCleanliness: checklistStates.value[2]?.status === 'ok',
-          vehicleOdor: checklistStates.value[3]?.status === 'ok',
-          sealCondition: checklistStates.value[4]?.status === 'ok',
-          vehicleCondition: true,
-          checklistItems: {
-            initialMoisture: 0,
-            items: checklistStates.value.map((s, idx) => ({
-              label: vehicleChecklist[idx] || 'Checklist item',
-              ok: s.status === 'ok',
-              photo: s.photo || null
-            }))
-          },
-          notes: passed ? 'Lolos sampling awal QC' : 'Ditolak pada sampling awal QC'
-        };
-        response = await qcStore.submitVehicleResult(truck.id, payload)
-      }
-      const updatedTruck = response?.data || response;
-      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-      
-      if (passed) {
-        toast.success(`${getPlateNumber(truck)} verification passed! ${isStage3Incoming ? 'Proceed to Outbound Weighbridge.' : 'Proceed to Unloading / Warehouse.'}`);
-      } else {
-        toast.error(`${getPlateNumber(truck)} verification rejected.`); 
-      }
-      
-      selectedTruck.value = null; 
-      showVerificationModal.value = false;
-      showChecklistModal.value = false;
-    } catch(e) {} finally { isProcessing.value = false; }
-  }
-}
 </script>
 
