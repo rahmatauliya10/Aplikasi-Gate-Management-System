@@ -1,4 +1,9 @@
-import { runProductionMigrationPreflight, checkTableExists, checkColumnExists } from './production-migration-preflight';
+import {
+  runProductionMigrationPreflight,
+  checkTableExists,
+  checkColumnExists,
+  isDirectExecution,
+} from './production-migration-preflight';
 import * as fs from 'fs';
 
 jest.mock('fs', () => {
@@ -183,13 +188,10 @@ describe('Production Migration Preflight (PR-28 Hard Gate)', () => {
     expect(report.queryErrors?.[0]).toContain('Database connection timeout');
   });
 
-  it('should verify isDirectExecution returns false during unit test execution without throwing require errors', async () => {
-    const { isDirectExecution } = await import(
-      './production-migration-preflight'
-    );
+  it('should verify isDirectExecution returns false during unit test execution', () => {
     expect(typeof isDirectExecution).toBe('function');
-    // When run via Jest, argv[1] contains jest, not production-migration-preflight.ts
+    // When run via Jest, argv[1] points to jest runner, not production-migration-preflight.ts
     const isDirect = isDirectExecution();
-    expect(typeof isDirect).toBe('boolean');
+    expect(isDirect).toBe(false);
   });
 });
