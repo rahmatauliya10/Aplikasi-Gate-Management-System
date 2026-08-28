@@ -442,9 +442,9 @@ const productConditionList = [
 
 const documentList = [
   { label: "Surat jalan / Delivery note", optional: false },
-  { label: "Dokumen hasil analisa / Certificate of Analysis", optional: false },
+  { label: "Dokumen hasil analisa / Certificate of Analysis", optional: true },
   { label: "Dokumen Halal / Certificate of Halal", optional: true },
-  { label: "Surat pesanan / Purchasing order", optional: false }
+  { label: "Surat pesanan / Purchasing order", optional: true }
 ]
 
 const currentDateStr = computed(() => {
