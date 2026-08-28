@@ -356,10 +356,24 @@ export async function runProductionMigrationPreflight(
 
 export async function main(): Promise<void> {
   const report = await runProductionMigrationPreflight();
-  fs.writeFileSync(
-    'migration_preflight_report.json',
-    JSON.stringify(report, null, 2),
-  );
+  try {
+    const reportDir =
+      process.env.LOCAL_BACKUP_DIR || (fs.existsSync('/tmp') ? '/tmp' : '.');
+    const reportPath = path.join(reportDir, 'migration_preflight_report.json');
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  } catch {
+    try {
+      fs.writeFileSync(
+        'migration_preflight_report.json',
+        JSON.stringify(report, null, 2),
+      );
+    } catch {
+      console.warn(
+        '⚠️ Could not persist migration_preflight_report.json to working directory (restricted permissions). Summary logged above.',
+      );
+    }
+  }
+
   if (!report.isReadyForMigration) {
     console.error(
       '❌ PREFLIGHT BLOCKER DETECTED: Database is NOT ready for migration.',
