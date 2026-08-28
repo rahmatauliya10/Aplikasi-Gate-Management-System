@@ -590,11 +590,11 @@ jobs:
           docker build --target migrator -t gms-backend-migrator:ci-prod ./backend
           docker build -t gms-frontend:ci-prod ./frontend
 
-      - name: Gate 3 - Production Compose Boot Smoke Test
+      - name: Gate 3 - Exact Production Migrator Rehearsal & Compose Boot Smoke Test
         run: |
           set -Eeuo pipefail
-          echo "Step 1: Starting entire production stack via Compose (with dependency ordering)..."
-          docker compose -f docker-compose.prod.yml up -d
+          echo "Step 1: Starting PostgreSQL database container..."
+          docker compose -f docker-compose.prod.yml up -d postgres
           
           echo "Waiting for postgres to become healthy..."
           timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-postgres 2>/dev/null)" = "healthy" ]; do sleep 1; done' || (docker logs gate-system-postgres && exit 1)
@@ -614,6 +614,76 @@ jobs:
             -RestoreUser "restore_operator" \
             -RestorePassword "ci_restore_password_min_32_chars_long_123"
 
+          echo "Step 3: Simulating Production Baseline Database State (18 Applied / 2 Pending Migrations)..."
+          # Apply migrations 1 through 18 into live PostgreSQL to reproduce authentic production upgrade scenario
+          MIGRATIONS_1_TO_18=$(ls -1d backend/prisma/migrations/2026* | head -n 18)
+          for mig in $MIGRATIONS_1_TO_18; do
+            m_name=$(basename "$mig")
+            echo "Applying baseline migration $m_name..."
+            docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 < "$mig/migration.sql"
+            checksum=$(sha256sum "$mig/migration.sql" | awk '{print $1}')
+            docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+              CREATE TABLE IF NOT EXISTS _prisma_migrations (
+                id VARCHAR(36) PRIMARY KEY,
+                checksum VARCHAR(64) NOT NULL,
+                finished_at TIMESTAMPTZ,
+                migration_name VARCHAR(255) NOT NULL,
+                logs TEXT,
+                rolled_back_at TIMESTAMPTZ,
+                started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                applied_steps_count INTEGER NOT NULL DEFAULT 1
+              );
+              INSERT INTO _prisma_migrations (id, checksum, finished_at, migration_name, applied_steps_count)
+              VALUES (gen_random_uuid()::text, '$checksum', now(), '$m_name', 1)
+              ON CONFLICT (id) DO NOTHING;
+            "
+          done
+
+          echo "Assigning schema ownership to gms_owner and configuring least-privilege table grants..."
+          docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            DECLARE
+              r RECORD;
+            BEGIN
+              FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+                EXECUTE 'ALTER TABLE public.' || quote_ident(r.tablename) || ' OWNER TO gms_owner;';
+                EXECUTE 'GRANT ALL ON TABLE public.' || quote_ident(r.tablename) || ' TO gms_owner;';
+                EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.' || quote_ident(r.tablename) || ' TO gms_app;';
+                EXECUTE 'GRANT SELECT ON TABLE public.' || quote_ident(r.tablename) || ' TO gms_backup;';
+              END LOOP;
+              FOR r IN (SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public') LOOP
+                EXECUTE 'ALTER SEQUENCE public.' || quote_ident(r.sequence_name) || ' OWNER TO gms_owner;';
+                EXECUTE 'GRANT ALL ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_owner;';
+                EXECUTE 'GRANT USAGE, SELECT, UPDATE ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_app;';
+              END LOOP;
+            END \$\$;
+          "
+
+          echo "Step 4: Running Production Migrator Checks (Exact Production Rehearsal Sequence)..."
+          
+          echo "4A: Verifying Pending-Migration-Aware Drift Check..."
+          docker compose -f docker-compose.prod.yml run --rm migrator npm run test:drift
+
+          echo "4B: Running Production Migration Preflight Audit..."
+          docker compose -f docker-compose.prod.yml run --rm migrator npm run prisma:preflight -- --report-only --fail-on-duplicates
+
+          echo "4C: Creating Atomic Pre-Deployment Backup via Migrator..."
+          docker compose -f docker-compose.prod.yml run --rm migrator node scripts/run-predeploy-backup.js
+
+          echo "4D: Verifying Pre-Deployment Backup Persistence on Host Storage..."
+          test -s backups/local/latest-predeploy.json
+          grep '"localStatus":\s*"VERIFIED"' backups/local/latest-predeploy.json
+          grep '"offsiteStatus":\s*"VERIFIED"' backups/local/latest-predeploy.json
+          echo "Host backup persistence and status VERIFIED [PASS]."
+
+          echo "4E: Deploying Forward Migrations via Migrator Container..."
+          docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate deploy
+          docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate status
+          docker compose -f docker-compose.prod.yml run --rm migrator node scripts/enforce-audit-immutability.js
+
+          echo "Step 5: Booting Full Application Stack (--no-build)..."
+          docker compose -f docker-compose.prod.yml up -d --no-build
+
           echo "Waiting for backend to become healthy..."
           timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-backend 2>/dev/null)" = "healthy" ]; do sleep 2; done' || (docker logs gate-system-backend && exit 1)
           
@@ -623,16 +693,16 @@ jobs:
           echo "Waiting for nginx-proxy to become healthy..."
           timeout 45 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-nginx 2>/dev/null)" = "healthy" ]; do sleep 1; done' || (docker compose -f docker-compose.prod.yml ps && docker logs gate-system-nginx && exit 1)
           
-          echo "Step 4A: Testing HTTP health endpoint..."
+          echo "Step 6A: Testing HTTP health endpoint..."
           curl --fail --silent --show-error http://localhost:8080/health
           echo ""
 
-          echo "Step 4B: Testing HTTPS/TLS health endpoint..."
+          echo "Step 6B: Testing HTTPS/TLS health endpoint..."
           curl --fail --silent --show-error --insecure https://localhost/health
           echo ""
 
           echo "HTTP + HTTPS production gateway probes PASSED [100% OK]."
-          echo "Production compose 3-layer validation gate PASSED successfully."
+          echo "Production compose exact rehearsal & 3-layer validation gate PASSED successfully."
 
       - name: Cleanup Production Compose Smoke Environment
         if: always()

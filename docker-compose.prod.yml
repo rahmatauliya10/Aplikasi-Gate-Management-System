@@ -150,8 +150,17 @@ services:
       - ALL
     environment:
       - DATABASE_URL=postgresql://${GMS_OWNER_USER:-gms_owner}:${GMS_OWNER_PASSWORD:?GMS_OWNER_PASSWORD wajib diisi di .env}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
+      - BACKUP_DATABASE_URL=postgresql://${GMS_BACKUP_USER:-gms_backup}:${GMS_BACKUP_PASSWORD:?GMS_BACKUP_PASSWORD wajib diisi di .env}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
+      - BACKUP_SIGNATURE_SECRET=${BACKUP_SIGNATURE_SECRET:?BACKUP_SIGNATURE_SECRET wajib diisi di .env}
+      - LOCAL_BACKUP_DIR=/app/backups/local
+      - OFFSITE_BACKUP_DIR=/app/backups/nas
+      - UPLOAD_DIR=/app/uploads
       - GMS_APP_USER=${GMS_APP_USER:-gms_app}
       - NODE_ENV=production
+    volumes:
+      - ./uploads:/app/uploads:ro
+      - ./backups/local:/app/backups/local
+      - ${NAS_MOUNT_PATH:?NAS_MOUNT_PATH must be set to a remote offsite/NAS mount directory}:/app/backups/nas
     depends_on:
       postgres:
         condition: service_healthy

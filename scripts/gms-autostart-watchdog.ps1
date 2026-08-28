@@ -18,6 +18,9 @@ param(
     [string]$EnvFilePath = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$ProjectName = "aplikasigatemanagementsystem",
+
+    [Parameter(Mandatory=$false)]
     [bool]$RequireFrontend = $true,
 
     [Parameter(Mandatory=$false)]
@@ -99,7 +102,7 @@ if (-not $CreatedNew) {
 [System.Diagnostics.Stopwatch]$OverallTimer = [System.Diagnostics.Stopwatch]::StartNew()
 
 try {
-    Write-SanitizedLog -Message "Starting GMS Production Auto-Recovery Watchdog execution..." -Level "INFO"
+    Write-SanitizedLog -Message "Starting GMS Production Auto-Recovery Watchdog execution (Project: $ProjectName)..." -Level "INFO"
 
     # --- Step 1: Check Compose File and Env File Existence ---
     if (-not (Test-Path -Path $ComposeFilePath -PathType Leaf)) {
@@ -152,14 +155,14 @@ try {
 
     # --- Step 4: Validate Docker Compose Configuration Syntax (Quiet Mode) ---
     Write-SanitizedLog -Message "Validating Docker Compose configuration syntax..." -Level "INFO"
-    & docker compose --env-file $EnvFilePath -f $ComposeFilePath config --quiet 2>&1
+    & docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath config --quiet 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Docker Compose configuration validation failed (Exit Code $LASTEXITCODE)."
     }
 
     # --- Step 5: Start GMS Production Containers (Non-Destructive --no-build) ---
     Write-SanitizedLog -Message "Deploying GMS Production containers using docker compose up -d --no-build..." -Level "INFO"
-    & docker compose --env-file $EnvFilePath -f $ComposeFilePath up -d --no-build 2>&1
+    & docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath up -d --no-build 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Docker Compose up failed with exit code $LASTEXITCODE."
     }
@@ -171,7 +174,7 @@ try {
 
     while (-not $PostgresHealthy -and $PgCheckCount -lt 20) {
         $PgCheckCount++
-        [string]$PgContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q postgres 2>&1).ToString().Trim()
+        [string]$PgContainerId = (& docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath ps -q postgres 2>&1).ToString().Trim()
         
         if ($PgContainerId) {
             [string]$PgStatus = (& docker inspect --format="{{.State.Health.Status}}" $PgContainerId 2>&1).ToString().Trim()
@@ -196,7 +199,7 @@ try {
     while (-not $BackendReady -and $BackendCheckCount -lt 15) {
         $BackendCheckCount++
         try {
-            [string]$BackendContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q backend 2>&1).ToString().Trim()
+            [string]$BackendContainerId = (& docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath ps -q backend 2>&1).ToString().Trim()
             if ($BackendContainerId) {
                 [string]$HealthStatus = (& docker inspect --format="{{.State.Health.Status}}" $BackendContainerId 2>&1).ToString().Trim()
                 if ($HealthStatus -eq "healthy") {
@@ -217,7 +220,7 @@ try {
 
     # --- Step 7b: Verify Frontend and Reverse Proxy Container Health ---
     Write-SanitizedLog -Message "Verifying Frontend and Web Gateway container health readiness..." -Level "INFO"
-    [string]$FrontendContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q frontend 2>&1).ToString().Trim()
+    [string]$FrontendContainerId = (& docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath ps -q frontend 2>&1).ToString().Trim()
     if ($FrontendContainerId) {
         [string]$feHealth = (& docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $FrontendContainerId 2>&1).ToString().Trim()
         if ($feHealth -eq "healthy" -or $feHealth -eq "running") {
@@ -229,9 +232,9 @@ try {
         throw "GMS Frontend service container was not found in compose stack."
     }
 
-    [string]$NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx-proxy 2>&1).ToString().Trim()
+    [string]$NginxContainerId = (& docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx-proxy 2>&1).ToString().Trim()
     if (-not $NginxContainerId) {
-        $NginxContainerId = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
+        $NginxContainerId = (& docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath ps -q nginx 2>&1).ToString().Trim()
     }
     if ($NginxContainerId) {
         [string]$ngHealth = (& docker inspect --format="{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $NginxContainerId 2>&1).ToString().Trim()
@@ -246,7 +249,7 @@ try {
 
     # --- Step 7c: Backend /api/health Direct HTTP Smoke Check ---
     Write-SanitizedLog -Message "Performing application HTTP readiness check on /api/health directly to backend..." -Level "INFO"
-    [string]$HealthResp = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
+    [string]$HealthResp = (& docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
         const http = require('http');
         const port = process.env.PORT || 3001;
         const req = http.get('http://127.0.0.1:' + port + '/api/health', (res) => {
@@ -270,7 +273,7 @@ try {
     if ($EffectiveRequireNginx -and $NginxContainerId) {
         Write-SanitizedLog -Message "Performing end-to-end HTTPS Gateway validation (TLS, API Routing, Frontend Proxy)..." -Level "INFO"
         
-        [string]$GatewaySmokeCheck = (& docker compose --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
+        [string]$GatewaySmokeCheck = (& docker compose -p $ProjectName --env-file $EnvFilePath -f $ComposeFilePath exec -T backend node -e "
             const https = require('https');
             const http = require('http');
 

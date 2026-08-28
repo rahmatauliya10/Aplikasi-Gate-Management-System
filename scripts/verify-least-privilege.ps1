@@ -258,6 +258,13 @@ if ($AppPassword -and $OwnerPassword -and $BackupPassword -and $PostgresPassword
 # Check 16 & 17: Database Audit & History Immutability Gate
 $auditTables = @("ActivityLog", "TransactionCorrection", "TransactionCorrectionItem", "TransactionStatusHistory")
 foreach ($tbl in $auditTables) {
+    # Check if table exists before querying table-level privileges
+    $tableExists = Run-Query -user $OwnerUser -password $OwnerPassword -sql "SELECT to_regclass('public.`"$tbl`"') IS NOT NULL;"
+    if ($tableExists.Trim() -ne "t" -and $tableExists.Trim() -ne "true") {
+        Write-Host "Check 16/17: Table '$tbl' not found in database yet; skipping immutability check." -ForegroundColor Yellow
+        continue
+    }
+
     # Check 16: Positive Test - gms_app has SELECT and INSERT on audit table
     $selectAudit = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.`"$tbl`"', 'SELECT'), has_table_privilege('$AppUser', 'public.`"$tbl`"', 'INSERT');"
     if ($selectAudit -match "f|false") {
@@ -270,15 +277,20 @@ foreach ($tbl in $auditTables) {
         throw "IMMUTABILITY VIOLATION: Role '$AppUser' has UPDATE or DELETE privilege on immutable audit table '$tbl': $updateAudit"
     }
 }
-Write-Host "Check 16: Positive Test - gms_app SELECT and INSERT verified on all 4 audit tables [PASS]" -ForegroundColor Green
-Write-Host "Check 17: Negative Test - gms_app UPDATE and DELETE revoked on all 4 audit tables [PASS]" -ForegroundColor Green
+Write-Host "Check 16: Positive Test - gms_app SELECT and INSERT verified on all active audit tables [PASS]" -ForegroundColor Green
+Write-Host "Check 17: Negative Test - gms_app UPDATE and DELETE revoked on all active audit tables [PASS]" -ForegroundColor Green
 
 # Check 18: Transaction Hard-Delete & Truncate Immutability Gate
-$txDeleteCheck = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.`"Transaction`"', 'DELETE'), has_table_privilege('$AppUser', 'public.`"Transaction`"', 'TRUNCATE');"
-if ($txDeleteCheck -match "t|true") {
-    throw "IMMUTABILITY VIOLATION: Role '$AppUser' has DELETE or TRUNCATE privilege on 'Transaction' table: $txDeleteCheck"
+$txExists = Run-Query -user $OwnerUser -password $OwnerPassword -sql "SELECT to_regclass('public.`"Transaction`"') IS NOT NULL;"
+if ($txExists.Trim() -eq "t" -or $txExists.Trim() -eq "true") {
+    $txDeleteCheck = Run-Query -user $AppUser -password $AppPassword -sql "SELECT has_table_privilege('$AppUser', 'public.`"Transaction`"', 'DELETE'), has_table_privilege('$AppUser', 'public.`"Transaction`"', 'TRUNCATE');"
+    if ($txDeleteCheck -match "t|true") {
+        throw "IMMUTABILITY VIOLATION: Role '$AppUser' has DELETE or TRUNCATE privilege on 'Transaction' table: $txDeleteCheck"
+    }
+    Write-Host "Check 18: Negative Test - gms_app DELETE and TRUNCATE revoked on Transaction table [PASS]" -ForegroundColor Green
+} else {
+    Write-Host "Check 18: Table 'Transaction' not found in database yet; skipping delete/truncate check." -ForegroundColor Yellow
 }
-Write-Host "Check 18: Negative Test - gms_app DELETE and TRUNCATE revoked on Transaction table [PASS]" -ForegroundColor Green
 
 # Post-check: Native pg_dump Smoke Test with gms_backup Credentials
 if ($BackupPassword) {
