@@ -184,12 +184,13 @@ describe('QcService - Segregation of Duties (SoD)', () => {
   });
 
   describe('GBJ Vehicle Check — Decision Mode & Policy Enforcement', () => {
-    const validPhoto = 'data:image/jpeg;base64,' + Buffer.from('mockphoto').toString('base64');
+    const validPhoto =
+      'data:image/jpeg;base64,' + Buffer.from('mockphoto').toString('base64');
     const makeChecklist = (states: boolean[], withPhotos = true) => ({
       items: states.map((ok, idx) => ({
         label: `Item ${idx + 1}`,
         ok,
-        photo: ok ? null : (withPhotos ? validPhoto : null),
+        photo: ok ? null : withPhotos ? validPhoto : null,
       })),
     });
 
@@ -209,7 +210,9 @@ describe('QcService - Segregation of Duties (SoD)', () => {
       mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-          findUnique: jest.fn().mockResolvedValue({ ...mockGbjTx, status: 'QC_VEHICLE_PASSED' }),
+          findUnique: jest
+            .fn()
+            .mockResolvedValue({ ...mockGbjTx, status: 'QC_VEHICLE_PASSED' }),
         },
         qcVehicleCheck: {
           aggregate: jest.fn().mockResolvedValue({ _max: { revision: 1 } }),
@@ -221,7 +224,9 @@ describe('QcService - Segregation of Duties (SoD)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValue(mockGbjTx);
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
     });
 
     it('1. should REJECT (400) when CRITICAL item is NOT OK with APPROVED_WITH_DEVIATION', async () => {
@@ -257,11 +262,17 @@ describe('QcService - Segregation of Duties (SoD)', () => {
       const dto = {
         result: 'REJECT' as const, // Client might send REJECT, server must override
         decisionMode: 'APPROVED_WITH_DEVIATION' as const,
-        deviationReason: 'Truk dibersihkan di lokasi dan telah dipasang alas terpal bersih',
+        deviationReason:
+          'Truk dibersihkan di lokasi dan telah dipasang alas terpal bersih',
         checklistItems: makeChecklist([true, true, false, true, false]),
       };
 
-      const res = await service.submitVehicleCheck('tx-gbj-1', dto, 'user-qc-1', qcUser as any);
+      const res = await service.submitVehicleCheck(
+        'tx-gbj-1',
+        dto,
+        'user-qc-1',
+        qcUser as any,
+      );
 
       expect(res.success).toBe(true);
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
@@ -275,7 +286,8 @@ describe('QcService - Segregation of Duties (SoD)', () => {
             result: 'PASS',
             decisionMode: 'APPROVED_WITH_DEVIATION',
             hasDeviation: true,
-            deviationReason: 'Truk dibersihkan di lokasi dan telah dipasang alas terpal bersih',
+            deviationReason:
+              'Truk dibersihkan di lokasi dan telah dipasang alas terpal bersih',
           }),
         }),
       );
@@ -308,7 +320,12 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         checklistItems: makeChecklist([true, true, true, true, true]),
       };
 
-      const res = await service.submitVehicleCheck('tx-gbj-1', dto, 'user-qc-1', qcUser as any);
+      const res = await service.submitVehicleCheck(
+        'tx-gbj-1',
+        dto,
+        'user-qc-1',
+        qcUser as any,
+      );
 
       expect(res.success).toBe(true);
       expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalledWith(
@@ -365,7 +382,12 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         status: 'QC_VEHICLE_REJECTED',
       });
 
-      const res = await service.submitVehicleCheck('tx-gbj-1', dto, 'user-qc-1', qcUser as any);
+      const res = await service.submitVehicleCheck(
+        'tx-gbj-1',
+        dto,
+        'user-qc-1',
+        qcUser as any,
+      );
 
       expect(res.success).toBe(true);
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
@@ -390,7 +412,12 @@ describe('QcService - Segregation of Duties (SoD)', () => {
         checklistItems: makeChecklist([true, true, true, true, true]),
       };
 
-      const res = await service.submitVehicleCheck('tx-gbj-1', dto, 'user-qc-1', qcUser as any);
+      const res = await service.submitVehicleCheck(
+        'tx-gbj-1',
+        dto,
+        'user-qc-1',
+        qcUser as any,
+      );
 
       expect(res.success).toBe(true);
       expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalledWith(
@@ -494,7 +521,11 @@ describe('QcService - Segregation of Duties (SoD)', () => {
           items: [
             { label: 'Item 1', ok: true, photo: null },
             { label: 'Item 2', ok: true, photo: null },
-            { label: 'Item 3', ok: false, photo: 'data:application/pdf;base64,mockpdf' },
+            {
+              label: 'Item 3',
+              ok: false,
+              photo: 'data:application/pdf;base64,mockpdf',
+            },
             { label: 'Item 4', ok: true, photo: null },
             { label: 'Item 5', ok: true, photo: null },
           ],
@@ -517,7 +548,11 @@ describe('QcService - Segregation of Duties (SoD)', () => {
           items: [
             { label: 'Item 1', ok: true, photo: null },
             { label: 'Item 2', ok: true, photo: null },
-            { label: 'Item 3', ok: false, photo: `data:image/jpeg;base64,${largeData}` },
+            {
+              label: 'Item 3',
+              ok: false,
+              photo: `data:image/jpeg;base64,${largeData}`,
+            },
             { label: 'Item 4', ok: true, photo: null },
             { label: 'Item 5', ok: true, photo: null },
           ],

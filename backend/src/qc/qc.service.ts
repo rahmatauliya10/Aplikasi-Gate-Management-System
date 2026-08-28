@@ -335,7 +335,7 @@ export class QcService {
     // ═══════════════════════════════════════════
     // STEP 1: Structural Validation of Checklist
     // ═══════════════════════════════════════════
-    const rawItems: unknown[] = (dto.checklistItems as any)?.items;
+    const rawItems: unknown[] = dto.checklistItems?.items;
 
     if (!Array.isArray(rawItems)) {
       throw new BadRequestException({
@@ -380,7 +380,9 @@ export class QcService {
         }
 
         // Photo MIME validation
-        const mimeMatch = raw.photo.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
+        const mimeMatch = raw.photo.match(
+          /^data:(image\/[a-zA-Z0-9+.-]+);base64,/,
+        );
         if (!mimeMatch) {
           throw new BadRequestException({
             success: false,
@@ -434,7 +436,7 @@ export class QcService {
     let effectiveDecisionMode: QcVehicleDecisionMode;
 
     if (dto.decisionMode) {
-      effectiveDecisionMode = dto.decisionMode as QcVehicleDecisionMode;
+      effectiveDecisionMode = dto.decisionMode;
     } else {
       // Safe legacy derivation — NOT a bypass
       if (dto.result === 'PASS' && !serverHasDeviation) {

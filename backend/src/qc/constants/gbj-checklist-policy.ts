@@ -20,11 +20,11 @@ export const GBJ_CHECKLIST_ITEMS = [
 export type GbjChecklistSeverity = 'CRITICAL' | 'CONDITIONAL';
 
 export const GBJ_CHECKLIST_SEVERITY: readonly GbjChecklistSeverity[] = [
-  'CRITICAL',      // 0: Hama
-  'CRITICAL',      // 1: Haram/najis
-  'CONDITIONAL',   // 2: Bersih & tidak berbau
-  'CRITICAL',      // 3: Bahan kimia/kontaminan
-  'CONDITIONAL',   // 4: Alas lantai
+  'CRITICAL', // 0: Hama
+  'CRITICAL', // 1: Haram/najis
+  'CONDITIONAL', // 2: Bersih & tidak berbau
+  'CRITICAL', // 3: Bahan kimia/kontaminan
+  'CONDITIONAL', // 4: Alas lantai
 ] as const;
 
 export const GBJ_CHECKLIST_COUNT = GBJ_CHECKLIST_ITEMS.length;
