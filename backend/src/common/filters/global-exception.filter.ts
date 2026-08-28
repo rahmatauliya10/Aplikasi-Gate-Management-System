@@ -67,7 +67,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           exceptionResponse.message
         ) {
           if (Array.isArray(exceptionResponse.message)) {
-            message = 'Validasi data gagal. Periksa field yang wajib diisi.';
+            message =
+              exceptionResponse.message[0] ||
+              'Validasi data gagal. Periksa field yang wajib diisi.';
             errorCode = 'VALIDATION_ERROR';
             details = exceptionResponse.message;
           } else if (

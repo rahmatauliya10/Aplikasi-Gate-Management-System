@@ -141,6 +141,13 @@ router.beforeEach(async (to, from, next) => {
   if (to.path !== '/login' && !authStore.isAuthenticated) {
     next('/login')
   } else if (to.path === '/login' && authStore.isAuthenticated) {
+    if (authStore.mustChangePassword) {
+      // If user deliberately navigates to /login while mustChangePassword is true,
+      // log out so they can sign in with another account
+      await authStore.logout()
+      next()
+      return
+    }
     // If logged in and heading to login page, redirect to dashboard
     next('/')
   } else if (to.meta.requiresAuth && authStore.isAuthenticated) {
