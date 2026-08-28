@@ -233,25 +233,55 @@ async function main() {
       const normStmt = normalizeSql(stmt);
       if (!normStmt) continue;
 
-      // Extract core signature (e.g., "alter table ... add column ...", "create table ...", "create type ...")
-      // Check if statement or its target object is declared in pending migrations
       let isAccountedFor = normPending.includes(normStmt);
 
       if (!isAccountedFor) {
-        // Keyword/identifier token match fallback for formatted differences
         const createTableMatch = normStmt.match(/create table\s+["`]?(\w+)["`]?/i);
         const addColumnMatch = normStmt.match(/alter table\s+["`]?(\w+)["`]?\s+add column\s+["`]?(\w+)["`]?/i);
         const createTypeMatch = normStmt.match(/create type\s+["`]?(\w+)["`]?/i);
         const createIndexMatch = normStmt.match(/create\s+(unique\s+)?index\s+["`]?(\w+)["`]?/i);
+        const addConstraintMatch = normStmt.match(/alter table\s+["`]?(\w+)["`]?\s+add constraint\s+["`]?(\w+)["`]?/i);
+        const dropConstraintMatch = normStmt.match(/alter table\s+["`]?(\w+)["`]?\s+drop constraint\s+["`]?(\w+)["`]?/i);
+        const dropIndexMatch = normStmt.match(/drop\s+index\s+["`]?(\w+)["`]?/i);
 
         if (createTableMatch && normPending.includes(createTableMatch[1].toLowerCase())) {
           isAccountedFor = true;
-        } else if (addColumnMatch && normPending.includes(addColumnMatch[1].toLowerCase()) && normPending.includes(addColumnMatch[2].toLowerCase())) {
+        } else if (
+          addColumnMatch &&
+          normPending.includes(addColumnMatch[1].toLowerCase()) &&
+          normPending.includes(addColumnMatch[2].toLowerCase())
+        ) {
           isAccountedFor = true;
         } else if (createTypeMatch && normPending.includes(createTypeMatch[1].toLowerCase())) {
           isAccountedFor = true;
         } else if (createIndexMatch && normPending.includes(createIndexMatch[2].toLowerCase())) {
           isAccountedFor = true;
+        } else if (
+          addConstraintMatch &&
+          normPending.includes(addConstraintMatch[1].toLowerCase()) &&
+          normPending.includes(addConstraintMatch[2].toLowerCase())
+        ) {
+          isAccountedFor = true;
+        } else if (
+          dropConstraintMatch &&
+          normPending.includes(dropConstraintMatch[1].toLowerCase()) &&
+          normPending.includes(dropConstraintMatch[2].toLowerCase())
+        ) {
+          isAccountedFor = true;
+        } else if (dropIndexMatch && normPending.includes(dropIndexMatch[1].toLowerCase())) {
+          isAccountedFor = true;
+        } else if (normStmt.includes('foreign key') && normStmt.includes('references')) {
+          // Extract table names and constraint from foreign key statement
+          const fkMatches = normStmt.match(/["`](\w+)["`]/g);
+          if (fkMatches && fkMatches.length > 0) {
+            const allIdentifiersInPending = fkMatches.every((id) => {
+              const cleanId = id.replace(/["`]/g, '').toLowerCase();
+              return normPending.includes(cleanId);
+            });
+            if (allIdentifiersInPending) {
+              isAccountedFor = true;
+            }
+          }
         }
       }
 
