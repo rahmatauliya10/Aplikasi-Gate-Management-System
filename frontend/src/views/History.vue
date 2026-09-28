@@ -663,6 +663,7 @@
 </template>
 
 <script setup>
+import { formatPlantDate, formatPlantTime, formatPlantDateTime, plantDateKey } from '../utils/displayTime'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -730,21 +731,19 @@ const sortBy = ref('gateInDesc')
 
 const applyDatePreset = (preset) => {
   datePreset.value = preset
-  const today = new Date()
-  const todayStr = today.toISOString().split('T')[0]
+  const todayStr = plantDateKey(new Date())
 
   if (preset === 'TODAY') {
     startDate.value = todayStr
     endDate.value = todayStr
   } else if (preset === 'THIS_WEEK') {
-    const day = today.getDay()
-    const firstDay = new Date(today)
-    firstDay.setDate(today.getDate() - (day === 0 ? 6 : day - 1))
-    startDate.value = firstDay.toISOString().split('T')[0]
+    const localDay = new Date(`${todayStr}T00:00:00.000Z`)
+    const day = localDay.getUTCDay()
+    localDay.setUTCDate(localDay.getUTCDate() - (day === 0 ? 6 : day - 1))
+    startDate.value = localDay.toISOString().slice(0, 10)
     endDate.value = todayStr
   } else if (preset === 'THIS_MONTH') {
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
-    startDate.value = firstDay.toISOString().split('T')[0]
+    startDate.value = `${todayStr.slice(0, 7)}-01`
     endDate.value = todayStr
   } else if (preset === 'ALL') {
     startDate.value = ''
@@ -754,12 +753,7 @@ const applyDatePreset = (preset) => {
 }
 
 const formatArrivalDateTime = (isoString) => {
-  if (!isoString) return { date: '-', time: '-' }
-  const d = new Date(isoString)
-  if (isNaN(d.getTime())) return { date: '-', time: '-' }
-  const date = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return { date, time }
+  return { date: formatPlantDate(isoString), time: formatPlantTime(isoString) }
 }
 
 const extractMoistureValue = (target) => {
@@ -976,7 +970,7 @@ const filteredAnalyzedTrucks = computed(() => {
     let matchesDate = true
     const arrTime = truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt
     if (arrTime) {
-      const arrDateStr = new Date(arrTime).toISOString().split('T')[0]
+      const arrDateStr = plantDateKey(arrTime)
       if (startDate.value && arrDateStr < startDate.value) matchesDate = false
       if (endDate.value && arrDateStr > endDate.value) matchesDate = false
     }
@@ -1232,10 +1226,7 @@ const formatPercentage = (val) => {
 }
 
 const formatTime = (isoString) => {
-  if (!isoString) return '-'
-  const d = new Date(isoString)
-  if (isNaN(d.getTime())) return '-'
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return formatPlantTime(isoString)
 }
 
 const getQCEndTime = (truck) => {
@@ -1245,10 +1236,7 @@ const getQCEndTime = (truck) => {
 }
 
 const formatTimeFull = (isoString) => {
-  if (!isoString) return '-'
-  const d = new Date(isoString)
-  if (isNaN(d.getTime())) return '-'
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ', ' + d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+  return formatPlantDateTime(isoString)
 }
 
 const getTimelineRows = (truck) => {

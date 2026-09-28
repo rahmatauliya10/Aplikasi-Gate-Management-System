@@ -604,6 +604,7 @@
 </template>
 
 <script setup>
+import { formatPlantTime } from '../utils/displayTime'
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
@@ -875,7 +876,7 @@ const executeGbjSubmit = async (decisionMode, reason) => {
   }
 }
 
-const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+const formatTime = formatPlantTime
 const startQC = (truck) => { 
   // Normally we would just set state, but since it's already pending, we don't need to change status to processing.
   // We can just open the modal directly.

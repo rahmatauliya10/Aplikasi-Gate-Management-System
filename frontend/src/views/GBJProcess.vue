@@ -335,6 +335,7 @@
 </template>
 
 <script setup>
+import { formatPlantTime } from '../utils/displayTime'
 import PageHeader from '../components/PageHeader.vue'
 import { ref, computed, watch, reactive, onMounted } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
@@ -486,7 +487,7 @@ const selectTruck = (truck) => {
   deliveryForm.productCondition = [false, false, false, false];
   deliveryForm.documentAvailability = [false, false, false, false];
 }
-const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+const formatTime = formatPlantTime
 
 const handleWeightCapture = (weight) => {
   capturedWeight.value = weight

@@ -334,6 +334,7 @@
 </template>
 
 <script setup>
+import { formatPlantTime } from '../utils/displayTime'
 import PageHeader from '../components/PageHeader.vue'
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -470,7 +471,7 @@ const selectTruck = (truck) => {
   }
 }
 
-const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+const formatTime = formatPlantTime
 
 const saveSecurityInfo = async () => {
   if (!suratJalanInput.value || !poNumberInput.value) { toast.warning('Please complete the Delivery Note and PO Number fields'); return }
