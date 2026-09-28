@@ -264,6 +264,7 @@
 import { reactive, ref, computed, watch, onMounted } from 'vue'
 import { useAuthStore } from '../stores/authStore'
 import { useMasterDataStore } from '../stores/masterDataStore'
+import { formatPlantDate, formatPlantTime } from '../utils/displayTime'
 
 const authStore = useAuthStore()
 const masterStore = useMasterDataStore()
@@ -390,9 +391,8 @@ const prevStep = () => {
 
 const updateDateTime = () => {
   const now = new Date()
-  const m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  form.entryDate = `${String(now.getDate()).padStart(2,'0')}-${m[now.getMonth()]}-${now.getFullYear()}`
-  form.entryTime = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})
+  form.entryDate = formatPlantDate(now)
+  form.entryTime = formatPlantTime(now)
 }
 
 const submitForm = () => {

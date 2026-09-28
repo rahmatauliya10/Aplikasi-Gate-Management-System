@@ -56,6 +56,7 @@
             <span class="text-2xl font-black leading-none text-[#4A8BDF] animate-pulse">:</span>
             <span class="text-2xl font-black text-slate-900 tracking-tighter font-mono leading-none">{{ clockMinute }}</span>
             <span class="text-xs font-black text-[#A0006D] font-mono ml-1.5 leading-none opacity-60">{{ clockSecond }}</span>
+            <span class="text-[9px] font-black text-slate-500 ml-1 leading-none">WIB</span>
           </div>
         </div>
 
@@ -221,6 +222,7 @@ import { useAuthStore } from '../stores/authStore'
 import ProfileDropdown from '../components/ProfileDropdown.vue'
 import ActivityLogDrawer from '../components/ActivityLogDrawer.vue'
 import RunningTextBanner from '../components/RunningTextBanner.vue'
+import { plantClockParts, PLANT_TIME_ZONE } from '../utils/displayTime'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
@@ -236,12 +238,13 @@ let timer = null
 
 const updateClock = () => {
   const now = new Date()
-  clockHour.value = String(now.getHours()).padStart(2, '0')
-  clockMinute.value = String(now.getMinutes()).padStart(2, '0')
-  clockSecond.value = String(now.getSeconds()).padStart(2, '0')
+  const clock = plantClockParts(now)
+  clockHour.value = clock.hour
+  clockMinute.value = clock.minute
+  clockSecond.value = clock.second
   
   const options = { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }
-  currentDate.value = now.toLocaleDateString('id-ID', options)
+  currentDate.value = now.toLocaleDateString('id-ID', { ...options, timeZone: PLANT_TIME_ZONE })
 }
 
 const hasAccess = (roles, warehouseCode = null) => {

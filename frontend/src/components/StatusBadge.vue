@@ -7,6 +7,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { getStatusLabel } from '../utils/statusLabel'
 
 const props = defineProps({
   status: {
@@ -47,11 +48,5 @@ const dotClasses = computed(() => {
   }
 })
 
-const label = computed(() => {
-  let s = props.status || ''
-  if ((props.processType === 'GBB' || props.processType === 'GSP') && s.startsWith('QC_VEHICLE')) {
-    s = s.replace('QC_VEHICLE', 'QC_SAMPLING')
-  }
-  return s.replace(/_/g, ' ')
-})
+const label = computed(() => getStatusLabel(props.status, props.processType))
 </script>
