@@ -141,4 +141,3 @@ describe('PR-03: Gate Plate Normalization & Concurrency Protection', () => {
     expect(numMorning).toBe('GMS-20260930-0001');
   });
 });
-
