@@ -1,135 +1,222 @@
 # DRAF SPESIFIKASI DESAIN: ALUR GSP 4 KELOMPOK BARANG & PEMERIKSAAN QC/PA (GMS)
 
-- **Status Dokumen:** `DRAFT — USULAN TEKNIS MENUNGGU VERIFIKASI SOP RESMI`
+- **Status Dokumen:** `DRAFT REVISI 2 — USULAN TEKNIS MENUNGGU VERIFIKASI SOP RESMI`
 - **Tanggal Draf:** 29 September 2026
-- **Baseline Git:** Branch `fix/gsp-process-audit-improvements` (Commit `bf65603` berbasis `master` `ae0b30c`)
+- **Baseline Git:** Branch `fix/gsp-process-audit-improvements` (Commit `c97a4cd` berbasis `master` `ae0b30c`)
 - **Lingkungan Target:** Khusus Lokal / UAT (Tidak untuk merge atau deploy ke produksi tanpa persetujuan formal)
 - **Batasan Ruang Lingkup:** Dibatasi ketat hanya pada **4 Kelompok Barang** (Batubara, Solar, PAC 280 AC / POLYCOR P9 / IPAC CIP A200, Rapid Klen / PRO-CIP B++). Kelompok ke-5 (bahan kimia baris kelima) ditunda dan tidak dimasukkan ke dalam implementasi tahap ini.
 
 ---
 
-## 1. Ringkasan Eksekutif & Prinsip Alur Operasional
+## 1. Pembedaan Tegas Tahap Waktu & Status Operasional
 
-Berdasarkan kesepakatan alur proses terbaru, keempat kelompok barang GSP memiliki karakteristik alur sebagai berikut:
+Berdasarkan penelusuran terhadap kode aktual `master` (`weighbridge.service.ts` dan `warehouse.service.ts`):
+1. **Status Pasca Timbang Masuk:** Kode aktual saat ini menetapkan status `QC_VEHICLE_PENDING` setelah timbang masuk selesai (bukan `WEIGH_IN_DONE`).
+2. **Semantik `WAREHOUSE_IN_PROGRESS`:** Status ini dan timestamp `warehouseStartAt` secara semantik menandakan bahwa proses fisik pembongkaran barang di gudang **telah benar-benar dimulai**. Memakai status ini untuk merepresentasikan armada yang baru tiba/antre di GSP sebelum pemeriksaan QC/PA adalah kekeliruan yang akan membuat waktu mulai bongkar tercatat terlalu awal (*premature timestamping*).
+
+Oleh karena itu, alur operasional di area GSP dipisahkan secara tegas menjadi 3 sub-tahap:
 
 ```mermaid
-flowchart TD
-    GATE_IN["1️⃣ Gate Check-In<br/>(Security catat Truk & Kelompok GSP)"] --> WB_IN["2️⃣ Weighbridge IN<br/>(Timbang Gross Truk + Muatan)"]
-    
-    WB_IN --> ROUTE{"Kelompok Barang GSP?"}
-    
-    ROUTE -->|"Solar"| SOLAR_ROUTE["3️⃣ Bypass QC/PA<br/>(Langsung Antre Gudang GSP)"]
-    ROUTE -->|"Batubara / PAC / Rapid Klen"| QC_STAGE["3️⃣ Pemeriksaan QC/PA<br/>(Sebelum Bongkar)"]
-    
-    QC_STAGE --> QC_DECISION{"Evaluasi Mutu QC/PA"}
-    
-    QC_DECISION -->|"✅ Release / Pass"| GSP_UNLOAD["4️⃣ Bongkar di Gudang GSP<br/>(GSP Process)"]
-    QC_DECISION -->|"⚠️ Kadar Air Tinggi (Batubara)"| RETEST["🔄 Uji Ulang Lab"]
-    RETEST -->|"Tetap Tinggi"| UTILITY_DISPO["⏳ Menunggu Disposisi Utility"]
-    UTILITY_DISPO -->|"Disposisi Diterima"| GSP_UNLOAD
-    UTILITY_DISPO -->|"Disposisi Ditolak"| REJECT_ROUTE["🚫 QC Rejected"]
-    QC_DECISION -->|"❌ Reject"| REJECT_ROUTE
-    
-    SOLAR_ROUTE --> GSP_UNLOAD
-    
-    GSP_UNLOAD -->|"Selesai Bongkar (Warehouse Done)"| WB_OUT["5️⃣ Weighbridge OUT<br/>(Timbang Tare Truk Kosong ➔ Netto)"]
-    REJECT_ROUTE --> WB_OUT
-    
-    WB_OUT --> GATE_OUT["6️⃣ Gate Check-Out<br/>(Validasi Akhir & Truk Keluar)"]
+sequenceDiagram
+    autonumber
+    actor Driver as Armada Truk
+    actor WB as Operator Timbangan
+    actor QC as Analis QC / PA
+    actor WH as Operator Gudang GSP
+    actor Sec as Petugas Gate Out
 
-    style SOLAR_ROUTE fill:#fef3c7,stroke:#f59e0b,color:#78350f
-    style QC_STAGE fill:#e0e7ff,stroke:#4f46e5,color:#312e81
-    style GSP_UNLOAD fill:#f0fdf4,stroke:#16a34a,color:#14532d
-    style UTILITY_DISPO fill:#fef2f2,stroke:#dc2626,color:#991b1b
+    Note over Driver,Sec: 1. GATE IN & TIMBANG MASUK
+    Driver->>WB: Timbang Masuk (Gross Weight)
+    WB->>WB: Catat grossWeight & weighInAt
+
+    alt Jalur Solar (Bypass QC/PA)
+        WB-->>WH: Status: QC_VEHICLE_PASSED (Auto-Bypass QC/PA)<br/>Truk antre di Gudang GSP
+        Note over WH: Truk tiba di GSP, BELUM BONGKAR
+        WH->>WH: Operator klik "Mulai Bongkar GSP"<br/>Status: WAREHOUSE_IN_PROGRESS<br/>Catat warehouseStartAt
+        WH->>WH: Pembongkaran Solar & Input Volume/Timbang
+        WH->>WB: Operator klik "Selesai Bongkar"<br/>Status: WAREHOUSE_DONE<br/>Catat warehouseEndAt
+    else Jalur Batubara, PAC, Rapid Klen (Wajib QC/PA Pra-Bongkar)
+        WB-->>QC: Status: QC_VEHICLE_PENDING<br/>Truk antre pemeriksaan QC/PA
+        Note over QC: Truk tiba di area sampling GSP, BELUM BONGKAR
+        QC->>QC: Analis ambil sampel & uji lab (Catat qcStartAt)
+        
+        opt Batubara: Kadar Air Melebihi Standar
+            QC->>QC: Status: QC_RETEST_REQUIRED (Uji Ulang Lab)
+            alt Uji Ulang Masih Tinggi
+                QC->>QC: Status: WAITING_UTILITY_DISPOSITION (Menunggu Disposisi Tim Utility)
+            end
+        end
+
+        QC->>WH: Hasil Uji RELEASE / PASS<br/>Status: QC_VEHICLE_PASSED (Catat qcEndAt)
+        Note over WH: Backend izinkan mulai bongkar
+        WH->>WH: Operator klik "Mulai Bongkar GSP"<br/>Status: WAREHOUSE_IN_PROGRESS<br/>Catat warehouseStartAt
+        WH->>WH: Pembongkaran Muatan & Input Timbang Aktual
+        WH->>WB: Operator klik "Selesai Bongkar"<br/>Status: WAREHOUSE_DONE<br/>Catat warehouseEndAt
+    end
+
+    Note over Driver,Sec: 2. TIMBANG KELUAR & GATE OUT
+    Driver->>WB: Timbang Keluar (Tare Weight)
+    WB->>WB: Catat tareWeight, hitung netWeight, status: WEIGH_OUT_DONE
+    Driver->>Sec: Verifikasi Surat Jalan & Gate Check-Out
+    Sec->>Sec: Release Truk, status: COMPLETED (Catat gateOutAt)
 ```
 
-### Prinsip Utama yang Disepakati:
-1. **Semua 4 kelompok wajib Timbang Masuk (`grossWeight`) dan Timbang Keluar (`tareWeight`).**
-2. **Solar melewati (bypass) tahap QC/PA:** langsung dari Timbang Masuk menuju Gudang GSP untuk bongkar.
-3. **Tiga kelompok lainnya wajib lulus QC/PA sebelum bongkar:** QC/PA bertindak sebagai *gatekeeper* sebelum operator gudang diizinkan membongkar muatan.
-4. **Penghapusan kewajiban Incoming Check pasca-bongkar untuk GSP:** Transaksi GSP setelah selesai bongkar gudang langsung berstatus `WAREHOUSE_DONE` menuju Timbang Keluar (tidak masuk ke `INCOMING_CHECK_PENDING` seperti bahan baku kopi GBB).
+---
+
+## 2. Matriks Transisi Status, Penjagaan API, dan Rekam Waktu
+
+Berikut adalah perbandingan rinci untuk masing-masing kelompok barang:
+
+| Kelompok Barang | Status Pasca Timbang Masuk | Penjagaan API Pra-Bongkar (*Pre-Unloading Guard*) | Aksi Mulai Bongkar Gudang | Status & Waktu Bongkar | Alur Pasca-Bongkar Gudang |
+|---|---|---|---|---|---|
+| **Solar** | `QC_VEHICLE_PASSED` *(Bypass QC/PA otomatis tercatat pada Timbang Masuk)* | `startWarehouse` memverifikasi status `QC_VEHICLE_PASSED` dan jenis muatan `Solar`. Tidak ada blokir QC. | Operator GSP menekan **"Mulai Proses GSP"** saat pembongkaran solar dimulai fisik. | Status beralih ke `WAREHOUSE_IN_PROGRESS`. `warehouseStartAt` dicatat akurat saat tombol ditekan. | Selesai bongkar ➔ `WAREHOUSE_DONE` (`warehouseEndAt`). Langsung menuju Timbang Keluar (`WEIGH_OUT_DONE`). Tidak ada incoming check! |
+| **Batubara** | `QC_VEHICLE_PENDING` | `startWarehouse` **memblokir keras** (HTTP 400) bila status transaksi belum `QC_VEHICLE_PASSED`. Menahan armada selama uji awal, uji ulang, atau menunggu disposisi Utility. | Operator GSP hanya dapat menekan **"Mulai Proses GSP"** setelah terbit keputusan `RELEASE` / `QC_VEHICLE_PASSED`. | Status beralih ke `WAREHOUSE_IN_PROGRESS`. `warehouseStartAt` dicatat akurat saat tombol ditekan. | Selesai bongkar ➔ `WAREHOUSE_DONE` (`warehouseEndAt`). Langsung menuju Timbang Keluar (`WEIGH_OUT_DONE`). |
+| **PAC 280 AC / POLYCOR P9 / IPAC CIP A200** | `QC_VEHICLE_PENDING` | `startWarehouse` **memblokir keras** (HTTP 400) bila status transaksi belum `QC_VEHICLE_PASSED`. | Operator GSP menekan **"Mulai Proses GSP"** setelah evaluasi Sensory & Chemical Analysis `RELEASE`. | Status beralih ke `WAREHOUSE_IN_PROGRESS`. `warehouseStartAt` dicatat akurat saat tombol ditekan. | Selesai bongkar ➔ `WAREHOUSE_DONE` (`warehouseEndAt`). Langsung menuju Timbang Keluar (`WEIGH_OUT_DONE`). |
+| **Rapid Klen / PRO-CIP B++** | `QC_VEHICLE_PENDING` | `startWarehouse` **memblokir keras** (HTTP 400) bila status transaksi belum `QC_VEHICLE_PASSED`. | Operator GSP menekan **"Mulai Proses GSP"** setelah evaluasi Sensory & Chemical Analysis `RELEASE`. | Status beralih ke `WAREHOUSE_IN_PROGRESS`. `warehouseStartAt` dicatat akurat saat tombol ditekan. | Selesai bongkar ➔ `WAREHOUSE_DONE` (`warehouseEndAt`). Langsung menuju Timbang Keluar (`WEIGH_OUT_DONE`). |
 
 ---
 
-## 2. Matriks Alur & Transisi Status Backend
+## 3. Penjagaan API & Arsitektur State Machine Backend
 
-| Kelompok Barang | Status Awal | Setelah Timbang Masuk | Tahap QC/PA Pra-Bongkar | Status Siap Bongkar | Pasca-Bongkar Gudang | Status Akhir |
-|---|---|---|---|---|---|---|
-| **Batubara** | `REGISTERED` | `WEIGH_IN_DONE` | `QC_VEHICLE_PENDING` ➔ Uji Lab ➔ Status Antara bila deviasi ➔ `QC_VEHICLE_PASSED` | `WAREHOUSE_IN_PROGRESS` | `WAREHOUSE_DONE` | `WEIGH_OUT_DONE` ➔ `COMPLETED` |
-| **Solar** | `REGISTERED` | `WEIGH_IN_DONE` | **BYPASS** (Tidak masuk antrean QC) | `WAREHOUSE_IN_PROGRESS` (Langsung) | `WAREHOUSE_DONE` | `WEIGH_OUT_DONE` ➔ `COMPLETED` |
-| **PAC 280 AC / POLYCOR P9 / IPAC CIP A200** | `REGISTERED` | `WEIGH_IN_DONE` | `QC_VEHICLE_PENDING` ➔ Sensory & Chemical Analysis ➔ `QC_VEHICLE_PASSED` | `WAREHOUSE_IN_PROGRESS` | `WAREHOUSE_DONE` | `WEIGH_OUT_DONE` ➔ `COMPLETED` |
-| **Rapid Klen / PRO-CIP B++** | `REGISTERED` | `WEIGH_IN_DONE` | `QC_VEHICLE_PENDING` ➔ Sensory & Chemical Analysis ➔ `QC_VEHICLE_PASSED` | `WAREHOUSE_IN_PROGRESS` | `WAREHOUSE_DONE` | `WEIGH_OUT_DONE` ➔ `COMPLETED` |
+### A. Penyelarasan Layanan Timbangan Masuk (`weighbridge.service.ts`)
+Pada saat fungsi `recordWeighIn` dipanggil:
+```typescript
+let grossWeight: number | null = dto.weight;
+let tareWeight: number | null = null;
+let nextStatus: TransactionStatus;
+
+if (tx.processType === 'GSP' && tx.cargoSubType === 'Solar') {
+  // Jalur khusus Solar: Bypass QC/PA secara resmi dan terverifikasi di backend
+  nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
+} else if (tx.processType === 'GBB' || tx.processType === 'GSP') {
+  // GBB dan GSP non-Solar: Wajib menuju antrean QC
+  nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
+} else if (tx.processType === 'GBJ') {
+  tareWeight = dto.weight;
+  grossWeight = null;
+  nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
+}
+```
+
+*Audit Trail Catatan Otomatis untuk Solar:*
+Ketika Solar ditetapkan ke `QC_VEHICLE_PASSED`, sistem otomatis mencatat `ActivityLog` bertipe `QC_BYPASS_AUTHORIZED` dengan deskripsi `"SOP Exemption: Solar fuel delivery is exempt from laboratory PA analysis. Ready for warehouse unloading."`
+
+### B. Penjagaan Mulai Bongkar Gudang (`warehouse.service.ts`)
+Fungsi `startWarehouse` menjaga agar proses bongkar tidak dapat dimanipulasi:
+```typescript
+// Validasi status prasyarat:
+if (tx.status !== TransactionStatus.QC_VEHICLE_PASSED) {
+  throw new BadRequestException({
+    success: false,
+    message: `Gudang tidak dapat memulai bongkar: Transaksi harus berstatus QC_VEHICLE_PASSED (status saat ini: ${tx.status}).`,
+    errors: [],
+  });
+}
+
+// Atomic update status dan pencatatan warehouseStartAt:
+const claimed = await prismaTx.transaction.updateMany({
+  where: {
+    id: transactionId,
+    status: TransactionStatus.QC_VEHICLE_PASSED,
+    revision: tx.revision,
+  },
+  data: {
+    revision: { increment: 1 },
+    status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+    warehouseStartAt: new Date(), // Dicatat akurat tepat saat tombol diklik
+    warehouseStartById: user.id,
+    ...(dto.suratJalanNumber && { suratJalanNumber: dto.suratJalanNumber }),
+    ...(dto.poNumber && { poNumber: dto.poNumber }),
+  },
+});
+```
+
+### C. Penjagaan Selesai Bongkar Gudang (`warehouse.service.ts`)
+Fungsi `completeWarehouse` menghapus kewajiban Incoming Check pasca-bongkar untuk GSP tanpa mengganggu alur 7-tahap GBB:
+```typescript
+let nextStatus: TransactionStatus;
+if (tx.processType === 'GBB') {
+  // Komoditas bahan baku biji kopi GBB tetap wajib Uji Mutu Lab Pasca-Bongkar
+  nextStatus = TransactionStatus.INCOMING_CHECK_PENDING;
+} else {
+  // GSP (dan GBJ) langsung menyelesaikan proses gudang dan menuju timbangan keluar
+  nextStatus = TransactionStatus.WAREHOUSE_DONE;
+}
+```
 
 ---
 
-## 3. Rincian Usulan Parameter QC/PA per Lembar Kerja SOP
+## 4. Rincian Usulan Parameter QC/PA Sesuai Lembar Kerja SOP
 
-> *Catatan Verifikasi:* Seluruh angka dan metode di bawah ini disalin secara setia dari 3 lembar kerja Excel yang diberikan, dengan catatan rujukan dan koreksi standar teknis yang menunggu validasi laboratorium pabrik.
+### A. Lembar 1: Batubara (Sheet "Batu bara")
+*Rujukan: Lembar Excel "Batu bara" — Bagian 1, 2, 3, dan Baris Noted*
 
-### A. Lembar 1: Batubara (Coal)
-*Rujukan Dokumen: Sheet "Batu bara" — Bagian 1, 2, 3, dan Catatan*
-
-1. **Parameter Analisis Visual (Sebelum Dumping):**
+1. **Parameter Analisis Visual (Pra-Dumping):**
    - *Kondisi Batubara:* Spesifikasi `"Kering (Tidak Basah)"` [Metode: Visual Analysis]
    - *Warna Batubara:* Spesifikasi `"Hitam / Hitam Kecoklatan / Coklat"` [Metode: Visual Analysis]
    - *Level Rank:* Spesifikasi `"High Rank Coal / Medium Rank coal / Low Rank Coal"` [Metode: Visual Analysis]
    - *Kilap Batubara:* Spesifikasi `"Hitam Mengkilap / Hitam Kecoklatan / Mudah lapuk"` [Metode: Visual Analysis]
    - *Bahan Pengotor:* Spesifikasi `"Tidak ada kontaminasi batuan maupun tanah"` [Metode: Visual Analysis]
 
-2. **Moisture Analysis (Metode: Digital Moisture Analyzer):**
+2. **Moisture Analysis (Digital Moisture Analyzer):**
    - Pilihan Kategori Kalori:
      - `Kalori >6000`: Batas Maks. **25%**
      - `Kalori 5600 - 6000`: Batas Maks. **33%**
    - Hasil Uji Kadar Air (%): Input numerik (contoh lembar: `23,60%`).
 
-3. **Proximate Analysis (ASTM):**
-   | Parameter Analisis | Teks Lembar SOP | Standar ASTM Resmi yang Terverifikasi | Nilai COA | Nilai Hasil (%) |
-   |---|---|---|:---:|:---:|
-   | A. Moisture in Analysis | `ASTM D 33302` | **ASTM D3302** *(Total Moisture)* / **ASTM D3173** *(Analysis Sample Moisture)* | 5,04 | 19,11% |
-   | B. Ash Content | `ASTM D 3174-18` | **ASTM D3174** *(Ash in the Analysis Sample)* | 23,71 | 10,08% |
-   | C. Volatile Matter | `ASTM D 3175-18` | **ASTM D3175** *(Volatile Matter in the Analysis Sample)* | 38,35 | 49,52% |
-   | D. Fix Carbon by Difference | `ASTM D 03172-13` | **ASTM D3172** *(Standard Practice for Proximate Analysis)* | 32,90 | 21,29% |
+3. **Proximate Analysis:**
+   - **Teks Lembar SOP:** `ASTM D 33302` ➔ *Verifikasi Standar Resmi:* Terindikasi salah ketik dari **ASTM D3302** *(Standard Test Method for Total Moisture in Coal)* atau **ASTM D3173** *(Moisture in the Analysis Sample of Coal and Coke)*.
+   - **Ash Content:** `ASTM D 3174-18` *(Standard Test Method for Ash in the Analysis Sample of Coal and Coke)*.
+   - **Volatile Matter:** `ASTM D 3175-18` *(Standard Test Method for Volatile Matter in the Analysis Sample of Coal and Coke)*.
+   - **Teks Lembar SOP:** `ASTM D 03172-13` ➔ *Verifikasi Standar Resmi:* Format baku ASTM adalah **ASTM D3172** *(Standard Practice for Proximate Analysis of Coal and Coke)* yang mencakup perhitungan *Fixed Carbon by Difference*.
 
-4. **Koreksi Alur Status Antara (Berdasarkan Catatan Lembar SOP):**
-   - *Catatan Asli SOP:* `"Jika Moisture Analysis melebihi standard maka harus dilakukan analisa ulang. Jika hasil pengulangan analisa masih diatas standard maka akan dilakukan disposisi oleh tim Utility."`
-   - *Rancangan State Machine Khusus Batubara:*
-     1. **Uji Awal (Initial Test):**
-        - Jika Kadar Air $\le$ Standar ➔ Hasil: `RELEASE` ➔ Lanjut Bongkar (`QC_VEHICLE_PASSED`).
-        - Jika Kadar Air $>$ Standar ➔ Hasil: `RETEST_REQUIRED` (Wajib Uji Ulang).
-     2. **Uji Ulang (Retest):**
-        - Analis QC menginput hasil uji ke-2.
-        - Jika Uji Ulang $\le$ Standar ➔ `RELEASE` (dengan catatan uji ulang berhasil).
-        - Jika Uji Ulang tetap $>$ Standar ➔ Status beralih ke `WAITING_UTILITY_DISPOSITION`.
-     3. **Disposisi Tim Utility:**
-        - User dengan role/kewenangan Utility (atau QC Supervisor) menginput disposisi:
-          - `DISPOSITION_ACCEPTED`: Batubara diizinkan bongkar dengan catatan penyesuaian boiler.
-          - `DISPOSITION_REJECTED`: Muatan ditolak keras (`QC_VEHICLE_REJECTED`).
+4. **Alur Status Antara Khusus Batubara (Berdasarkan Catatan SOP):**
+   ```mermaid
+   flowchart TD
+       START_TEST["Uji Kadar Air Awal (Round 1)"] --> CHECK{{"Hasil vs Standar Kalori"}}
+       CHECK -->|"≤ Batas Maksimal"| PASS_INIT["✅ RELEASE (Lolos)"]
+       CHECK -->|"> Batas Maksimal"| RETEST["🔄 Uji Ulang Lab (Round 2)"]
+       
+       RETEST --> CHECK_RETEST{{"Hasil Uji Ulang"}}
+       CHECK_RETEST -->|"≤ Batas Maksimal"| PASS_RETEST["✅ RELEASE (Lolos Uji Ulang)"]
+       CHECK_RETEST -->|"> Batas Maksimal"| WAIT_DISPO["⏳ WAITING_UTILITY_DISPOSITION<br/>(Menunggu Disposisi Tim Utility)"]
+       
+       WAIT_DISPO --> DECISION_DISPO{{"Keputusan Tim Utility"}}
+       DECISION_DISPO -->|"Disposisi Diterima (Dispensasi)"| PASS_DISPO["✅ RELEASE WITH DISPOSITION<br/>(Otorisasi Utility Tercatat)"]
+       DECISION_DISPO -->|"Disposisi Ditolak"| REJECT["❌ REJECT<br/>(Ditolak Keluar Pabrik)"]
+
+       style PASS_INIT fill:#f0fdf4,stroke:#16a34a,color:#14532d
+       style PASS_RETEST fill:#f0fdf4,stroke:#16a34a,color:#14532d
+       style PASS_DISPO fill:#fef3c7,stroke:#f59e0b,color:#78350f
+       style REJECT fill:#fef2f2,stroke:#ef4444,color:#7f1d1d
+       style WAIT_DISPO fill:#fdf2f8,stroke:#db2777,color:#831843
+   ```
 
 ---
 
-### B. Lembar 2: PAC 280 AC / POLYCOR P9 / IPAC CIP A200
-*Rujukan Dokumen: Sheet "PAC" — Bagian 1 Sensory dan Bagian 2 Chemical Analysis*
+### B. Lembar 2: PAC 280 AC / POLYCOR P9 / IPAC CIP A200 (Sheet "PAC")
+*Rujukan: Lembar Excel "PAC" — Bagian 1 Sensory dan Bagian 2 Chemical Analysis*
 
-1. **Sensory Analysis (Metode: Visual Evaluation):**
+1. **Sensory Analysis (Visual Evaluation):**
    - *Visual:* Spesifikasi `"Kuning, Coklat Jernih"` ➔ Hasil: OK (Coklat Jernih) / Not OK
    - *Foreign Matters:* Spesifikasi `"Tidak ada kontaminasi"` ➔ Hasil: OK / Not OK
    - *Kemasan dan Label:* Spesifikasi `"Kemasan & label tidak rusak"` ➔ Hasil: OK / Not OK
 
 2. **Chemical Analysis:**
-   - *pH 1%:* Spesifikasi **3,5 – 5** [Metode: pH meter] (contoh lembar: `4,225`)
-   - *Density / Specific Gravity:* Spesifikasi **1,170 – 1,260 gr/cm³** [Metode: Hydrometer] (contoh lembar: `1,25`)
+   - *pH 1%:* Spesifikasi **3,5 – 5,0** [Metode: pH meter] (contoh lembar: `4,225`)
+   - *Density / Specific Gravity:* Spesifikasi **1,170 – 1,260 gr/cm³** [Metode: Hydrometer] (contoh lembar: `1,250`)
    - *Aluminium Content (%):* Spesifikasi **Min. 9%** [Metode: Titrasi] (contoh lembar: `-`)
 
-3. **Koreksi Terhadap Variasi Produk:**
-   - *Catatan Penting:* Nilai spesifikasi di atas tercantum pada lembar berlabel `"PAC"`. Ketiga nama produk dalam kelompok ini (PAC 280 AC, POLYCOR P9, IPAC CIP A200) memiliki komposisi kimiawi berbeda. 
-   - **Aturan Draf:** Nilai spesifikasi default lembar ini diterapkan untuk `PAC 280 AC`. Untuk `POLYCOR P9` dan `IPAC CIP A200`, sistem harus mengizinkan pembacaan parameter spesifikasi produk masing-masing atau input acuan COA yang fleksibel sebelum batas resmi disahkan oleh QC Pabrik.
+3. **Prinsip Keterikatan Batas Uji terhadap Produk:**
+   - Nilai spesifikasi pada lembar ini berlaku sebagai default untuk produk `PAC 280 AC`.
+   - Produk `POLYCOR P9` dan `IPAC CIP A200` tidak boleh disamaratakan sebelum ada dokumen SOP spesifik untuk masing-masing merek; sistem menyediakan kemampuan mengikat batas spesifikasi ke master produk atau acuan COA resmi.
 
 ---
 
-### C. Lembar 3: Rapid Klen / PRO-CIP B++
-*Rujukan Dokumen: Sheet "Rapid kleen" — Bagian 1 Sensory dan Bagian 2 Chemical Analysis*
+### C. Lembar 3: Rapid Klen / PRO-CIP B++ (Sheet "Rapid kleen")
+*Rujukan: Lembar Excel "Rapid kleen" — Bagian 1 Sensory dan Bagian 2 Chemical Analysis*
 
-1. **Sensory Analysis (Metode: Visual Evaluation):**
+1. **Sensory Analysis (Visual Evaluation):**
    - *Visual:* Spesifikasi `"Jernih"` ➔ Hasil: OK / Not OK
    - *Foreign Matters:* Spesifikasi `"Tidak ada kontaminasi"` ➔ Hasil: OK / Not OK
    - *Kemasan dan Label:* Spesifikasi `"Kemasan & label tidak rusak"` ➔ Hasil: OK / Not OK
@@ -140,111 +227,78 @@ flowchart TD
    - *pH 1%:* Spesifikasi **> 12,000** [Metode: pH meter] (contoh lembar: `12,653`)
    - *Density:* Spesifikasi **> 1,400 gr/cm³** [Metode: Hydrometer] (contoh lembar: `1,498 gr/cm³`)
 
-3. **Koreksi Terhadap Variasi Produk:**
-   - *Catatan Penting:* Lembar ini bertajuk `"Rapid kleen"`. Produk `PRO-CIP B++` mungkin memiliki konsentrasi dan batas alkalinitas berbeda. Konfigurasi batas harus terikat pada master data produk spesifik, bukan disamaratakan tanpa verifikasi SOP.
+3. **Prinsip Keterikatan Batas Uji terhadap Produk:**
+   - Nilai spesifikasi pada lembar ini berlaku untuk `Rapid Klen`.
+   - Produk `PRO-CIP B++` memiliki batas alkalinitas dan spesifikasi tersendiri sesuai formulasi pabrikannya, yang wajib dikonfigurasi secara mandiri.
 
 ---
 
-## 4. Evaluasi Opsi Model Data QC/PA Analysis
+## 5. Model Data QC/PA Analysis: Usulan Tabel `QcProductAnalysis`
 
-Menindaklanjuti arahan bahwa kolom `QcVehicleCheck.checklistItems` saat ini ditujukan untuk pemeriksaan fisik kendaraan, berikut adalah perbandingan 3 opsi arsitektur data:
+Menolak kompromi penyimpanan JSON pada `QcVehicleCheck` yang berisiko merusak integritas audit, diajukan perancangan tabel terpisah `QcProductAnalysis` untuk menjaga jejak audit multi-round testing dan otorisasi disposisi:
 
-| Kriteria Evaluasi | Opsi A: Tabel Baru `QcProductAnalysis` | Opsi B: Alihkan `IncomingMaterialCheck` | Opsi C: Skema JSON `QcVehicleCheck.checklistItems` |
-|---|---|---|---|
-| **Deskripsi** | Membuat tabel relasional baru khusus pengujian laboratorium produk (termasuk multi-round retest, COA, dan disposisi). | Menggunakan tabel `IncomingMaterialCheck` yang sudah ada, namun dijalankan di awal (pra-bongkar) untuk GSP. | Menyimpan seluruh hasil pengujian dan log retest dalam format JSON terstruktur pada tabel `QcVehicleCheck`. |
-| **Separation of Concerns** | **Sangat Baik**: Terpisah tegas antara inspeksi armada truk dan analisis kimia/laboratorium. | **Cukup**: Mencampur konsep bahan baku kopi GBB dengan bahan kimia/energi GSP. | **Kurang**: Menggabungkan data kendaraan fisik dengan uji lab mineral/kimia. |
-| **Dukungan Retest & Disposisi** | **Sangat Fleksibel**: Dapat menyimpan relasi `iteration: 1 (Initial)`, `iteration: 2 (Retest)`, serta kolom `dispositionBy`, `dispositionNotes`. | **Terbatas**: Skema tabel sudah memiliki kolom kaku untuk kopi (`moisture`, `foreignMatter`, `beanCondition`). | **Sedang**: Bisa disimpan di JSON, namun pencarian data dan validasi schema di tingkat DB lebih lemah. |
-| **Dampak Migrasi Database** | Memerlukan Prisma migration baru (`ProductAssuranceCheck`). | Memerlukan penyesuaian enum dan relasi waktu tanpa tabel baru. | **Nol migrasi**: Kolom JSON sudah ada dan siap dipakai di lokal/UAT saat ini. |
-| **Rekomendasi Dokumen** | **Rekomendasi Jangka Panjang (Produksi)** | Tidak direkomendasikan karena semantik kolom tidak sesuai | **Rekomendasi Fase Uji Coba Cepat (Lokal/UAT)** |
-
-### Usulan Skema Opsi A (Tabel Baru):
 ```prisma
 model QcProductAnalysis {
   id                    String        @id @default(uuid())
   transactionId         String
-  testRound             Int           @default(1) // 1: Uji Awal, 2: Retest
-  analysisType          String        // BATUBARA | PAC | RAPID_KLEN
-  parameters            Json          // Nilai COA, Standar, Hasil Uji
+  testRound             Int           @default(1) // 1: Uji Awal, 2: Uji Ulang (Retest)
+  productCategory       String        // BATUBARA | PAC | RAPID_KLEN
+  productName           String        // Nama spesifik: PAC 280 AC, PRO-CIP B++, dsb.
+  parameters            Json          // Data nilai hasil, COA, metode, dan status per parameter
   result                QcResult      // PASS | REJECT
-  status                String        // RELEASED | RETEST_REQUIRED | WAITING_DISPOSITION | REJECTED
-  dispositionRole       String?       // UTILITY | QC_SUPERVISOR
-  dispositionNotes      String?
+  status                String        // RELEASED | RETEST_REQUIRED | WAITING_UTILITY_DISPOSITION | REJECTED
+  
+  // Jejak Audit Disposisi Tim Utility (Khusus Batubara):
+  dispositionAction     String?       // DISPOSITION_ACCEPTED | DISPOSITION_REJECTED
+  dispositionReason     String?       // Alasan teknis penyesuaian boiler / disposisi
+  dispositionById       String?       // ID User PIC Utility yang mengotorisasi
   dispositionAt         DateTime?
+  
   testedById            String?
   testedAt              DateTime      @default(now())
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   transaction           Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  testedBy              User?         @relation(fields: [testedById], references: [id], onDelete: SetNull)
+  testedBy              User?         @relation("ProductAnalysisTestedBy", fields: [testedById], references: [id], onDelete: SetNull)
+  dispositionBy         User?         @relation("ProductAnalysisDispositionBy", fields: [dispositionById], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
+  @@index([productCategory])
 }
 ```
+
+### Keunggulan Arsitektur:
+1. **Audit Mutu Penuh:** Rekam pengujian ke-1 (saat melebihi batas) tetap tersimpan utuh dan tidak tertimpa oleh hasil uji ulang ke-2.
+2. **Keterlacakan Disposisi Utility:** Siapa petugas utility yang menyetujui, kapan otorisasi diberikan, dan apa alasan dispensasi tercatat eksplisit dengan relasi user autentik.
+3. **Pemisahan Peran (*Separation of Duties*):** Pemeriksaan fisik truk pengangkut (`QcVehicleCheck`) dan pengujian kimiawi muatan (`QcProductAnalysis`) berada pada tabel terpisah dengan hak akses dan PIC yang sesuai.
 
 ---
 
-## 5. Rancangan Perubahan Backend & State Machine
+## 6. Skenario Pengujian UAT (4 Kelompok & Kasus Penolakan)
 
-### A. State Machine (`backend/src/common/state-machine/workflow-state-machine.ts`)
-1. Menambahkan transisi yang sah dari `WEIGH_IN_DONE` langsung ke `WAREHOUSE_IN_PROGRESS`:
-   ```typescript
-   WEIGH_IN_DONE: [
-     TransactionStatus.QC_VEHICLE_PENDING,
-     TransactionStatus.WAREHOUSE_IN_PROGRESS, // Khusus Solar (Bypass QC)
-     TransactionStatus.CANCELLED,
-   ],
-   ```
-2. Menjamin transisi `WAREHOUSE_IN_PROGRESS` ke `WAREHOUSE_DONE` berlaku untuk proses gudang GSP:
-   ```typescript
-   WAREHOUSE_IN_PROGRESS: [
-     TransactionStatus.INCOMING_CHECK_PENDING, // Khusus GBB
-     TransactionStatus.WAREHOUSE_DONE,        // Khusus GBJ dan GSP
-     TransactionStatus.CANCELLED,
-   ],
-   ```
+Rencana pengujian lokal/UAT mencakup skenario komprehensif berikut:
 
-### B. Layanan Timbangan (`backend/src/weighbridge/weighbridge.service.ts`)
-Pada saat operator menyelesaikan Timbang Masuk (`recordWeighIn`):
-```typescript
-let nextStatus: TransactionStatus;
-if (tx.processType === 'GSP' && tx.cargoSubType === 'Solar') {
-  nextStatus = TransactionStatus.WAREHOUSE_IN_PROGRESS; // Bypass QC/PA
-} else if (tx.processType === 'GBJ') {
-  nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
-} else {
-  nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
-}
-```
-
-### C. Layanan Gudang (`backend/src/warehouse/warehouse.service.ts`)
-Pada saat operator gudang menyelesaikan proses bongkar (`completeWarehouse`):
-```typescript
-// Baris 465-469 yang sebelumnya mengarahkan GBB & GSP ke INCOMING_CHECK_PENDING:
-let nextStatus: TransactionStatus;
-if (tx.processType === 'GBB') {
-  nextStatus = TransactionStatus.INCOMING_CHECK_PENDING; // GBB tetap alur 7-tahap
-} else {
-  nextStatus = TransactionStatus.WAREHOUSE_DONE;         // GBJ dan GSP langsung selesai gudang
-}
-```
-
-### D. Penyelarasan Frontend (`GSPProcess.vue`)
-Tombol mulai bongkar gudang disesuaikan agar aktif pada kondisi:
-- Truk dengan status `QC_VEHICLE_PASSED` (untuk Batubara, PAC, Rapid Klen), **ATAU**
-- Truk dengan status `WEIGH_IN_DONE` khusus `cargoSubType === 'Solar'`.
+1. **Jalur 1: Solar (Happy Path — Bypass QC/PA)**
+   - Gate In ➔ Timbang Masuk (`grossWeight: 24.500 kg`) ➔ Status menjadi `QC_VEHICLE_PASSED` tanpa antre QC ➔ Mulai Bongkar di GSP (`warehouseStartAt` tercatat) ➔ Selesai Bongkar (`warehouseEndAt` tercatat, status `WAREHOUSE_DONE`) ➔ Timbang Keluar (`tareWeight: 9.500 kg`, `netWeight: 15.000 kg`) ➔ Gate Out (`COMPLETED`).
+2. **Jalur 2: PAC 280 AC (Happy Path — Lolos QC/PA)**
+   - Gate In ➔ Timbang Masuk ➔ Status `QC_VEHICLE_PENDING` ➔ QC input Sensory OK, pH 4.25, Density 1.25 ➔ Keputusan `RELEASE` ➔ Operator GSP Mulai Bongkar ➔ Selesai Bongkar ➔ Timbang Keluar ➔ Gate Out.
+3. **Jalur 3: Rapid Klen (Skenario Penolakan QC — Reject)**
+   - Gate In ➔ Timbang Masuk ➔ Status `QC_VEHICLE_PENDING` ➔ QC input Alkalinity 28% (di bawah batas 35%) ➔ Keputusan `REJECT` ➔ Status beralih ke `QC_VEHICLE_REJECTED` ➔ Operator GSP tidak dapat membongkar (tombol nonaktif) ➔ Armada diarahkan langsung ke Timbang Keluar ➔ Gate Out.
+4. **Jalur 4: Batubara (Skenario Deviasi Kadar Air ➔ Uji Ulang ➔ Disposisi Utility)**
+   - Gate In ➔ Timbang Masuk ➔ Status `QC_VEHICLE_PENDING`.
+   - Uji Awal: Kadar air 36% (melebihi batas kalori 33%) ➔ Status beralih ke `QC_RETEST_REQUIRED`.
+   - Uji Ulang: Hasil ke-2 tetap 35% ➔ Status beralih ke `WAITING_UTILITY_DISPOSITION`.
+   - Otorisasi Utility: Akun PIC Utility menginput disposisi penerimaan dengan catatan penyesuaian burner ➔ Status menjadi `QC_VEHICLE_PASSED`.
+   - Mulai Bongkar di GSP ➔ Selesai Bongkar ➔ Timbang Keluar ➔ Gate Out.
 
 ---
 
-## 6. Daftar Keputusan yang Masih Terbuka (Open Decisions)
+## 7. Status Keputusan Terbuka (Open Decisions Tracker)
 
-Sebelum draf ini disahkan menjadi rencana implementasi, pemilik proses (QC/PA, Utility, Gudang) perlu memberikan konfirmasi formal atas 4 poin ini:
-
-1. **Pemilihan Model Data Database:**
-   - Apakah untuk pengujian lokal/UAT tahap ini diizinkan membuat tabel migrasi baru (`QcProductAnalysis`), ataukah sementara menggunakan skema JSON terstruktur pada tabel yang ada agar tidak mengubah skema DB?
-2. **Konfirmasi Rujukan Standar ASTM Laboratorium:**
-   - Konfirmasi apakah laboratorium pabrik menggunakan **ASTM D3302** (Total Moisture) atau **ASTM D3173** (Analysis Sample Moisture), dan penulisan standar proximate **ASTM D3172**.
-3. **Spesifikasi Spesifik per Varian Produk:**
-   - Penyediaan batas spesifikasi resmi untuk:
-     - `POLYCOR P9` vs `PAC 280 AC` vs `IPAC CIP A200`.
-     - `PRO-CIP B++` vs `Rapid Klen`.
-4. **Alur Otorisasi Disposisi Utility:**
-   - Siapa PIC / akun yang berwenang menekan tombol "Disposisi Diterima" pada sistem saat batubara memiliki kadar air di atas standar (apakah akun dengan role khusus Utility, atau cukup Supervisor QC)?
+| No | Poin Keputusan Bisnis / Teknis | Pilihan yang Tersedia | Status Rekomendasi |
+|:--:|---|---|---|
+| **1** | **Model Data Database QC/PA** | Opsi A: Tabel Baru `QcProductAnalysis`<br/>Opsi C: Kolom JSON sementara | **Rekomendasi: Opsi A** (Tabel Baru) demi integritas audit retest & disposisi. Menunggu keputusan DBA/arsitek. |
+| **2** | **Konfirmasi Standar ASTM Pabrik** | ASTM D3302 (Total Moisture) vs ASTM D3173 (Analysis Sample)<br/>Penulisan ASTM D3172 | Menunggu konfirmasi formal dokumen SOP Laboratorium Pabrik SJA. |
+| **3** | **Spesifikasi per Varian Merek Produk** | Batas spesifik untuk `POLYCOR P9`, `IPAC CIP A200`, `PRO-CIP B++` | Menunggu lembar spesifikasi masing-masing produk dari tim Purchasing/QC. |
+| **4** | **Hak Otorisasi Disposisi Utility** | Role `UTILITY` khusus vs Role `QC_SUPERVISOR` / `ADMIN` | Menunggu penetapan struktur wewenang pengguna dari manajemen pabrik. |
