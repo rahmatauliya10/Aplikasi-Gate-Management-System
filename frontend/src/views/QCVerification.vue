@@ -975,8 +975,9 @@ const submitSamplingAwal = async (truck, passed) => {
       const updatedTruck = response?.data || response;
       if (updatedTruck) truckStore.upsertTruck(updatedTruck);
 
+      const targetWarehouse = getProcessType(truck) === 'GSP' ? 'Gudang GSP' : 'Gudang GBB';
       if (passed) {
-        toast.success(`Sampling Awal ${getPlateNumber(truck)} disetujui. Siap dibongkar di Gudang GBB.`);
+        toast.success(`Sampling Awal ${getPlateNumber(truck)} disetujui. Siap dibongkar di ${targetWarehouse}.`);
       } else {
         toast.error(`Sampling Awal ${getPlateNumber(truck)} DITOLAK.`);
       }

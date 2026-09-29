@@ -61,25 +61,36 @@
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9"><StepTimeline :current-step="selectedTruck.status" :process-type="selectedTruck.processType" /></div>
             
             <div class="mt-6 space-y-4">
+              <!-- Start GSP Process Button when security data is already present -->
+              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && selectedTruck.suratJalanNumber && selectedTruck.poNumber" class="space-y-4">
+                <button @click="startGspProcess" :disabled="isProcessing" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98]"
+                  style="background:linear-gradient(135deg,#A0006D,#70004C);"
+                  id="btn-start-gsp-process">
+                  <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
+                  <span v-else class="material-icons text-xl">play_arrow</span>
+                  <span class="text-base tracking-wide uppercase">{{ isProcessing ? 'Memulai Proses...' : 'Mulai Proses GSP (Start GSP Process)' }}</span>
+                </button>
+              </div>
+
               <!-- Missing Security Info -->
               <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
                 <div class="flex items-center space-x-2 text-[#800057] mb-2">
                   <span class="material-icons text-lg">warning_amber</span>
-                  <span class="text-[11px] font-black uppercase tracking-wider">Complete Security Data</span>
+                  <span class="text-[11px] font-black uppercase tracking-wider">Lengkapi Data Surat Jalan & PO</span>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div class="space-y-1.5" v-if="!selectedTruck.suratJalanNumber">
-                    <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">Delivery Note No. *</label>
-                    <input v-model="suratJalanInput" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="SJ-XXXXX">
+                    <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">Delivery Note / Surat Jalan *</label>
+                    <input v-model="suratJalanInput" id="input-gsp-surat-jalan" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="SJ-XXXXX">
                   </div>
                   <div class="space-y-1.5" v-if="!selectedTruck.poNumber">
                     <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">No PO *</label>
-                    <input v-model="poNumberInput" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="PO-XXXXX">
+                    <input v-model="poNumberInput" id="input-gsp-po-number" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="PO-XXXXX">
                   </div>
                 </div>
-                <button @click="saveSecurityInfo" :disabled="isProcessing" class="w-full btn-primary py-2.5 mt-2 flex justify-center items-center space-x-2">
+                <button @click="saveSecurityInfo" :disabled="isProcessing" class="w-full btn-primary py-2.5 mt-2 flex justify-center items-center space-x-2" id="btn-save-security-gsp">
                   <span v-if="isProcessing" class="material-icons animate-spin">autorenew</span>
-                  <span>Save Security Data & Start Processing</span>
+                  <span>Simpan Data & Mulai Proses GSP</span>
                 </button>
               </div>
 
@@ -208,82 +219,7 @@
         </div>
       </div>
     </div>
-    
-    <!-- Incoming Material Check Modal -->
-    <div v-if="showChecklistModal && selectedTruck" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="showChecklistModal = false"></div>
-      <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-slide-up">
-        
-        <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <div>
-            <h3 class="text-xl font-black text-slate-800 tracking-tight">Incoming Material Check</h3>
-            <p class="text-xs font-bold text-slate-500 mt-1">{{ selectedTruck.plateNumber }} &middot; Cargo Type: {{ selectedTruck.cargoType || 'General Goods' }}</p>
-          </div>
-          <button @click="showChecklistModal = false" class="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
-            <span class="material-icons">close</span>
-          </button>
-        </div>
 
-        <div class="p-6 overflow-y-auto hide-scrollbar space-y-6">
-          <div class="space-y-4">
-            <div v-for="(item, index) in currentChecklist" :key="index" 
-              class="group relative overflow-hidden rounded-2xl transition-all duration-300"
-              :class="checklistStates[index] === true ? 'bg-emerald-50 border border-emerald-200' : (checklistStates[index] === false ? 'bg-red-50 border border-red-200' : 'bg-slate-50 border border-slate-200')">
-              <div class="p-4 flex items-center justify-between">
-                <div class="flex-1 pr-6">
-                  <div class="flex items-center space-x-3 mb-2">
-                    <span class="flex items-center justify-center w-6 h-6 rounded-full bg-white text-[10px] font-black border border-slate-200"
-                      :class="checklistStates[index] === true ? 'text-emerald-600 border-emerald-200' : (checklistStates[index] === false ? 'text-red-600 border-red-200' : 'text-slate-400')">
-                      {{ index + 1 }}
-                    </span>
-                    <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Inspection Item</span>
-                  </div>
-                  <p class="text-sm font-bold text-slate-700 leading-relaxed">{{ item }}</p>
-                </div>
-                <div class="flex items-center space-x-2 shrink-0">
-                  <button @click="checklistStates[index] = false" class="w-12 h-12 rounded-xl flex items-center justify-center transition-all border"
-                    :class="checklistStates[index] === false ? 'bg-red-500 text-white border-red-600 shadow-inner' : 'bg-white text-slate-400 border-slate-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200'">
-                    <span class="material-icons text-lg">close</span>
-                  </button>
-                  <button @click="checklistStates[index] = true" class="w-12 h-12 rounded-xl flex items-center justify-center transition-all border"
-                    :class="checklistStates[index] === true ? 'bg-emerald-500 text-white border-emerald-600 shadow-inner' : 'bg-white text-slate-400 border-slate-200 hover:bg-emerald-50 hover:text-emerald-500 hover:border-emerald-200'">
-                    <span class="material-icons text-lg">check</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div v-if="hasChecklistReject" class="animate-fade-in space-y-2">
-            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Rejection Reason *</label>
-            <textarea v-model="rejectComment" rows="3" class="w-full p-4 bg-red-50/50 rounded-2xl text-sm font-bold text-slate-700 outline-none border border-red-100 focus:border-red-300 focus:ring-4 focus:ring-red-500/10 transition-all resize-none placeholder:text-red-300/50" placeholder="Please provide details for the rejection..."></textarea>
-          </div>
-        </div>
-
-        <div v-if="!hasChecklistReject" class="p-6 border-t border-slate-100 bg-white grid grid-cols-2 gap-4">
-          <button @click="showChecklistModal = false" class="py-4 rounded-xl font-black text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">
-            Cancel
-          </button>
-          <button @click="acceptChecklist(false)" :disabled="!isChecklistComplete || isProcessing" class="py-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);">
-            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-            <span v-else class="material-icons text-lg">verified</span>
-            <span>Pass Inspection</span>
-          </button>
-        </div>
-        <div v-else class="p-6 border-t border-slate-100 bg-white flex flex-col sm:flex-row gap-3">
-          <button @click="rejectChecklist" :disabled="!rejectComment.trim() || isProcessing" class="flex-1 py-4 rounded-xl font-black text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 shadow-md">
-            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-            <span v-else class="material-icons text-lg">cancel</span>
-            <span>Reject Inspection</span>
-          </button>
-          <button @click="acceptChecklist(true)" :disabled="isProcessing" class="flex-1 py-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg" style="background:linear-gradient(135deg,#F59E0B,#D97706);">
-            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-            <span v-else class="material-icons text-lg">warning</span>
-            <span>Terima With Note</span>
-          </button>
-        </div>
-      </div>
-    </div>
     <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" size="wide" @close="showDetailsModal = false" />
   </div>
 </template>
@@ -301,6 +237,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import StepTimeline from '../components/StepTimeline.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import Pagination from '../components/Pagination.vue'
+import WeightInput from '../components/WeightInput.vue'
 
 // Safety Helpers at the top
 const getPlateNumber = (truck) => {
@@ -391,25 +328,59 @@ const selectTruck = (truck) => {
 }
 const formatTime = formatPlantTime
 
-const saveSecurityInfo = async () => {
-  if (!suratJalanInput.value || !poNumberInput.value) { toast.warning('Please complete the Delivery Note and PO Number fields'); return }
-  if (isProcessing.value) return;
-  isProcessing.value = true;
+const startGspProcess = async () => {
+  if (!selectedTruck.value || isProcessing.value) return
+  isProcessing.value = true
   try {
-    const sj = suratJalanInput.value.toUpperCase();
-    const po = poNumberInput.value.toUpperCase();
+    const sj = (selectedTruck.value.suratJalanNumber || suratJalanInput.value || '').toUpperCase()
+    const po = (selectedTruck.value.poNumber || poNumberInput.value || '').toUpperCase()
+    const payload = {}
+    if (sj) payload.suratJalanNumber = sj
+    if (po) payload.poNumber = po
+
+    const response = await warehouseStore.startProcess(selectedTruck.value.id, payload)
+    const updatedTruck = response?.data || response
+    if (updatedTruck) {
+      truckStore.upsertTruck(updatedTruck)
+      selectedTruck.value = { ...selectedTruck.value, ...updatedTruck }
+    }
+    toast.success('Proses GSP berhasil dimulai.')
+  } catch (err) {
+    toast.error(err?.response?.data?.message || err?.message || 'Gagal memulai proses GSP')
+  } finally {
+    isProcessing.value = false
+  }
+}
+
+const saveSecurityInfo = async () => {
+  if (!suratJalanInput.value || !poNumberInput.value) {
+    toast.warning('Harap lengkapi nomor Surat Jalan dan PO')
+    return
+  }
+  if (isProcessing.value) return
+  isProcessing.value = true
+  try {
+    const sj = suratJalanInput.value.toUpperCase()
+    const po = poNumberInput.value.toUpperCase()
     const response = await warehouseStore.startProcess(selectedTruck.value.id, { suratJalanNumber: sj, poNumber: po })
     
     // Explicitly update local state for immediate UI reflection
     if (selectedTruck.value) {
-      selectedTruck.value.suratJalanNumber = sj;
-      selectedTruck.value.poNumber = po;
+      selectedTruck.value.suratJalanNumber = sj
+      selectedTruck.value.poNumber = po
     }
     
-    const updatedTruck = response?.data || response;
-    if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-    toast.success('Security data saved. Processing started.')
-  } catch(e) {} finally { isProcessing.value = false; }
+    const updatedTruck = response?.data || response
+    if (updatedTruck) {
+      truckStore.upsertTruck(updatedTruck)
+      selectedTruck.value = { ...selectedTruck.value, ...updatedTruck }
+    }
+    toast.success('Data Surat Jalan & PO tersimpan. Proses GSP dimulai.')
+  } catch (err) {
+    toast.error(err?.response?.data?.message || err?.message || 'Gagal memulai proses GSP')
+  } finally {
+    isProcessing.value = false
+  }
 }
 
 const handleWeightSave = async (weight) => {

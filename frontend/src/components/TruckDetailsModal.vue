@@ -559,9 +559,9 @@
                 <!-- Status Transition Details -->
                 <div v-if="item.eventType === 'STATUS_TRANSITION' || (item.oldStatus && item.newStatus)" class="flex items-center gap-2 text-[10px] font-mono bg-blue-50/60 p-2 rounded border border-blue-100">
                   <span class="text-slate-500 font-bold">Transisi Status:</span>
-                  <span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{{ item.oldStatus || 'NONE' }}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{{ getStatusLabel(item.oldStatus, truck?.processType) || 'NONE' }}</span>
                   <span class="material-icons text-xs text-blue-600">arrow_forward</span>
-                  <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white font-bold">{{ item.newStatus }}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white font-bold">{{ getStatusLabel(item.newStatus, truck?.processType) }}</span>
                 </div>
 
                 <!-- Field Level Diff if single item -->
@@ -1368,6 +1368,7 @@
 
 <script setup>
 import { formatPlantDate, formatPlantTime } from '../utils/displayTime'
+import { getStatusLabel } from '../utils/statusLabel'
 import { defineProps, defineEmits, computed, ref, watch } from 'vue'
 import StatusBadge from './StatusBadge.vue'
 import ProcessTimerBadge from './ProcessTimerBadge.vue'
