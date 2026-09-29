@@ -19,6 +19,7 @@ import {
   normalizePlateNumber,
   getRawPlateNumber,
 } from '../common/utils/normalize-plate.util';
+import { getPlantDay } from '../common/utils/plant-day.util';
 
 @Injectable()
 export class GateService {
@@ -29,18 +30,18 @@ export class GateService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private async generateTransactionNumber(
+  async generateTransactionNumber(
     txClient: any = this.prisma,
+    now: Date = new Date(),
   ): Promise<string> {
-    const today = new Date();
-    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-    const prefix = `GMS-${dateStr}-`;
+    const { dateKey, start, end } = getPlantDay(now);
+    const prefix = `GMS-${dateKey}-`;
 
     const count = await txClient.transaction.count({
       where: {
         createdAt: {
-          gte: new Date(today.setHours(0, 0, 0, 0)),
-          lt: new Date(today.setHours(23, 59, 59, 999)),
+          gte: start,
+          lt: end,
         },
       },
     });

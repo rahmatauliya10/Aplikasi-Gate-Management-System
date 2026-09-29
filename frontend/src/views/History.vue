@@ -309,7 +309,7 @@
                         
                         <span v-if="truck.status === 'CANCELLED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-rose-50 border border-rose-200 text-rose-600 shrink-0">CANCELLED</span>
                         <span v-else-if="truck.status === 'COMPLETED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 shrink-0">COMPLETED</span>
-                        <span v-else class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ truck.status || 'ACTIVE' }}</span>
+                        <span v-else class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ getStatusLabel(truck.status, getProcessType(truck)) }}</span>
                       </div>
 
                       <div v-if="getCorrectionCount(truck) > 0">
@@ -663,6 +663,8 @@
 </template>
 
 <script setup>
+import { formatPlantDate, formatPlantTime, formatPlantDateTime, plantDateKey } from '../utils/displayTime'
+import { getStatusLabel } from '../utils/statusLabel'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -730,21 +732,19 @@ const sortBy = ref('gateInDesc')
 
 const applyDatePreset = (preset) => {
   datePreset.value = preset
-  const today = new Date()
-  const todayStr = today.toISOString().split('T')[0]
+  const todayStr = plantDateKey(new Date())
 
   if (preset === 'TODAY') {
     startDate.value = todayStr
     endDate.value = todayStr
   } else if (preset === 'THIS_WEEK') {
-    const day = today.getDay()
-    const firstDay = new Date(today)
-    firstDay.setDate(today.getDate() - (day === 0 ? 6 : day - 1))
-    startDate.value = firstDay.toISOString().split('T')[0]
+    const localDay = new Date(`${todayStr}T00:00:00.000Z`)
+    const day = localDay.getUTCDay()
+    localDay.setUTCDate(localDay.getUTCDate() - (day === 0 ? 6 : day - 1))
+    startDate.value = localDay.toISOString().slice(0, 10)
     endDate.value = todayStr
   } else if (preset === 'THIS_MONTH') {
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
-    startDate.value = firstDay.toISOString().split('T')[0]
+    startDate.value = `${todayStr.slice(0, 7)}-01`
     endDate.value = todayStr
   } else if (preset === 'ALL') {
     startDate.value = ''
@@ -754,12 +754,7 @@ const applyDatePreset = (preset) => {
 }
 
 const formatArrivalDateTime = (isoString) => {
-  if (!isoString) return { date: '-', time: '-' }
-  const d = new Date(isoString)
-  if (isNaN(d.getTime())) return { date: '-', time: '-' }
-  const date = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
-  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  return { date, time }
+  return { date: formatPlantDate(isoString), time: formatPlantTime(isoString) }
 }
 
 const extractMoistureValue = (target) => {
@@ -976,7 +971,7 @@ const filteredAnalyzedTrucks = computed(() => {
     let matchesDate = true
     const arrTime = truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt
     if (arrTime) {
-      const arrDateStr = new Date(arrTime).toISOString().split('T')[0]
+      const arrDateStr = plantDateKey(arrTime)
       if (startDate.value && arrDateStr < startDate.value) matchesDate = false
       if (endDate.value && arrDateStr > endDate.value) matchesDate = false
     }
@@ -1232,10 +1227,7 @@ const formatPercentage = (val) => {
 }
 
 const formatTime = (isoString) => {
-  if (!isoString) return '-'
-  const d = new Date(isoString)
-  if (isNaN(d.getTime())) return '-'
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return formatPlantTime(isoString)
 }
 
 const getQCEndTime = (truck) => {
@@ -1245,10 +1237,7 @@ const getQCEndTime = (truck) => {
 }
 
 const formatTimeFull = (isoString) => {
-  if (!isoString) return '-'
-  const d = new Date(isoString)
-  if (isNaN(d.getTime())) return '-'
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + ', ' + d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
+  return formatPlantDateTime(isoString)
 }
 
 const getTimelineRows = (truck) => {

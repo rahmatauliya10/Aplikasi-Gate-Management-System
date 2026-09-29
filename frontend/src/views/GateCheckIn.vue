@@ -78,7 +78,7 @@
             <div class="flex items-center mt-1 space-x-2 flex-wrap">
               <span class="text-[9px] sm:text-[10px] font-black text-slate-500 uppercase tracking-widest">Real-time Activity Tracker</span>
               <span class="w-1 h-1 rounded-full bg-slate-300 hidden sm:block"></span>
-              <span class="text-[9px] sm:text-[10px] font-bold text-[#A0006D] uppercase hidden sm:block">{{ new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' }) }}</span>
+              <span class="text-[9px] sm:text-[10px] font-bold text-[#A0006D] uppercase hidden sm:block">{{ formatPlantDate(new Date()) }}</span>
             </div>
           </div>
         </div>
@@ -111,7 +111,7 @@
           <div class="flex-[2] min-w-0 px-3">VENDOR</div>
           <div class="w-[70px] shrink-0 text-center">WHSE</div>
           <div class="flex-[2] min-w-0 px-3">CURRENT PHASE</div>
-          <div class="w-[90px] shrink-0 text-center">ARRIVED</div>
+          <div class="w-[165px] shrink-0 text-center">REGISTERED (WIB)</div>
           <div class="w-[100px] shrink-0 text-center">ELAPSED</div>
           <div class="w-[50px] shrink-0 text-center">VIEW</div>
         </div>
@@ -152,8 +152,8 @@
             </div>
 
             <!-- COL 5: Time -->
-            <div class="w-auto md:w-[90px] shrink-0 text-center">
-              <span class="text-[12px] font-mono text-slate-500 font-semibold tracking-tight">{{ formatTime(getEntryTimestamp(truck)) }}</span>
+            <div class="w-auto md:w-[165px] shrink-0 text-center">
+              <span class="text-[11px] font-mono text-slate-500 font-semibold tracking-tight">{{ formatPlantDateTime(getEntryTimestamp(truck)) }}</span>
             </div>
 
             <!-- COL 6: Duration -->
@@ -203,6 +203,8 @@ import TruckForm from '../components/TruckForm.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pagination from '../components/Pagination.vue'
+import { formatPlantDate, formatPlantDateTime } from '../utils/displayTime'
+import { getStatusLabel } from '../utils/statusLabel'
 
 const truckStore = useTruckStore()
 const toast = useToast()
@@ -263,12 +265,7 @@ const getProcessType = (truck) => {
 
 const getStepLabel = (truck) => {
   if (!truck) return '-'
-  let step = truck.step || truck.status || '-'
-  const pType = getProcessType(truck)
-  if ((pType === 'GBB' || pType === 'GSP') && String(step).startsWith('QC_VEHICLE')) {
-    step = String(step).replace('QC_VEHICLE', 'QC_SAMPLING')
-  }
-  return String(step).replace(/_/g, ' ').toUpperCase()
+  return getStatusLabel(truck.step || truck.status, getProcessType(truck)).toUpperCase()
 }
 
 const getEntryTimestamp = (truck) => {
@@ -293,10 +290,9 @@ const handleTruckSubmit = async (truckData) => {
     isSubmitting.value = false;
   }
 }
-const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
 const calculateDuration = (isoString) => {
   if (!isoString) return '-';
-  const diff = Math.floor((new Date() - new Date(isoString)) / 60000);
+  const diff = Math.max(0, Math.floor((Date.now() - new Date(isoString).getTime()) / 60000));
   const h = Math.floor(diff / 60);
   const m = diff % 60;
   return `${h}h ${m}m`;

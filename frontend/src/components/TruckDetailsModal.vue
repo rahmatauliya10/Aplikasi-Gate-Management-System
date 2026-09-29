@@ -1367,6 +1367,7 @@
 </template>
 
 <script setup>
+import { formatPlantDate, formatPlantTime } from '../utils/displayTime'
 import { defineProps, defineEmits, computed, ref, watch } from 'vue'
 import StatusBadge from './StatusBadge.vue'
 import ProcessTimerBadge from './ProcessTimerBadge.vue'
@@ -1643,7 +1644,7 @@ const allowedReopenTargets = computed(() => {
   }
   return [
     { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-    { value: 'QC_VEHICLE_PENDING', label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+    { value: 'QC_VEHICLE_PENDING', label: '2. QC Sampling Pending (Menunggu Sampling Awal)' },
     { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
     { value: 'INCOMING_CHECK_PENDING', label: '4. Incoming Check Pending (Menunggu QC Material)' },
   ]
@@ -2836,7 +2837,8 @@ const formatPercentageCustom1 = (val) => {
 const formatTimeFull = (isoString) => {
   if (!isoString) return '-'
   const d = new Date(isoString)
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ', ' + d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  if (Number.isNaN(d.getTime())) return '-'
+  return `${formatPlantTime(d, true)}, ${formatPlantDate(d)} WIB`
 }
 </script>
 

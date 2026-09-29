@@ -162,6 +162,7 @@
 </template>
 
 <script setup>
+import { formatPlantTime } from '../utils/displayTime'
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
@@ -278,8 +279,7 @@ watch(filteredQueueTrucks, () => {
 watch(searchQuery, () => { currentPage.value = 1 })
 
 const formatTime = (ts) => {
-  if (!ts) return '-'
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return formatPlantTime(ts)
 }
 
 const truckInfoRows = computed(() => {

@@ -297,7 +297,7 @@ export class QcService {
           oldStatus: tx.status,
           newStatus: nextStatus,
           changedById: userId,
-          notes: `Vehicle Check: ${result}`,
+          notes: `${tx.processType === 'GBJ' ? 'Vehicle Check' : 'Initial QC Sampling'}: ${result}`,
         },
       });
 

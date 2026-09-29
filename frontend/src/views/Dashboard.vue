@@ -262,7 +262,7 @@
               <th class="px-4 sm:px-6 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Plate / Driver</th>
               <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Type / Vendor</th>
               <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Status / Location</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Arrival</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Registered (WIB)</th>
               <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Stage SLA</th>
               <th class="px-3 sm:px-4 py-3.5 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">Action</th>
             </tr>
@@ -287,10 +287,10 @@
               <td class="px-2 sm:px-4 py-3 border-y border-slate-100">
                 <div class="flex items-center">
                   <div class="w-1.5 h-1.5 rounded-full mr-2" :class="getStatusDotClass(truck.status)"></div>
-                  <span class="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider truncate max-w-[180px] sm:max-w-[220px]" :class="getStatusTextClass(truck.status)">{{ truck?.status ? truck.status.replace(/_/g, ' ') : '-' }}</span>
+                  <span class="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider truncate max-w-[180px] sm:max-w-[220px]" :class="getStatusTextClass(truck.status)">{{ getStatusLabel(truck?.status, truck?.processType) }}</span>
                 </div>
               </td>
-              <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-[10px] sm:text-[11px] font-bold text-slate-500 font-mono border-y border-slate-100">{{ formatTime(truck?.gateInAt || truck?.createdAt) }}</td>
+              <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-[10px] sm:text-[11px] font-bold text-slate-500 font-mono border-y border-slate-100">{{ formatPlantDateTime(truck?.gateInAt || truck?.createdAt) }}</td>
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-slate-100">
                 <ProcessTimerBadge 
                   :start-time="truck.warehouseStartAt || truck.qcStartAt || truck.weighInAt || truck.gateInAt || truck.createdAt" 
@@ -345,6 +345,8 @@ import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import DashboardFilterBar from '../components/DashboardFilterBar.vue'
+import { formatPlantDateTime } from '../utils/displayTime'
+import { getStatusLabel } from '../utils/statusLabel'
 
 const truckStore = useTruckStore()
 const settingsStore = useSettingsStore()
@@ -500,8 +502,6 @@ watch(() => alertList.value.length, () => {
 const defaultStat = { totalProcessed: 0, totalNet: 0, avgDiscrepancy: 0 }
 const getStatFor = (type) => stats.value?.fraudStats?.[type] || defaultStat
 const getDiscrepancyColor = (val) => { if (!val || val === 0) return 'text-slate-400'; if (val <= 2) return 'text-emerald-600'; if (val <= 5) return 'text-amber-500'; return 'text-red-500' }
-
-const formatTime = (isoString) => { if (!isoString) return '-'; return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
 
 const getStatusDotClass = (s) => {
   if (!s) return 'bg-slate-400'
