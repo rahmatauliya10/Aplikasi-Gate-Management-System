@@ -309,7 +309,7 @@
                         
                         <span v-if="truck.status === 'CANCELLED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-rose-50 border border-rose-200 text-rose-600 shrink-0">CANCELLED</span>
                         <span v-else-if="truck.status === 'COMPLETED'" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-emerald-50 border border-emerald-200 text-emerald-600 shrink-0">COMPLETED</span>
-                        <span v-else class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ truck.status || 'ACTIVE' }}</span>
+                        <span v-else class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider bg-amber-50 border border-amber-200 text-amber-700 animate-pulse shrink-0">{{ getStatusLabel(truck.status, getProcessType(truck)) }}</span>
                       </div>
 
                       <div v-if="getCorrectionCount(truck) > 0">
@@ -664,6 +664,7 @@
 
 <script setup>
 import { formatPlantDate, formatPlantTime, formatPlantDateTime, plantDateKey } from '../utils/displayTime'
+import { getStatusLabel } from '../utils/statusLabel'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
