@@ -115,4 +115,30 @@ describe('PR-03: Gate Plate Normalization & Concurrency Protection', () => {
       }),
     );
   });
+
+  it('generates transaction numbers rolling over exactly at 00.00.00 WIB', async () => {
+    mockPrismaService.transaction.count.mockResolvedValue(0);
+
+    // 23:59:59 WIB (2026-09-29T16:59:59.000Z UTC)
+    const numBeforeMidnight = await gateService.generateTransactionNumber(
+      mockPrismaService,
+      new Date('2026-09-29T16:59:59.000Z'),
+    );
+    expect(numBeforeMidnight).toBe('GMS-20260929-0001');
+
+    // 00:00:00 WIB (2026-09-29T17:00:00.000Z UTC)
+    const numAtMidnight = await gateService.generateTransactionNumber(
+      mockPrismaService,
+      new Date('2026-09-29T17:00:00.000Z'),
+    );
+    expect(numAtMidnight).toBe('GMS-20260930-0001');
+
+    // 06:59:59 WIB (2026-09-29T23:59:59.000Z UTC)
+    const numMorning = await gateService.generateTransactionNumber(
+      mockPrismaService,
+      new Date('2026-09-29T23:59:59.000Z'),
+    );
+    expect(numMorning).toBe('GMS-20260930-0001');
+  });
 });
+

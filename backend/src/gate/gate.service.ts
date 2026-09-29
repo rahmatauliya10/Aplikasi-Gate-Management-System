@@ -30,10 +30,11 @@ export class GateService {
     private activityLogsService: ActivityLogsService,
   ) {}
 
-  private async generateTransactionNumber(
+  async generateTransactionNumber(
     txClient: any = this.prisma,
+    now: Date = new Date(),
   ): Promise<string> {
-    const { dateKey, start, end } = getPlantDay();
+    const { dateKey, start, end } = getPlantDay(now);
     const prefix = `GMS-${dateKey}-`;
 
     const count = await txClient.transaction.count({
