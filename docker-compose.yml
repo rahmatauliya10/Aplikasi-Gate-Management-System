@@ -2,6 +2,7 @@ name: gms
 
 services:
   frontend:
+    image: aplikasigatemanagementsystem-frontend:v1.0.1-wib-qc
     build: 
       context: ./frontend
       dockerfile: Dockerfile
@@ -12,8 +13,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - gms_net
 
   backend:
+    image: aplikasigatemanagementsystem-backend:v1.0.1-wib-qc
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -53,6 +57,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      gms_net:
+        aliases:
+          - backend
 
   migrator:
     build:
@@ -72,6 +80,8 @@ services:
     volumes:
       - uploads:/app/uploads
       - backups_local:/app/backups/local
+    networks:
+      - gms_net
 
   postgres:
     image: postgres:15.12-alpine
@@ -90,9 +100,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      gms_net:
+        aliases:
+          - postgres
 
 volumes:
   pgdata:
   uploads:
   backups_local:
   backups_nas:
+
+networks:
+  gms_net:
+    name: gms_net
+    driver: bridge
