@@ -85,6 +85,9 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
+        qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
       };
 
       mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));

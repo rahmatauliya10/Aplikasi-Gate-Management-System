@@ -1,7 +1,12 @@
 /**
- * Operational Quality Specifications for Boiler Coal (Batubara)
- * Standard Operating Procedure: SOP-GSP-2026.1 (PT Santos Jaya Abadi)
- * Method: ASTM D3302 (Total Moisture in Coal by Digital Analyzer)
+ * Reference Quality Specifications & Evaluation Rules for Boiler Coal (Batubara)
+ * Status: Reference Benchmark / Purchase Contract Tiers (Pending Formal QA/Utility Department Signoff)
+ *
+ * IMPORTANT AUDIT NOTE:
+ * The calorie tiers (GAR 3800 - GAR 5500+) and Total Moisture thresholds (26.0% - 36.0%)
+ * represent supplier contract benchmarks and testing fixtures. They must NOT be treated as
+ * permanent company-wide SOP rules without formal signoff from QA and Utility Section Heads.
+ * In production, thresholds should be dynamically loaded from approved ProductCatalog records.
  */
 
 export interface CoalCalorieTierSpec {

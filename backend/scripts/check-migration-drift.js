@@ -34,6 +34,14 @@ try {
 
 const prisma = new PrismaClient();
 
+const candidatePrismaBins = [
+  path.resolve(__dirname, '..', 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma'),
+  path.resolve(process.cwd(), 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma'),
+  path.resolve(process.cwd(), 'backend', 'node_modules', '.bin', process.platform === 'win32' ? 'prisma.cmd' : 'prisma'),
+];
+const foundPrismaBin = candidatePrismaBins.find((b) => fs.existsSync(b));
+const prismaBin = foundPrismaBin ? `"${foundPrismaBin}"` : 'npx prisma';
+
 async function checkUnmanagedLegacyDb(prismaClient) {
   try {
     const existingTables = await prismaClient.$queryRaw`
@@ -187,7 +195,7 @@ async function main() {
     console.log('\nAll migrations applied. Executing exact Prisma datamodel diff check against live database...');
     try {
       execSync(
-        `npx prisma migrate diff --from-schema-datasource "${schemaPath}" --to-schema-datamodel "${schemaPath}" --exit-code`,
+        `${prismaBin} migrate diff --from-schema-datasource "${schemaPath}" --to-schema-datamodel "${schemaPath}" --exit-code`,
         { stdio: 'inherit', encoding: 'utf8' },
       );
       console.log('\n✅ Zero Schema Drift: Live database perfectly matches Prisma datamodel [100% OK].\n');
@@ -204,7 +212,7 @@ async function main() {
     let diffScript = '';
     try {
       diffScript = execSync(
-        `npx prisma migrate diff --from-schema-datasource "${schemaPath}" --to-schema-datamodel "${schemaPath}" --script`,
+        `${prismaBin} migrate diff --from-schema-datasource "${schemaPath}" --to-schema-datamodel "${schemaPath}" --script`,
         { encoding: 'utf8' },
       );
     } catch (genErr) {

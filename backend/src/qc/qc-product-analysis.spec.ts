@@ -463,6 +463,49 @@ describe('QcProductAnalysisService (Task 5)', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('rejects disposition even if user is ADMIN if department is NOT Utility (no automatic Admin bypass)', async () => {
+      const waitingTx = {
+        id: 'tx-waiting-disp',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        processType: ProcessType.GSP,
+        revision: 4,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(waitingTx);
+
+      const latestAnalysis = {
+        id: 'analysis-2',
+        transactionId: 'tx-waiting-disp',
+        testRound: 2,
+        testedById: 'analyst-1',
+      };
+
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(latestAnalysis);
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 'admin-it-1',
+        role: 'ADMIN',
+        department: 'IT', // Admin, but NOT Utility!
+      });
+
+      const adminItUser = {
+        id: 'admin-it-1',
+        role: 'ADMIN',
+        email: 'admin.it@sja.com',
+      } as unknown as JwtPayloadUser;
+
+      await expect(
+        service.submitUtilityDisposition(
+          'tx-waiting-disp',
+          {
+            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
+            dispositionReason: 'Admin without Utility department attempt',
+            revision: 4,
+          },
+          adminItUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
     it('successfully processes REJECT disposition and sets status to QC_VEHICLE_REJECTED', async () => {
       const waitingTx = {
         id: 'tx-waiting-disp',

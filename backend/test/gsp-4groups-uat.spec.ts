@@ -992,7 +992,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         warehouseService.startWarehouse(chemRejectTx.id, {}, warehouseUser),
       ).rejects.toThrow(BadRequestException);
 
-      // 3. Truck routes directly to Weighbridge Out (Tare Weight = Gross Weight, Net = 0)
+      // 3. Truck routes directly to Weighbridge Out with actual exit scale reading
+      // The truck exits still carrying rejected cargo. Scale reading is 21,970 kg (30 kg variance from fuel/scale diff).
+      // Backend faithfully stores actual tare scale reading (21,970 kg) without forcing equality with gross (22,000 kg).
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rejectedState);
       mockPrismaService.weighbridgeRecord.findFirst
         .mockResolvedValueOnce(null) // 1. Duplicate OUT check -> null
@@ -1009,8 +1011,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           findUnique: jest.fn().mockResolvedValue({
             ...chemRejectTx,
             status: TransactionStatus.WEIGH_OUT_DONE,
-            tareWeight: 22000,
-            netWeight: 0,
+            tareWeight: 21970,
+            netWeight: 30,
             weighOutBy: { id: weighbridgeUser.id, name: 'Weighbridge Operator', role: 'SECURITY' },
           }),
         },
@@ -1020,7 +1022,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({
             id: 'wb-out-rej-rec',
             type: WeighbridgeType.OUT,
-            weight: 22000,
+            weight: 21970,
             revision: 1,
           }),
         },
@@ -1033,7 +1035,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       const wbOutRes = await weighbridgeService.submitWeighOut(
         chemRejectTx.id,
         {
-          weight: 22000, // No cargo unloaded: Tare equals Gross
+          weight: 21970, // Actual physical scale reading on exit
           weighbridgeNumber: 'WB-02',
           revision: 3,
         },
@@ -1045,8 +1047,16 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             status: TransactionStatus.WEIGH_OUT_DONE,
-            tareWeight: 22000,
-            netWeight: 0, // Zero cargo delivered
+            tareWeight: 21970, // Actual scale reading preserved faithfully
+            netWeight: 30, // Actual calculated difference
+          }),
+        }),
+      );
+      expect(mockTxClientWbOut.weighbridgeRecord.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: WeighbridgeType.OUT,
+            weight: 21970, // Actual scale weight recorded
           }),
         }),
       );

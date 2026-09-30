@@ -1,6 +1,17 @@
 /**
- * Operational Quality Specifications for Chemicals (PAC & Rapid Klen CIP)
- * Standard Operating Procedure: SOP-GSP-2026.1 (PT Santos Jaya Abadi)
+ * Reference Quality Specifications & Evaluation Rules for Chemicals (PAC & Rapid Klen CIP)
+ * Status: Reference Benchmark / Test Fixtures (Pending Formal QA Department Signoff & Official COA Validation)
+ *
+ * IMPORTANT CHEMICAL & AUDIT DISTINCTIONS:
+ * 1. PAC (Poly Aluminium Chloride):
+ *    - "Aluminium Content" (% Al elemental, typical ~4.8% - 5.3%) is chemically distinct from
+ *      "Alumina Content" (% Al2O3, typical ~9.0% - 10.5%). Molecular conversion factor: 2*Al / Al2O3 ≈ 0.529.
+ *      The parameter below evaluates Al2O3 basis (Min 9.0% w/w) as a test benchmark.
+ *    - Operational specifications must be verified against supplier Certificate of Analysis (COA) and QA SOP.
+ * 2. Rapid Klen (Heavy-Duty Alkaline CIP):
+ *    - Total Alkalinity can be expressed as % Na2O or % NaOH (conversion factor: 2*NaOH / Na2O = 80/62 ≈ 1.29).
+ *    - Boundary conditions: Exact 35.00% Na2O is evaluated as compliant (non-strict inequality >= 35.0%).
+ *    - These numerical limits are reference thresholds for testing and require formal QA validation.
  */
 
 export interface PacAnalysisParameters {

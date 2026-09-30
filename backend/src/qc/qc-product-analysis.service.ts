@@ -196,13 +196,11 @@ export class QcProductAnalysisService {
     });
 
     const isAuthorizedUtility =
-      user.role === 'ADMIN' ||
-      userRecord?.role === 'ADMIN' ||
-      userRecord?.department?.toUpperCase() === 'UTILITY';
+      userRecord?.department?.trim().toUpperCase() === 'UTILITY';
 
     if (!isAuthorizedUtility) {
       throw new ForbiddenException(
-        'Otoritas tidak memadai: Akun tanpa kewenangan Utility atau Admin ditolak untuk memberikan disposisi.',
+        'Otoritas tidak memadai: Akun tanpa kewenangan operasional Departemen Utility ditolak untuk memberikan disposisi teknis. Role Admin sistem tidak otomatis memiliki wewenang pejabat Utility.',
       );
     }
 
