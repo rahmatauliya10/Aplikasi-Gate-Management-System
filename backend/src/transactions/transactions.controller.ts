@@ -28,12 +28,21 @@ import type { JwtPayloadUser } from '../common/decorators/current-user.decorator
 import { Req } from '@nestjs/common';
 import type { Request } from 'express';
 
+import { ActiveTransactionAmendmentService } from './active-transaction-amendment.service';
+import {
+  AmendActiveProductDto,
+  RecordOperationalIncidentDto,
+} from './dto/amend-active-transaction.dto';
+
 @ApiTags('Transactions')
 @ApiBearerAuth()
 @Controller('transactions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TransactionsController {
-  constructor(private readonly transactionsService: TransactionsService) {}
+  constructor(
+    private readonly transactionsService: TransactionsService,
+    private readonly amendmentService: ActiveTransactionAmendmentService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all transactions with pagination and filters' })
@@ -146,4 +155,47 @@ export class TransactionsController {
   ) {
     return this.transactionsService.voidTransaction(id, dto, user);
   }
+
+  @Post(':id/amend-product')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Amend product details on active transaction before unloading (ADMIN only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Product amended successfully; status downgraded if applicable',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Unloading started or invalid transaction state',
+  })
+  amendProduct(
+    @Param('id') id: string,
+    @Body() dto: AmendActiveProductDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.amendmentService.amendActiveProduct(id, dto, user);
+  }
+
+  @Post(':id/operational-incident')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Record operational incident for post-unloading corrections with evidence (ADMIN only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Operational incident recorded in audit trail',
+  })
+  recordOperationalIncident(
+    @Param('id') id: string,
+    @Body() dto: RecordOperationalIncidentDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.amendmentService.recordOperationalIncident(id, dto, user);
+  }
 }
+

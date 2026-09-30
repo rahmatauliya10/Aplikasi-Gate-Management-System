@@ -62,7 +62,7 @@
             
             <div class="mt-6 space-y-4">
               <!-- Start GSP Process Button when security data is already present -->
-              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && selectedTruck.suratJalanNumber && selectedTruck.poNumber" class="space-y-4">
+              <div v-if="(selectedTruck.status === 'QC_VEHICLE_PASSED' || selectedTruck.status === 'PA_NOT_REQUIRED') && selectedTruck.suratJalanNumber && selectedTruck.poNumber" class="space-y-4">
                 <button @click="startGspProcess" :disabled="isProcessing" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:scale-[0.98]"
                   style="background:linear-gradient(135deg,#A0006D,#70004C);"
                   id="btn-start-gsp-process">
@@ -73,7 +73,7 @@
               </div>
 
               <!-- Missing Security Info -->
-              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
+              <div v-if="(selectedTruck.status === 'QC_VEHICLE_PASSED' || selectedTruck.status === 'PA_NOT_REQUIRED') && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
                 <div class="flex items-center space-x-2 text-[#800057] mb-2">
                   <span class="material-icons text-lg">warning_amber</span>
                   <span class="text-[11px] font-black uppercase tracking-wider">Lengkapi Data Surat Jalan & PO</span>
@@ -92,6 +92,21 @@
                   <span v-if="isProcessing" class="material-icons animate-spin">autorenew</span>
                   <span>Simpan Data & Mulai Proses GSP</span>
                 </button>
+              </div>
+
+              <!-- Waiting for QC / PA Analysis Notice -->
+              <div v-if="['QC_VEHICLE_PENDING', 'QC_RETEST_REQUIRED', 'WAITING_UTILITY_DISPOSITION'].includes(selectedTruck.status)" class="space-y-3 p-5 rounded-2xl bg-amber-50/80 border border-amber-200">
+                <div class="flex items-center space-x-2 text-amber-800">
+                  <span class="material-icons text-xl animate-pulse">pending</span>
+                  <span class="text-xs font-black uppercase tracking-wider">Menunggu Hasil QC / PA Analysis</span>
+                </div>
+                <p class="text-xs font-medium text-amber-700 leading-relaxed">
+                  Muatan ini memerlukan persetujuan lulus uji laboratorium (RELEASE) sebelum proses bongkar di gudang GSP dapat dimulai.
+                </p>
+                <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                  <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span>Status: {{ getStatusLabel(selectedTruck.status, 'GSP') }}</span>
+                </div>
               </div>
 
               <!-- Weight Input (processing) -->

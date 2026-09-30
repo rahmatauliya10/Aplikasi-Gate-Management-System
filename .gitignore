@@ -41,3 +41,7 @@ backend/backups/nas/*
 deploy/current_release.txt
 
 
+ 
+# Dev and scratch
+.vite/
+scratch/

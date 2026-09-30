@@ -13,6 +13,7 @@ import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
 import { WarehouseQueryDto } from './dto/warehouse-query.dto';
 import { TransactionStatus, Prisma, ProcessType } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 
 @Injectable()
@@ -67,6 +68,7 @@ export class WarehouseService {
     const statusConditions: Prisma.TransactionWhereInput[] = [
       { processType: 'GBB', status: 'QC_VEHICLE_PASSED' },
       { processType: 'GSP', status: 'QC_VEHICLE_PASSED' },
+      { processType: 'GSP', status: 'PA_NOT_REQUIRED' },
       { processType: 'GBJ', status: 'QC_VEHICLE_PASSED' },
     ];
     andConditions.push({ OR: statusConditions });
@@ -157,6 +159,7 @@ export class WarehouseService {
 
     const tx = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
+      include: { productCatalog: true },
     });
 
     if (!tx) {
@@ -227,21 +230,35 @@ export class WarehouseService {
       });
     }
 
-    const expectedStatus = 'QC_VEHICLE_PASSED';
-    if (tx.status !== expectedStatus) {
+    // Guard: allow start for QC_VEHICLE_PASSED or PA_NOT_REQUIRED (Solar exempt via verified catalog)
+    const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+      processType: tx.processType,
+      cargoType: tx.cargoType,
+      cargoSubType: tx.cargoSubType,
+    });
+    const isSolarExempt =
+      tx.processType === 'GSP' &&
+      tx.status === TransactionStatus.PA_NOT_REQUIRED &&
+      exemptionEval.isExempt;
+    const isQcPassed = tx.status === TransactionStatus.QC_VEHICLE_PASSED;
+
+    if (!isSolarExempt && !isQcPassed) {
       await this.activityLogsService
         .logAction({
           userId: user.id,
           action: 'WAREHOUSE_FLOW_REJECTED',
           module: 'WAREHOUSE',
           referenceId: transactionId,
-          description: `Warehouse start rejected: Current status is ${tx.status}, expected ${expectedStatus}`,
+          description: `Warehouse start rejected: Current status is ${tx.status}. ` +
+            `Required: QC_VEHICLE_PASSED or PA_NOT_REQUIRED (verified Solar exemption).`,
           status: 'SUCCESS',
         })
         .catch(() => {});
       throw new BadRequestException({
         success: false,
-        message: `Transaction must be in ${expectedStatus} status to start warehouse process (current: ${tx.status})`,
+        message:
+          `Gudang tidak dapat memulai proses: Transaksi berstatus ${tx.status} ` +
+          `belum memperoleh persetujuan RELEASE PA Analysis atau bukan produk berizin bypass PA.`,
         errors: [],
       });
     }
@@ -258,7 +275,7 @@ export class WarehouseService {
       const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
-          status: 'QC_VEHICLE_PASSED',
+          status: { in: ['QC_VEHICLE_PASSED', 'PA_NOT_REQUIRED'] },
           revision: tx.revision,
         },
         data: {
@@ -462,9 +479,11 @@ export class WarehouseService {
     }
 
     let nextStatus: TransactionStatus;
-    if (tx.processType === 'GBB' || tx.processType === 'GSP') {
+    if (tx.processType === 'GBB') {
+      // GBB goes through incoming material check after warehouse
       nextStatus = 'INCOMING_CHECK_PENDING';
     } else {
+      // GSP and GBJ go directly to WAREHOUSE_DONE
       nextStatus = 'WAREHOUSE_DONE';
     }
 

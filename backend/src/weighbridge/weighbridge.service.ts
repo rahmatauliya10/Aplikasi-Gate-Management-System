@@ -13,6 +13,7 @@ import { WeighbridgeQueryDto } from './dto/weighbridge-query.dto';
 import { TransactionStatus, Prisma } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
+import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 
 @Injectable()
 export class WeighbridgeService {
@@ -152,6 +153,7 @@ export class WeighbridgeService {
 
     const tx = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
+      include: { productCatalog: true },
     });
 
     if (!tx) {
@@ -237,12 +239,21 @@ export class WeighbridgeService {
     let tareWeight: number | null = null;
     let nextStatus: TransactionStatus;
 
-    if (tx.processType === 'GBB' || tx.processType === 'GSP') {
+    const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+      processType: tx.processType,
+      cargoType: tx.cargoType,
+      cargoSubType: tx.cargoSubType,
+    });
+
+    if (tx.processType === 'GSP' && exemptionEval.isExempt) {
       grossWeight = dto.weight;
-      nextStatus = 'QC_VEHICLE_PENDING';
+      nextStatus = TransactionStatus.PA_NOT_REQUIRED;
+    } else if (tx.processType === 'GBB' || tx.processType === 'GSP') {
+      grossWeight = dto.weight;
+      nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
     } else if (tx.processType === 'GBJ') {
       tareWeight = dto.weight;
-      nextStatus = 'QC_VEHICLE_PENDING';
+      nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
     } else {
       throw new BadRequestException({
         success: false,
@@ -300,6 +311,10 @@ export class WeighbridgeService {
           ...(tareWeight !== null && { tareWeight }),
           ...(nextStatus === 'QC_VEHICLE_PENDING' &&
             !tx.qcStartAt && { qcStartAt: new Date() }),
+          ...(nextStatus === TransactionStatus.PA_NOT_REQUIRED && {
+            paExemptionReason: exemptionEval.reason,
+            paPolicyVersion: exemptionEval.policyVersion,
+          }),
         },
       });
 
@@ -318,7 +333,9 @@ export class WeighbridgeService {
           oldStatus: tx.status,
           newStatus: nextStatus,
           changedById: user.id,
-          notes: dto.remarks || 'Weigh-in processed successfully',
+          notes: nextStatus === TransactionStatus.PA_NOT_REQUIRED
+            ? `[PA_EXEMPT] ${exemptionEval.policyVersion}: ${exemptionEval.reason}`
+            : (dto.remarks || 'Weigh-in processed successfully'),
         },
       });
 
@@ -363,6 +380,20 @@ export class WeighbridgeService {
         status: 'SUCCESS',
       })
       .catch(() => {});
+
+    // Log PA exemption when applied
+    if (nextStatus === TransactionStatus.PA_NOT_REQUIRED) {
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'PA_EXEMPTION_APPLIED',
+          module: 'WEIGHBRIDGE',
+          referenceId: transactionId,
+          description: exemptionEval.reason || 'PA exemption applied via master catalog',
+          status: 'SUCCESS',
+        })
+        .catch(() => {});
+    }
 
     return {
       success: true,

@@ -98,6 +98,30 @@ export class GateService {
             });
           }
 
+          let resolvedCatalogId: string | null = null;
+          if (dto.productCatalogId) {
+            const cat = await tx.productCatalog.findUnique({
+              where: { id: dto.productCatalogId },
+            });
+            if (cat) {
+              resolvedCatalogId = cat.id;
+            }
+          } else if (dto.cargoSubType && dto.processType) {
+            const cat = await tx.productCatalog.findFirst({
+              where: {
+                processType: dto.processType,
+                isActive: true,
+                OR: [
+                  { name: { equals: dto.cargoSubType, mode: 'insensitive' } },
+                  { subCategory: { equals: dto.cargoSubType, mode: 'insensitive' } },
+                ],
+              },
+            });
+            if (cat) {
+              resolvedCatalogId = cat.id;
+            }
+          }
+
           return tx.transaction.create({
             data: {
               transactionNumber,
@@ -109,6 +133,7 @@ export class GateService {
               processType: dto.processType,
               cargoType: dto.cargoType,
               cargoSubType: dto.cargoSubType,
+              productCatalogId: resolvedCatalogId,
               cargoProcessType: dto.cargoProcessType,
               suratJalanNumber: dto.suratJalanNumber,
               poNumber: dto.poNumber,

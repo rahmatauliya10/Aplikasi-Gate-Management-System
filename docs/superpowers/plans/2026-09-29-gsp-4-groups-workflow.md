@@ -43,17 +43,36 @@
   - If status is `QC_VEHICLE_PENDING`, transactions will continue through the updated QC/PA flow.
   - Transactions currently in `INCOMING_CHECK_PENDING` will be completed under current rules or reset via standard UAT test reset.
 
-### 3. Rollback Plan
-- Prisma rollback migration script:
-  - Drop table `"QcProductAnalysis"`.
-  - Revert `workflow-state-machine.ts`, `weighbridge.service.ts`, and `warehouse.service.ts` to commit `bf65603`.
-  - For PostgreSQL enum values, if rollback of enum is required in dev, restore DB from the automated backup `backups/pre_gsp_migration.sql`.
+### 3. Rollback Plan (Three-Layer Strategy)
+
+PostgreSQL **cannot** remove a value from an existing enum type with `ALTER TYPE ... DROP VALUE`. Rollback must be planned across three layers:
+
+#### Layer A: Application-Level Revert (Git)
+- Revert branch to commit `bf65603` via `git revert` or `git reset`.
+- Remove new service files (`qc-product-analysis.service.ts`, `active-transaction-amendment.service.ts`, `pa-exemption-policy.ts`).
+- Revert `workflow-state-machine.ts`, `weighbridge.service.ts`, `warehouse.service.ts` to pre-GSP code.
+- The new enum values (`PA_NOT_REQUIRED`, `QC_RETEST_REQUIRED`, `WAITING_UTILITY_DISPOSITION`) remain in the database type but are **unreachable** by application code. No runtime side effects.
+
+#### Layer B: Forward-Fix Migration (For Dev/UAT Cleanup)
+- Create a new Prisma migration that:
+  1. Drops table `"QcProductAnalysis"`.
+  2. Drops table `"ProductCatalog"` (if cleanup is desired).
+  3. Leaves enum values intact — PostgreSQL does not support removing them.
+  4. Optionally renames unused enum values (e.g., `ALTER TYPE "TransactionStatus" RENAME VALUE 'PA_NOT_REQUIRED' TO '_DEPRECATED_PA_NOT_REQUIRED'`) to signal deprecation without breaking the type.
+- This migration is **forward-only** and safe to deploy.
+
+#### Layer C: Isolated DB Restore (Nuclear Option — Dev/UAT Only)
+- If a clean enum type is required, restore from a pre-migration `pg_dump` backup.
+- Backup is taken before migration: `pg_dump --format=custom --file=pre_gsp_migration.dump $DATABASE_URL`
+- **NEVER commit database dumps to Git.** Store in a secured, time-limited location (local disk, S3 with retention policy).
+- Restore: `pg_restore --clean --if-exists --no-owner --dbname=$DATABASE_URL pre_gsp_migration.dump`
+- This destroys all data written after the backup timestamp.
 
 ---
 
 ## Tasks Breakdown
 
-### Task 1: Prisma Schema Migration & Product Catalog Exemption Policy
+### Task 1: Prisma Schema Migration, Product Catalog & PA Exemption Policy
 
 **Files:**
 - Modify: `backend/prisma/schema.prisma`
@@ -61,8 +80,19 @@
 - Create: `backend/src/qc/constants/pa-exemption-policy.ts`
 - Create: `backend/src/qc/constants/pa-exemption-policy.spec.ts`
 
+**Architecture Decision: Product Catalog Validation**
+
+> The existing `cargoType` and `cargoSubType` fields are free-text strings. Comparing them with literal `"Fuel"` / `"Solar"` does NOT prove the product originates from a ratified master catalog. To prevent spoofing:
+>
+> 1. Create a `ProductCatalog` model in Prisma with `id`, `code`, `name`, `category`, `processType`, `isPaRequired`, `policyVersion`, and `isActive`.
+> 2. Seed the four GSP groups with canonical IDs.
+> 3. Add an optional `productCatalogId` FK on `Transaction`. When set, the backend resolves PA exemption by joining to `ProductCatalog.isPaRequired`, not by string matching.
+> 4. Store `policyVersion` from the catalog entry on `QcProductAnalysis` and activity logs.
+> 5. As a transitional fallback, the `isProductPaExempt()` function still accepts string arguments but logs a deprecation warning when `productCatalogId` is null.
+
 **Interfaces:**
-- Produces: `isProductPaExempt(processType: string, cargoType: string, cargoSubType: string): boolean`
+- Produces: `isProductPaExempt(processType, cargoType, cargoSubType, productCatalogId?): boolean`
+- Produces: `resolveProductPolicy(productCatalogId): ProductCatalogEntry | null`
 - Produces: `PA_EXEMPTION_WHITELIST` constant with policy version `SOP-GSP-2026.1`.
 
 - [ ] **Step 1: Write failing test for PA Exemption Policy**
@@ -85,17 +115,25 @@ describe('PA Exemption Whitelist Policy', () => {
     expect(isProductPaExempt('GSP', 'Coal', 'Batubara')).toBe(false);
     expect(isProductPaExempt('GBB', 'Fuel', 'Solar')).toBe(false);
   });
+
+  it('logs deprecation warning when productCatalogId is null (transitional)', () => {
+    // When productCatalogId is provided, lookup should be by ID
+    // When null, fallback to string matching with deprecation
+    const rule = getPaExemptionRule('GSP', 'Fuel', 'Solar');
+    expect(rule).not.toBeNull();
+    expect(rule?.policyVersion).toBeDefined();
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify failure**
 
-Run: `npm --prefix backend test backend/src/qc/constants/pa-exemption-policy.spec.ts`
+Run: `npm --prefix backend test -- --testPathPatterns backend/src/qc/constants/pa-exemption-policy.spec.ts`
 Expected: FAIL (Cannot find module './pa-exemption-policy')
 
-- [ ] **Step 3: Implement `backend/src/qc/constants/pa-exemption-policy.ts` and update `schema.prisma`**
+- [ ] **Step 3: Implement `pa-exemption-policy.ts`, `ProductCatalog` model, and update `schema.prisma`**
 
-Update `schema.prisma` to include new `TransactionStatus` enums and `QcProductAnalysis` model:
+Update `schema.prisma` to include new `TransactionStatus` enums, `ProductCatalog`, and `QcProductAnalysis` models:
 ```prisma
 enum TransactionStatus {
   REGISTERED
@@ -118,12 +156,38 @@ enum TransactionStatus {
   CANCELLED
 }
 
+// ── Product Catalog (Master Data) ─────────────────────────────────────
+// Canonical source of truth for product identity and PA exemption rules.
+// PA exemption is resolved by joining Transaction.productCatalogId → ProductCatalog.isPaRequired.
+// Free-text cargoType/cargoSubType matching is a transitional fallback only.
+model ProductCatalog {
+  id             String      @id @default(uuid())
+  code           String      @unique   // e.g. "SOLAR-001", "PAC280-001"
+  name           String                // Display name: "Solar", "PAC 280 AC"
+  category       String                // "Fuel", "Coal", "Chemicals"
+  subCategory    String?               // Finer grouping if needed
+  processType    ProcessType           // GSP, GBB, GBJ
+  isPaRequired   Boolean     @default(true)
+  policyVersion  String      @default("SOP-GSP-2026.1")
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  transactions   Transaction[]
+  qcAnalyses     QcProductAnalysis[]
+
+  @@index([processType, isActive])
+  @@index([category])
+}
+
 model QcProductAnalysis {
-  id                    String        @id @default(uuid())
+  id                    String             @id @default(uuid())
   transactionId         String
-  testRound             Int           @default(1)
+  productCatalogId      String?
+  testRound             Int                @default(1)
   productCategory       String
   productName           String
+  policyVersion         String             @default("SOP-GSP-2026.1")
   parameters            Json
   result                QcResult
   status                String
@@ -132,25 +196,37 @@ model QcProductAnalysis {
   dispositionById       String?
   dispositionAt         DateTime?
   testedById            String?
-  testedAt              DateTime      @default(now())
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  testedAt              DateTime           @default(now())
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
-  transaction           Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  testedBy              User?         @relation("ProductAnalysisTestedBy", fields: [testedById], references: [id], onDelete: SetNull)
-  dispositionBy         User?         @relation("ProductAnalysisDispositionBy", fields: [dispositionById], references: [id], onDelete: SetNull)
+  transaction           Transaction        @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  productCatalog        ProductCatalog?    @relation(fields: [productCatalogId], references: [id], onDelete: SetNull)
+  testedBy              User?              @relation("ProductAnalysisTestedBy", fields: [testedById], references: [id], onDelete: SetNull)
+  dispositionBy         User?              @relation("ProductAnalysisDispositionBy", fields: [dispositionById], references: [id], onDelete: SetNull)
 
   @@index([transactionId])
   @@index([productCategory])
 }
 ```
 
+Add `productCatalogId` FK to `Transaction` model:
+```prisma
+// In model Transaction, add:
+  productCatalogId      String?
+  productCatalog        ProductCatalog?    @relation(fields: [productCatalogId], references: [id], onDelete: SetNull)
+```
+
 Implement `backend/src/qc/constants/pa-exemption-policy.ts`:
 ```typescript
+import { Logger } from '@nestjs/common';
+
+const logger = new Logger('PaExemptionPolicy');
+
 export interface PaExemptionRule {
   processType: 'GSP';
-  cargoType: 'Fuel';
-  cargoSubType: 'Solar';
+  cargoType: string;
+  cargoSubType: string;
   policyVersion: string;
   reason: string;
   isPaRequired: false;
@@ -167,13 +243,36 @@ export const PA_EXEMPTION_WHITELIST: readonly PaExemptionRule[] = [
   },
 ] as const;
 
-export function getPaExemptionRule(processType?: string | null, cargoType?: string | null, cargoSubType?: string | null): PaExemptionRule | null {
-  if (processType !== 'GSP' || cargoType !== 'Fuel' || cargoSubType !== 'Solar') return null;
-  return PA_EXEMPTION_WHITELIST.find(r => r.processType === processType && r.cargoType === cargoType && r.cargoSubType === cargoSubType) || null;
+/**
+ * Resolve PA exemption rule.
+ * Preferred path: productCatalogId → DB lookup (handled by service layer).
+ * Transitional fallback: string matching with deprecation warning.
+ */
+export function getPaExemptionRule(
+  processType?: string | null,
+  cargoType?: string | null,
+  cargoSubType?: string | null,
+  productCatalogId?: string | null,
+): PaExemptionRule | null {
+  if (!productCatalogId) {
+    logger.warn(
+      `PA exemption resolved via string matching (transitional). ` +
+      `Migrate to productCatalogId for catalog-verified exemption. ` +
+      `processType=${processType}, cargoType=${cargoType}, cargoSubType=${cargoSubType}`,
+    );
+  }
+  return PA_EXEMPTION_WHITELIST.find(
+    r => r.processType === processType && r.cargoType === cargoType && r.cargoSubType === cargoSubType,
+  ) || null;
 }
 
-export function isProductPaExempt(processType?: string | null, cargoType?: string | null, cargoSubType?: string | null): boolean {
-  return getPaExemptionRule(processType, cargoType, cargoSubType) !== null;
+export function isProductPaExempt(
+  processType?: string | null,
+  cargoType?: string | null,
+  cargoSubType?: string | null,
+  productCatalogId?: string | null,
+): boolean {
+  return getPaExemptionRule(processType, cargoType, cargoSubType, productCatalogId) !== null;
 }
 ```
 
@@ -449,52 +548,102 @@ git commit -m "feat(warehouse): guard gsp start and complete with pa exemption a
 
 ---
 
-### Task 4: Anti-Tamper & Auditable Operational Incident Handling in Corrections
+### Task 4: Active Transaction Amendment & Operational Incident Handling
+
+> **CRITICAL DESIGN DECISION:** `operation-log-correction.service.ts` is strictly scoped to
+> **COMPLETED or CANCELLED** transactions (line 247-251). DO NOT loosen this guard.
+>
+> Product amendments on **active** transactions (status before COMPLETED/CANCELLED) require
+> a **separate** `ActiveTransactionAmendmentService` with its own access control, audit trail,
+> and state-machine integration.
 
 **Files:**
-- Modify: `backend/src/transactions/operation-log-correction.service.ts`
-- Modify: `backend/src/transactions/operation-log-correction.service.spec.ts`
+- Create: `backend/src/transactions/active-transaction-amendment.service.ts`
+- Create: `backend/src/transactions/active-transaction-amendment.service.spec.ts`
+- Create: `backend/src/transactions/dto/amend-active-transaction.dto.ts`
+- Modify: `backend/src/transactions/transactions.module.ts` (register new service)
+- **DO NOT modify:** `backend/src/transactions/operation-log-correction.service.ts`
 
 **Rules Enforced:**
-1. If product is changed from exempt (Solar) to non-exempt (Batubara, PAC, Rapid Klen):
-   - While still `PA_NOT_REQUIRED`: auto-downgrade status back to `QC_VEHICLE_PENDING`.
-   - Once warehouse process has started (`WAREHOUSE_IN_PROGRESS`, `WAREHOUSE_DONE`, `COMPLETED`): **HARD BLOCK** standard product correction.
-   - For post-unloading adjustments, only permit through an explicit *Operational Incident Procedure* (`RECORD_OPERATIONAL_INCIDENT`) requiring incident report reason, photo/document evidence, and supervisor acknowledgment. Never promise physical discharge cancellation.
+1. **Pre-unloading amendment** (status is `PA_NOT_REQUIRED`, `QC_VEHICLE_PENDING`, `QC_VEHICLE_PASSED`, etc. — before `warehouseStartAt`):
+   - If product changed from exempt (Solar) to non-exempt (Batubara, PAC, Rapid Klen): auto-downgrade status to `QC_VEHICLE_PENDING`.
+   - Requires ADMIN role, mandatory reason, and creates `TransactionCorrection` record with `action: 'AMEND_ACTIVE'`.
+   - Activity log records old product, new product, policy version, and status change.
+2. **Post-unloading hard block** (`warehouseStartAt` is set, or status ∈ {`WAREHOUSE_IN_PROGRESS`, `WAREHOUSE_DONE`}):
+   - Standard product amendment is **HARD BLOCKED**.
+   - Only permitted through explicit **Operational Incident Procedure** (`RECORD_OPERATIONAL_INCIDENT`):
+     - Requires: incident reason, photo/document evidence attachment ID (verified via `Attachment` table), supervisor PIC.
+     - Records incident as a `TransactionCorrection` with `action: 'OPERATIONAL_INCIDENT'`.
+     - Does NOT promise physical discharge cancellation — only records the correction.
+     - Does NOT change transaction status automatically.
+3. **Scope fence:** This service NEVER touches COMPLETED/CANCELLED transactions. Those remain exclusively under `OperationLogCorrectionService`.
 
-- [ ] **Step 1: Write unit tests in `operation-log-correction.service.spec.ts`**
+**New Prisma enum value for CorrectionAction:**
+```prisma
+enum CorrectionAction {
+  CORRECT_DATA
+  CORRECT_RECORDED_STATUS
+  REOPEN_WORKFLOW
+  AMEND_ACTIVE           // New: pre-unloading product amendment on active tx
+  OPERATIONAL_INCIDENT   // New: post-unloading incident record
+}
+```
+
+- [ ] **Step 1: Write unit tests in `active-transaction-amendment.service.spec.ts`**
 
 ```typescript
-it('auto-downgrades PA_NOT_REQUIRED to QC_VEHICLE_PENDING if product changed to Batubara before unloading', async () => {
-  // test downgrade logic
-});
+describe('ActiveTransactionAmendmentService', () => {
+  it('auto-downgrades PA_NOT_REQUIRED to QC_VEHICLE_PENDING if product changed to Batubara before unloading', async () => {
+    // Setup: tx with status PA_NOT_REQUIRED, warehouseStartAt=null
+    // Act: amend cargoSubType from Solar to Batubara
+    // Assert: status changed to QC_VEHICLE_PENDING, TransactionCorrection created with action AMEND_ACTIVE
+  });
 
-it('strictly rejects standard product correction once warehouse has started and mandates operational incident handling', async () => {
-  // test rejection and incident handling requirement
+  it('hard-blocks standard product amendment once warehouse has started', async () => {
+    // Setup: tx with status WAREHOUSE_IN_PROGRESS, warehouseStartAt set
+    // Act: attempt amend cargoSubType
+    // Assert: throws BadRequestException with message about operational incident requirement
+  });
+
+  it('permits operational incident record with evidence for post-unloading corrections', async () => {
+    // Setup: tx with warehouseStartAt set
+    // Act: submit operational incident with reason + evidence attachment ID
+    // Assert: TransactionCorrection created with action OPERATIONAL_INCIDENT, tx status unchanged
+  });
+
+  it('rejects non-ADMIN users', async () => {
+    // Assert: throws ForbiddenException
+  });
+
+  it('never accepts COMPLETED or CANCELLED transactions', async () => {
+    // Assert: throws BadRequestException directing to OperationLogCorrectionService
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify failure**
 
-Run: `npm --prefix backend test backend/src/transactions/operation-log-correction.service.spec.ts`
+Run: `npm --prefix backend test -- --testPathPatterns active-transaction-amendment`
 Expected: FAIL
 
-- [ ] **Step 3: Implement anti-tamper guards in `operation-log-correction.service.ts`**
+- [ ] **Step 3: Implement `ActiveTransactionAmendmentService`**
 
-Implement product correction checks:
-- Verify cargo change semantics.
-- Trigger status downgrade if changing from Solar to non-exempt prior to unloading.
-- Reject product modification after `warehouseStartAt` is recorded, logging warning and requiring formal operational incident logging.
+Key implementation points:
+- Constructor injects `PrismaService`, `ActivityLogsService`.
+- `amendProduct(txId, dto, user)`: validates active status, checks warehouseStartAt, applies downgrade or blocks.
+- `recordOperationalIncident(txId, dto, user)`: validates evidence attachment, creates TransactionCorrection with OPERATIONAL_INCIDENT.
+- Both methods use OCC (optimistic concurrency) with `tx.revision`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `npm --prefix backend test backend/src/transactions/operation-log-correction.service.spec.ts`
+Run: `npm --prefix backend test -- --testPathPatterns active-transaction-amendment`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/transactions/operation-log-correction.service*
-git commit -m "feat(corrections): enforce anti-tamper on pa exemption and auditable operational incident handling"
+git add backend/src/transactions/active-transaction-amendment* backend/src/transactions/dto/amend-active-transaction.dto.ts backend/src/transactions/transactions.module.ts backend/prisma/schema.prisma
+git commit -m "feat(transactions): add active transaction amendment and operational incident handling"
 ```
 
 ---
@@ -644,22 +793,25 @@ git commit -m "feat(frontend): dynamic qc-pa forms for coal, pac, and rapid klen
 **Files:**
 - Run: Entire test suite across backend and frontend.
 
-- [ ] **Step 1: Run all backend tests**
+- [x] **Step 1: Run all backend tests**
 
 Run: `npm --prefix backend test`
 Expected: All backend unit and e2e test suites PASS (0 failures).
+Result: 47 passed, 47 total (315 passed, 315 total).
 
-- [ ] **Step 2: Run all frontend tests**
+- [x] **Step 2: Run all frontend tests**
 
 Run: `npm --prefix frontend test`
 Expected: All frontend test suites PASS (0 failures).
+Result: 13 passed, 13 total (73 passed, 73 total).
 
-- [ ] **Step 3: Build frontend production bundle**
+- [x] **Step 3: Build frontend production bundle**
 
 Run: `npm --prefix frontend run build`
 Expected: Build succeeds without TypeScript or asset errors.
+Result: Built successfully in 23.52s.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit --allow-empty -m "test(all): verify complete test suite passes for gsp 4 groups workflow"
@@ -682,6 +834,7 @@ git commit --allow-empty -m "test(all): verify complete test suite passes for gs
    - Complete warehouse: verify status beralih ke `WAREHOUSE_DONE` (NO incoming check pending).
    - Weigh-out tare: 10,000 kg ➔ `WEIGH_OUT_DONE`.
    - Gate-out: `COMPLETED`.
+   - Result: PASS.
 2. **Skenario 2 (PAC 280 AC — Happy Path Lolos QC/PA):**
    - Register Truck `B9302PAC` (Cargo: `Chemicals`, Sub: `PAC 280 AC`).
    - Weigh-in gross: 22,000 kg ➔ Status `QC_VEHICLE_PENDING`.
@@ -690,6 +843,7 @@ git commit --allow-empty -m "test(all): verify complete test suite passes for gs
    - Status beralih ke `QC_VEHICLE_PASSED`.
    - In GSP Process: "Mulai Bongkar GSP" button becomes active.
    - Complete warehouse ➔ `WAREHOUSE_DONE` ➔ Weigh-out ➔ Gate-out.
+   - Result: PASS.
 3. **Skenario 3 (Rapid Klen — Penolakan QC/PA):**
    - Register Truck `B9303RPD` (Cargo: `Chemicals`, Sub: `RAPID KLEEN`).
    - Weigh-in gross: 20,000 kg ➔ Status `QC_VEHICLE_PENDING`.
@@ -697,6 +851,7 @@ git commit --allow-empty -m "test(all): verify complete test suite passes for gs
    - Status beralih ke `QC_VEHICLE_REJECTED`.
    - In GSP Process: Unloading blocked permanently.
    - Directed immediately to Weigh-out ➔ Gate-out.
+   - Result: PASS.
 4. **Skenario 4 (Batubara — Deviasi Kadar Air ➔ Uji Ulang ➔ Disposisi Utility):**
    - Register Truck `B9304COAL` (Cargo: `Coal`, Sub: `Batubara`).
    - Weigh-in gross: 30,000 kg ➔ Status `QC_VEHICLE_PENDING`.
@@ -706,11 +861,13 @@ git commit --allow-empty -m "test(all): verify complete test suite passes for gs
    - Four-Eyes Disposition: Authorized Utility officer enters disposition acceptance ➔ Status beralih ke `QC_VEHICLE_PASSED`.
    - In GSP Process: "Mulai Bongkar GSP" becomes active.
    - Complete warehouse ➔ `WAREHOUSE_DONE` ➔ Weigh-out ➔ Gate-out.
+   - Result: PASS.
 5. **Skenario 5 (Anti-Tamper Product Correction):**
    - Register as Solar ➔ Weigh-in (`PA_NOT_REQUIRED`).
    - Attempt to correct product to Batubara: verify status downgrades to `QC_VEHICLE_PENDING`.
    - Test that once unloading has started, product change is blocked and routed to operational incident logging.
+   - Result: PASS.
 
-- [ ] **Step 1: Execute CDP automated runner for all 5 scenarios**
-- [ ] **Step 2: Collect screenshots and verify DB logs**
-- [ ] **Step 3: Document UAT report in `artifacts/laporan_uat_gsp_4_kelompok.md`**
+- [x] **Step 1: Execute CDP automated runner for all 5 scenarios**
+- [x] **Step 2: Collect screenshots and verify DB logs**
+- [x] **Step 3: Document UAT report in `artifacts/laporan_uat_gsp_4_kelompok.md`**
