@@ -56,6 +56,7 @@
             <option value="4200">4200 kcal/kg (Batas Max TM: 33%)</option>
             <option value="4800">4800 kcal/kg (Batas Max TM: 30%)</option>
             <option value="5000">5000 kcal/kg (Batas Max TM: 28%)</option>
+            <option value="5500">5500+ kcal/kg (Batas Max TM: 26% — High Calorie)</option>
           </select>
         </div>
 
@@ -186,6 +187,7 @@ const maxAllowedMoisture = computed(() => {
     case '4200': return 33.0
     case '4800': return 30.0
     case '5000': return 28.0
+    case '5500': return 26.0
     default: return 33.0
   }
 })

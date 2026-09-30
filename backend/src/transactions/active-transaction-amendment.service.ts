@@ -104,13 +104,34 @@ export class ActiveTransactionAmendmentService {
     let newStatus: TransactionStatus = tx.status;
     let statusDowngraded = false;
 
-    // If current status is PA_NOT_REQUIRED and new product is NOT exempt, downgrade to QC_VEHICLE_PENDING
-    if (tx.status === TransactionStatus.PA_NOT_REQUIRED && !willBeExempt) {
-      newStatus = TransactionStatus.QC_VEHICLE_PENDING;
-      statusDowngraded = true;
+    if (willBeExempt) {
+      newStatus = TransactionStatus.PA_NOT_REQUIRED;
+      if (tx.status !== TransactionStatus.PA_NOT_REQUIRED) {
+        statusDowngraded = true;
+      }
+    } else {
+      // Non-exempt product strictly requires QC PA verification
+      if (tx.status === TransactionStatus.PA_NOT_REQUIRED ||
+          tx.status === TransactionStatus.QC_VEHICLE_PASSED ||
+          tx.status === TransactionStatus.QC_RETEST_REQUIRED ||
+          tx.status === TransactionStatus.WAITING_UTILITY_DISPOSITION) {
+        newStatus = TransactionStatus.QC_VEHICLE_PENDING;
+        statusDowngraded = true;
+      }
     }
 
     await this.prisma.$transaction(async (prismaTx) => {
+      // Invalidate any previous QC Product Analysis records so old test results cannot be reused
+      await prismaTx.qcProductAnalysis.updateMany({
+        where: { transactionId, isVoided: false },
+        data: {
+          isVoided: true,
+          voidedAt: new Date(),
+          voidReason: `Dibatalkan karena perubahan produk aktif dari ${tx.cargoSubType} ke ${dto.cargoSubType}. Alasan: ${dto.reason}`,
+          status: 'VOIDED',
+        },
+      });
+
       const claimed = await prismaTx.transaction.updateMany({
         where: { id: transactionId, revision: dto.revision },
         data: {
@@ -118,6 +139,12 @@ export class ActiveTransactionAmendmentService {
           cargoSubType: dto.cargoSubType,
           productCatalogId: newCatalog ? newCatalog.id : (dto.productCatalogId !== undefined ? dto.productCatalogId : tx.productCatalogId),
           status: newStatus,
+          paExemptionReason: willBeExempt
+            ? (newCatalog?.exemptionReason || 'SOP Exemption Rule v1.0: Komoditas Solar BBM tidak memerlukan uji laboratorium pra-bongkar.')
+            : null,
+          paPolicyVersion: willBeExempt
+            ? (newCatalog?.policyVersion || 'SOP-GSP-2026.1')
+            : null,
           revision: { increment: 1 },
         },
       });
@@ -135,7 +162,7 @@ export class ActiveTransactionAmendmentService {
           action: CorrectionAction.AMEND_ACTIVE,
           reasonCode: 'PRODUCT_AMENDMENT',
           reason: dto.reason,
-          remark: `Koreksi produk aktif sebelum bongkar: ${tx.cargoSubType} -> ${dto.cargoSubType}`,
+          remark: `Koreksi produk aktif sebelum bongkar: ${tx.cargoSubType} -> ${dto.cargoSubType}. Hasil PA lama dibatalkan.`,
           oldValues: {
             cargoType: tx.cargoType,
             cargoSubType: tx.cargoSubType,
@@ -159,7 +186,7 @@ export class ActiveTransactionAmendmentService {
             oldStatus: tx.status,
             newStatus,
             changedById: user.id,
-            notes: `Status otomatis diturunkan ke QC_VEHICLE_PENDING karena perubahan produk ke ${dto.cargoSubType} yang memerlukan analisis PA. Alasan: ${dto.reason}`,
+            notes: `Status otomatis disesuaikan ke ${newStatus} karena perubahan produk ke ${dto.cargoSubType}. Hasil analisis PA sebelumnya dibatalkan secara atomik. Alasan: ${dto.reason}`,
           },
         });
       }

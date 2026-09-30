@@ -59,7 +59,7 @@ export class QcProductAnalysisController {
   }
 
   @Post('disposition/:transactionId')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'QC')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Submit Utility disposition for out-of-spec products (Enforces Four-Eyes Principle)',

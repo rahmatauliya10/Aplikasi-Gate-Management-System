@@ -635,7 +635,10 @@ model QcProductAnalysis {
   policyVersion         String             @default("SOP-GSP-2026.1")
   parameters            Json
   result                QcResult
-  status                String             // e.g. RELEASE, REJECT, RETEST, PENDING_DISPOSITION
+  status                String             // e.g. RELEASE, REJECT, RETEST, PENDING_DISPOSITION, VOIDED
+  isVoided              Boolean            @default(false)
+  voidedAt              DateTime?
+  voidReason            String?
   dispositionAction     String?
   dispositionReason     String?
   dispositionById       String?
@@ -652,4 +655,7 @@ model QcProductAnalysis {
 
   @@index([transactionId])
   @@index([productCategory])
+  @@index([productCatalogId])
+  @@index([testedById])
+  @@index([dispositionById])
 }

@@ -189,10 +189,35 @@ export class QcProductAnalysisService {
       throw new NotFoundException('Data analisis produk tidak ditemukan');
     }
 
-    // Four-Eyes Principle: Approver must be distinct from testing analyst
-    if (latestAnalysis.testedById && user.id === latestAnalysis.testedById) {
+    // Verify Utility authority (ADMIN role or UTILITY department)
+    const userRecord = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { id: true, role: true, department: true },
+    });
+
+    const isAuthorizedUtility =
+      user.role === 'ADMIN' ||
+      userRecord?.role === 'ADMIN' ||
+      userRecord?.department?.toUpperCase() === 'UTILITY';
+
+    if (!isAuthorizedUtility) {
       throw new ForbiddenException(
-        'Prinsip Four-Eyes: Penyetuju disposisi harus berbeda dari analis yang menguji sampel.',
+        'Otoritas tidak memadai: Akun tanpa kewenangan Utility atau Admin ditolak untuk memberikan disposisi.',
+      );
+    }
+
+    // Four-Eyes Principle: Approver must NOT be any analyst who performed any test round on this transaction
+    const allAnalyses = await this.prisma.qcProductAnalysis.findMany({
+      where: { transactionId },
+      select: { id: true, testRound: true, testedById: true },
+    });
+
+    const wasAnalystInAnyRound = allAnalyses.some(
+      (a) => a.testedById && a.testedById === user.id,
+    );
+    if (wasAnalystInAnyRound) {
+      throw new ForbiddenException(
+        'Prinsip Four-Eyes: Penyetuju disposisi tidak boleh merupakan analis yang pernah menguji sampel pada ronde mana pun dalam transaksi ini.',
       );
     }
 
