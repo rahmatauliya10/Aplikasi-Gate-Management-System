@@ -141,19 +141,33 @@ export function evaluateCoalAnalysis(
   const isWithinSpec =
     params.sensoryPassed && params.totalMoisture <= maxAllowedMoisture;
 
-  if (isWithinSpec) {
-    // Audit Rule: If specification is NOT formally approved by QA/Utility, withhold automated RELEASE
-    if (specMetadata.approvalStatus !== 'APPROVED') {
+  // Audit Rule: Specifications that are NOT formally 'APPROVED' CANNOT produce automated decisions.
+  // Both automated RELEASE and automated REJECT based on provisional spec limits are withheld
+  // and routed to manual review (PENDING_DISPOSITION) with reason: "spesifikasi belum disahkan".
+  if (specMetadata.approvalStatus !== 'APPROVED') {
+    if (isWithinSpec) {
       return {
         result: 'PASS',
         decision: 'PENDING_DISPOSITION',
         maxAllowedMoisture,
         isWithinSpec: true,
         specMetadata,
-        notes: `Hasil kadar air (${params.totalMoisture}% <= ${maxAllowedMoisture}%) memenuhi acuan kontrak, namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; memerlukan disposisi pejabat Utility/QA.`,
+        notes: `Hasil kadar air (${params.totalMoisture}% <= ${maxAllowedMoisture}%) memenuhi acuan kontrak, namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`,
       };
     }
 
+    return {
+      result: 'REJECT',
+      decision: 'PENDING_DISPOSITION',
+      maxAllowedMoisture,
+      isWithinSpec: false,
+      specMetadata,
+      notes: `Hasil kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%) melampaui acuan kontrak sementara, namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Penolakan mutu otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`,
+    };
+  }
+
+  // --- Approved Specification Evaluation Logic Below ---
+  if (isWithinSpec) {
     return {
       result: 'PASS',
       decision: 'RELEASE',
@@ -177,7 +191,7 @@ export function evaluateCoalAnalysis(
     };
   }
 
-  // Moisture exceeded
+  // Moisture exceeded under formally approved specification
   if (params.testRound === 1) {
     return {
       result: 'REJECT',
@@ -185,7 +199,7 @@ export function evaluateCoalAnalysis(
       maxAllowedMoisture,
       isWithinSpec: false,
       specMetadata,
-      notes: `Kadar air melebihi batas spesifikasi (${params.totalMoisture}% > ${maxAllowedMoisture}%). Diperlukan uji ulang (Round 2).`,
+      notes: `Kadar air melebihi batas spesifikasi teresahkan (${params.totalMoisture}% > ${maxAllowedMoisture}%). Diperlukan uji ulang (Round 2).`,
     };
   }
 
@@ -196,6 +210,6 @@ export function evaluateCoalAnalysis(
     maxAllowedMoisture,
     isWithinSpec: false,
     specMetadata,
-    notes: `Kadar air uji ulang tetap melebihi batas spesifikasi (${params.totalMoisture}% > ${maxAllowedMoisture}%). Eskalasi ke Disposisi Utility.`,
+    notes: `Kadar air uji ulang tetap melebihi batas spesifikasi teresahkan (${params.totalMoisture}% > ${maxAllowedMoisture}%). Eskalasi ke Disposisi Utility.`,
   };
 }

@@ -38,21 +38,36 @@ export const OPERATIONAL_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
   approvedAt: null,
   minOperator: 'GTE',
   notes:
-    'Provisional PAC parameters. Automated RELEASE is prohibited until formal QA validation.',
+    'Provisional PAC parameters. Automated decisions (RELEASE/REJECT) prohibited until formal QA validation.',
 };
 
-export const OPERATIONAL_RAPID_KLEN_SPEC_METADATA: ChemicalSpecificationMetadata =
+export const RAPID_KLEN_DOC_STRICT_GT_METADATA: ChemicalSpecificationMetadata = {
+  version: '1.0.0-doc-strict-gt',
+  documentSource:
+    'Supplier CIP Technical Specification Doc #CIP-STRICT-01 (Specifies strict GT > 35.0%)',
+  approvalStatus: 'PENDING_SIGNOFF',
+  approvedBy: null,
+  approvedAt: null,
+  minOperator: 'GT',
+  notes:
+    'Document explicitly specifies strict greater-than (> 35.0%). Automated decisions withheld until formal QA validation.',
+};
+
+export const RAPID_KLEN_DOC_STANDARD_GTE_METADATA: ChemicalSpecificationMetadata =
   {
-    version: '1.0.0-provisional',
+    version: '1.0.0-doc-standard-gte',
     documentSource:
-      'Supplier CIP Technical Specification (Awaiting Formal QA Head Signoff)',
+      'QA Harmonized CIP Technical Specification Doc #CIP-HARM-02 (Specifies standard GTE >= 35.0%)',
     approvalStatus: 'PENDING_SIGNOFF',
     approvedBy: null,
     approvedAt: null,
-    minOperator: 'GT', // Strict > 35.00% in provisional state
+    minOperator: 'GTE',
     notes:
-      'Provisional Rapid Klen parameters. Exact 35.00% boundary requires strict GT > 35.0% in provisional mode.',
+      'Document explicitly specifies greater-than-or-equal (>= 35.0%). Automated decisions withheld until formal QA validation.',
   };
+
+export const OPERATIONAL_RAPID_KLEN_SPEC_METADATA: ChemicalSpecificationMetadata =
+  RAPID_KLEN_DOC_STRICT_GT_METADATA;
 
 export const TEST_FIXTURE_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
   version: 'test-fixture-1.0',
@@ -64,16 +79,28 @@ export const TEST_FIXTURE_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
   notes: 'Simulated approved spec for automated testing.',
 };
 
+export const TEST_FIXTURE_RAPID_KLEN_STRICT_GT: ChemicalSpecificationMetadata = {
+  version: 'test-fixture-strict-gt',
+  documentSource: 'QA Approved Test Fixture with strict GT (> 35.0%)',
+  approvalStatus: 'APPROVED',
+  approvedBy: 'QA_HEAD_SIMULATED',
+  approvedAt: '2026-09-30T00:00:00.000Z',
+  minOperator: 'GT',
+  notes: 'Simulated approved spec specifying strict operator GT.',
+};
+
+export const TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE: ChemicalSpecificationMetadata = {
+  version: 'test-fixture-standard-gte',
+  documentSource: 'QA Approved Test Fixture with standard GTE (>= 35.0%)',
+  approvalStatus: 'APPROVED',
+  approvedBy: 'QA_HEAD_SIMULATED',
+  approvedAt: '2026-09-30T00:00:00.000Z',
+  minOperator: 'GTE',
+  notes: 'Simulated approved spec specifying standard operator GTE.',
+};
+
 export const TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA: ChemicalSpecificationMetadata =
-  {
-    version: 'test-fixture-1.0',
-    documentSource: 'QA Approved Test Fixture (Simulated)',
-    approvalStatus: 'APPROVED',
-    approvedBy: 'QA_HEAD_SIMULATED',
-    approvedAt: '2026-09-30T00:00:00.000Z',
-    minOperator: 'GTE',
-    notes: 'Simulated approved spec for automated testing.',
-  };
+  TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE;
 
 export interface PacAnalysisParameters {
   sensory: {
@@ -179,16 +206,22 @@ export function evaluatePacAnalysis(
 
   const isCompliant = violations.length === 0;
 
-  // Audit Rule: Withhold automated RELEASE if spec is not formally approved
+  // Audit Rule: Specifications that are NOT formally 'APPROVED' CANNOT produce automated decisions.
+  // Both automated RELEASE and automated REJECT based on provisional spec limits are withheld
+  // and routed to manual review (PENDING_DISPOSITION) with reason: "spesifikasi belum disahkan".
   let decision: 'RELEASE' | 'PENDING_DISPOSITION' | 'REJECT';
   let summary: string;
 
-  if (!isCompliant) {
-    decision = 'REJECT';
-    summary = `PAC ditolak karena melanggar ${violations.length} parameter spesifikasi: ${violations.join('; ')}`;
-  } else if (specMetadata.approvalStatus !== 'APPROVED') {
+  if (specMetadata.approvalStatus !== 'APPROVED') {
     decision = 'PENDING_DISPOSITION';
-    summary = `PAC memenuhi parameter acuan teknis (pH: ${params.ph}, Density: ${params.density}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke disposisi pejabat Utility/QA.`;
+    if (!isCompliant) {
+      summary = `PAC tidak memenuhi parameter acuan sementara (${violations.join('; ')}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Penolakan mutu otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`;
+    } else {
+      summary = `PAC memenuhi parameter acuan teknis (pH: ${params.ph}, Density: ${params.density}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`;
+    }
+  } else if (!isCompliant) {
+    decision = 'REJECT';
+    summary = `PAC ditolak karena melanggar ${violations.length} parameter spesifikasi teresahkan: ${violations.join('; ')}`;
   } else {
     decision = 'RELEASE';
     summary = `PAC memenuhi seluruh parameter wajib (pH: ${params.ph}, Density: ${params.density}, Sensori OK). Disetujui RELEASE berdasarkan spesifikasi teresahkan v${specMetadata.version}.`;
@@ -281,16 +314,22 @@ export function evaluateRapidKlenAnalysis(
 
   const isCompliant = violations.length === 0;
 
-  // Audit Rule: Withhold automated RELEASE if spec is not formally approved
+  // Audit Rule: Specifications that are NOT formally 'APPROVED' CANNOT produce automated decisions.
+  // Both automated RELEASE and automated REJECT based on provisional spec limits are withheld
+  // and routed to manual review (PENDING_DISPOSITION) with reason: "spesifikasi belum disahkan".
   let decision: 'RELEASE' | 'PENDING_DISPOSITION' | 'REJECT';
   let summary: string;
 
-  if (!isCompliant) {
-    decision = 'REJECT';
-    summary = `Rapid Klen ditolak karena melanggar spesifikasi: ${violations.join('; ')}`;
-  } else if (specMetadata.approvalStatus !== 'APPROVED') {
+  if (specMetadata.approvalStatus !== 'APPROVED') {
     decision = 'PENDING_DISPOSITION';
-    summary = `Rapid Klen memenuhi parameter acuan teknis (Na2O: ${params.alkalinityNa2O}%, pH: ${params.ph}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke disposisi pejabat Utility/QA.`;
+    if (!isCompliant) {
+      summary = `Rapid Klen tidak memenuhi parameter acuan sementara (${violations.join('; ')}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Penolakan mutu otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`;
+    } else {
+      summary = `Rapid Klen memenuhi parameter acuan teknis (Na2O: ${params.alkalinityNa2O}%, pH: ${params.ph}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`;
+    }
+  } else if (!isCompliant) {
+    decision = 'REJECT';
+    summary = `Rapid Klen ditolak karena melanggar spesifikasi teresahkan: ${violations.join('; ')}`;
   } else {
     decision = 'RELEASE';
     summary = `Rapid Klen memenuhi seluruh parameter (Na2O: ${params.alkalinityNa2O}%, pH: ${params.ph}, Density: ${params.density}, Kemasan OK). Disetujui RELEASE berdasarkan spesifikasi teresahkan v${specMetadata.version}.`;

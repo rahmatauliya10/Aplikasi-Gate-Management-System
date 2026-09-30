@@ -72,7 +72,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
   });
 
-  it('triggers RETEST_REQUIRED in Round 1 when moisture exceeds 26% on GAR 5500', () => {
+  it('withholds automated REJECT (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF and moisture exceeds limit', () => {
     const evalResult = evaluateCoalAnalysis({
       targetCalorie: '5500',
       totalMoisture: 28.5,
@@ -81,30 +81,55 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     });
 
     expect(evalResult.result).toBe('REJECT');
-    expect(evalResult.decision).toBe('RETEST_REQUIRED');
+    expect(evalResult.decision).toBe('PENDING_DISPOSITION');
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
+    expect(evalResult.notes).toContain('Penolakan mutu otomatis ditahan');
+    expect(evalResult.notes).toContain('spesifikasi belum disahkan');
   });
 
-  it('triggers PENDING_DISPOSITION in Round 2 when moisture still exceeds limit', () => {
-    const evalResult = evaluateCoalAnalysis({
-      targetCalorie: '5500',
-      totalMoisture: 27.2,
-      testRound: 2,
-      sensoryPassed: true,
-    });
+  it('triggers RETEST_REQUIRED in Round 1 when moisture exceeds 26% on GAR 5500 under approved specification', () => {
+    const evalResult = evaluateCoalAnalysis(
+      {
+        targetCalorie: '5500',
+        totalMoisture: 28.5,
+        testRound: 1,
+        sensoryPassed: true,
+      },
+      TEST_FIXTURE_COAL_SPEC_METADATA,
+    );
+
+    expect(evalResult.result).toBe('REJECT');
+    expect(evalResult.decision).toBe('RETEST_REQUIRED');
+    expect(evalResult.maxAllowedMoisture).toBe(26.0);
+    expect(evalResult.notes).toContain('Kadar air melebihi batas spesifikasi teresahkan');
+  });
+
+  it('triggers PENDING_DISPOSITION in Round 2 when moisture still exceeds limit under approved specification', () => {
+    const evalResult = evaluateCoalAnalysis(
+      {
+        targetCalorie: '5500',
+        totalMoisture: 27.2,
+        testRound: 2,
+        sensoryPassed: true,
+      },
+      TEST_FIXTURE_COAL_SPEC_METADATA,
+    );
 
     expect(evalResult.result).toBe('REJECT');
     expect(evalResult.decision).toBe('PENDING_DISPOSITION');
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
   });
 
-  it('immediately rejects if sensory check fails regardless of moisture', () => {
-    const evalResult = evaluateCoalAnalysis({
-      targetCalorie: '4200',
-      totalMoisture: 22.0,
-      testRound: 1,
-      sensoryPassed: false,
-    });
+  it('immediately rejects if sensory check fails on approved specification', () => {
+    const evalResult = evaluateCoalAnalysis(
+      {
+        targetCalorie: '4200',
+        totalMoisture: 22.0,
+        testRound: 1,
+        sensoryPassed: false,
+      },
+      TEST_FIXTURE_COAL_SPEC_METADATA,
+    );
 
     expect(evalResult.result).toBe('REJECT');
     expect(evalResult.decision).toBe('REJECT');

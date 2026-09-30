@@ -582,14 +582,24 @@ export class WeighbridgeService {
       });
     }
 
-    // Calculate physical difference between scale readings
+    // Calculate physical difference between scale readings (load cell delta)
     const physicalScaleDelta = Math.max(0, finalGrossWeight - finalTareWeight);
 
-    // Inventory & Audit Rule:
-    // A REJECTED transaction MUST NOT produce accepted inventory (accepted netWeight = 0 kg).
-    // Physical scale discrepancies (e.g. 30 kg due to scale variance, fuel, or samples)
-    // are preserved as truck tare scale readings and logged in audit trail, but never credited to stock.
-    const netWeight = isRejected ? 0 : finalGrossWeight - finalTareWeight;
+    // Audit Rule: Definition of columns
+    // 1. Transaction.netWeight: represents the physical scale differential (finalGrossWeight - finalTareWeight),
+    //    e.g. 30 kg for QC_VEHICLE_REJECTED (scale variance/fuel), or e.g. 15,000 kg if unloaded.
+    // 2. Accepted Inventory (Penerimaan Stok):
+    //    - If QC_VEHICLE_REJECTED: Cargo was NEVER unloaded. actualWeight = 0 kg, accepted inventory = 0 kg.
+    //    - If INCOMING_CHECK_REJECTED: Material was physically unloaded into hopper/silo before incoming inspection failed!
+    //      Physical scale delta reflects unloaded mass (e.g. 15,000 kg), but the material is QUARANTINED / INCIDENT.
+    //      Normal accepted stock = 0 kg. It must be tracked under quarantined inventory.
+    const netWeight = physicalScaleDelta;
+    let actualWeight: number | null | undefined = tx.actualWeight;
+    if (tx.status === 'QC_VEHICLE_REJECTED') {
+      actualWeight = 0;
+    } else if (tx.status === 'INCOMING_CHECK_REJECTED') {
+      actualWeight = physicalScaleDelta; // Physical material entered facility, but quarantined
+    }
 
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
@@ -611,11 +621,14 @@ export class WeighbridgeService {
       });
       const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
-      const recordRemarks = isRejected
-        ? dto.remarks
-          ? `${dto.remarks} [REJECT: Selisih skala fisik ${physicalScaleDelta} kg, Penerimaan stok 0 kg]`
-          : `[REJECT: Selisih skala fisik ${physicalScaleDelta} kg, Penerimaan stok 0 kg]`
-        : dto.remarks || null;
+      let recordRemarks = dto.remarks || null;
+      if (tx.status === 'QC_VEHICLE_REJECTED') {
+        const detail = `[REJECT: Selisih skala fisik ${physicalScaleDelta} kg, Muatan tidak dibongkar, Penerimaan stok diakui: 0 kg]`;
+        recordRemarks = dto.remarks ? `${dto.remarks} ${detail}` : detail;
+      } else if (tx.status === 'INCOMING_CHECK_REJECTED') {
+        const detail = `[INCOMING_REJECT: Material fisik telah dibongkar (${physicalScaleDelta} kg). Status inventori: DIKARANTINA / INSIDEN OPERASIONAL. Penerimaan stok baik diakui: 0 kg]`;
+        recordRemarks = dto.remarks ? `${dto.remarks} ${detail}` : detail;
+      }
 
       await prismaTx.weighbridgeRecord.create({
         data: {
@@ -644,6 +657,7 @@ export class WeighbridgeService {
           grossWeight: finalGrossWeight,
           tareWeight: finalTareWeight,
           netWeight: netWeight,
+          ...(actualWeight !== undefined && { actualWeight }),
           revision: { increment: 1 },
         },
       });
@@ -657,11 +671,14 @@ export class WeighbridgeService {
         });
       }
 
-      const statusNotes = isRejected
-        ? dto.remarks
-          ? `${dto.remarks} | [REJECT_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Penerimaan persediaan diakui: 0 kg.`
-          : `[REJECT_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Penerimaan persediaan diakui: 0 kg.`
-        : dto.remarks || 'Weigh-out processed successfully';
+      let statusNotes = dto.remarks || 'Weigh-out processed successfully';
+      if (tx.status === 'QC_VEHICLE_REJECTED') {
+        const detail = `[REJECT_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Muatan tidak dibongkar; Penerimaan persediaan diakui: 0 kg.`;
+        statusNotes = dto.remarks ? `${dto.remarks} | ${detail}` : detail;
+      } else if (tx.status === 'INCOMING_CHECK_REJECTED') {
+        const detail = `[INCOMING_CHECK_REJECTED_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Material fisik telah masuk fasilitas; Status inventori: DIKARANTINA / INSIDEN OPERASIONAL; Penerimaan stok reguler: 0 kg.`;
+        statusNotes = dto.remarks ? `${dto.remarks} | ${detail}` : detail;
+      }
 
       await prismaTx.transactionStatusHistory.create({
         data: {

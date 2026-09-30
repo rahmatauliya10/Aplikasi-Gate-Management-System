@@ -121,4 +121,75 @@ describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
       service.updateStatus('admin-id', { isActive: false }),
     ).rejects.toThrow(BadRequestException);
   });
+
+  describe('Utility Authority Governance & Anti-Self-Escalation', () => {
+    it('should reject self-grant of UTILITY_DISPOSITION_AUTHORITY with ForbiddenException', async () => {
+      const targetUser = {
+        id: 'admin-usr-1',
+        username: 'admin',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+        area: 'GENERAL',
+      };
+      mockPrismaService.user.findFirst.mockResolvedValueOnce(targetUser);
+
+      const currentUser = {
+        id: 'admin-usr-1',
+        email: 'admin@gms.local',
+        name: 'Admin User',
+        role: 'ADMIN',
+        warehouseAccess: [],
+      };
+
+      await expect(
+        service.update(
+          'admin-usr-1',
+          { area: 'UTILITY_DISPOSITION_AUTHORITY' },
+          currentUser,
+        ),
+      ).rejects.toThrow('Self-privilege escalation prohibited');
+    });
+
+    it('should allow granting UTILITY_DISPOSITION_AUTHORITY to another user and record audit log', async () => {
+      const targetUser = {
+        id: 'operator-usr-2',
+        username: 'spv_utility',
+        email: 'spv@gms.local',
+        role: 'QC',
+        area: 'UTILITY_INSPECTION',
+        warehouseAccess: [{ processType: 'GSP' }],
+      };
+      mockPrismaService.user.findFirst.mockResolvedValueOnce(targetUser);
+      mockPrismaService.user.update.mockResolvedValueOnce({
+        ...targetUser,
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
+        warehouseAccess: [{ processType: 'GSP' }],
+      });
+
+      const currentUser = {
+        id: 'admin-usr-1',
+        email: 'admin@gms.local',
+        name: 'Admin Master',
+        role: 'ADMIN',
+        warehouseAccess: [],
+      };
+
+      const result = await service.update(
+        'operator-usr-2',
+        { area: 'UTILITY_DISPOSITION_AUTHORITY' },
+        currentUser,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data.area).toBe('UTILITY_DISPOSITION_AUTHORITY');
+      expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'USER_PRIVILEGE_CHANGED',
+          module: 'USERS',
+          referenceId: 'operator-usr-2',
+          status: 'SUCCESS',
+        }),
+      );
+    });
+  });
 });

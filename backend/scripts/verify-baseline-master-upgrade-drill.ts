@@ -135,16 +135,25 @@ async function main() {
     encoding: 'utf8',
   });
 
+  // Helper function: Compute deterministic cryptographic SHA-256 fingerprint of baseline records
+  async function computeBaselineFingerprint(client: PrismaClient): Promise<{ hash: string; rowCount: number; details: any }> {
+    const users: any[] = await client.$queryRawUnsafe(`SELECT id, email, username, name, role, "isActive" FROM "User" ORDER BY id ASC`);
+    const txs: any[] = await client.$queryRawUnsafe(`SELECT id, "transactionNumber", "plateNumber", status, "grossWeight", "tareWeight", "netWeight", "createdById" FROM "Transaction" ORDER BY id ASC`);
+    const wbs: any[] = await client.$queryRawUnsafe(`SELECT id, "transactionId", type, weight, "isCurrent" FROM "WeighbridgeRecord" ORDER BY id ASC`);
+    const settings: any[] = await client.$queryRawUnsafe(`SELECT id, key, value FROM "AppSetting" ORDER BY id ASC`);
+
+    const payload = JSON.stringify({ users, txs, wbs, settings });
+    const hash = crypto.createHash('sha256').update(payload).digest('hex');
+    const totalCount = users.length + txs.length + wbs.length + settings.length;
+    return { hash, rowCount: totalCount, details: { users: users.length, txs: txs.length, wbs: wbs.length, settings: settings.length } };
+  }
+
   const drillPrisma = new PrismaClient({ datasources: { db: { url: DRILL_DB_URL } } });
   await drillPrisma.$connect();
 
-  const baselineCountRes: any = await drillPrisma.$queryRawUnsafe(`
-    SELECT 
-      (SELECT COUNT(*)::text FROM "User") as user_count,
-      (SELECT COUNT(*)::text FROM "Transaction") as tx_count,
-      (SELECT COUNT(*)::text FROM "WeighbridgeRecord") as wb_count;
-  `);
-  console.log(`  ✓ Representative baseline seeded: ${JSON.stringify(baselineCountRes[0])}\n`);
+  const preUpgradeFingerprint = await computeBaselineFingerprint(drillPrisma);
+  console.log(`  ✓ Pre-Upgrade SHA-256 Data Fingerprint: ${preUpgradeFingerprint.hash}`);
+  console.log(`  ✓ Representative baseline seeded: ${JSON.stringify(preUpgradeFingerprint.details)}\n`);
 
   await drillPrisma.$disconnect();
 
@@ -174,22 +183,43 @@ async function main() {
     throw new Error(`Expected exactly 22 migrations applied, found: ${migrationRows.length}`);
   }
 
-  // Verify baseline data intact
-  const postUpgradeCountRes: any = await verifyPrisma.$queryRawUnsafe(`
-    SELECT 
-      (SELECT COUNT(*)::text FROM "User") as user_count,
-      (SELECT COUNT(*)::text FROM "Transaction") as tx_count,
-      (SELECT COUNT(*)::text FROM "WeighbridgeRecord") as wb_count;
-  `);
-  console.log(`  ✓ Post-upgrade baseline data counts: ${JSON.stringify(postUpgradeCountRes[0])}`);
-  if (
-    Number(postUpgradeCountRes[0].user_count) !== Number(baselineCountRes[0].user_count) ||
-    Number(postUpgradeCountRes[0].tx_count) !== Number(baselineCountRes[0].tx_count) ||
-    Number(postUpgradeCountRes[0].wb_count) !== Number(baselineCountRes[0].wb_count)
-  ) {
-    throw new Error('Baseline data loss or corruption detected during upgrade!');
+  // Cryptographic Checksum Verification of all 20 Baseline Migrations against Master files
+  console.log('  Verifying SHA-256 checksums of all 20 baseline migrations...');
+  for (const migName of BASELINE_MASTER_MIGRATIONS) {
+    const sqlPath = path.join(migrationsDir, migName, 'migration.sql');
+    const sqlContent = fs.readFileSync(sqlPath, 'utf8');
+    const expectedChecksum = crypto.createHash('sha256').update(sqlContent).digest('hex');
+    const row: any = await verifyPrisma.$queryRawUnsafe(`SELECT checksum FROM "_prisma_migrations" WHERE migration_name = '${migName}';`);
+    if (!row[0] || row[0].checksum !== expectedChecksum) {
+      throw new Error(`Checksum mismatch on baseline migration ${migName}! Expected: ${expectedChecksum}, Found: ${row[0]?.checksum}`);
+    }
   }
-  console.log('  ✓ 100% of baseline master records preserved perfectly across upgrade.\n');
+  console.log('  ✓ 20/20 baseline migration checksums matched master repository files with 100% cryptographic precision.');
+
+  // Verify Post-Upgrade Fingerprint
+  const postUpgradeFingerprint = await computeBaselineFingerprint(verifyPrisma);
+  console.log(`  ✓ Post-Upgrade SHA-256 Data Fingerprint: ${postUpgradeFingerprint.hash}`);
+  if (postUpgradeFingerprint.hash !== preUpgradeFingerprint.hash) {
+    throw new Error(`Data corruption detected! Fingerprint changed across migration upgrade. Pre: ${preUpgradeFingerprint.hash}, Post: ${postUpgradeFingerprint.hash}`);
+  }
+  console.log('  ✓ 100% of baseline master records and contents cryptographically verified intact across upgrade.');
+
+  // Relational Foreign Key Integrity Verification
+  console.log('  Validating foreign key relationships and checking for orphan records...');
+  const orphanTxs: any = await verifyPrisma.$queryRawUnsafe(`
+    SELECT COUNT(*)::text as count FROM "Transaction" t
+    LEFT JOIN "User" u ON t."createdById" = u.id
+    WHERE u.id IS NULL AND t."createdById" IS NOT NULL;
+  `);
+  const orphanWbs: any = await verifyPrisma.$queryRawUnsafe(`
+    SELECT COUNT(*)::text as count FROM "WeighbridgeRecord" w
+    LEFT JOIN "Transaction" t ON w."transactionId" = t.id
+    WHERE t.id IS NULL;
+  `);
+  if (orphanTxs[0].count !== '0' || orphanWbs[0].count !== '0') {
+    throw new Error(`Relational integrity failure! Orphan transactions: ${orphanTxs[0].count}, Orphan weighbridge records: ${orphanWbs[0].count}`);
+  }
+  console.log('  ✓ 0 orphan records found. All foreign key relations (Transaction -> User, Transaction -> Weighbridge) verified 100% intact.\n');
 
   // Verify new GSP tables and columns work
   console.log('  Verifying new GSP tables (ProductCatalog, QcProductAnalysis)...');

@@ -9,6 +9,8 @@ import {
   TEST_FIXTURE_PAC_SPEC_METADATA,
   OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
   TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+  TEST_FIXTURE_RAPID_KLEN_STRICT_GT,
+  TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE,
 } from './chemical-specification';
 
 describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
@@ -78,53 +80,90 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
       expect(res.decision).toBe('RELEASE');
     });
 
-    it('rejects when pH is slightly below lower boundary (3.49)', () => {
+    it('withholds automated REJECT (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF and pH is below limit', () => {
       const res = evaluatePacAnalysis({
         ...validPacParams,
         ph: 3.49,
       });
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('PENDING_DISPOSITION');
+      expect(res.summary).toContain('Penolakan mutu otomatis ditahan');
+      expect(res.summary).toContain('spesifikasi belum disahkan');
+    });
+
+    it('rejects when pH is slightly below lower boundary (3.49) under approved specification', () => {
+      const res = evaluatePacAnalysis(
+        {
+          ...validPacParams,
+          ph: 3.49,
+        },
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
+      expect(res.isCompliant).toBe(false);
+      expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('pH'))).toBe(true);
     });
 
-    it('rejects when pH is slightly above upper boundary (5.01)', () => {
-      const res = evaluatePacAnalysis({
-        ...validPacParams,
-        ph: 5.01,
-      });
+    it('rejects when pH is slightly above upper boundary (5.01) under approved specification', () => {
+      const res = evaluatePacAnalysis(
+        {
+          ...validPacParams,
+          ph: 5.01,
+        },
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('pH'))).toBe(true);
     });
 
-    it('rejects when density is slightly below boundary (1.169 g/mL)', () => {
-      const res = evaluatePacAnalysis({
-        ...validPacParams,
-        density: 1.169,
-      });
+    it('rejects when density is slightly below boundary (1.169 g/mL) under approved specification', () => {
+      const res = evaluatePacAnalysis(
+        {
+          ...validPacParams,
+          density: 1.169,
+        },
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('Density'))).toBe(true);
     });
 
-    it('rejects when sensory fails: odor contamination detected', () => {
-      const res = evaluatePacAnalysis({
-        ...validPacParams,
-        sensory: { ...validPacParams.sensory, odor: false },
-      });
+    it('rejects when sensory fails: odor contamination detected under approved specification', () => {
+      const res = evaluatePacAnalysis(
+        {
+          ...validPacParams,
+          sensory: { ...validPacParams.sensory, odor: false },
+        },
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('Bau'))).toBe(true);
     });
 
-    it('rejects when packaging/seal is compromised', () => {
-      const res = evaluatePacAnalysis({
-        ...validPacParams,
-        sensory: { ...validPacParams.sensory, packaging: false },
-      });
+    it('rejects when packaging/seal is compromised under approved specification', () => {
+      const res = evaluatePacAnalysis(
+        {
+          ...validPacParams,
+          sensory: { ...validPacParams.sensory, packaging: false },
+        },
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('kemasan'))).toBe(true);
     });
   });
@@ -148,14 +187,27 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
       expect(res.decision).toBe('PENDING_DISPOSITION');
       expect(res.specMetadata.approvalStatus).toBe('PENDING_SIGNOFF');
       expect(res.summary).toContain('Keputusan RELEASE otomatis ditahan');
+      expect(res.summary).toContain('spesifikasi belum disahkan');
       expect(res.violations).toHaveLength(0);
+    });
+
+    it('withholds automated REJECT (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF and parameters fail', () => {
+      const res = evaluateRapidKlenAnalysis({
+        ...validRapidParams,
+        ph: 11.0,
+      });
+      expect(res.isCompliant).toBe(false);
+      expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('PENDING_DISPOSITION');
+      expect(res.summary).toContain('Penolakan mutu otomatis ditahan');
+      expect(res.summary).toContain('spesifikasi belum disahkan');
     });
 
     it('approves compliant Rapid Klen and grants RELEASE when using approved fixture specification', () => {
       const res = evaluateRapidKlenAnalysis(
         validRapidParams,
         'Rapid Klen',
-        TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+        TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE,
       );
       expect(res.isCompliant).toBe(true);
       expect(res.result).toBe('PASS');
@@ -164,80 +216,106 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
       expect(res.violations).toHaveLength(0);
     });
 
-    it('rejects exact boundary value 35.0% under provisional strict operator GT (> 35.0%)', () => {
-      const res = evaluateRapidKlenAnalysis(
+    it('evaluates document specifying strict GT (> 35.0%): rejects exact 35.0% and passes 35.1%', () => {
+      const resExact = evaluateRapidKlenAnalysis(
         {
           ...validRapidParams,
           alkalinityNa2O: 35.0,
         },
         'Rapid Klen',
-        OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+        TEST_FIXTURE_RAPID_KLEN_STRICT_GT,
       );
-      expect(res.isCompliant).toBe(false);
-      expect(res.result).toBe('REJECT');
+      expect(resExact.isCompliant).toBe(false);
+      expect(resExact.result).toBe('REJECT');
+      expect(resExact.decision).toBe('REJECT');
       expect(
-        res.violations.some((v) => v.includes('Na2O') && v.includes('> 35%')),
+        resExact.violations.some((v) => v.includes('Na2O') && v.includes('> 35%')),
       ).toBe(true);
-    });
 
-    it('accepts exact minimum boundary values under approved fixture operator GTE (>= 35.0%)', () => {
-      const res = evaluateRapidKlenAnalysis(
+      const resAbove = evaluateRapidKlenAnalysis(
         {
           ...validRapidParams,
-          alkalinityNa2O: RAPID_KLEN_SPECIFICATION.na2oMin, // 35.0
+          alkalinityNa2O: 35.1,
+        },
+        'Rapid Klen',
+        TEST_FIXTURE_RAPID_KLEN_STRICT_GT,
+      );
+      expect(resAbove.isCompliant).toBe(true);
+      expect(resAbove.decision).toBe('RELEASE');
+    });
+
+    it('evaluates document specifying standard GTE (>= 35.0%): accepts exact 35.0% and rejects 34.9%', () => {
+      const resExact = evaluateRapidKlenAnalysis(
+        {
+          ...validRapidParams,
+          alkalinityNa2O: 35.0,
           alkalinityNaOH: RAPID_KLEN_SPECIFICATION.naohMin, // 45.16
           ph: RAPID_KLEN_SPECIFICATION.phMin, // 12.0
           density: RAPID_KLEN_SPECIFICATION.densityMin, // 1.400
         },
         'Rapid Klen',
-        TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+        TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE,
       );
-      expect(res.isCompliant).toBe(true);
-      expect(res.result).toBe('PASS');
-      expect(res.decision).toBe('RELEASE');
-    });
+      expect(resExact.isCompliant).toBe(true);
+      expect(resExact.result).toBe('PASS');
+      expect(resExact.decision).toBe('RELEASE');
 
-    it('rejects at near-boundary: Na2O 34.9% (below 35.0%)', () => {
-      const res = evaluateRapidKlenAnalysis(
+      const resBelow = evaluateRapidKlenAnalysis(
         {
           ...validRapidParams,
           alkalinityNa2O: 34.9,
         },
         'Rapid Klen',
-        TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+        TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE,
+      );
+      expect(resBelow.isCompliant).toBe(false);
+      expect(resBelow.result).toBe('REJECT');
+      expect(resBelow.decision).toBe('REJECT');
+      expect(resBelow.violations.some((v) => v.includes('Na2O'))).toBe(true);
+    });
+
+    it('rejects at near-boundary: pH 11.9 (below 12.0) under approved specification', () => {
+      const res = evaluateRapidKlenAnalysis(
+        {
+          ...validRapidParams,
+          ph: 11.9,
+        },
+        'Rapid Klen',
+        TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE,
       );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
-      expect(res.violations.some((v) => v.includes('Na2O'))).toBe(true);
-    });
-
-    it('rejects at near-boundary: pH 11.9 (below 12.0)', () => {
-      const res = evaluateRapidKlenAnalysis({
-        ...validRapidParams,
-        ph: 11.9,
-      });
-      expect(res.isCompliant).toBe(false);
-      expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('pH'))).toBe(true);
     });
 
-    it('rejects at near-boundary: density 1.399 g/mL (below 1.400)', () => {
-      const res = evaluateRapidKlenAnalysis({
-        ...validRapidParams,
-        density: 1.399,
-      });
+    it('rejects at near-boundary: density 1.399 g/mL (below 1.400) under approved specification', () => {
+      const res = evaluateRapidKlenAnalysis(
+        {
+          ...validRapidParams,
+          density: 1.399,
+        },
+        'Rapid Klen',
+        TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE,
+      );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('Density'))).toBe(true);
     });
 
-    it('rejects if packaging seal is broken or visual sediment present', () => {
-      const res = evaluateRapidKlenAnalysis({
-        ...validRapidParams,
-        sensory: { visual: false, packaging: false },
-      });
+    it('rejects if packaging seal is broken or visual sediment present under approved specification', () => {
+      const res = evaluateRapidKlenAnalysis(
+        {
+          ...validRapidParams,
+          sensory: { visual: false, packaging: false },
+        },
+        'Rapid Klen',
+        TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE,
+      );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
       expect(res.violations).toHaveLength(2);
     });
   });

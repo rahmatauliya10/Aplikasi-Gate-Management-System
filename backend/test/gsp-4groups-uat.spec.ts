@@ -1244,7 +1244,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             ...chemRejectTx,
             status: TransactionStatus.WEIGH_OUT_DONE,
             tareWeight: 21970,
-            netWeight: 0, // Zero inventory accepted for rejected transaction
+            netWeight: 30, // Scale differential (load cell delta) is 30 kg
+            actualWeight: 0, // Zero inventory accepted for rejected transaction
             weighOutBy: {
               id: weighbridgeUser.id,
               name: 'Weighbridge Operator',
@@ -1286,7 +1287,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           data: expect.objectContaining({
             status: TransactionStatus.WEIGH_OUT_DONE,
             tareWeight: 21970, // Actual scale reading preserved faithfully
-            netWeight: 0, // Accepted inventory is strictly 0 kg (not 30 kg)
+            netWeight: 30, // Physical scale difference is preserved (30 kg)
+            actualWeight: 0, // Accepted inventory quantity is recorded separately as 0 kg
           }),
         }),
       );
@@ -1308,7 +1310,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             type: WeighbridgeType.OUT,
             weight: 21970, // Actual scale weight recorded
             remarks: expect.stringContaining(
-              'Selisih skala fisik 30 kg, Penerimaan stok 0 kg',
+              'Selisih skala fisik 30 kg',
             ),
           }),
         }),
