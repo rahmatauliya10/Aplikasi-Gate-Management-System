@@ -5,7 +5,12 @@ import { WeighbridgeService } from '../weighbridge/weighbridge.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
-import { TransactionStatus, ProcessType, WarehouseCondition, WarehouseUnit } from '@prisma/client';
+import {
+  TransactionStatus,
+  ProcessType,
+  WarehouseCondition,
+  WarehouseUnit,
+} from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
@@ -121,7 +126,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await weighbridgeService.submitWeighIn(
         'tx-solar-1',
@@ -159,7 +166,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         revision: 1,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(unlinkedSolarTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        unlinkedSolarTx,
+      );
       mockPrismaService.weighbridgeRecord.findFirst.mockResolvedValueOnce(null);
 
       const mockTxClient = {
@@ -182,7 +191,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await weighbridgeService.submitWeighIn(
         'tx-solar-nocat',
@@ -234,7 +245,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await weighbridgeService.submitWeighIn(
         'tx-coal-1',
@@ -286,7 +299,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await weighbridgeService.submitWeighIn(
         'tx-pac-1',
@@ -351,9 +366,15 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
-      const res = await warehouseService.startWarehouse('tx-solar-1', {}, mockUser);
+      const res = await warehouseService.startWarehouse(
+        'tx-solar-1',
+        {},
+        mockUser,
+      );
 
       expect(res.success).toBe(true);
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
@@ -402,9 +423,15 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
-      const res = await warehouseService.startWarehouse('tx-coal-1', {}, mockUser);
+      const res = await warehouseService.startWarehouse(
+        'tx-coal-1',
+        {},
+        mockUser,
+      );
 
       expect(res.success).toBe(true);
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
@@ -506,7 +533,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         revision: 2,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(unlinkedTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        unlinkedTx,
+      );
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);
@@ -537,7 +566,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(inactiveCatTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        inactiveCatTx,
+      );
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);
@@ -568,7 +599,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mismatchedTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        mismatchedTx,
+      );
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);
@@ -614,7 +647,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await warehouseService.completeWarehouse(
         'tx-gsp-wh',
@@ -671,7 +706,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await warehouseService.completeWarehouse(
         'tx-gbb-wh',

@@ -19,12 +19,18 @@ export enum AnalysisDecision {
 }
 
 export class SubmitProductAnalysisDto {
-  @ApiProperty({ description: 'Product category (Coal, Chemicals)', example: 'Coal' })
+  @ApiProperty({
+    description: 'Product category (Coal, Chemicals)',
+    example: 'Coal',
+  })
   @IsString()
   @IsNotEmpty()
   productCategory: string;
 
-  @ApiProperty({ description: 'Product name (Batubara, PAC 280 AC, Rapid Klen)', example: 'Batubara' })
+  @ApiProperty({
+    description: 'Product name (Batubara, PAC 280 AC, Rapid Klen)',
+    example: 'Batubara',
+  })
   @IsString()
   @IsNotEmpty()
   productName: string;
@@ -34,21 +40,28 @@ export class SubmitProductAnalysisDto {
   @IsUUID()
   productCatalogId?: string;
 
-  @ApiPropertyOptional({ description: 'Test round (1 for initial, 2 for retest)', default: 1 })
+  @ApiPropertyOptional({
+    description: 'Test round (1 for initial, 2 for retest)',
+    default: 1,
+  })
   @IsOptional()
   @IsInt()
   @Min(1)
   testRound?: number;
 
   @ApiProperty({
-    description: 'Detailed analysis parameters (sensory checklist, lab metrics)',
+    description:
+      'Detailed analysis parameters (sensory checklist, lab metrics)',
     example: { sensory: { visual: 'OK' }, moisture: 31.5 },
   })
   @IsObject()
   @IsNotEmpty()
   parameters: Record<string, any>;
 
-  @ApiProperty({ enum: QcResult, description: 'Overall lab result (PASSED or REJECTED)' })
+  @ApiProperty({
+    enum: QcResult,
+    description: 'Overall lab result (PASSED or REJECTED)',
+  })
   @IsEnum(QcResult)
   result: QcResult;
 
@@ -61,7 +74,10 @@ export class SubmitProductAnalysisDto {
   @IsString()
   notes?: string;
 
-  @ApiProperty({ description: 'Current transaction revision for optimistic concurrency control' })
+  @ApiProperty({
+    description:
+      'Current transaction revision for optimistic concurrency control',
+  })
   @IsInt()
   @Min(0)
   revision: number;

@@ -249,7 +249,8 @@ export class WarehouseService {
           action: 'WAREHOUSE_FLOW_REJECTED',
           module: 'WAREHOUSE',
           referenceId: transactionId,
-          description: `Warehouse start rejected: Current status is ${tx.status}. ` +
+          description:
+            `Warehouse start rejected: Current status is ${tx.status}. ` +
             `Required: QC_VEHICLE_PASSED or PA_NOT_REQUIRED (verified Solar exemption).`,
           status: 'SUCCESS',
         })

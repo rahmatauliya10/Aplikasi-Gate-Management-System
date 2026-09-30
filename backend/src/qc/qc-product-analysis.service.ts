@@ -17,6 +17,11 @@ import {
   DispositionAction,
 } from './dto/utility-disposition.dto';
 import { TransactionStatus } from '@prisma/client';
+import { OPERATIONAL_COAL_SPEC_METADATA } from './constants/coal-specification';
+import {
+  OPERATIONAL_PAC_SPEC_METADATA,
+  OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+} from './constants/chemical-specification';
 import { isProductPaExempt } from './constants/pa-exemption-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
@@ -62,7 +67,11 @@ export class QcProductAnalysisService {
     const testRound = dto.testRound || 1;
 
     // Validate status according to test round
-    if (testRound === 1 && tx.status !== TransactionStatus.QC_VEHICLE_PENDING && tx.status !== TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
+    if (
+      testRound === 1 &&
+      tx.status !== TransactionStatus.QC_VEHICLE_PENDING &&
+      tx.status !== TransactionStatus.QC_VEHICLE_IN_PROGRESS
+    ) {
       throw new BadRequestException(
         `Analisis awal (Round 1) hanya dapat diproses saat status transaksi QC_VEHICLE_PENDING (saat ini: ${tx.status})`,
       );
@@ -77,7 +86,18 @@ export class QcProductAnalysisService {
     let nextStatus: TransactionStatus;
     switch (dto.decision) {
       case AnalysisDecision.RELEASE:
-        nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
+        {
+          const specStatus = this.checkSpecificationApprovalStatus(
+            dto.productCategory,
+            dto.productName,
+          );
+          if (specStatus.approvalStatus !== 'APPROVED') {
+            throw new BadRequestException(
+              `Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk ${dto.productName} (${dto.productCategory}) belum berstatus disahkan oleh QA/Utility (Status: ${specStatus.approvalStatus}, Dokumen: ${specStatus.documentSource}). Keputusan RELEASE otomatis ditahan; transaksi harus dialihkan ke PENDING_DISPOSITION atau REJECT.`,
+            );
+          }
+          nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
+        }
         break;
       case AnalysisDecision.REJECT:
         nextStatus = TransactionStatus.QC_VEHICLE_REJECTED;
@@ -89,7 +109,9 @@ export class QcProductAnalysisService {
         nextStatus = TransactionStatus.WAITING_UTILITY_DISPOSITION;
         break;
       default:
-        throw new BadRequestException(`Keputusan analisis tidak valid: ${dto.decision}`);
+        throw new BadRequestException(
+          `Keputusan analisis tidak valid: ${dto.decision}`,
+        );
     }
 
     assertValidStatusTransition(tx.status, nextStatus);
@@ -130,7 +152,9 @@ export class QcProductAnalysisService {
           oldStatus: tx.status,
           newStatus: nextStatus,
           changedById: user.id,
-          notes: dto.notes || `Analisis PA Round ${testRound}: Keputusan ${dto.decision}`,
+          notes:
+            dto.notes ||
+            `Analisis PA Round ${testRound}: Keputusan ${dto.decision}`,
         },
       });
     });
@@ -158,8 +182,54 @@ export class QcProductAnalysisService {
   }
 
   /**
+   * Helper to check specification approval status.
+   * Products without formal QA/Utility approval status CANNOT be automatically RELEASED.
+   */
+  checkSpecificationApprovalStatus(
+    productCategory: string,
+    productName?: string,
+  ): {
+    approvalStatus: string;
+    documentSource: string;
+  } {
+    const cat = (productCategory || '').toUpperCase();
+    const name = (productName || '').toUpperCase();
+
+    if (
+      cat === 'COAL' ||
+      cat.includes('BATUBARA') ||
+      name.includes('BATUBARA')
+    ) {
+      return {
+        approvalStatus: OPERATIONAL_COAL_SPEC_METADATA.approvalStatus,
+        documentSource: OPERATIONAL_COAL_SPEC_METADATA.documentSource,
+      };
+    }
+    if (name.includes('PAC')) {
+      return {
+        approvalStatus: OPERATIONAL_PAC_SPEC_METADATA.approvalStatus,
+        documentSource: OPERATIONAL_PAC_SPEC_METADATA.documentSource,
+      };
+    }
+    if (name.includes('RAPID') || name.includes('KLEN')) {
+      return {
+        approvalStatus: OPERATIONAL_RAPID_KLEN_SPEC_METADATA.approvalStatus,
+        documentSource: OPERATIONAL_RAPID_KLEN_SPEC_METADATA.documentSource,
+      };
+    }
+    return {
+      approvalStatus: 'PENDING_SIGNOFF',
+      documentSource: 'Unverified Product Specification',
+    };
+  }
+
+  /**
    * Submit Four-Eyes Utility Disposition for out-of-spec products requiring management disposition.
-   * Strictly enforces that the approver must NOT be the testing analyst.
+   * Strictly enforces:
+   * 1. Account must be active and not deleted
+   * 2. Department must be UTILITY
+   * 3. Explicit disposition authority (UTILITY_DISPOSITION_AUTHORITY)
+   * 4. Multi-round Four-Eyes: Approver must NOT be any analyst on this transaction
    */
   async submitUtilityDisposition(
     transactionId: string,
@@ -189,14 +259,27 @@ export class QcProductAnalysisService {
       throw new NotFoundException('Data analisis produk tidak ditemukan');
     }
 
-    // Verify Utility authority (ADMIN role or UTILITY department)
+    // 1. Verify user status and department
     const userRecord = await this.prisma.user.findUnique({
       where: { id: user.id },
-      select: { id: true, role: true, department: true },
+      select: {
+        id: true,
+        role: true,
+        department: true,
+        area: true,
+        isActive: true,
+        isDeleted: true,
+      },
     });
 
+    if (!userRecord || !userRecord.isActive || userRecord.isDeleted) {
+      throw new ForbiddenException(
+        'Otoritas tidak memadai: Akun pengguna tidak aktif, tidak ditemukan, atau telah dinonaktifkan.',
+      );
+    }
+
     const isAuthorizedUtility =
-      userRecord?.department?.trim().toUpperCase() === 'UTILITY';
+      userRecord.department?.trim().toUpperCase() === 'UTILITY';
 
     if (!isAuthorizedUtility) {
       throw new ForbiddenException(
@@ -204,7 +287,36 @@ export class QcProductAnalysisService {
       );
     }
 
-    // Four-Eyes Principle: Approver must NOT be any analyst who performed any test round on this transaction
+    // 2. Verify explicit disposition authority
+    let hasExplicitPermission =
+      Boolean(userRecord.area?.includes('UTILITY_DISPOSITION_AUTHORITY')) ||
+      Boolean(userRecord.area?.includes('DISPOSITION_APPROVER')) ||
+      Boolean(userRecord.area?.includes('SECTION_HEAD'));
+
+    if (!hasExplicitPermission) {
+      const setting = await this.prisma.appSetting.findUnique({
+        where: { key: 'UTILITY_DISPOSITION_AUTHORIZED_USERS' },
+      });
+      if (setting && setting.value) {
+        const authorizedList = setting.value
+          .split(',')
+          .map((s) => s.trim().toLowerCase());
+        if (
+          authorizedList.includes(userRecord.id.toLowerCase()) ||
+          (user.email && authorizedList.includes(user.email.toLowerCase()))
+        ) {
+          hasExplicitPermission = true;
+        }
+      }
+    }
+
+    if (!hasExplicitPermission) {
+      throw new ForbiddenException(
+        'Otoritas tidak memadai: Akun Departemen Utility tidak memiliki izin disposisi teknis yang ditetapkan secara eksplisit (memerlukan hak UTILITY_DISPOSITION_AUTHORITY).',
+      );
+    }
+
+    // 3. Four-Eyes Principle: Approver must NOT be any analyst who performed any test round on this transaction
     const allAnalyses = await this.prisma.qcProductAnalysis.findMany({
       where: { transactionId },
       select: { id: true, testRound: true, testedById: true },

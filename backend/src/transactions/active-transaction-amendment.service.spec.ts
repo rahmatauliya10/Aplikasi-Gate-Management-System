@@ -1,9 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ActiveTransactionAmendmentService } from './active-transaction-amendment.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { TransactionStatus, ProcessType, CorrectionAction } from '@prisma/client';
+import {
+  TransactionStatus,
+  ProcessType,
+  CorrectionAction,
+} from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 describe('ActiveTransactionAmendmentService (Task 4)', () => {
@@ -58,7 +66,9 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
       ],
     }).compile();
 
-    service = module.get<ActiveTransactionAmendmentService>(ActiveTransactionAmendmentService);
+    service = module.get<ActiveTransactionAmendmentService>(
+      ActiveTransactionAmendmentService,
+    );
   });
 
   describe('amendActiveProduct', () => {
@@ -90,7 +100,9 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.amendActiveProduct(
         'tx-solar-active',
@@ -135,7 +147,9 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         revision: 3,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(unloadingTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        unloadingTx,
+      );
 
       await expect(
         service.amendActiveProduct(
@@ -200,7 +214,9 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         revision: 4,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(inProgressTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        inProgressTx,
+      );
       mockPrismaService.attachment.findUnique.mockResolvedValueOnce({
         id: 'att-evidence-1',
         fileName: 'berita-acara-solar.pdf',
@@ -212,12 +228,15 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.recordOperationalIncident(
         'tx-incident-target',
         {
-          incidentReason: 'Muatan solar terindikasi bercampur air saat bongkar berjalan',
+          incidentReason:
+            'Muatan solar terindikasi bercampur air saat bongkar berjalan',
           evidenceAttachmentId: 'att-evidence-1',
           supervisorPic: 'Pak Bambang (Supervisor)',
           actionTaken: 'Pompa dihentikan dan sampel dikirim ke laboratorium',
@@ -244,7 +263,9 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         revision: 4,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(inProgressTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        inProgressTx,
+      );
       mockPrismaService.attachment.findUnique.mockResolvedValueOnce(null);
 
       await expect(

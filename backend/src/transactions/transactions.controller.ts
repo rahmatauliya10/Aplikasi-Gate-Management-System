@@ -165,7 +165,8 @@ export class TransactionsController {
   })
   @ApiResponse({
     status: 200,
-    description: 'Product amended successfully; status downgraded if applicable',
+    description:
+      'Product amended successfully; status downgraded if applicable',
   })
   @ApiResponse({
     status: 400,
@@ -198,4 +199,3 @@ export class TransactionsController {
     return this.amendmentService.recordOperationalIncident(id, dto, user);
   }
 }
-

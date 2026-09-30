@@ -34,7 +34,8 @@ export class AmendActiveProductDto {
   productCatalogId?: string;
 
   @ApiProperty({
-    description: 'Detailed reason for amending product on active transaction (mandatory, min 10 chars)',
+    description:
+      'Detailed reason for amending product on active transaction (mandatory, min 10 chars)',
     example: 'Koreksi kesalahan input jenis muatan dari surat jalan sopir',
   })
   @IsString()
@@ -43,7 +44,8 @@ export class AmendActiveProductDto {
   reason: string;
 
   @ApiProperty({
-    description: 'Current transaction revision for optimistic concurrency control (mandatory)',
+    description:
+      'Current transaction revision for optimistic concurrency control (mandatory)',
     example: 1,
   })
   @IsNumber()
@@ -53,8 +55,10 @@ export class AmendActiveProductDto {
 
 export class RecordOperationalIncidentDto {
   @ApiProperty({
-    description: 'Detailed reason for operational incident (mandatory, min 10 chars)',
-    example: 'Muatan solar tercampur atau spesifikasi tidak sesuai setelah proses bongkar dimulai',
+    description:
+      'Detailed reason for operational incident (mandatory, min 10 chars)',
+    example:
+      'Muatan solar tercampur atau spesifikasi tidak sesuai setelah proses bongkar dimulai',
   })
   @IsString()
   @IsNotEmpty()
@@ -62,7 +66,8 @@ export class RecordOperationalIncidentDto {
   incidentReason: string;
 
   @ApiProperty({
-    description: 'UUID of supporting evidence file in Attachment table (mandatory)',
+    description:
+      'UUID of supporting evidence file in Attachment table (mandatory)',
     example: 'c2e5b7e2-45e7-4b18-8d4e-7bdf91e1d001',
   })
   @IsString()
@@ -79,7 +84,8 @@ export class RecordOperationalIncidentDto {
   supervisorPic: string;
 
   @ApiPropertyOptional({
-    description: 'Immediate corrective action taken or follow-up recommendation',
+    description:
+      'Immediate corrective action taken or follow-up recommendation',
     example: 'Truk dipisahkan ke area karantina untuk investigasi lanjutan',
   })
   @IsOptional()
@@ -87,7 +93,8 @@ export class RecordOperationalIncidentDto {
   actionTaken?: string;
 
   @ApiProperty({
-    description: 'Current transaction revision for optimistic concurrency control (mandatory)',
+    description:
+      'Current transaction revision for optimistic concurrency control (mandatory)',
     example: 2,
   })
   @IsNumber()

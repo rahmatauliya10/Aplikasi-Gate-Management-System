@@ -5,6 +5,10 @@ import {
   RAPID_KLEN_SPECIFICATION,
   PacAnalysisParameters,
   RapidKlenAnalysisParameters,
+  OPERATIONAL_PAC_SPEC_METADATA,
+  TEST_FIXTURE_PAC_SPEC_METADATA,
+  OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+  TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
 } from './chemical-specification';
 
 describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
@@ -15,38 +19,63 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
         odor: true,
         packaging: true,
       },
-      ph: 4.20,
-      density: 1.210,
+      ph: 4.2,
+      density: 1.21,
       aluminaContent: 10.5,
     };
 
-    it('approves compliant PAC with all mandatory sensory and physico-chemical parameters', () => {
+    it('withholds automated RELEASE (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF', () => {
       const res = evaluatePacAnalysis(validPacParams);
       expect(res.isCompliant).toBe(true);
       expect(res.result).toBe('PASS');
-      expect(res.decision).toBe('RELEASE');
+      expect(res.decision).toBe('PENDING_DISPOSITION');
+      expect(res.specMetadata.approvalStatus).toBe('PENDING_SIGNOFF');
+      expect(res.summary).toContain('Keputusan RELEASE otomatis ditahan');
       expect(res.violations).toHaveLength(0);
     });
 
-    it('accepts exact lower boundary values for PAC (pH 3.50, Density 1.170, Al2O3 9.0)', () => {
-      const res = evaluatePacAnalysis({
-        ...validPacParams,
-        ph: PAC_SPECIFICATION.phMin, // 3.50
-        density: PAC_SPECIFICATION.densityMin, // 1.170
-        aluminaContent: PAC_SPECIFICATION.aluminaMin, // 9.0
-      });
+    it('approves compliant PAC and grants RELEASE when using approved fixture specification', () => {
+      const res = evaluatePacAnalysis(
+        validPacParams,
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(true);
       expect(res.result).toBe('PASS');
+      expect(res.decision).toBe('RELEASE');
+      expect(res.specMetadata.approvalStatus).toBe('APPROVED');
+      expect(res.violations).toHaveLength(0);
     });
 
-    it('accepts exact upper boundary values for PAC (pH 5.00, Density 1.260)', () => {
-      const res = evaluatePacAnalysis({
-        ...validPacParams,
-        ph: PAC_SPECIFICATION.phMax, // 5.00
-        density: PAC_SPECIFICATION.densityMax, // 1.260
-      });
+    it('accepts exact lower boundary values for PAC (pH 3.50, Density 1.170, Al2O3 9.0) with approved fixture', () => {
+      const res = evaluatePacAnalysis(
+        {
+          ...validPacParams,
+          ph: PAC_SPECIFICATION.phMin, // 3.50
+          density: PAC_SPECIFICATION.densityMin, // 1.170
+          aluminaContent: PAC_SPECIFICATION.aluminaMin, // 9.0
+        },
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(true);
       expect(res.result).toBe('PASS');
+      expect(res.decision).toBe('RELEASE');
+    });
+
+    it('accepts exact upper boundary values for PAC (pH 5.00, Density 1.260) with approved fixture', () => {
+      const res = evaluatePacAnalysis(
+        {
+          ...validPacParams,
+          ph: PAC_SPECIFICATION.phMax, // 5.00
+          density: PAC_SPECIFICATION.densityMax, // 1.260
+        },
+        'PAC 280 AC',
+        TEST_FIXTURE_PAC_SPEC_METADATA,
+      );
+      expect(res.isCompliant).toBe(true);
+      expect(res.result).toBe('PASS');
+      expect(res.decision).toBe('RELEASE');
     });
 
     it('rejects when pH is slightly below lower boundary (3.49)', () => {
@@ -112,31 +141,71 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
       density: 1.425,
     };
 
-    it('approves compliant Rapid Klen meeting all parameters', () => {
+    it('withholds automated RELEASE (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF', () => {
       const res = evaluateRapidKlenAnalysis(validRapidParams);
       expect(res.isCompliant).toBe(true);
       expect(res.result).toBe('PASS');
-      expect(res.decision).toBe('RELEASE');
+      expect(res.decision).toBe('PENDING_DISPOSITION');
+      expect(res.specMetadata.approvalStatus).toBe('PENDING_SIGNOFF');
+      expect(res.summary).toContain('Keputusan RELEASE otomatis ditahan');
       expect(res.violations).toHaveLength(0);
     });
 
-    it('accepts exact minimum boundary values (Na2O 35.0%, NaOH 45.16%, pH 12.0, Density 1.400)', () => {
-      const res = evaluateRapidKlenAnalysis({
-        ...validRapidParams,
-        alkalinityNa2O: RAPID_KLEN_SPECIFICATION.na2oMin, // 35.0
-        alkalinityNaOH: RAPID_KLEN_SPECIFICATION.naohMin, // 45.16
-        ph: RAPID_KLEN_SPECIFICATION.phMin, // 12.0
-        density: RAPID_KLEN_SPECIFICATION.densityMin, // 1.400
-      });
+    it('approves compliant Rapid Klen and grants RELEASE when using approved fixture specification', () => {
+      const res = evaluateRapidKlenAnalysis(
+        validRapidParams,
+        'Rapid Klen',
+        TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(true);
       expect(res.result).toBe('PASS');
+      expect(res.decision).toBe('RELEASE');
+      expect(res.specMetadata.approvalStatus).toBe('APPROVED');
+      expect(res.violations).toHaveLength(0);
+    });
+
+    it('rejects exact boundary value 35.0% under provisional strict operator GT (> 35.0%)', () => {
+      const res = evaluateRapidKlenAnalysis(
+        {
+          ...validRapidParams,
+          alkalinityNa2O: 35.0,
+        },
+        'Rapid Klen',
+        OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+      );
+      expect(res.isCompliant).toBe(false);
+      expect(res.result).toBe('REJECT');
+      expect(
+        res.violations.some((v) => v.includes('Na2O') && v.includes('> 35%')),
+      ).toBe(true);
+    });
+
+    it('accepts exact minimum boundary values under approved fixture operator GTE (>= 35.0%)', () => {
+      const res = evaluateRapidKlenAnalysis(
+        {
+          ...validRapidParams,
+          alkalinityNa2O: RAPID_KLEN_SPECIFICATION.na2oMin, // 35.0
+          alkalinityNaOH: RAPID_KLEN_SPECIFICATION.naohMin, // 45.16
+          ph: RAPID_KLEN_SPECIFICATION.phMin, // 12.0
+          density: RAPID_KLEN_SPECIFICATION.densityMin, // 1.400
+        },
+        'Rapid Klen',
+        TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+      );
+      expect(res.isCompliant).toBe(true);
+      expect(res.result).toBe('PASS');
+      expect(res.decision).toBe('RELEASE');
     });
 
     it('rejects at near-boundary: Na2O 34.9% (below 35.0%)', () => {
-      const res = evaluateRapidKlenAnalysis({
-        ...validRapidParams,
-        alkalinityNa2O: 34.9,
-      });
+      const res = evaluateRapidKlenAnalysis(
+        {
+          ...validRapidParams,
+          alkalinityNa2O: 34.9,
+        },
+        'Rapid Klen',
+        TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+      );
       expect(res.isCompliant).toBe(false);
       expect(res.result).toBe('REJECT');
       expect(res.violations.some((v) => v.includes('Na2O'))).toBe(true);

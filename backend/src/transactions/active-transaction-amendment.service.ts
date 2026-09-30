@@ -12,10 +12,7 @@ import {
   AmendActiveProductDto,
   RecordOperationalIncidentDto,
 } from './dto/amend-active-transaction.dto';
-import {
-  CorrectionAction,
-  TransactionStatus,
-} from '@prisma/client';
+import { CorrectionAction, TransactionStatus } from '@prisma/client';
 import { isProductPaExempt } from '../qc/constants/pa-exemption-policy';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
@@ -51,7 +48,10 @@ export class ActiveTransactionAmendmentService {
       throw new NotFoundException('Transaksi tidak ditemukan');
     }
 
-    if (tx.status === TransactionStatus.COMPLETED || tx.status === TransactionStatus.CANCELLED) {
+    if (
+      tx.status === TransactionStatus.COMPLETED ||
+      tx.status === TransactionStatus.CANCELLED
+    ) {
       throw new BadRequestException(
         'Transaksi sudah selesai atau dibatalkan. Gunakan OperationLogCorrectionService untuk koreksi data historis.',
       );
@@ -71,7 +71,7 @@ export class ActiveTransactionAmendmentService {
     if (tx.warehouseStartAt || postUnloadingStatuses.includes(tx.status)) {
       throw new BadRequestException(
         'Bongkar muatan di gudang sudah dimulai atau diselesaikan. Koreksi produk standar diblokir secara fisik. ' +
-        'Gunakan prosedur Pencatatan Insiden Operasional.',
+          'Gunakan prosedur Pencatatan Insiden Operasional.',
       );
     }
 
@@ -111,10 +111,12 @@ export class ActiveTransactionAmendmentService {
       }
     } else {
       // Non-exempt product strictly requires QC PA verification
-      if (tx.status === TransactionStatus.PA_NOT_REQUIRED ||
-          tx.status === TransactionStatus.QC_VEHICLE_PASSED ||
-          tx.status === TransactionStatus.QC_RETEST_REQUIRED ||
-          tx.status === TransactionStatus.WAITING_UTILITY_DISPOSITION) {
+      if (
+        tx.status === TransactionStatus.PA_NOT_REQUIRED ||
+        tx.status === TransactionStatus.QC_VEHICLE_PASSED ||
+        tx.status === TransactionStatus.QC_RETEST_REQUIRED ||
+        tx.status === TransactionStatus.WAITING_UTILITY_DISPOSITION
+      ) {
         newStatus = TransactionStatus.QC_VEHICLE_PENDING;
         statusDowngraded = true;
       }
@@ -137,13 +139,18 @@ export class ActiveTransactionAmendmentService {
         data: {
           cargoType: dto.cargoType,
           cargoSubType: dto.cargoSubType,
-          productCatalogId: newCatalog ? newCatalog.id : (dto.productCatalogId !== undefined ? dto.productCatalogId : tx.productCatalogId),
+          productCatalogId: newCatalog
+            ? newCatalog.id
+            : dto.productCatalogId !== undefined
+              ? dto.productCatalogId
+              : tx.productCatalogId,
           status: newStatus,
           paExemptionReason: willBeExempt
-            ? (newCatalog?.exemptionReason || 'SOP Exemption Rule v1.0: Komoditas Solar BBM tidak memerlukan uji laboratorium pra-bongkar.')
+            ? newCatalog?.exemptionReason ||
+              'SOP Exemption Rule v1.0: Komoditas Solar BBM tidak memerlukan uji laboratorium pra-bongkar.'
             : null,
           paPolicyVersion: willBeExempt
-            ? (newCatalog?.policyVersion || 'SOP-GSP-2026.1')
+            ? newCatalog?.policyVersion || 'SOP-GSP-2026.1'
             : null,
           revision: { increment: 1 },
         },
@@ -237,7 +244,10 @@ export class ActiveTransactionAmendmentService {
       throw new NotFoundException('Transaksi tidak ditemukan');
     }
 
-    if (tx.status === TransactionStatus.COMPLETED || tx.status === TransactionStatus.CANCELLED) {
+    if (
+      tx.status === TransactionStatus.COMPLETED ||
+      tx.status === TransactionStatus.CANCELLED
+    ) {
       throw new BadRequestException(
         'Transaksi sudah selesai atau dibatalkan. Insiden operasional hanya berlaku untuk transaksi aktif pasca-bongkar.',
       );

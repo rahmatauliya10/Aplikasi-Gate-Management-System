@@ -22,4 +22,3 @@ import { ActiveTransactionAmendmentService } from './active-transaction-amendmen
   ],
 })
 export class TransactionsModule {}
-

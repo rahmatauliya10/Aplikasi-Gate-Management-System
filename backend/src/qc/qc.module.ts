@@ -14,4 +14,3 @@ import { QcProductAnalysisController } from './qc-product-analysis.controller';
   exports: [QcService, QcProductAnalysisService],
 })
 export class QcModule {}
-

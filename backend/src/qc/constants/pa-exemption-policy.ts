@@ -70,7 +70,8 @@ export function evaluatePaExemption(
     const normCatName = catalog.name.trim().toLowerCase();
     const normSubCat = (catalog.subCategory || '').trim().toLowerCase();
 
-    const isMatch = normTx === normCatName || (normSubCat && normTx === normSubCat);
+    const isMatch =
+      normTx === normCatName || (normSubCat && normTx === normSubCat);
     if (!isMatch) {
       return {
         isExempt: false,

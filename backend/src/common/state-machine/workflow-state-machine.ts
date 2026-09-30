@@ -86,7 +86,6 @@ export const VALID_STATUS_TRANSITIONS: Record<
   CANCELLED: [],
 };
 
-
 export function isValidStatusTransition(
   fromStatus: TransactionStatus,
   toStatus: TransactionStatus,

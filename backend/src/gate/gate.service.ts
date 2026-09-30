@@ -113,7 +113,12 @@ export class GateService {
                 isActive: true,
                 OR: [
                   { name: { equals: dto.cargoSubType, mode: 'insensitive' } },
-                  { subCategory: { equals: dto.cargoSubType, mode: 'insensitive' } },
+                  {
+                    subCategory: {
+                      equals: dto.cargoSubType,
+                      mode: 'insensitive',
+                    },
+                  },
                 ],
               },
             });

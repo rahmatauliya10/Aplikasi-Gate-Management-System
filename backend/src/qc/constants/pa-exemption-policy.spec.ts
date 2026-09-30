@@ -38,7 +38,12 @@ describe('Strict Catalog-Driven PA Exemption Policy', () => {
     expect(res.isExempt).toBe(true);
     expect(res.policyVersion).toBe('SOP-GSP-2026.1');
     expect(res.reason).toContain('terverifikasi dari katalog master');
-    expect(isProductPaExempt(validSolarCatalog, { processType: 'GSP', cargoSubType: 'Solar' })).toBe(true);
+    expect(
+      isProductPaExempt(validSolarCatalog, {
+        processType: 'GSP',
+        cargoSubType: 'Solar',
+      }),
+    ).toBe(true);
   });
 
   it('2. rejects product without catalog (null / undefined) — NO free-text fallback', () => {
@@ -58,7 +63,9 @@ describe('Strict Catalog-Driven PA Exemption Policy', () => {
     expect(resUndefined.isExempt).toBe(false);
     expect(resUndefined.failureReason).toContain('CATALOG_MISSING');
 
-    expect(isProductPaExempt(null, { processType: 'GSP', cargoSubType: 'Solar' })).toBe(false);
+    expect(
+      isProductPaExempt(null, { processType: 'GSP', cargoSubType: 'Solar' }),
+    ).toBe(false);
   });
 
   it('3. rejects deactivated catalog even if product is Solar', () => {
@@ -73,7 +80,12 @@ describe('Strict Catalog-Driven PA Exemption Policy', () => {
     });
     expect(res.isExempt).toBe(false);
     expect(res.failureReason).toContain('CATALOG_INACTIVE');
-    expect(isProductPaExempt(inactiveSolar, { processType: 'GSP', cargoSubType: 'Solar' })).toBe(false);
+    expect(
+      isProductPaExempt(inactiveSolar, {
+        processType: 'GSP',
+        cargoSubType: 'Solar',
+      }),
+    ).toBe(false);
   });
 
   it('4. rejects name / catalog mismatch (e.g. Batubara transaction paired with Solar catalog)', () => {
@@ -84,7 +96,12 @@ describe('Strict Catalog-Driven PA Exemption Policy', () => {
     });
     expect(res.isExempt).toBe(false);
     expect(res.failureReason).toContain('NAME_MISMATCH');
-    expect(isProductPaExempt(validSolarCatalog, { processType: 'GSP', cargoSubType: 'Batubara' })).toBe(false);
+    expect(
+      isProductPaExempt(validSolarCatalog, {
+        processType: 'GSP',
+        cargoSubType: 'Batubara',
+      }),
+    ).toBe(false);
   });
 
   it('5. rejects process type mismatch (e.g. GBB process attempting to use GSP Solar catalog)', () => {
@@ -95,7 +112,12 @@ describe('Strict Catalog-Driven PA Exemption Policy', () => {
     });
     expect(res.isExempt).toBe(false);
     expect(res.failureReason).toContain('PROCESS_MISMATCH');
-    expect(isProductPaExempt(validSolarCatalog, { processType: 'GBB', cargoSubType: 'Solar' })).toBe(false);
+    expect(
+      isProductPaExempt(validSolarCatalog, {
+        processType: 'GBB',
+        cargoSubType: 'Solar',
+      }),
+    ).toBe(false);
   });
 
   it('6. rejects products where isPaRequired is true (Batubara, PAC, Rapid Klen)', () => {
@@ -106,6 +128,11 @@ describe('Strict Catalog-Driven PA Exemption Policy', () => {
     });
     expect(res.isExempt).toBe(false);
     expect(res.failureReason).toContain('PA_REQUIRED');
-    expect(isProductPaExempt(validBatubaraCatalog, { processType: 'GSP', cargoSubType: 'Batubara' })).toBe(false);
+    expect(
+      isProductPaExempt(validBatubaraCatalog, {
+        processType: 'GSP',
+        cargoSubType: 'Batubara',
+      }),
+    ).toBe(false);
   });
 });

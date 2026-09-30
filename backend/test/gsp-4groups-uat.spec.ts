@@ -1,6 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { TransactionStatus, ProcessType, QcResult, WarehouseUnit, WarehouseCondition, Role, CorrectionAction, WeighbridgeType } from '@prisma/client';
+import {
+  TransactionStatus,
+  ProcessType,
+  QcResult,
+  WarehouseUnit,
+  WarehouseCondition,
+  Role,
+  CorrectionAction,
+  WeighbridgeType,
+} from '@prisma/client';
 import { WeighbridgeService } from '../src/weighbridge/weighbridge.service';
 import { WarehouseService } from '../src/warehouse/warehouse.service';
 import { QcProductAnalysisService } from '../src/qc/qc-product-analysis.service';
@@ -24,12 +33,36 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
   let mockAuthScopeService: any;
 
   // Actors
-  const securityUser: JwtPayloadUser = { id: 'sec-1', role: Role.SECURITY, email: 'security@gms.local' } as any;
-  const weighbridgeUser: JwtPayloadUser = { id: 'wb-1', role: Role.SECURITY, email: 'weighbridge@gms.local' } as any;
-  const qcAnalystUser: JwtPayloadUser = { id: 'qc-analyst-1', role: Role.QC, email: 'analyst@gms.local' } as any;
-  const utilityOfficerUser: JwtPayloadUser = { id: 'util-officer-1', role: Role.ADMIN, email: 'utility@gms.local' } as any;
-  const warehouseUser: JwtPayloadUser = { id: 'wh-1', role: Role.WAREHOUSE, email: 'warehouse@gms.local' } as any;
-  const adminUser: JwtPayloadUser = { id: 'admin-1', role: Role.ADMIN, email: 'admin@gms.local' } as any;
+  const securityUser: JwtPayloadUser = {
+    id: 'sec-1',
+    role: Role.SECURITY,
+    email: 'security@gms.local',
+  } as any;
+  const weighbridgeUser: JwtPayloadUser = {
+    id: 'wb-1',
+    role: Role.SECURITY,
+    email: 'weighbridge@gms.local',
+  } as any;
+  const qcAnalystUser: JwtPayloadUser = {
+    id: 'qc-analyst-1',
+    role: Role.QC,
+    email: 'analyst@gms.local',
+  } as any;
+  const utilityOfficerUser: JwtPayloadUser = {
+    id: 'util-officer-1',
+    role: Role.ADMIN,
+    email: 'utility@gms.local',
+  } as any;
+  const warehouseUser: JwtPayloadUser = {
+    id: 'wh-1',
+    role: Role.WAREHOUSE,
+    email: 'warehouse@gms.local',
+  } as any;
+  const adminUser: JwtPayloadUser = {
+    id: 'admin-1',
+    role: Role.ADMIN,
+    email: 'admin@gms.local',
+  } as any;
 
   beforeEach(async () => {
     mockPrismaService = {
@@ -74,15 +107,20 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         findUnique: jest.fn(),
       },
       userWarehouseAccess: {
-        findMany: jest.fn().mockResolvedValue([
-          { processType: ProcessType.GSP },
-          { processType: ProcessType.GBB },
-          { processType: ProcessType.GBJ },
-        ]),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { processType: ProcessType.GSP },
+            { processType: ProcessType.GBB },
+            { processType: ProcessType.GBJ },
+          ]),
       },
       productCatalog: {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
+      },
+      appSetting: {
+        findUnique: jest.fn(),
       },
     };
 
@@ -108,8 +146,12 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
 
     weighbridgeService = module.get<WeighbridgeService>(WeighbridgeService);
     warehouseService = module.get<WarehouseService>(WarehouseService);
-    qcAnalysisService = module.get<QcProductAnalysisService>(QcProductAnalysisService);
-    amendmentService = module.get<ActiveTransactionAmendmentService>(ActiveTransactionAmendmentService);
+    qcAnalysisService = module.get<QcProductAnalysisService>(
+      QcProductAnalysisService,
+    );
+    amendmentService = module.get<ActiveTransactionAmendmentService>(
+      ActiveTransactionAmendmentService,
+    );
   });
 
   // =========================================================================
@@ -169,9 +211,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientWbIn));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWbIn),
+      );
 
-      const wbInRes = await weighbridgeService.submitWeighIn(solarTx.id, { weight: 25000 }, weighbridgeUser);
+      const wbInRes = await weighbridgeService.submitWeighIn(
+        solarTx.id,
+        { weight: 25000 },
+        weighbridgeUser,
+      );
       expect(wbInRes.success).toBe(true);
 
       // Verify status is PA_NOT_REQUIRED (never QC_VEHICLE_PASSED!)
@@ -192,8 +240,18 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
 
       // State machine validity check
-      expect(isValidStatusTransition(TransactionStatus.REGISTERED, TransactionStatus.PA_NOT_REQUIRED)).toBe(true);
-      expect(isValidStatusTransition(TransactionStatus.PA_NOT_REQUIRED, TransactionStatus.WAREHOUSE_IN_PROGRESS)).toBe(true);
+      expect(
+        isValidStatusTransition(
+          TransactionStatus.REGISTERED,
+          TransactionStatus.PA_NOT_REQUIRED,
+        ),
+      ).toBe(true);
+      expect(
+        isValidStatusTransition(
+          TransactionStatus.PA_NOT_REQUIRED,
+          TransactionStatus.WAREHOUSE_IN_PROGRESS,
+        ),
+      ).toBe(true);
 
       // 3. GSP Warehouse: Start Unloading
       const solarPostWbIn = {
@@ -202,7 +260,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         grossWeight: 25000,
         revision: 2,
       };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(solarPostWbIn);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        solarPostWbIn,
+      );
 
       const mockTxClientWhStart = {
         transaction: {
@@ -222,9 +282,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientWhStart));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWhStart),
+      );
 
-      const whStartRes = await warehouseService.startWarehouse(solarTx.id, {}, warehouseUser);
+      const whStartRes = await warehouseService.startWarehouse(
+        solarTx.id,
+        {},
+        warehouseUser,
+      );
       expect(whStartRes.success).toBe(true);
       expect(mockTxClientWhStart.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -241,7 +307,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         warehouseStartAt: new Date(),
         revision: 3,
       };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(solarUnloading);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        solarUnloading,
+      );
 
       const mockTxClientWhComplete = {
         transaction: {
@@ -255,14 +323,20 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           }),
         },
         warehouseProcess: {
-          findFirst: jest.fn().mockResolvedValue({ id: 'wp-solar-1', revision: 1 }),
-          update: jest.fn().mockResolvedValue({ id: 'wp-solar-1', revision: 2 }),
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ id: 'wp-solar-1', revision: 1 }),
+          update: jest
+            .fn()
+            .mockResolvedValue({ id: 'wp-solar-1', revision: 2 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientWhComplete));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWhComplete),
+      );
 
       const whCompleteRes = await warehouseService.completeWarehouse(
         solarTx.id,
@@ -277,7 +351,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       expect(whCompleteRes.success).toBe(true);
 
       // CRITICAL: verify GSP routes strictly to WAREHOUSE_DONE
-      expect(mockTxClientWhComplete.transaction.updateMany).toHaveBeenCalledWith(
+      expect(
+        mockTxClientWhComplete.transaction.updateMany,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             status: TransactionStatus.WAREHOUSE_DONE,
@@ -287,8 +363,18 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
 
       // 5. Weighbridge OUT: Tare 10,000 kg -> WEIGH_OUT_DONE
-      expect(isValidStatusTransition(TransactionStatus.WAREHOUSE_DONE, TransactionStatus.WEIGH_OUT_DONE)).toBe(true);
-      expect(isValidStatusTransition(TransactionStatus.WEIGH_OUT_DONE, TransactionStatus.COMPLETED)).toBe(true);
+      expect(
+        isValidStatusTransition(
+          TransactionStatus.WAREHOUSE_DONE,
+          TransactionStatus.WEIGH_OUT_DONE,
+        ),
+      ).toBe(true);
+      expect(
+        isValidStatusTransition(
+          TransactionStatus.WEIGH_OUT_DONE,
+          TransactionStatus.COMPLETED,
+        ),
+      ).toBe(true);
     });
   });
 
@@ -333,9 +419,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientWbIn));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWbIn),
+      );
 
-      const wbInRes = await weighbridgeService.submitWeighIn(pacTx.id, { weight: 22000 }, weighbridgeUser);
+      const wbInRes = await weighbridgeService.submitWeighIn(
+        pacTx.id,
+        { weight: 22000 },
+        weighbridgeUser,
+      );
       expect(wbInRes.success).toBe(true);
       expect(mockTxClientWbIn.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -352,25 +444,42 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         grossWeight: 22000,
         revision: 2,
       };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacPending);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        pacPending,
+      );
 
-      await expect(warehouseService.startWarehouse(pacTx.id, {}, warehouseUser)).rejects.toThrow(BadRequestException);
+      await expect(
+        warehouseService.startWarehouse(pacTx.id, {}, warehouseUser),
+      ).rejects.toThrow(BadRequestException);
 
       // 3. QC Lab: Submit PA Analysis with Decision: RELEASE
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacPending);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        pacPending,
+      );
 
       const mockTxClientQc = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          create: jest.fn().mockResolvedValue({ id: 'analysis-pac-1', testRound: 1 }),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-pac-1', testRound: 1 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientQc));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientQc),
+      );
+
+      jest
+        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
+        .mockReturnValueOnce({
+          approvalStatus: 'APPROVED',
+          documentSource: 'QA Approved PAC Specification SOP-GSP-2026.1',
+        });
 
       const qcRes = await qcAnalysisService.submitProductAnalysis(
         pacTx.id,
@@ -428,9 +537,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientWhStart));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWhStart),
+      );
 
-      const whStartRes = await warehouseService.startWarehouse(pacTx.id, {}, warehouseUser);
+      const whStartRes = await warehouseService.startWarehouse(
+        pacTx.id,
+        {},
+        warehouseUser,
+      );
       expect(whStartRes.success).toBe(true);
       expect(mockTxClientWhStart.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -468,13 +583,17 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          create: jest.fn().mockResolvedValue({ id: 'analysis-rpd-1', testRound: 1 }),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-rpd-1', testRound: 1 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientQc));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientQc),
+      );
 
       const qcRes = await qcAnalysisService.submitProductAnalysis(
         rpdTx.id,
@@ -509,13 +628,27 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: TransactionStatus.QC_VEHICLE_REJECTED,
         revision: 3,
       };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rpdRejected);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        rpdRejected,
+      );
 
-      await expect(warehouseService.startWarehouse(rpdTx.id, {}, warehouseUser)).rejects.toThrow(BadRequestException);
+      await expect(
+        warehouseService.startWarehouse(rpdTx.id, {}, warehouseUser),
+      ).rejects.toThrow(BadRequestException);
 
       // 3. State Machine confirms rejected truck can only route to WEIGH_OUT_DONE -> COMPLETED
-      expect(isValidStatusTransition(TransactionStatus.QC_VEHICLE_REJECTED, TransactionStatus.WAREHOUSE_IN_PROGRESS)).toBe(false);
-      expect(isValidStatusTransition(TransactionStatus.QC_VEHICLE_REJECTED, TransactionStatus.WEIGH_OUT_DONE)).toBe(true);
+      expect(
+        isValidStatusTransition(
+          TransactionStatus.QC_VEHICLE_REJECTED,
+          TransactionStatus.WAREHOUSE_IN_PROGRESS,
+        ),
+      ).toBe(false);
+      expect(
+        isValidStatusTransition(
+          TransactionStatus.QC_VEHICLE_REJECTED,
+          TransactionStatus.WEIGH_OUT_DONE,
+        ),
+      ).toBe(true);
     });
   });
 
@@ -546,13 +679,17 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          create: jest.fn().mockResolvedValue({ id: 'analysis-coal-1', testRound: 1 }),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-coal-1', testRound: 1 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientRound1));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientRound1),
+      );
 
       const r1Res = await qcAnalysisService.submitProductAnalysis(
         coalTx.id,
@@ -562,7 +699,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           parameters: { sensory: 'OK', moisture: 36.0 },
           result: QcResult.REJECTED,
           decision: AnalysisDecision.RETEST_REQUIRED,
-          notes: 'Total moisture melewati batas normal (36.0% > 33.0%). Wajib uji ulang.',
+          notes:
+            'Total moisture melewati batas normal (36.0% > 33.0%). Wajib uji ulang.',
           revision: 2,
         },
         qcAnalystUser,
@@ -577,25 +715,39 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
 
       // Verify unloading is blocked during QC_RETEST_REQUIRED
-      const coalRetest = { ...coalTx, status: TransactionStatus.QC_RETEST_REQUIRED, revision: 3 };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalRetest);
-      await expect(warehouseService.startWarehouse(coalTx.id, {}, warehouseUser)).rejects.toThrow(BadRequestException);
+      const coalRetest = {
+        ...coalTx,
+        status: TransactionStatus.QC_RETEST_REQUIRED,
+        revision: 3,
+      };
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalRetest,
+      );
+      await expect(
+        warehouseService.startWarehouse(coalTx.id, {}, warehouseUser),
+      ).rejects.toThrow(BadRequestException);
 
       // 2. Round 2 Test: Moisture 35.5% (still > 33%) -> Decision: PENDING_DISPOSITION
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalRetest);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalRetest,
+      );
 
       const mockTxClientRound2 = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          create: jest.fn().mockResolvedValue({ id: 'analysis-coal-2', testRound: 2 }),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-coal-2', testRound: 2 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientRound2));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientRound2),
+      );
 
       const r2Res = await qcAnalysisService.submitProductAnalysis(
         coalTx.id,
@@ -606,7 +758,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           parameters: { sensory: 'OK', moisture: 35.5 },
           result: QcResult.REJECTED,
           decision: AnalysisDecision.PENDING_DISPOSITION,
-          notes: 'Hasil uji ulang tetap melewati batas (35.5%). Menunggu disposisi Utility.',
+          notes:
+            'Hasil uji ulang tetap melewati batas (35.5%). Menunggu disposisi Utility.',
           revision: 3,
         },
         qcAnalystUser,
@@ -621,13 +774,23 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
 
       // Verify unloading is blocked during WAITING_UTILITY_DISPOSITION
-      const coalWaiting = { ...coalTx, status: TransactionStatus.WAITING_UTILITY_DISPOSITION, revision: 4 };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalWaiting);
-      await expect(warehouseService.startWarehouse(coalTx.id, {}, warehouseUser)).rejects.toThrow(BadRequestException);
+      const coalWaiting = {
+        ...coalTx,
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        revision: 4,
+      };
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalWaiting,
+      );
+      await expect(
+        warehouseService.startWarehouse(coalTx.id, {}, warehouseUser),
+      ).rejects.toThrow(BadRequestException);
 
       // 3. Four-Eyes Enforcement across ALL rounds:
       // Case 3a: Round 2 analyst attempts self-approval -> MUST BE FORBIDDEN
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalWaiting);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'analysis-coal-2',
         transactionId: coalTx.id,
@@ -640,7 +803,11 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         department: 'UTILITY',
       });
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'analysis-coal-1', testRound: 1, testedById: 'round1-analyst-id' },
+        {
+          id: 'analysis-coal-1',
+          testRound: 1,
+          testedById: 'round1-analyst-id',
+        },
         { id: 'analysis-coal-2', testRound: 2, testedById: qcAnalystUser.id },
       ]);
 
@@ -657,8 +824,14 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       ).rejects.toThrow(ForbiddenException);
 
       // Case 3b: Round 1 analyst attempts approval of Round 2 disposition -> MUST BE FORBIDDEN
-      const round1Analyst = { id: 'round1-analyst-id', role: 'ADMIN', department: 'UTILITY' } as any;
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalWaiting);
+      const round1Analyst = {
+        id: 'round1-analyst-id',
+        role: 'ADMIN',
+        department: 'UTILITY',
+      } as any;
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'analysis-coal-2',
         transactionId: coalTx.id,
@@ -667,7 +840,11 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       });
       mockPrismaService.user.findUnique.mockResolvedValueOnce(round1Analyst);
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'analysis-coal-1', testRound: 1, testedById: 'round1-analyst-id' },
+        {
+          id: 'analysis-coal-1',
+          testRound: 1,
+          testedById: 'round1-analyst-id',
+        },
         { id: 'analysis-coal-2', testRound: 2, testedById: qcAnalystUser.id },
       ]);
 
@@ -684,7 +861,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       ).rejects.toThrow(ForbiddenException);
 
       // Case 3c: Account without Utility authority (e.g. Security) -> MUST BE FORBIDDEN
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalWaiting);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'analysis-coal-2',
         transactionId: coalTx.id,
@@ -709,7 +888,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       ).rejects.toThrow(ForbiddenException);
 
       // 4. Authorized Utility Officer (Independent of all rounds) approves disposition -> SUCCEEDS
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalWaiting);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'analysis-coal-2',
         transactionId: coalTx.id,
@@ -720,9 +901,16 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         id: utilityOfficerUser.id,
         role: 'ADMIN',
         department: 'UTILITY',
+        isActive: true,
+        isDeleted: false,
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
       });
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'analysis-coal-1', testRound: 1, testedById: 'round1-analyst-id' },
+        {
+          id: 'analysis-coal-1',
+          testRound: 1,
+          testedById: 'round1-analyst-id',
+        },
         { id: 'analysis-coal-2', testRound: 2, testedById: qcAnalystUser.id },
       ]);
 
@@ -737,13 +925,16 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientDisp));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientDisp),
+      );
 
       const dispRes = await qcAnalysisService.submitUtilityDisposition(
         coalTx.id,
         {
           dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-          dispositionReason: 'Disetujui bersyarat oleh Kepala Bagian Utility untuk pencampuran boiler silo #2',
+          dispositionReason:
+            'Disetujui bersyarat oleh Kepala Bagian Utility untuk pencampuran boiler silo #2',
           revision: 4,
         },
         utilityOfficerUser, // Different user!
@@ -760,8 +951,14 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
 
       // 5. GSP Warehouse: Start Unloading NOW PERMITTED
-      const coalPassed = { ...coalWaiting, status: TransactionStatus.QC_VEHICLE_PASSED, revision: 5 };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalPassed);
+      const coalPassed = {
+        ...coalWaiting,
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        revision: 5,
+      };
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalPassed,
+      );
 
       const mockTxClientWhStart = {
         transaction: {
@@ -781,9 +978,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientWhStart));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWhStart),
+      );
 
-      const whStartRes = await warehouseService.startWarehouse(coalTx.id, {}, warehouseUser);
+      const whStartRes = await warehouseService.startWarehouse(
+        coalTx.id,
+        {},
+        warehouseUser,
+      );
       expect(whStartRes.success).toBe(true);
     });
   });
@@ -807,7 +1010,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         revision: 2,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(solarActiveTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        solarActiveTx,
+      );
 
       const mockTxClientAmend = {
         transaction: {
@@ -823,7 +1028,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientAmend));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientAmend),
+      );
 
       const amendRes = await amendmentService.amendActiveProduct(
         solarActiveTx.id,
@@ -862,7 +1069,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         revision: 3,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(unloadedTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        unloadedTx,
+      );
 
       // Attempt standard product amendment -> MUST BE BLOCKED
       await expect(
@@ -879,8 +1088,12 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       ).rejects.toThrow(BadRequestException);
 
       // Must be handled via recordOperationalIncident with mandatory attachment and supervisor PIC
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(unloadedTx);
-      mockPrismaService.attachment.findUnique.mockResolvedValueOnce({ id: 'att-evidence-1' });
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        unloadedTx,
+      );
+      mockPrismaService.attachment.findUnique.mockResolvedValueOnce({
+        id: 'att-evidence-1',
+      });
 
       const mockTxClientIncident = {
         transaction: {
@@ -893,22 +1106,28 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientIncident));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientIncident),
+      );
 
       const incidentRes = await amendmentService.recordOperationalIncident(
         unloadedTx.id,
         {
-          incidentReason: 'Muatan solar sudah tertuang ke tangki penampungan sebelum ketidaksesuaian DO terdeteksi',
+          incidentReason:
+            'Muatan solar sudah tertuang ke tangki penampungan sebelum ketidaksesuaian DO terdeteksi',
           supervisorPic: 'Bpk. Hendro - SPV Utility',
           evidenceAttachmentId: 'att-evidence-1',
-          actionTaken: 'Isolasi kompartemen tangki #3 dan pengambilan sampel uji darurat',
+          actionTaken:
+            'Isolasi kompartemen tangki #3 dan pengambilan sampel uji darurat',
           revision: 3,
         },
         adminUser,
       );
 
       expect(incidentRes.success).toBe(true);
-      expect(mockTxClientIncident.transactionCorrection.create).toHaveBeenCalledWith(
+      expect(
+        mockTxClientIncident.transactionCorrection.create,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             action: CorrectionAction.OPERATIONAL_INCIDENT,
@@ -941,7 +1160,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       };
 
       // 1. Submit out-of-spec chemical analysis -> REJECT
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemRejectTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        chemRejectTx,
+      );
 
       const mockTxClientReject = {
         transaction: {
@@ -954,7 +1175,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientReject));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientReject),
+      );
 
       const rejectRes = await qcAnalysisService.submitProductAnalysis(
         chemRejectTx.id,
@@ -985,8 +1208,14 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
 
       // 2. Warehouse operator attempts to start unloading -> BLOCKED
-      const rejectedState = { ...chemRejectTx, status: TransactionStatus.QC_VEHICLE_REJECTED, revision: 3 };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rejectedState);
+      const rejectedState = {
+        ...chemRejectTx,
+        status: TransactionStatus.QC_VEHICLE_REJECTED,
+        revision: 3,
+      };
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        rejectedState,
+      );
 
       await expect(
         warehouseService.startWarehouse(chemRejectTx.id, {}, warehouseUser),
@@ -995,10 +1224,13 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       // 3. Truck routes directly to Weighbridge Out with actual exit scale reading
       // The truck exits still carrying rejected cargo. Scale reading is 21,970 kg (30 kg variance from fuel/scale diff).
       // Backend faithfully stores actual tare scale reading (21,970 kg) without forcing equality with gross (22,000 kg).
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rejectedState);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        rejectedState,
+      );
       mockPrismaService.weighbridgeRecord.findFirst
         .mockResolvedValueOnce(null) // 1. Duplicate OUT check -> null
-        .mockResolvedValueOnce({     // 2. Lookup IN record for gross -> 22000
+        .mockResolvedValueOnce({
+          // 2. Lookup IN record for gross -> 22000
           id: 'wb-in-rej-rec',
           type: WeighbridgeType.IN,
           weight: 22000,
@@ -1012,8 +1244,12 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             ...chemRejectTx,
             status: TransactionStatus.WEIGH_OUT_DONE,
             tareWeight: 21970,
-            netWeight: 30,
-            weighOutBy: { id: weighbridgeUser.id, name: 'Weighbridge Operator', role: 'SECURITY' },
+            netWeight: 0, // Zero inventory accepted for rejected transaction
+            weighOutBy: {
+              id: weighbridgeUser.id,
+              name: 'Weighbridge Operator',
+              role: 'SECURITY',
+            },
           }),
         },
         weighbridgeRecord: {
@@ -1030,7 +1266,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientWbOut));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWbOut),
+      );
 
       const wbOutRes = await weighbridgeService.submitWeighOut(
         chemRejectTx.id,
@@ -1048,7 +1286,19 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           data: expect.objectContaining({
             status: TransactionStatus.WEIGH_OUT_DONE,
             tareWeight: 21970, // Actual scale reading preserved faithfully
-            netWeight: 30, // Actual calculated difference
+            netWeight: 0, // Accepted inventory is strictly 0 kg (not 30 kg)
+          }),
+        }),
+      );
+      expect(
+        mockTxClientWbOut.transactionStatusHistory.create,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            newStatus: 'WEIGH_OUT_DONE',
+            notes: expect.stringContaining(
+              'Penerimaan persediaan diakui: 0 kg',
+            ),
           }),
         }),
       );
@@ -1057,6 +1307,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           data: expect.objectContaining({
             type: WeighbridgeType.OUT,
             weight: 21970, // Actual scale weight recorded
+            remarks: expect.stringContaining(
+              'Selisih skala fisik 30 kg, Penerimaan stok 0 kg',
+            ),
           }),
         }),
       );
@@ -1090,8 +1343,12 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         isActive: true,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(batubaraPassedTx);
-      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(pacCatalog);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        batubaraPassedTx,
+      );
+      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(
+        pacCatalog,
+      );
 
       const mockTxClientAmend = {
         transaction: {
@@ -1107,7 +1364,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClientAmend));
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientAmend),
+      );
 
       const res = await amendmentService.amendActiveProduct(
         batubaraPassedTx.id,
@@ -1115,7 +1374,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           cargoType: 'Chemicals',
           cargoSubType: 'PAC 280 AC',
           productCatalogId: pacCatalog.id,
-          reason: 'Perubahan pesanan operasional: dialihkan dari Batubara ke PAC',
+          reason:
+            'Perubahan pesanan operasional: dialihkan dari Batubara ke PAC',
           revision: 3,
         },
         adminUser,
@@ -1125,7 +1385,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       expect(res.data?.newStatus).toBe(TransactionStatus.QC_VEHICLE_PENDING);
 
       // Verify old PA was marked VOIDED
-      expect(mockTxClientAmend.qcProductAnalysis.updateMany).toHaveBeenCalledWith(
+      expect(
+        mockTxClientAmend.qcProductAnalysis.updateMany,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { transactionId: batubaraPassedTx.id, isVoided: false },
           data: expect.objectContaining({

@@ -36,7 +36,8 @@ export class QcProductAnalysisController {
   @Roles('QC', 'ADMIN')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Submit lab analysis or retest for GSP cargo (Batubara, PAC, Rapid Klen)',
+    summary:
+      'Submit lab analysis or retest for GSP cargo (Batubara, PAC, Rapid Klen)',
   })
   @ApiResponse({
     status: 200,
@@ -44,7 +45,8 @@ export class QcProductAnalysisController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Invalid transition, exempt product (Solar), or state mismatch',
+    description:
+      'Invalid transition, exempt product (Solar), or state mismatch',
   })
   submitProductAnalysis(
     @Param('transactionId') transactionId: string,
@@ -62,7 +64,8 @@ export class QcProductAnalysisController {
   @Roles('ADMIN', 'QC')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Submit Utility disposition for out-of-spec products (Enforces Four-Eyes Principle)',
+    summary:
+      'Submit Utility disposition for out-of-spec products (Enforces Four-Eyes Principle)',
   })
   @ApiResponse({
     status: 200,
@@ -70,7 +73,8 @@ export class QcProductAnalysisController {
   })
   @ApiResponse({
     status: 403,
-    description: 'Four-Eyes Principle violation: approver cannot be testing analyst',
+    description:
+      'Four-Eyes Principle violation: approver cannot be testing analyst',
   })
   submitUtilityDisposition(
     @Param('transactionId') transactionId: string,

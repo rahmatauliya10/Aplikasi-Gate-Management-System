@@ -333,9 +333,10 @@ export class WeighbridgeService {
           oldStatus: tx.status,
           newStatus: nextStatus,
           changedById: user.id,
-          notes: nextStatus === TransactionStatus.PA_NOT_REQUIRED
-            ? `[PA_EXEMPT] ${exemptionEval.policyVersion}: ${exemptionEval.reason}`
-            : (dto.remarks || 'Weigh-in processed successfully'),
+          notes:
+            nextStatus === TransactionStatus.PA_NOT_REQUIRED
+              ? `[PA_EXEMPT] ${exemptionEval.policyVersion}: ${exemptionEval.reason}`
+              : dto.remarks || 'Weigh-in processed successfully',
         },
       });
 
@@ -389,7 +390,8 @@ export class WeighbridgeService {
           action: 'PA_EXEMPTION_APPLIED',
           module: 'WEIGHBRIDGE',
           referenceId: transactionId,
-          description: exemptionEval.reason || 'PA exemption applied via master catalog',
+          description:
+            exemptionEval.reason || 'PA exemption applied via master catalog',
           status: 'SUCCESS',
         })
         .catch(() => {});
@@ -580,9 +582,14 @@ export class WeighbridgeService {
       });
     }
 
-    const netWeight = isRejected
-      ? Math.max(0, finalGrossWeight - finalTareWeight)
-      : finalGrossWeight - finalTareWeight;
+    // Calculate physical difference between scale readings
+    const physicalScaleDelta = Math.max(0, finalGrossWeight - finalTareWeight);
+
+    // Inventory & Audit Rule:
+    // A REJECTED transaction MUST NOT produce accepted inventory (accepted netWeight = 0 kg).
+    // Physical scale discrepancies (e.g. 30 kg due to scale variance, fuel, or samples)
+    // are preserved as truck tare scale readings and logged in audit trail, but never credited to stock.
+    const netWeight = isRejected ? 0 : finalGrossWeight - finalTareWeight;
 
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
@@ -604,6 +611,12 @@ export class WeighbridgeService {
       });
       const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
+      const recordRemarks = isRejected
+        ? dto.remarks
+          ? `${dto.remarks} [REJECT: Selisih skala fisik ${physicalScaleDelta} kg, Penerimaan stok 0 kg]`
+          : `[REJECT: Selisih skala fisik ${physicalScaleDelta} kg, Penerimaan stok 0 kg]`
+        : dto.remarks || null;
+
       await prismaTx.weighbridgeRecord.create({
         data: {
           transactionId,
@@ -612,7 +625,7 @@ export class WeighbridgeService {
           weight: dto.weight,
           ticketNumber: dto.ticketNumber || null,
           operatorId: user.id,
-          remarks: dto.remarks || null,
+          remarks: recordRemarks,
         },
       });
 
@@ -644,13 +657,19 @@ export class WeighbridgeService {
         });
       }
 
+      const statusNotes = isRejected
+        ? dto.remarks
+          ? `${dto.remarks} | [REJECT_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Penerimaan persediaan diakui: 0 kg.`
+          : `[REJECT_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Penerimaan persediaan diakui: 0 kg.`
+        : dto.remarks || 'Weigh-out processed successfully';
+
       await prismaTx.transactionStatusHistory.create({
         data: {
           transactionId,
           oldStatus: tx.status,
           newStatus: 'WEIGH_OUT_DONE',
           changedById: user.id,
-          notes: dto.remarks || 'Weigh-out processed successfully',
+          notes: statusNotes,
         },
       });
 

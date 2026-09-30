@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { QcProductAnalysisService } from './qc-product-analysis.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -45,6 +49,9 @@ describe('QcProductAnalysisService (Task 5)', () => {
       user: {
         findUnique: jest.fn(),
       },
+      appSetting: {
+        findUnique: jest.fn(),
+      },
     };
 
     mockActivityLogsService = {
@@ -80,14 +87,24 @@ describe('QcProductAnalysisService (Task 5)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          create: jest.fn().mockResolvedValue({ id: 'analysis-1', testRound: 1 }),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-1', testRound: 1 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+      jest
+        .spyOn(service, 'checkSpecificationApprovalStatus')
+        .mockReturnValueOnce({
+          approvalStatus: 'APPROVED',
+          documentSource: 'Test Harness Fixture (Simulated Approved Spec)',
+        });
 
       const res = await service.submitProductAnalysis(
         'tx-coal-1',
@@ -139,14 +156,18 @@ describe('QcProductAnalysisService (Task 5)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          create: jest.fn().mockResolvedValue({ id: 'analysis-1', testRound: 1 }),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-1', testRound: 1 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.submitProductAnalysis(
         'tx-coal-1',
@@ -188,14 +209,18 @@ describe('QcProductAnalysisService (Task 5)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          create: jest.fn().mockResolvedValue({ id: 'analysis-2', testRound: 2 }),
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-2', testRound: 2 }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.submitProductAnalysis(
         'tx-coal-retest',
@@ -259,6 +284,34 @@ describe('QcProductAnalysisService (Task 5)', () => {
         ),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('rejects automated RELEASE if product specification is provisional/unapproved (PENDING_SIGNOFF)', async () => {
+      const coalTx = {
+        id: 'tx-coal-provisional',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-coal-provisional',
+          {
+            productCategory: 'Coal',
+            productName: 'Batubara GAR 4200',
+            parameters: { totalMoisture: 31.0, sensoryPassed: true },
+            result: QcResult.PASSED,
+            decision: AnalysisDecision.RELEASE, // Attempting automated RELEASE on unapproved spec!
+            revision: 2,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 
   describe('submitUtilityDisposition - Four-Eyes Principle', () => {
@@ -281,11 +334,16 @@ describe('QcProductAnalysisService (Task 5)', () => {
         testedById: mockAnalystUser.id, // Tested by analyst-1
       };
 
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(latestAnalysis);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
       mockPrismaService.user.findUnique.mockResolvedValueOnce({
         id: mockUtilityUser.id,
         role: 'ADMIN',
         department: 'UTILITY',
+        isActive: true,
+        isDeleted: false,
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
       });
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         { id: 'analysis-1', testRound: 1, testedById: mockAnalystUser.id },
@@ -304,7 +362,9 @@ describe('QcProductAnalysisService (Task 5)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       // Approved by mockUtilityUser (user-utility-1 !== user-analyst-1)
       const res = await service.submitUtilityDisposition(
@@ -353,11 +413,16 @@ describe('QcProductAnalysisService (Task 5)', () => {
         testedById: mockAnalystUser.id,
       };
 
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(latestAnalysis);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
       mockPrismaService.user.findUnique.mockResolvedValueOnce({
         id: mockAnalystUser.id,
         role: 'ADMIN',
         department: 'UTILITY',
+        isActive: true,
+        isDeleted: false,
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
       });
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         { id: 'analysis-1', testRound: 1, testedById: 'other-analyst' },
@@ -395,11 +460,16 @@ describe('QcProductAnalysisService (Task 5)', () => {
         testedById: 'analyst-round-2', // Different from mockAnalystUser
       };
 
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(latestAnalysis);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
       mockPrismaService.user.findUnique.mockResolvedValueOnce({
         id: mockAnalystUser.id,
         role: 'ADMIN',
         department: 'UTILITY',
+        isActive: true,
+        isDeleted: false,
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
       });
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         { id: 'analysis-1', testRound: 1, testedById: mockAnalystUser.id }, // mockAnalystUser tested round 1!
@@ -437,7 +507,9 @@ describe('QcProductAnalysisService (Task 5)', () => {
         testedById: 'some-analyst',
       };
 
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(latestAnalysis);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
       mockPrismaService.user.findUnique.mockResolvedValueOnce({
         id: 'user-security-1',
         role: 'SECURITY',
@@ -480,7 +552,9 @@ describe('QcProductAnalysisService (Task 5)', () => {
         testedById: 'analyst-1',
       };
 
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(latestAnalysis);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
       mockPrismaService.user.findUnique.mockResolvedValueOnce({
         id: 'admin-it-1',
         role: 'ADMIN',
@@ -506,6 +580,152 @@ describe('QcProductAnalysisService (Task 5)', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('rejects disposition if user is in UTILITY department but lacks explicit disposition authority', async () => {
+      const waitingTx = {
+        id: 'tx-waiting-disp',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        processType: ProcessType.GSP,
+        revision: 4,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(waitingTx);
+
+      const latestAnalysis = {
+        id: 'analysis-2',
+        transactionId: 'tx-waiting-disp',
+        testRound: 2,
+        testedById: 'some-analyst',
+      };
+
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 'utility-staff-no-perm',
+        role: 'ADMIN',
+        department: 'UTILITY',
+        isActive: true,
+        isDeleted: false,
+        area: 'GENERAL_BOILER_OPERATOR', // No UTILITY_DISPOSITION_AUTHORITY!
+      });
+      mockPrismaService.appSetting.findUnique.mockResolvedValueOnce(null);
+
+      const utilityStaffUser = {
+        id: 'utility-staff-no-perm',
+        role: 'ADMIN',
+        email: 'staff@gms.local',
+      } as unknown as JwtPayloadUser;
+
+      await expect(
+        service.submitUtilityDisposition(
+          'tx-waiting-disp',
+          {
+            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
+            dispositionReason:
+              'Utility staff without explicit permission attempt',
+            revision: 4,
+          },
+          utilityStaffUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects disposition if user is in UTILITY with authority but account is inactive', async () => {
+      const waitingTx = {
+        id: 'tx-waiting-disp',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        processType: ProcessType.GSP,
+        revision: 4,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(waitingTx);
+
+      const latestAnalysis = {
+        id: 'analysis-2',
+        transactionId: 'tx-waiting-disp',
+        testRound: 2,
+        testedById: 'some-analyst',
+      };
+
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 'utility-inactive-user',
+        role: 'ADMIN',
+        department: 'UTILITY',
+        isActive: false, // Inactive account!
+        isDeleted: false,
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
+      });
+
+      const inactiveUser = {
+        id: 'utility-inactive-user',
+        role: 'ADMIN',
+        email: 'inactive@gms.local',
+      } as unknown as JwtPayloadUser;
+
+      await expect(
+        service.submitUtilityDisposition(
+          'tx-waiting-disp',
+          {
+            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
+            dispositionReason: 'Inactive user attempt',
+            revision: 4,
+          },
+          inactiveUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects disposition if user is in UTILITY with authority but account is marked deleted', async () => {
+      const waitingTx = {
+        id: 'tx-waiting-disp',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        processType: ProcessType.GSP,
+        revision: 4,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(waitingTx);
+
+      const latestAnalysis = {
+        id: 'analysis-2',
+        transactionId: 'tx-waiting-disp',
+        testRound: 2,
+        testedById: 'some-analyst',
+      };
+
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
+      mockPrismaService.user.findUnique.mockResolvedValueOnce({
+        id: 'utility-deleted-user',
+        role: 'ADMIN',
+        department: 'UTILITY',
+        isActive: true,
+        isDeleted: true, // Marked deleted!
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
+      });
+
+      const deletedUser = {
+        id: 'utility-deleted-user',
+        role: 'ADMIN',
+        email: 'deleted@gms.local',
+      } as unknown as JwtPayloadUser;
+
+      await expect(
+        service.submitUtilityDisposition(
+          'tx-waiting-disp',
+          {
+            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
+            dispositionReason: 'Deleted user attempt',
+            revision: 4,
+          },
+          deletedUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
     it('successfully processes REJECT disposition and sets status to QC_VEHICLE_REJECTED', async () => {
       const waitingTx = {
         id: 'tx-waiting-disp',
@@ -523,11 +743,16 @@ describe('QcProductAnalysisService (Task 5)', () => {
         testedById: mockAnalystUser.id,
       };
 
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(latestAnalysis);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        latestAnalysis,
+      );
       mockPrismaService.user.findUnique.mockResolvedValueOnce({
         id: mockUtilityUser.id,
         role: 'ADMIN',
         department: 'UTILITY',
+        isActive: true,
+        isDeleted: false,
+        area: 'UTILITY_DISPOSITION_AUTHORITY',
       });
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         { id: 'analysis-1', testRound: 1, testedById: mockAnalystUser.id },
@@ -546,7 +771,9 @@ describe('QcProductAnalysisService (Task 5)', () => {
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.submitUtilityDisposition(
         'tx-waiting-disp',

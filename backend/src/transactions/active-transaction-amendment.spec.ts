@@ -1,9 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  ConflictException,
+} from '@nestjs/common';
 import { ActiveTransactionAmendmentService } from './active-transaction-amendment.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { TransactionStatus, ProcessType, CorrectionAction } from '@prisma/client';
+import {
+  TransactionStatus,
+  ProcessType,
+  CorrectionAction,
+} from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', () => {
@@ -31,7 +39,8 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
     subCategory: 'Solar',
     processType: ProcessType.GSP,
     isPaRequired: false,
-    exemptionReason: 'SOP Exemption Rule v1.0: Komoditas Solar BBM tidak memerlukan uji laboratorium pra-bongkar.',
+    exemptionReason:
+      'SOP Exemption Rule v1.0: Komoditas Solar BBM tidak memerlukan uji laboratorium pra-bongkar.',
     policyVersion: 'SOP-GSP-2026.1',
     isActive: true,
   };
@@ -81,7 +90,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
       ],
     }).compile();
 
-    service = module.get<ActiveTransactionAmendmentService>(ActiveTransactionAmendmentService);
+    service = module.get<ActiveTransactionAmendmentService>(
+      ActiveTransactionAmendmentService,
+    );
   });
 
   describe('amendActiveProduct', () => {
@@ -89,7 +100,12 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
       await expect(
         service.amendActiveProduct(
           'tx-1',
-          { cargoType: 'Coal', cargoSubType: 'Batubara', reason: 'Attempt by operator', revision: 1 },
+          {
+            cargoType: 'Coal',
+            cargoSubType: 'Batubara',
+            reason: 'Attempt by operator',
+            revision: 1,
+          },
           mockOperatorUser,
         ),
       ).rejects.toThrow(ForbiddenException);
@@ -108,7 +124,12 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
       await expect(
         service.amendActiveProduct(
           'tx-unloading',
-          { cargoType: 'Coal', cargoSubType: 'Batubara', reason: 'Change after start', revision: 2 },
+          {
+            cargoType: 'Coal',
+            cargoSubType: 'Batubara',
+            reason: 'Change after start',
+            revision: 2,
+          },
           mockAdminUser,
         ),
       ).rejects.toThrow(BadRequestException);
@@ -129,7 +150,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(initialTx);
-      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(coalCatalog);
+      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(
+        coalCatalog,
+      );
 
       const mockTxClient = {
         transaction: {
@@ -146,7 +169,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.amendActiveProduct(
         'tx-solar-to-coal',
@@ -219,7 +244,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(initialTx);
-      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(pacCatalog);
+      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(
+        pacCatalog,
+      );
 
       const mockTxClient = {
         transaction: {
@@ -236,7 +263,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.amendActiveProduct(
         'tx-pa-passed',
@@ -260,7 +289,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
           data: expect.objectContaining({
             isVoided: true,
             status: 'VOIDED',
-            voidReason: expect.stringContaining('Dibatalkan karena perubahan produk aktif'),
+            voidReason: expect.stringContaining(
+              'Dibatalkan karena perubahan produk aktif',
+            ),
           }),
         }),
       );
@@ -284,21 +315,33 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         processType: ProcessType.GSP,
         revision: 2,
       });
-      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(coalCatalog);
+      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(
+        coalCatalog,
+      );
 
       const mockTxClient = {
-        qcProductAnalysis: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+        qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 0 }), // Concurrency conflict
         },
       };
 
-      mockPrismaService.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       await expect(
         service.amendActiveProduct(
           'tx-conflict',
-          { cargoType: 'Coal', cargoSubType: 'Batubara', productCatalogId: coalCatalog.id, reason: 'Stale revision', revision: 1 },
+          {
+            cargoType: 'Coal',
+            cargoSubType: 'Batubara',
+            productCatalogId: coalCatalog.id,
+            reason: 'Stale revision',
+            revision: 1,
+          },
           mockAdminUser,
         ),
       ).rejects.toThrow(ConflictException);

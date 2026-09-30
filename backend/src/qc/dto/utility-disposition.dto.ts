@@ -16,14 +16,17 @@ export enum DispositionAction {
 export class UtilityDispositionDto {
   @ApiProperty({
     enum: DispositionAction,
-    description: 'Utility disposition decision (ACCEPT_WITH_DEVIATION or REJECT)',
+    description:
+      'Utility disposition decision (ACCEPT_WITH_DEVIATION or REJECT)',
   })
   @IsEnum(DispositionAction)
   dispositionAction: DispositionAction;
 
   @ApiProperty({
-    description: 'Detailed technical rationale and approval reference for disposition (min 10 chars)',
-    example: 'Disposisi Utility: Kadar air 35% diterima bersyarat dengan penyesuaian rasio blending boiler',
+    description:
+      'Detailed technical rationale and approval reference for disposition (min 10 chars)',
+    example:
+      'Disposisi Utility: Kadar air 35% diterima bersyarat dengan penyesuaian rasio blending boiler',
   })
   @IsString()
   @IsNotEmpty()
@@ -31,7 +34,8 @@ export class UtilityDispositionDto {
   dispositionReason: string;
 
   @ApiProperty({
-    description: 'Current transaction revision for optimistic concurrency control',
+    description:
+      'Current transaction revision for optimistic concurrency control',
     example: 3,
   })
   @IsInt()

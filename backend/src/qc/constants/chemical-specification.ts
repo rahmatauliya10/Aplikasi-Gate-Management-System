@@ -10,9 +10,70 @@
  *    - Operational specifications must be verified against supplier Certificate of Analysis (COA) and QA SOP.
  * 2. Rapid Klen (Heavy-Duty Alkaline CIP):
  *    - Total Alkalinity can be expressed as % Na2O or % NaOH (conversion factor: 2*NaOH / Na2O = 80/62 ≈ 1.29).
- *    - Boundary conditions: Exact 35.00% Na2O is evaluated as compliant (non-strict inequality >= 35.0%).
- *    - These numerical limits are reference thresholds for testing and require formal QA validation.
+ *    - Boundary conditions: Operator comparison is strictly governed by signed specifications (minOperator: 'GT' vs 'GTE').
+ *      In provisional status, strict boundary > 35.0% is maintained to prevent unwarranted automated release.
+ * 3. Governance Rule:
+ *    - Any product with approvalStatus !== 'APPROVED' CANNOT produce an automated 'RELEASE'.
  */
+
+export type SpecificationApprovalStatus =
+  'APPROVED' | 'PENDING_SIGNOFF' | 'TEST_FIXTURE';
+
+export interface ChemicalSpecificationMetadata {
+  version: string;
+  documentSource: string;
+  approvalStatus: SpecificationApprovalStatus;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  minOperator: 'GT' | 'GTE';
+  notes: string;
+}
+
+export const OPERATIONAL_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
+  version: '1.0.0-provisional',
+  documentSource:
+    'Supplier Reference Datasheet (Awaiting Formal QA Head Signoff & COA Validation)',
+  approvalStatus: 'PENDING_SIGNOFF',
+  approvedBy: null,
+  approvedAt: null,
+  minOperator: 'GTE',
+  notes:
+    'Provisional PAC parameters. Automated RELEASE is prohibited until formal QA validation.',
+};
+
+export const OPERATIONAL_RAPID_KLEN_SPEC_METADATA: ChemicalSpecificationMetadata =
+  {
+    version: '1.0.0-provisional',
+    documentSource:
+      'Supplier CIP Technical Specification (Awaiting Formal QA Head Signoff)',
+    approvalStatus: 'PENDING_SIGNOFF',
+    approvedBy: null,
+    approvedAt: null,
+    minOperator: 'GT', // Strict > 35.00% in provisional state
+    notes:
+      'Provisional Rapid Klen parameters. Exact 35.00% boundary requires strict GT > 35.0% in provisional mode.',
+  };
+
+export const TEST_FIXTURE_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
+  version: 'test-fixture-1.0',
+  documentSource: 'QA Approved Test Fixture (Simulated)',
+  approvalStatus: 'APPROVED',
+  approvedBy: 'QA_HEAD_SIMULATED',
+  approvedAt: '2026-09-30T00:00:00.000Z',
+  minOperator: 'GTE',
+  notes: 'Simulated approved spec for automated testing.',
+};
+
+export const TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA: ChemicalSpecificationMetadata =
+  {
+    version: 'test-fixture-1.0',
+    documentSource: 'QA Approved Test Fixture (Simulated)',
+    approvalStatus: 'APPROVED',
+    approvedBy: 'QA_HEAD_SIMULATED',
+    approvedAt: '2026-09-30T00:00:00.000Z',
+    minOperator: 'GTE',
+    notes: 'Simulated approved spec for automated testing.',
+  };
 
 export interface PacAnalysisParameters {
   sensory: {
@@ -40,7 +101,8 @@ export interface ChemicalEvaluationResult {
   productName: string;
   isCompliant: boolean;
   result: 'PASS' | 'REJECT';
-  decision: 'RELEASE' | 'REJECT';
+  decision: 'RELEASE' | 'PENDING_DISPOSITION' | 'REJECT';
+  specMetadata: ChemicalSpecificationMetadata;
   violations: string[];
   summary: string;
 }
@@ -53,25 +115,30 @@ export interface ChemicalEvaluationResult {
  * - Sensory: All 3 mandatory checks must be true
  */
 export const PAC_SPECIFICATION = {
-  phMin: 3.50,
-  phMax: 5.00,
-  densityMin: 1.170,
-  densityMax: 1.260,
+  phMin: 3.5,
+  phMax: 5.0,
+  densityMin: 1.17,
+  densityMax: 1.26,
   aluminaMin: 9.0,
 };
 
 export function evaluatePacAnalysis(
   params: PacAnalysisParameters,
   productName = 'PAC 280 AC',
+  specMetadata: ChemicalSpecificationMetadata = OPERATIONAL_PAC_SPEC_METADATA,
 ): ChemicalEvaluationResult {
   const violations: string[] = [];
 
   // 1. Sensory checks
   if (!params.sensory?.visual) {
-    violations.push('Visual tidak homogen atau keruh (harus cairan jernih kekuningan)');
+    violations.push(
+      'Visual tidak homogen atau keruh (harus cairan jernih kekuningan)',
+    );
   }
   if (!params.sensory?.odor) {
-    violations.push('Bau terdeteksi kontaminasi asing (harus bau khas PAC normal)');
+    violations.push(
+      'Bau terdeteksi kontaminasi asing (harus bau khas PAC normal)',
+    );
   }
   if (!params.sensory?.packaging) {
     violations.push('Segel tangki/drum rusak atau kemasan bocor');
@@ -80,7 +147,10 @@ export function evaluatePacAnalysis(
   // 2. pH verification (3.50 - 5.00)
   if (params.ph == null || isNaN(params.ph)) {
     violations.push('Parameter pH wajib diisi');
-  } else if (params.ph < PAC_SPECIFICATION.phMin || params.ph > PAC_SPECIFICATION.phMax) {
+  } else if (
+    params.ph < PAC_SPECIFICATION.phMin ||
+    params.ph > PAC_SPECIFICATION.phMax
+  ) {
     violations.push(
       `pH (${params.ph}) di luar batas spesifikasi (${PAC_SPECIFICATION.phMin} - ${PAC_SPECIFICATION.phMax})`,
     );
@@ -108,15 +178,30 @@ export function evaluatePacAnalysis(
   }
 
   const isCompliant = violations.length === 0;
+
+  // Audit Rule: Withhold automated RELEASE if spec is not formally approved
+  let decision: 'RELEASE' | 'PENDING_DISPOSITION' | 'REJECT';
+  let summary: string;
+
+  if (!isCompliant) {
+    decision = 'REJECT';
+    summary = `PAC ditolak karena melanggar ${violations.length} parameter spesifikasi: ${violations.join('; ')}`;
+  } else if (specMetadata.approvalStatus !== 'APPROVED') {
+    decision = 'PENDING_DISPOSITION';
+    summary = `PAC memenuhi parameter acuan teknis (pH: ${params.ph}, Density: ${params.density}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke disposisi pejabat Utility/QA.`;
+  } else {
+    decision = 'RELEASE';
+    summary = `PAC memenuhi seluruh parameter wajib (pH: ${params.ph}, Density: ${params.density}, Sensori OK). Disetujui RELEASE berdasarkan spesifikasi teresahkan v${specMetadata.version}.`;
+  }
+
   return {
     productName,
     isCompliant,
     result: isCompliant ? 'PASS' : 'REJECT',
-    decision: isCompliant ? 'RELEASE' : 'REJECT',
+    decision,
+    specMetadata,
     violations,
-    summary: isCompliant
-      ? `PAC memenuhi seluruh parameter wajib (pH: ${params.ph}, Density: ${params.density}, Sensori OK). Disetujui RELEASE.`
-      : `PAC ditolak karena melanggar ${violations.length} parameter spesifikasi: ${violations.join('; ')}`,
+    summary,
   };
 }
 
@@ -132,12 +217,13 @@ export const RAPID_KLEN_SPECIFICATION = {
   na2oMin: 35.0,
   naohMin: 45.16,
   phMin: 12.0,
-  densityMin: 1.400,
+  densityMin: 1.4,
 };
 
 export function evaluateRapidKlenAnalysis(
   params: RapidKlenAnalysisParameters,
   productName = 'Rapid Klen',
+  specMetadata: ChemicalSpecificationMetadata = OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
 ): ChemicalEvaluationResult {
   const violations: string[] = [];
 
@@ -149,13 +235,21 @@ export function evaluateRapidKlenAnalysis(
     violations.push('Integritas kemasan/segel pabrik rusak');
   }
 
-  // 2. Na2O Alkalinity (>= 35.0%)
+  // 2. Na2O Alkalinity (Operator governed by specMetadata: GT vs GTE)
   if (params.alkalinityNa2O == null || isNaN(params.alkalinityNa2O)) {
     violations.push('Kadar Alkalinitas Na2O wajib diisi');
-  } else if (params.alkalinityNa2O < RAPID_KLEN_SPECIFICATION.na2oMin) {
-    violations.push(
-      `Alkalinitas Na2O (${params.alkalinityNa2O}%) di bawah batas minimal (${RAPID_KLEN_SPECIFICATION.na2oMin}%)`,
-    );
+  } else {
+    const isAlkalinityBelow =
+      specMetadata.minOperator === 'GT'
+        ? params.alkalinityNa2O <= RAPID_KLEN_SPECIFICATION.na2oMin
+        : params.alkalinityNa2O < RAPID_KLEN_SPECIFICATION.na2oMin;
+
+    if (isAlkalinityBelow) {
+      const opText = specMetadata.minOperator === 'GT' ? '>' : '>=';
+      violations.push(
+        `Alkalinitas Na2O (${params.alkalinityNa2O}%) tidak memenuhi batas spesifikasi (${opText} ${RAPID_KLEN_SPECIFICATION.na2oMin}%)`,
+      );
+    }
   }
 
   // 3. Optional NaOH Alkalinity (>= 45.16%)
@@ -186,14 +280,29 @@ export function evaluateRapidKlenAnalysis(
   }
 
   const isCompliant = violations.length === 0;
+
+  // Audit Rule: Withhold automated RELEASE if spec is not formally approved
+  let decision: 'RELEASE' | 'PENDING_DISPOSITION' | 'REJECT';
+  let summary: string;
+
+  if (!isCompliant) {
+    decision = 'REJECT';
+    summary = `Rapid Klen ditolak karena melanggar spesifikasi: ${violations.join('; ')}`;
+  } else if (specMetadata.approvalStatus !== 'APPROVED') {
+    decision = 'PENDING_DISPOSITION';
+    summary = `Rapid Klen memenuhi parameter acuan teknis (Na2O: ${params.alkalinityNa2O}%, pH: ${params.ph}), namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke disposisi pejabat Utility/QA.`;
+  } else {
+    decision = 'RELEASE';
+    summary = `Rapid Klen memenuhi seluruh parameter (Na2O: ${params.alkalinityNa2O}%, pH: ${params.ph}, Density: ${params.density}, Kemasan OK). Disetujui RELEASE berdasarkan spesifikasi teresahkan v${specMetadata.version}.`;
+  }
+
   return {
     productName,
     isCompliant,
     result: isCompliant ? 'PASS' : 'REJECT',
-    decision: isCompliant ? 'RELEASE' : 'REJECT',
+    decision,
+    specMetadata,
     violations,
-    summary: isCompliant
-      ? `Rapid Klen memenuhi seluruh parameter (Na2O: ${params.alkalinityNa2O}%, pH: ${params.ph}, Density: ${params.density}, Kemasan OK). Disetujui RELEASE.`
-      : `Rapid Klen ditolak karena melanggar spesifikasi: ${violations.join('; ')}`,
+    summary,
   };
 }

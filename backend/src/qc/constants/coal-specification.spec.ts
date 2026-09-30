@@ -3,6 +3,8 @@ import {
   DEFAULT_COAL_CALORIE,
   getCoalMoistureLimit,
   evaluateCoalAnalysis,
+  TEST_FIXTURE_COAL_SPEC_METADATA,
+  OPERATIONAL_COAL_SPEC_METADATA,
 } from './coal-specification';
 
 describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
@@ -22,7 +24,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     expect(getCoalMoistureLimit('9999')).toBe(33.0);
   });
 
-  it('evaluates PASS / RELEASE when within limit for standard GAR 4200 (<= 33%)', () => {
+  it('withholds automated RELEASE (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF', () => {
     const evalResult = evaluateCoalAnalysis({
       targetCalorie: '4200',
       totalMoisture: 31.5,
@@ -31,18 +33,39 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     });
 
     expect(evalResult.result).toBe('PASS');
+    expect(evalResult.decision).toBe('PENDING_DISPOSITION');
+    expect(evalResult.isWithinSpec).toBe(true);
+    expect(evalResult.specMetadata.approvalStatus).toBe('PENDING_SIGNOFF');
+    expect(evalResult.notes).toContain('Keputusan RELEASE otomatis ditahan');
+  });
+
+  it('evaluates PASS / RELEASE when within limit for standard GAR 4200 using approved fixture specification', () => {
+    const evalResult = evaluateCoalAnalysis(
+      {
+        targetCalorie: '4200',
+        totalMoisture: 31.5,
+        testRound: 1,
+        sensoryPassed: true,
+      },
+      TEST_FIXTURE_COAL_SPEC_METADATA,
+    );
+
+    expect(evalResult.result).toBe('PASS');
     expect(evalResult.decision).toBe('RELEASE');
     expect(evalResult.isWithinSpec).toBe(true);
     expect(evalResult.maxAllowedMoisture).toBe(33.0);
   });
 
-  it('evaluates PASS / RELEASE for high-calorie GAR 5500 tier when <= 26%', () => {
-    const evalResult = evaluateCoalAnalysis({
-      targetCalorie: '5500',
-      totalMoisture: 25.4,
-      testRound: 1,
-      sensoryPassed: true,
-    });
+  it('evaluates PASS / RELEASE for high-calorie GAR 5500 tier when <= 26% with approved fixture', () => {
+    const evalResult = evaluateCoalAnalysis(
+      {
+        targetCalorie: '5500',
+        totalMoisture: 25.4,
+        testRound: 1,
+        sensoryPassed: true,
+      },
+      TEST_FIXTURE_COAL_SPEC_METADATA,
+    );
 
     expect(evalResult.result).toBe('PASS');
     expect(evalResult.decision).toBe('RELEASE');
