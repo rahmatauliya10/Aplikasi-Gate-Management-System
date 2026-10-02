@@ -245,7 +245,6 @@ export class WarehouseService {
             [
               TransactionStatus.PA_NOT_REQUIRED,
               TransactionStatus.QC_VEHICLE_PASSED,
-              TransactionStatus.QC_VEHICLE_PENDING,
             ] as TransactionStatus[]
           ).includes(tx.status) &&
           tx.weighInAt != null &&
