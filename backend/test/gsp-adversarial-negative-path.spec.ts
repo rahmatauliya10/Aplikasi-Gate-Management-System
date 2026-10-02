@@ -132,11 +132,13 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         updateMany: jest.fn(),
       },
       userWarehouseAccess: {
-        findMany: jest.fn().mockResolvedValue([
-          { processType: ProcessType.GSP },
-          { processType: ProcessType.GBB },
-          { processType: ProcessType.GBJ },
-        ]),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { processType: ProcessType.GSP },
+            { processType: ProcessType.GBB },
+            { processType: ProcessType.GBJ },
+          ]),
       },
       productCatalog: {
         findUnique: jest.fn(),
@@ -199,7 +201,11 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
     it('Vector 1: startQc fails closed with HTTP 400 for GSP transaction', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspTx);
       await expect(
-        qcService.startQc('tx-gsp-adv-1', { revision: 1 } as any, qcAnalystUser),
+        qcService.startQc(
+          'tx-gsp-adv-1',
+          { revision: 1 } as any,
+          qcAnalystUser,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -295,7 +301,11 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       });
 
       await expect(
-        warehouseService.startWarehouse('tx-wrong-scope-cat', {}, warehouseUser),
+        warehouseService.startWarehouse(
+          'tx-wrong-scope-cat',
+          {},
+          warehouseUser,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -414,7 +424,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         revision: 2,
       };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTxWaiting);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalTxWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'pa-r2',
         transactionId: coalTxWaiting.id,
@@ -463,7 +475,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         area: 'UTILITY_DISPOSITION_AUTHORITY',
       } as any;
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTxWaiting);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalTxWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'pa-r2',
         transactionId: coalTxWaiting.id,
@@ -496,14 +510,18 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         revision: 2,
       };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTxWaiting);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalTxWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'pa-r2',
         transactionId: coalTxWaiting.id,
         testRound: 2,
         testedById: 'analyst-x',
       });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(adminNonUtilityUser);
+      mockPrismaService.user.findUnique.mockResolvedValueOnce(
+        adminNonUtilityUser,
+      );
 
       await expect(
         qcAnalysisService.submitUtilityDisposition(
@@ -525,7 +543,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         revision: 2,
       };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTxWaiting);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalTxWaiting,
+      );
       mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
         id: 'pa-r2',
         transactionId: coalTxWaiting.id,

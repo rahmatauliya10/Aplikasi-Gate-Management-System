@@ -241,11 +241,13 @@ export class WarehouseService {
       if (exemptionEval.isExempt) {
         // Solar BBM exemption branch: Must have physical weigh-in and valid catalog
         const isSolarValid =
-          [
-            TransactionStatus.PA_NOT_REQUIRED,
-            TransactionStatus.QC_VEHICLE_PASSED,
-            TransactionStatus.QC_VEHICLE_PENDING,
-          ].includes(tx.status) &&
+          (
+            [
+              TransactionStatus.PA_NOT_REQUIRED,
+              TransactionStatus.QC_VEHICLE_PASSED,
+              TransactionStatus.QC_VEHICLE_PENDING,
+            ] as TransactionStatus[]
+          ).includes(tx.status) &&
           tx.weighInAt != null &&
           tx.grossWeight != null &&
           Number(tx.grossWeight) > 0 &&
@@ -260,8 +262,7 @@ export class WarehouseService {
               action: 'WAREHOUSE_FLOW_REJECTED',
               module: 'WAREHOUSE',
               referenceId: transactionId,
-              description:
-                `Warehouse start rejected for GSP Solar: Incomplete weigh-in or invalid exemption catalog. Status: ${tx.status}`,
+              description: `Warehouse start rejected for GSP Solar: Incomplete weigh-in or invalid exemption catalog. Status: ${tx.status}`,
               status: 'FAILED',
             })
             .catch(() => {});
@@ -281,15 +282,13 @@ export class WarehouseService {
               action: 'WAREHOUSE_FLOW_REJECTED',
               module: 'WAREHOUSE',
               referenceId: transactionId,
-              description:
-                `Warehouse start rejected: GSP cargo ${tx.cargoSubType} has status ${tx.status}, expected QC_VEHICLE_PASSED.`,
+              description: `Warehouse start rejected: GSP cargo ${tx.cargoSubType} has status ${tx.status}, expected QC_VEHICLE_PASSED.`,
               status: 'FAILED',
             })
             .catch(() => {});
           throw new BadRequestException({
             success: false,
-            message:
-              `Gudang tidak dapat memulai proses: Transaksi GSP ${tx.cargoSubType} berstatus ${tx.status}. Wajib berstatus QC_VEHICLE_PASSED dari rilis PA yang sah.`,
+            message: `Gudang tidak dapat memulai proses: Transaksi GSP ${tx.cargoSubType} berstatus ${tx.status}. Wajib berstatus QC_VEHICLE_PASSED dari rilis PA yang sah.`,
             errors: [],
           });
         }
@@ -336,8 +335,7 @@ export class WarehouseService {
               action: 'WAREHOUSE_FLOW_REJECTED',
               module: 'WAREHOUSE',
               referenceId: transactionId,
-              description:
-                `Security violation: Attempted warehouse start on GSP transaction with forged/missing PA record.`,
+              description: `Security violation: Attempted warehouse start on GSP transaction with forged/missing PA record.`,
               status: 'FAILED',
             })
             .catch(() => {});
@@ -372,8 +370,7 @@ export class WarehouseService {
         if (!isDirectRelease && !isUtilityAccepted) {
           throw new BadRequestException({
             success: false,
-            message:
-              `Gudang menolak memulai proses: Analisis PA terakhir belum memperoleh keputusan rilis yang sah (Status PA: ${activePa.status}, Disposisi: ${activePa.dispositionAction || 'NONE'}). Tidak ada izin bongkar.`,
+            message: `Gudang menolak memulai proses: Analisis PA terakhir belum memperoleh keputusan rilis yang sah (Status PA: ${activePa.status}, Disposisi: ${activePa.dispositionAction || 'NONE'}). Tidak ada izin bongkar.`,
             errors: [],
           });
         }
@@ -388,15 +385,13 @@ export class WarehouseService {
             action: 'WAREHOUSE_FLOW_REJECTED',
             module: 'WAREHOUSE',
             referenceId: transactionId,
-            description:
-              `Warehouse start rejected: Current status is ${tx.status}. Required: QC_VEHICLE_PASSED.`,
+            description: `Warehouse start rejected: Current status is ${tx.status}. Required: QC_VEHICLE_PASSED.`,
             status: 'SUCCESS',
           })
           .catch(() => {});
         throw new BadRequestException({
           success: false,
-          message:
-            `Gudang tidak dapat memulai proses: Transaksi berstatus ${tx.status} belum lulus QC pemeriksaan kendaraan.`,
+          message: `Gudang tidak dapat memulai proses: Transaksi berstatus ${tx.status} belum lulus QC pemeriksaan kendaraan.`,
           errors: [],
         });
       }

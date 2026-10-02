@@ -126,9 +126,7 @@ export class QcProductAnalysisService {
       const authName = authoritativeProductName
         .toUpperCase()
         .replace(/\s+/g, '');
-      const authSub = (tx.cargoSubType || '')
-        .toUpperCase()
-        .replace(/\s+/g, '');
+      const authSub = (tx.cargoSubType || '').toUpperCase().replace(/\s+/g, '');
       const normClient = clientName.replace(/EE/g, 'E');
       const normAuth = authName.replace(/EE/g, 'E');
       const normSub = authSub.replace(/EE/g, 'E');
@@ -188,7 +186,8 @@ export class QcProductAnalysisService {
 
     let evalResult: {
       result: 'PASS' | 'REJECT';
-      decision: 'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
+      decision:
+        'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
       notes?: string;
     };
 
@@ -217,7 +216,8 @@ export class QcProductAnalysisService {
 
       evalResult = evaluateCoalAnalysis(
         {
-          targetCalorie: tx.productCatalog?.code || tx.cargoSubType,
+          targetCalorie:
+            tx.productCatalog?.code || tx.cargoSubType || undefined,
           totalMoisture: Number(
             rawParams.moisture ?? rawParams.totalMoisture ?? 0,
           ),
@@ -244,7 +244,7 @@ export class QcProductAnalysisService {
               rawParams.sensory?.visual ??
               (rawParams.visualAppearance
                 ? !rawParams.visualAppearance.toLowerCase().includes('keruh')
-                : (rawParams.visual === 'OK' || rawParams.visual === true)),
+                : rawParams.visual === 'OK' || rawParams.visual === true),
             odor:
               rawParams.sensory?.odor ??
               (rawParams.foreignMatters === 'NIL' ||
@@ -255,7 +255,7 @@ export class QcProductAnalysisService {
               rawParams.sensory?.packaging ??
               (rawParams.packagingCondition
                 ? !rawParams.packagingCondition.toLowerCase().includes('rusak')
-                : (rawParams.packaging === 'OK' || rawParams.packaging === true)),
+                : rawParams.packaging === 'OK' || rawParams.packaging === true),
           },
           ph: Number(rawParams.ph),
           density: Number(rawParams.density),
@@ -282,12 +282,12 @@ export class QcProductAnalysisService {
               rawParams.sensory?.visual ??
               (rawParams.visualAppearance
                 ? !rawParams.visualAppearance.toLowerCase().includes('keruh')
-                : (rawParams.visual === 'OK' || rawParams.visual === true)),
+                : rawParams.visual === 'OK' || rawParams.visual === true),
             packaging:
               rawParams.sensory?.packaging ??
               (rawParams.packagingCondition
                 ? !rawParams.packagingCondition.toLowerCase().includes('rusak')
-                : (rawParams.packaging === 'OK' || rawParams.packaging === true)),
+                : rawParams.packaging === 'OK' || rawParams.packaging === true),
           },
           alkalinityNa2O: Number(
             rawParams.alkalinityNa2O ?? rawParams.alkalinity ?? 0,
@@ -312,16 +312,28 @@ export class QcProductAnalysisService {
     }
 
     const serverQcResult: QcResult =
-      evalResult.result === 'PASS' ? QcResult.PASSED : QcResult.REJECTED;
+      evalResult.result === 'PASS' ? QcResult.PASS : QcResult.REJECT;
+
+    const normalizedClientResult =
+      dto.result === (QcResult.PASS as any) ||
+      (dto.result as string) === 'PASSED'
+        ? QcResult.PASS
+        : dto.result === (QcResult.REJECT as any) ||
+            (dto.result as string) === 'REJECTED'
+          ? QcResult.REJECT
+          : null;
 
     // Validate client submitted values if sent (reject forging/tampering)
-    if (dto.result && dto.result !== serverQcResult) {
+    if (dto.result && normalizedClientResult !== serverQcResult) {
       throw new BadRequestException(
         `Hasil analisis client (${dto.result}) tidak sesuai dengan hasil evaluasi server (${serverQcResult}). Keputusan server bersifat otoritatif.`,
       );
     }
 
-    if (dto.decision && dto.decision !== evalResult.decision) {
+    if (
+      dto.decision &&
+      (dto.decision as string) !== (evalResult.decision as string)
+    ) {
       throw new BadRequestException(
         `Keputusan analisis client (${dto.decision}) tidak sesuai dengan evaluasi spesifikasi server (${evalResult.decision}). Keputusan server bersifat otoritatif.`,
       );
