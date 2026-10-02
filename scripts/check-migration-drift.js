@@ -236,8 +236,15 @@ async function main() {
         const addConstraintMatch = normStmt.match(/alter table\s+["`]?(\w+)["`]?\s+add constraint\s+["`]?(\w+)["`]?/i);
         const dropConstraintMatch = normStmt.match(/alter table\s+["`]?(\w+)["`]?\s+drop constraint\s+["`]?(\w+)["`]?/i);
         const dropIndexMatch = normStmt.match(/drop\s+index\s+["`]?(\w+)["`]?/i);
+        const alterTypeAddValueMatch = normStmt.match(/alter type\s+["`]?(\w+)["`]?\s+add value\s+['"]?(\w+)['"]?/i);
 
         if (createTableMatch && normPending.includes(createTableMatch[1].toLowerCase())) {
+          isAccountedFor = true;
+        } else if (
+          alterTypeAddValueMatch &&
+          normPending.includes(alterTypeAddValueMatch[1].toLowerCase()) &&
+          normPending.includes(alterTypeAddValueMatch[2].toLowerCase())
+        ) {
           isAccountedFor = true;
         } else if (
           addColumnMatch &&
