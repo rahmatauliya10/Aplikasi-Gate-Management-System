@@ -99,23 +99,34 @@ export class GateService {
           }
 
           let resolvedCatalogId: string | null = null;
-          if (dto.productCatalogId) {
+          if (dto.productCatalogId && tx.productCatalog) {
             const cat = await tx.productCatalog.findUnique({
               where: { id: dto.productCatalogId },
             });
             if (cat) {
               resolvedCatalogId = cat.id;
             }
-          } else if (dto.cargoSubType && dto.processType) {
+          } else if (
+            (dto.cargoSubType || dto.cargoType) &&
+            dto.processType &&
+            tx.productCatalog
+          ) {
+            const term = dto.cargoSubType || dto.cargoType;
             const cat = await tx.productCatalog.findFirst({
               where: {
                 processType: dto.processType,
                 isActive: true,
                 OR: [
-                  { name: { equals: dto.cargoSubType, mode: 'insensitive' } },
+                  { name: { equals: term, mode: 'insensitive' } },
                   {
                     subCategory: {
-                      equals: dto.cargoSubType,
+                      equals: term,
+                      mode: 'insensitive',
+                    },
+                  },
+                  {
+                    category: {
+                      equals: term,
                       mode: 'insensitive',
                     },
                   },

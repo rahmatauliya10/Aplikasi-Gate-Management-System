@@ -251,7 +251,7 @@ async function runE2ESmoke() {
   log(`  7. GBB Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
 
 
-  // Step 5: FULL GSP WORKFLOW (Check-In -> Weigh In -> QC Vehicle -> Warehouse -> QC Incoming -> Weigh Out -> Gate Out -> COMPLETED)
+  // Step 5: FULL GSP WORKFLOW (Check-In -> Weigh In -> Legacy QC Block Verification -> Warehouse -> Weigh Out -> Gate Out -> COMPLETED)
   log(`[WORKFLOW 2/3] Executing Complete GSP Lifecycle to COMPLETED...`);
 
   // 5a. Check-In
@@ -262,7 +262,8 @@ async function runE2ESmoke() {
     vendorName: 'PT E2E Supplier GSP',
     vehicleType: 'TRUCK',
     processType: 'GSP',
-    cargoType: 'General Cargo Material',
+    cargoType: 'Solar',
+    cargoSubType: 'Solar',
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-GSP-${timestampSuffix}`,
   });
@@ -280,21 +281,22 @@ async function runE2ESmoke() {
   if (!isSuccessStatus(gspWbIn.statusCode)) {
     throw new Error(`GSP Weigh-In FAILED: Status ${gspWbIn.statusCode}, Body: ${JSON.stringify(gspWbIn.body)}`);
   }
-  log(`  2. GSP Weigh-In SUCCESS (Gross: 12,000 kg, Status: WEIGH_IN_DONE)`);
+  log(`  2. GSP Weigh-In SUCCESS (Gross: 12,000 kg, Status: PA_NOT_REQUIRED)`);
 
-  // 5c. QC Vehicle Check
+  // 5c. QC Vehicle Check Bypass Attempt (Defense-in-depth: MUST return HTTP 400)
+  log(`  3. Testing Legacy QC Vehicle endpoint on GSP transaction (Must FAIL with HTTP 400)...`);
   const gspQcV = await request(`/api/qc/vehicle-result/${gspTxId}`, { method: 'POST', headers: authHeader }, {
     result: 'PASS',
     vehicleCleanliness: true,
     vehicleOdor: true,
   });
-  if (!isSuccessStatus(gspQcV.statusCode)) {
-    throw new Error(`GSP QC Vehicle Check FAILED: Status ${gspQcV.statusCode}, Body: ${JSON.stringify(gspQcV.body)}`);
+  if (gspQcV.statusCode !== 400) {
+    throw new Error(`GSP Legacy QC Vehicle check did NOT fail with 400! Received status: ${gspQcV.statusCode}`);
   }
-  log(`  3. GSP QC Vehicle Check SUCCESS (Status: QC_VEHICLE_PASSED)`);
+  log(`  3. Legacy QC Vehicle endpoint on GSP blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
 
   // 5d. Warehouse Start & Complete (Unloading)
-  await request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GSP unloading' });
+  await stepOk(request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GSP unloading' }), 'GSP Warehouse Start');
   const gspWhComp = await request(`/api/warehouse/complete/${gspTxId}`, { method: 'POST', headers: authHeader }, {
     actualWeight: 12000,
     actualQuantity: 40,
@@ -439,7 +441,9 @@ async function runE2ESmoke() {
         weight: processType === 'GBJ' ? 4000 : 15000,
         ticketNumber: `WB-IN-${processType}-RERUN-${suffix}`,
       }), 'Weighbridge In');
-      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
+      if (processType !== 'GSP') {
+        await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
+      }
       await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
       await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
@@ -460,7 +464,9 @@ async function runE2ESmoke() {
       }), 'Weighbridge Out');
       await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
     } else if (targetStatus === 'QC_VEHICLE_PENDING') {
-      await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
+      if (processType !== 'GSP') {
+        await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
+      }
       await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
       await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
@@ -577,8 +583,8 @@ async function runE2ESmoke() {
     log(`    ✓ GBB REOPEN -> ${target} rerun to COMPLETED [PASS]`, 'SUCCESS');
   }
 
-  // 7c. GSP Reopen Matrix (REGISTERED, QC_VEHICLE_PENDING, QC_VEHICLE_PASSED, INCOMING_CHECK_PENDING)
-  const gspTargets = ['REGISTERED', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_PASSED', 'INCOMING_CHECK_PENDING'];
+  // 7c. GSP Reopen Matrix (REGISTERED, QC_VEHICLE_PENDING, QC_VEHICLE_PASSED)
+  const gspTargets = ['REGISTERED', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_PASSED'];
   for (const target of gspTargets) {
     const detailRes = await request(`/api/transactions/${gspTxId}`, { headers: authHeader });
     const currentRev = detailRes.body?.data?.revision || 1;
@@ -602,7 +608,36 @@ async function runE2ESmoke() {
     log(`    ✓ GSP REOPEN -> ${target} rerun to COMPLETED [PASS]`, 'SUCCESS');
   }
 
-  // 7d. Fail-closed invalid REOPEN check (GBJ + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400)
+  // 7d. Fail-closed invalid REOPEN checks:
+  // 1) GSP + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400 (GSP does not support incoming QC)
+  log(`Testing REOPEN fail-closed enforcement (GSP + INCOMING_CHECK_PENDING)...`);
+  const gspDetailRes2 = await request(`/api/transactions/${gspTxId}`, { headers: authHeader });
+  const gspCurrentRev2 = gspDetailRes2.body?.data?.revision || 1;
+
+  const invalidGspReopenRes = await request(
+    `/api/transactions/${gspTxId}/operation-log-corrections`,
+    {
+      method: 'POST',
+      headers: authHeader,
+    },
+    {
+      action: 'REOPEN_WORKFLOW',
+      reasonCode: 'SALAH_INPUT_ANGKA',
+      remark: 'E2E Matrix Fail-Closed Business Rule Verification (GSP + INCOMING_CHECK_PENDING)',
+      expectedRevision: gspCurrentRev2,
+      reopenTargetStatus: 'INCOMING_CHECK_PENDING',
+    }
+  );
+
+  if (invalidGspReopenRes.statusCode === 400) {
+    log(`GSP REOPEN fail-closed business matrix check PASSED: Received EXACT HTTP 400 Bad Request.`, 'SUCCESS');
+  } else {
+    throw new Error(
+      `GSP REOPEN fail-closed business matrix check FAILED! Expected EXACT HTTP 400 for GSP INCOMING_CHECK_PENDING target, but received HTTP ${invalidGspReopenRes.statusCode}. Body: ${JSON.stringify(invalidGspReopenRes.body)}`
+    );
+  }
+
+  // 2) GBJ + INCOMING_CHECK_PENDING -> MUST BE EXACT HTTP 400
   log(`Testing REOPEN fail-closed enforcement (GBJ + INCOMING_CHECK_PENDING)...`);
   const gbjDetailRes2 = await request(`/api/transactions/${gbjTxId}`, { headers: authHeader });
   const currentRev2 = gbjDetailRes2.body?.data?.revision || 1;
@@ -616,17 +651,17 @@ async function runE2ESmoke() {
     {
       action: 'REOPEN_WORKFLOW',
       reasonCode: 'SALAH_INPUT_ANGKA',
-      remark: 'E2E Matrix Fail-Closed Business Rule Verification',
+      remark: 'E2E Matrix Fail-Closed Business Rule Verification (GBJ + INCOMING_CHECK_PENDING)',
       expectedRevision: currentRev2,
       reopenTargetStatus: 'INCOMING_CHECK_PENDING',
     }
   );
 
   if (invalidReopenRes.statusCode === 400) {
-    log(`REOPEN fail-closed business matrix check PASSED: Received EXACT HTTP 400 Bad Request as mandated.`, 'SUCCESS');
+    log(`GBJ REOPEN fail-closed business matrix check PASSED: Received EXACT HTTP 400 Bad Request as mandated.`, 'SUCCESS');
   } else {
     throw new Error(
-      `REOPEN fail-closed business matrix check FAILED! Expected EXACT HTTP 400 for GBJ INCOMING_CHECK_PENDING target, but received HTTP ${invalidReopenRes.statusCode}. Body: ${JSON.stringify(invalidReopenRes.body)}`
+      `GBJ REOPEN fail-closed business matrix check FAILED! Expected EXACT HTTP 400 for GBJ INCOMING_CHECK_PENDING target, but received HTTP ${invalidReopenRes.statusCode}. Body: ${JSON.stringify(invalidReopenRes.body)}`
     );
   }
 

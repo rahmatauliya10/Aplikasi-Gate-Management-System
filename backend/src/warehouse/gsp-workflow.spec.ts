@@ -57,6 +57,10 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       transactionStatusHistory: {
         create: jest.fn(),
       },
+      qcProductAnalysis: {
+        findFirst: jest.fn(),
+        findMany: jest.fn(),
+      },
     };
 
     mockActivityLogsService = {
@@ -329,6 +333,8 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         processType: ProcessType.GSP,
         cargoType: 'Fuel',
         cargoSubType: 'Solar',
+        weighInAt: new Date(),
+        grossWeight: 15000,
         revision: 2,
         productCatalog: {
           id: 'cat-solar-1',
@@ -397,10 +403,29 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         processType: ProcessType.GSP,
         cargoType: 'Coal',
         cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
         revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-coal-1',
+        transactionId: 'tx-coal-1',
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: 'PASSED',
+        isVoided: false,
+      });
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);

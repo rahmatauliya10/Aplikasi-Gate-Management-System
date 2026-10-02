@@ -113,24 +113,6 @@
               <div v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS'">
                 <WeightInput label="Input Actual Weight GSP (KG)" :is-submitting="isProcessing" @save="handleWeightSave" />
               </div>
-
-              <!-- Incoming Material Check (Read Only for Warehouse) -->
-              <div v-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="mt-6 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2)">
-                <span class="material-icons text-blue-500 text-2xl animate-spin">sync</span>
-                <div>
-                  <p class="text-sm font-black text-blue-700">Pemeriksaan Incoming QC Berlangsung</p>
-                  <p class="text-[11px] text-blue-600">Menunggu pemeriksaan Incoming QC oleh QC Team.</p>
-                </div>
-              </div>
-
-              <!-- Sampling Result Badge -->
-              <div v-if="selectedTruck.status === 'INCOMING_CHECK_REJECTED'" class="mt-4 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2)">
-                <span class="material-icons text-red-500 text-2xl">cancel</span>
-                <div>
-                  <p class="text-sm font-black text-red-700">Checklist REJECTED</p>
-                  <p class="text-[11px] text-red-500">Truck redirected to outbound weighbridge.</p>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -203,7 +185,7 @@
                 <div class="mt-4 flex justify-between items-end pl-3">
                   <div class="flex items-center space-x-2">
                     <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest"
-                      :class="truck.status === 'INCOMING_CHECK_PENDING' ? 'bg-sky-50 text-sky-600 border border-sky-200' : 'bg-slate-50 text-slate-700 border border-slate-200'">
+                      :class="truck.status === 'WAREHOUSE_IN_PROGRESS' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-50 text-slate-700 border border-slate-200'">
                       {{ getStepLabel(truck) }}
                     </span>
                   </div>
@@ -317,7 +299,7 @@ const suratJalanInput = ref('')
 const poNumberInput = ref('')
 const isProcessing = ref(false)
 
-const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'WAREHOUSE_IN_PROGRESS' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(t) === 'GSP'))
+const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'PA_NOT_REQUIRED' || t.status === 'WAREHOUSE_IN_PROGRESS') && getProcessType(t) === 'GSP'))
 const filteredGspTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
   if (!keyword) return gspTrucks.value

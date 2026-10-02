@@ -84,6 +84,16 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(solarTx);
+      mockPrismaService.productCatalog.findFirst.mockResolvedValueOnce({
+        id: 'cat-coal-1',
+        code: 'COAL-001',
+        name: 'Batubara',
+        subCategory: 'Batubara',
+        category: 'Coal',
+        processType: ProcessType.GSP,
+        isActive: true,
+        isPaRequired: true,
+      });
 
       const mockTxClient = {
         transaction: {
@@ -218,11 +228,15 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         inProgressTx,
       );
       mockPrismaService.attachment.findUnique.mockResolvedValueOnce({
-        id: 'att-evidence-1',
+        id: '11111111-1111-4111-8111-111111111111',
+        transactionId: 'tx-incident-target',
         fileName: 'berita-acara-solar.pdf',
       });
 
       const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
         transactionCorrection: {
           create: jest.fn().mockResolvedValue({ id: 'corr-incident-1' }),
         },
@@ -237,7 +251,7 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         {
           incidentReason:
             'Muatan solar terindikasi bercampur air saat bongkar berjalan',
-          evidenceAttachmentId: 'att-evidence-1',
+          evidenceAttachmentId: '11111111-1111-4111-8111-111111111111',
           supervisorPic: 'Pak Bambang (Supervisor)',
           actionTaken: 'Pompa dihentikan dan sampel dikirim ke laboratorium',
           revision: 4,
@@ -273,7 +287,7 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
           'tx-incident-target',
           {
             incidentReason: 'Insiden operasional tanpa bukti',
-            evidenceAttachmentId: 'att-non-existent',
+            evidenceAttachmentId: '22222222-2222-4222-8222-222222222222',
             supervisorPic: 'Supervisor',
             revision: 4,
           },

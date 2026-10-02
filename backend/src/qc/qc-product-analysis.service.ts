@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import {
   SubmitProductAnalysisDto,
   AnalysisDecision,
@@ -16,11 +17,21 @@ import {
   UtilityDispositionDto,
   DispositionAction,
 } from './dto/utility-disposition.dto';
-import { TransactionStatus } from '@prisma/client';
-import { OPERATIONAL_COAL_SPEC_METADATA } from './constants/coal-specification';
+import { QcResult, TransactionStatus } from '@prisma/client';
+import {
+  OPERATIONAL_COAL_SPEC_METADATA,
+  TEST_FIXTURE_COAL_SPEC_METADATA,
+  evaluateCoalAnalysis,
+} from './constants/coal-specification';
 import {
   OPERATIONAL_PAC_SPEC_METADATA,
+  TEST_FIXTURE_PAC_SPEC_METADATA,
   OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+  TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+  evaluatePacAnalysis,
+  evaluateRapidKlenAnalysis,
+  PacAnalysisParameters,
+  RapidKlenAnalysisParameters,
 } from './constants/chemical-specification';
 import { isProductPaExempt } from './constants/pa-exemption-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
@@ -33,10 +44,16 @@ export class QcProductAnalysisService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityLogsService: ActivityLogsService,
+    private readonly authorizationScopeService: AuthorizationScopeService,
   ) {}
 
   /**
    * Submit initial or retest lab analysis for a cargo transaction.
+   * Server-authoritative evaluation:
+   * 1. Product identity resolved from Transaction + ProductCatalog
+   * 2. Test round derived from active analysis history
+   * 3. Result and decision evaluated by server specifications
+   * 4. Enforces process-scope authorization (GSP scope)
    */
   async submitProductAnalysis(
     transactionId: string,
@@ -52,6 +69,14 @@ export class QcProductAnalysisService {
       throw new NotFoundException('Transaksi tidak ditemukan');
     }
 
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Analisis PA laboratorium hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+
     // Exempt products (Solar) must never undergo lab PA analysis
     const isExempt = isProductPaExempt(tx.productCatalog, {
       processType: tx.processType,
@@ -64,11 +89,80 @@ export class QcProductAnalysisService {
       );
     }
 
-    const testRound = dto.testRound || 1;
-
-    // Validate status according to test round
+    // ─── 1. Authoritative Product Identity ───
+    const authoritativeCatalogId = tx.productCatalogId;
     if (
-      testRound === 1 &&
+      dto.productCatalogId &&
+      dto.productCatalogId !== authoritativeCatalogId
+    ) {
+      throw new BadRequestException(
+        'Katalog produk pada payload tidak sesuai dengan transaksi aktif.',
+      );
+    }
+
+    const authoritativeProductName =
+      tx.productCatalog?.name || tx.cargoSubType || 'Unknown Product';
+    const authoritativeProductCategory =
+      tx.productCatalog?.category || tx.cargoType || 'Unknown Category';
+
+    // Validate client-provided product identity if sent (reject mismatch)
+    if (dto.productCategory) {
+      const clientCat = dto.productCategory.toUpperCase();
+      const authCat = authoritativeProductCategory.toUpperCase();
+      const authSub = (tx.cargoSubType || '').toUpperCase();
+      if (
+        !authCat.includes(clientCat) &&
+        !clientCat.includes(authCat) &&
+        !authSub.includes(clientCat)
+      ) {
+        throw new BadRequestException(
+          `Kategori produk (${dto.productCategory}) tidak sesuai dengan transaksi (${authoritativeProductCategory}).`,
+        );
+      }
+    }
+
+    if (dto.productName) {
+      const clientName = dto.productName.toUpperCase().replace(/\s+/g, '');
+      const authName = authoritativeProductName
+        .toUpperCase()
+        .replace(/\s+/g, '');
+      const authSub = (tx.cargoSubType || '')
+        .toUpperCase()
+        .replace(/\s+/g, '');
+      const normClient = clientName.replace(/EE/g, 'E');
+      const normAuth = authName.replace(/EE/g, 'E');
+      const normSub = authSub.replace(/EE/g, 'E');
+      if (
+        !normAuth.includes(normClient) &&
+        !normClient.includes(normAuth) &&
+        !normSub.includes(normClient) &&
+        !normClient.includes(normSub)
+      ) {
+        throw new BadRequestException(
+          `Nama produk (${dto.productName}) tidak sesuai dengan transaksi (${authoritativeProductName}).`,
+        );
+      }
+    }
+
+    // ─── 2. Authoritative Test Round Determination ───
+    const activeHistory = await this.prisma.qcProductAnalysis.findMany({
+      where: { transactionId, isVoided: false },
+      orderBy: { testRound: 'desc' },
+    });
+    const historyList = activeHistory || [];
+    const currentMaxRound =
+      historyList.length > 0 ? historyList[0].testRound : 0;
+    const authoritativeTestRound = currentMaxRound + 1;
+
+    if (dto.testRound != null && dto.testRound !== authoritativeTestRound) {
+      throw new BadRequestException(
+        `Nomor ronde uji tidak valid (${dto.testRound}). Ronde yang diharapkan oleh sistem: ${authoritativeTestRound}`,
+      );
+    }
+
+    // Validate status according to authoritative test round
+    if (
+      authoritativeTestRound === 1 &&
       tx.status !== TransactionStatus.QC_VEHICLE_PENDING &&
       tx.status !== TransactionStatus.QC_VEHICLE_IN_PROGRESS
     ) {
@@ -77,27 +171,173 @@ export class QcProductAnalysisService {
       );
     }
 
-    if (testRound > 1 && tx.status !== TransactionStatus.QC_RETEST_REQUIRED) {
+    if (
+      authoritativeTestRound > 1 &&
+      tx.status !== TransactionStatus.QC_RETEST_REQUIRED
+    ) {
       throw new BadRequestException(
-        `Uji ulang (Round ${testRound}) hanya dapat diproses saat status transaksi QC_RETEST_REQUIRED (saat ini: ${tx.status})`,
+        `Uji ulang (Round ${authoritativeTestRound}) hanya dapat diproses saat status transaksi QC_RETEST_REQUIRED (saat ini: ${tx.status})`,
       );
     }
 
-    let nextStatus: TransactionStatus;
-    switch (dto.decision) {
-      case AnalysisDecision.RELEASE:
+    // ─── 3. Server-Authoritative Result & Decision Evaluation ───
+    const specStatus = this.checkSpecificationApprovalStatus(
+      authoritativeProductCategory,
+      authoritativeProductName,
+    );
+
+    let evalResult: {
+      result: 'PASS' | 'REJECT';
+      decision: 'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
+      notes?: string;
+    };
+
+    const isCoal =
+      authoritativeProductCategory.toUpperCase().includes('COAL') ||
+      authoritativeProductName.toUpperCase().includes('BATUBARA') ||
+      (tx.cargoSubType || '').toUpperCase().includes('BATUBARA');
+
+    const isPac =
+      authoritativeProductName.toUpperCase().includes('PAC') ||
+      (tx.cargoSubType || '').toUpperCase().includes('PAC');
+
+    const isRapidKlen =
+      authoritativeProductName.toUpperCase().includes('RAPID') ||
+      authoritativeProductName.toUpperCase().includes('KLEN') ||
+      (tx.cargoSubType || '').toUpperCase().includes('RAPID') ||
+      (tx.cargoSubType || '').toUpperCase().includes('KLEN');
+
+    const rawParams = (dto.parameters || {}) as any;
+
+    if (isCoal) {
+      const coalSpecMeta =
+        specStatus.approvalStatus === 'APPROVED'
+          ? TEST_FIXTURE_COAL_SPEC_METADATA
+          : OPERATIONAL_COAL_SPEC_METADATA;
+
+      evalResult = evaluateCoalAnalysis(
         {
-          const specStatus = this.checkSpecificationApprovalStatus(
-            dto.productCategory,
-            dto.productName,
+          targetCalorie: tx.productCatalog?.code || tx.cargoSubType,
+          totalMoisture: Number(
+            rawParams.moisture ?? rawParams.totalMoisture ?? 0,
+          ),
+          testRound: authoritativeTestRound,
+          sensoryPassed:
+            rawParams.sensory === 'OK' ||
+            rawParams.sensory === true ||
+            rawParams.visual === 'OK' ||
+            rawParams.sensoryPassed === true ||
+            rawParams.sensory?.visual === true,
+        },
+        coalSpecMeta,
+      );
+    } else if (isPac) {
+      const pacSpecMeta =
+        specStatus.approvalStatus === 'APPROVED'
+          ? TEST_FIXTURE_PAC_SPEC_METADATA
+          : OPERATIONAL_PAC_SPEC_METADATA;
+
+      evalResult = evaluatePacAnalysis(
+        {
+          sensory: {
+            visual:
+              rawParams.sensory?.visual ??
+              (rawParams.visualAppearance
+                ? !rawParams.visualAppearance.toLowerCase().includes('keruh')
+                : (rawParams.visual === 'OK' || rawParams.visual === true)),
+            odor:
+              rawParams.sensory?.odor ??
+              (rawParams.foreignMatters === 'NIL' ||
+                rawParams.odor === 'OK' ||
+                rawParams.odor === true ||
+                rawParams.odor == null),
+            packaging:
+              rawParams.sensory?.packaging ??
+              (rawParams.packagingCondition
+                ? !rawParams.packagingCondition.toLowerCase().includes('rusak')
+                : (rawParams.packaging === 'OK' || rawParams.packaging === true)),
+          },
+          ph: Number(rawParams.ph),
+          density: Number(rawParams.density),
+          aluminaContent:
+            rawParams.aluminaContent != null
+              ? Number(rawParams.aluminaContent)
+              : rawParams.al2o3Content != null
+                ? Number(rawParams.al2o3Content)
+                : undefined,
+        },
+        authoritativeProductName,
+        pacSpecMeta,
+      );
+    } else if (isRapidKlen) {
+      const rkSpecMeta =
+        specStatus.approvalStatus === 'APPROVED'
+          ? TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA
+          : OPERATIONAL_RAPID_KLEN_SPEC_METADATA;
+
+      evalResult = evaluateRapidKlenAnalysis(
+        {
+          sensory: {
+            visual:
+              rawParams.sensory?.visual ??
+              (rawParams.visualAppearance
+                ? !rawParams.visualAppearance.toLowerCase().includes('keruh')
+                : (rawParams.visual === 'OK' || rawParams.visual === true)),
+            packaging:
+              rawParams.sensory?.packaging ??
+              (rawParams.packagingCondition
+                ? !rawParams.packagingCondition.toLowerCase().includes('rusak')
+                : (rawParams.packaging === 'OK' || rawParams.packaging === true)),
+          },
+          alkalinityNa2O: Number(
+            rawParams.alkalinityNa2O ?? rawParams.alkalinity ?? 0,
+          ),
+          alkalinityNaOH:
+            rawParams.alkalinityNaOH != null
+              ? Number(rawParams.alkalinityNaOH)
+              : undefined,
+          ph: Number(rawParams.ph),
+          density: Number(rawParams.density),
+        },
+        authoritativeProductName,
+        rkSpecMeta,
+      );
+    } else {
+      // Fallback: Unverified product specification
+      evalResult = {
+        result: 'PASS',
+        decision: 'PENDING_DISPOSITION',
+        notes: `Produk ${authoritativeProductName} belum memiliki spesifikasi operasional teresahkan. Dialihkan ke PENDING_DISPOSITION.`,
+      };
+    }
+
+    const serverQcResult: QcResult =
+      evalResult.result === 'PASS' ? QcResult.PASSED : QcResult.REJECTED;
+
+    // Validate client submitted values if sent (reject forging/tampering)
+    if (dto.result && dto.result !== serverQcResult) {
+      throw new BadRequestException(
+        `Hasil analisis client (${dto.result}) tidak sesuai dengan hasil evaluasi server (${serverQcResult}). Keputusan server bersifat otoritatif.`,
+      );
+    }
+
+    if (dto.decision && dto.decision !== evalResult.decision) {
+      throw new BadRequestException(
+        `Keputusan analisis client (${dto.decision}) tidak sesuai dengan evaluasi spesifikasi server (${evalResult.decision}). Keputusan server bersifat otoritatif.`,
+      );
+    }
+
+    const authoritativeDecision = evalResult.decision as AnalysisDecision;
+
+    let nextStatus: TransactionStatus;
+    switch (authoritativeDecision) {
+      case AnalysisDecision.RELEASE:
+        if (specStatus.approvalStatus !== 'APPROVED') {
+          throw new BadRequestException(
+            `Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk ${authoritativeProductName} belum berstatus disahkan oleh QA/Utility (Status: ${specStatus.approvalStatus}).`,
           );
-          if (specStatus.approvalStatus !== 'APPROVED') {
-            throw new BadRequestException(
-              `Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk ${dto.productName} (${dto.productCategory}) belum berstatus disahkan oleh QA/Utility (Status: ${specStatus.approvalStatus}, Dokumen: ${specStatus.documentSource}). Keputusan RELEASE otomatis ditahan; transaksi harus dialihkan ke PENDING_DISPOSITION atau REJECT.`,
-            );
-          }
-          nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
         }
+        nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
         break;
       case AnalysisDecision.REJECT:
         nextStatus = TransactionStatus.QC_VEHICLE_REJECTED;
@@ -110,18 +350,36 @@ export class QcProductAnalysisService {
         break;
       default:
         throw new BadRequestException(
-          `Keputusan analisis tidak valid: ${dto.decision}`,
+          `Keputusan analisis tidak valid: ${authoritativeDecision}`,
         );
     }
 
     assertValidStatusTransition(tx.status, nextStatus);
 
+    const now = new Date();
     await this.prisma.$transaction(async (prismaTx) => {
+      // 1. Guard against duplicate active test rounds (Concurrency defense)
+      const duplicateRound = await prismaTx.qcProductAnalysis.findFirst({
+        where: {
+          transactionId,
+          testRound: authoritativeTestRound,
+          isVoided: false,
+        },
+      });
+      if (duplicateRound) {
+        throw new ConflictException(
+          `Ronde uji ${authoritativeTestRound} aktif sudah pernah dicatat untuk transaksi ini.`,
+        );
+      }
+
+      // 2. CAS claim on Transaction
       const claimed = await prismaTx.transaction.updateMany({
         where: { id: transactionId, revision: dto.revision },
         data: {
           status: nextStatus,
           revision: { increment: 1 },
+          qcStartAt: tx.qcStartAt || now,
+          qcEndAt: now,
         },
       });
 
@@ -131,18 +389,19 @@ export class QcProductAnalysisService {
         );
       }
 
+      // 3. Create authoritative QcProductAnalysis
       await prismaTx.qcProductAnalysis.create({
         data: {
           transactionId,
-          productCatalogId: dto.productCatalogId || tx.productCatalogId,
-          testRound,
-          productCategory: dto.productCategory,
-          productName: dto.productName,
+          productCatalogId: authoritativeCatalogId,
+          testRound: authoritativeTestRound,
+          productCategory: authoritativeProductCategory,
+          productName: authoritativeProductName,
           parameters: dto.parameters as any,
-          result: dto.result,
-          status: dto.decision,
+          result: serverQcResult,
+          status: authoritativeDecision,
           testedById: user.id,
-          testedAt: new Date(),
+          testedAt: now,
         },
       });
 
@@ -154,7 +413,7 @@ export class QcProductAnalysisService {
           changedById: user.id,
           notes:
             dto.notes ||
-            `Analisis PA Round ${testRound}: Keputusan ${dto.decision}`,
+            `Analisis PA Round ${authoritativeTestRound}: Evaluasi Otoritatif Server ${authoritativeDecision} (${serverQcResult})`,
         },
       });
     });
@@ -165,17 +424,17 @@ export class QcProductAnalysisService {
         action: 'QC_PRODUCT_ANALYSIS_SUBMITTED',
         module: 'QC',
         referenceId: transactionId,
-        description: `Analisis PA Round ${testRound} diserahkan untuk ${tx.cargoSubType}. Hasil: ${dto.result}, Keputusan: ${dto.decision}`,
+        description: `Analisis PA Round ${authoritativeTestRound} dievaluasi untuk ${authoritativeProductName}. Hasil: ${serverQcResult}, Keputusan: ${authoritativeDecision}`,
         status: 'SUCCESS',
       })
       .catch(() => {});
 
     return {
       success: true,
-      message: `Analisis produk Round ${testRound} berhasil dicatat`,
+      message: `Analisis produk Round ${authoritativeTestRound} berhasil dicatat`,
       data: {
         transactionId,
-        testRound,
+        testRound: authoritativeTestRound,
         newStatus: nextStatus,
       },
     };
@@ -230,6 +489,7 @@ export class QcProductAnalysisService {
    * 2. Department must be UTILITY
    * 3. Explicit disposition authority (UTILITY_DISPOSITION_AUTHORITY)
    * 4. Multi-round Four-Eyes: Approver must NOT be any analyst on this transaction
+   * 5. Target analysis must be active (isVoided: false) and in PENDING_DISPOSITION state
    */
   async submitUtilityDisposition(
     transactionId: string,
@@ -244,19 +504,49 @@ export class QcProductAnalysisService {
       throw new NotFoundException('Transaksi tidak ditemukan');
     }
 
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Disposisi Utility hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+
     if (tx.status !== TransactionStatus.WAITING_UTILITY_DISPOSITION) {
       throw new BadRequestException(
         `Disposisi Utility hanya dapat diberikan pada transaksi berstatus WAITING_UTILITY_DISPOSITION (saat ini: ${tx.status})`,
       );
     }
 
+    // Only query active, non-voided analysis records
     const latestAnalysis = await this.prisma.qcProductAnalysis.findFirst({
-      where: { transactionId },
+      where: { transactionId, isVoided: false },
       orderBy: { testRound: 'desc' },
     });
 
     if (!latestAnalysis) {
-      throw new NotFoundException('Data analisis produk tidak ditemukan');
+      throw new NotFoundException(
+        'Data analisis produk aktif tidak ditemukan untuk transaksi ini',
+      );
+    }
+
+    if (
+      latestAnalysis.status &&
+      latestAnalysis.status !== 'PENDING_DISPOSITION'
+    ) {
+      throw new BadRequestException(
+        `Disposisi Utility hanya dapat diproses jika status analisis PA terakhir adalah PENDING_DISPOSITION (saat ini: ${latestAnalysis.status})`,
+      );
+    }
+
+    if (
+      tx.productCatalogId &&
+      latestAnalysis.productCatalogId &&
+      latestAnalysis.productCatalogId !== tx.productCatalogId
+    ) {
+      throw new BadRequestException(
+        'Katalog produk pada analisis PA tidak sesuai dengan transaksi aktif.',
+      );
     }
 
     // 1. Verify user status and department
@@ -316,9 +606,9 @@ export class QcProductAnalysisService {
       );
     }
 
-    // 3. Four-Eyes Principle: Approver must NOT be any analyst who performed any test round on this transaction
+    // 3. Four-Eyes Principle: Approver must NOT be any analyst who tested on any active round of this tx
     const allAnalyses = await this.prisma.qcProductAnalysis.findMany({
-      where: { transactionId },
+      where: { transactionId, isVoided: false },
       select: { id: true, testRound: true, testedById: true },
     });
 
@@ -400,8 +690,26 @@ export class QcProductAnalysisService {
 
   /**
    * Retrieve all PA Analysis rounds and history for a transaction.
+   * Enforces role and process scope authorization.
    */
-  async getAnalysisHistory(transactionId: string) {
+  async getAnalysisHistory(transactionId: string, user: JwtPayloadUser) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      select: { id: true, processType: true },
+    });
+
+    if (!tx) {
+      throw new NotFoundException('Transaksi tidak ditemukan');
+    }
+
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Analisis PA laboratorium hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+
     const records = await this.prisma.qcProductAnalysis.findMany({
       where: { transactionId },
       include: {

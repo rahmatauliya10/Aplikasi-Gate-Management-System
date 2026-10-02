@@ -89,6 +89,7 @@ export class QcProductAnalysisController {
   }
 
   @Get('product-analysis/:transactionId')
+  @Roles('QC', 'ADMIN', 'WAREHOUSE')
   @ApiOperation({
     summary: 'Get all product analysis rounds and history for a transaction',
   })
@@ -96,7 +97,10 @@ export class QcProductAnalysisController {
     status: 200,
     description: 'Product analysis history retrieved successfully',
   })
-  getAnalysisHistory(@Param('transactionId') transactionId: string) {
-    return this.productAnalysisService.getAnalysisHistory(transactionId);
+  getAnalysisHistory(
+    @Param('transactionId') transactionId: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.productAnalysisService.getAnalysisHistory(transactionId, user);
   }
 }

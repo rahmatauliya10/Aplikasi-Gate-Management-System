@@ -309,8 +309,6 @@ export class WeighbridgeService {
           revision: { increment: 1 },
           ...(grossWeight !== null && { grossWeight }),
           ...(tareWeight !== null && { tareWeight }),
-          ...(nextStatus === 'QC_VEHICLE_PENDING' &&
-            !tx.qcStartAt && { qcStartAt: new Date() }),
           ...(nextStatus === TransactionStatus.PA_NOT_REQUIRED && {
             paExemptionReason: exemptionEval.reason,
             paPolicyVersion: exemptionEval.policyVersion,

@@ -130,6 +130,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
 
     mockAuthScopeService = {
       getTransactionScope: jest.fn().mockReturnValue({}),
+      assertProcessAccess: jest.fn(),
+      assertScopeNotEmpty: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -257,6 +259,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       const solarPostWbIn = {
         ...solarTx,
         status: TransactionStatus.PA_NOT_REQUIRED,
+        weighInAt: new Date(),
         grossWeight: 25000,
         revision: 2,
       };
@@ -394,6 +397,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: TransactionStatus.REGISTERED,
         grossWeight: null,
         revision: 1,
+        productCatalogId: 'cat-pac-uat',
+        productCatalog: {
+          id: 'cat-pac-uat',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
       };
 
       // 1. Weighbridge IN: Gross 22,000 kg -> Must assign QC_VEHICLE_PENDING
@@ -465,6 +477,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest
             .fn()
             .mockResolvedValue({ id: 'analysis-pac-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -515,9 +528,17 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       const pacPassed = {
         ...pacPending,
         status: TransactionStatus.QC_VEHICLE_PASSED,
+        weighInAt: new Date(),
         revision: 3,
       };
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacPassed);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'analysis-pac-1',
+        transactionId: pacTx.id,
+        productCatalogId: pacTx.productCatalog.id,
+        status: 'RELEASE',
+        isVoided: false,
+      });
 
       const mockTxClientWhStart = {
         transaction: {
@@ -586,6 +607,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest
             .fn()
             .mockResolvedValue({ id: 'analysis-rpd-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -594,6 +616,12 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientQc),
       );
+      jest
+        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
+        .mockReturnValueOnce({
+          approvalStatus: 'APPROVED',
+          documentSource: 'QA Approved Rapid Klen Specification SOP-GSP-2026.1',
+        });
 
       const qcRes = await qcAnalysisService.submitProductAnalysis(
         rpdTx.id,
@@ -667,8 +695,18 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         cargoType: 'Coal',
         cargoSubType: 'Batubara',
         status: TransactionStatus.QC_VEHICLE_PENDING,
+        weighInAt: new Date(),
         grossWeight: 30000,
         revision: 2,
+        productCatalogId: 'cat-coal-uat',
+        productCatalog: {
+          id: 'cat-coal-uat',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
       };
 
       // 1. Round 1 Test: Moisture 36% (> 33%) -> Decision: RETEST_REQUIRED
@@ -682,6 +720,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest
             .fn()
             .mockResolvedValue({ id: 'analysis-coal-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -690,6 +729,12 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientRound1),
       );
+      jest
+        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
+        .mockReturnValue({
+          approvalStatus: 'APPROVED',
+          documentSource: 'QA Approved Coal Specification SOP-GSP-2026.1',
+        });
 
       const r1Res = await qcAnalysisService.submitProductAnalysis(
         coalTx.id,
@@ -740,6 +785,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest
             .fn()
             .mockResolvedValue({ id: 'analysis-coal-2', testRound: 2 }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -748,6 +794,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientRound2),
       );
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        { id: 'analysis-coal-1', testRound: 1, isVoided: false },
+      ]);
 
       const r2Res = await qcAnalysisService.submitProductAnalysis(
         coalTx.id,
@@ -954,11 +1003,20 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       const coalPassed = {
         ...coalWaiting,
         status: TransactionStatus.QC_VEHICLE_PASSED,
+        weighInAt: new Date(),
         revision: 5,
       };
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
         coalPassed,
       );
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'analysis-coal-2',
+        transactionId: coalTx.id,
+        productCatalogId: coalTx.productCatalog.id,
+        status: 'ACCEPT_WITH_DEVIATION',
+        dispositionById: utilityOfficerUser.id,
+        isVoided: false,
+      });
 
       const mockTxClientWhStart = {
         transaction: {
@@ -1028,6 +1086,17 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           create: jest.fn().mockResolvedValue({}),
         },
       };
+      mockPrismaService.productCatalog.findFirst.mockResolvedValueOnce({
+        id: 'cat-coal-uat',
+        code: 'COAL-001',
+        name: 'Batubara',
+        category: 'Coal',
+        subCategory: 'Batubara',
+        processType: ProcessType.GSP,
+        isActive: true,
+        isPaRequired: true,
+        policyVersion: 'SOP-GSP-2026.1',
+      });
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientAmend),
       );
@@ -1091,8 +1160,10 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
         unloadedTx,
       );
+      const validEvidenceUuid = '123e4567-e89b-12d3-a456-426614174000';
       mockPrismaService.attachment.findUnique.mockResolvedValueOnce({
-        id: 'att-evidence-1',
+        id: validEvidenceUuid,
+        transactionId: unloadedTx.id,
       });
 
       const mockTxClientIncident = {
@@ -1116,7 +1187,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           incidentReason:
             'Muatan solar sudah tertuang ke tangki penampungan sebelum ketidaksesuaian DO terdeteksi',
           supervisorPic: 'Bpk. Hendro - SPV Utility',
-          evidenceAttachmentId: 'att-evidence-1',
+          evidenceAttachmentId: validEvidenceUuid,
           actionTaken:
             'Isolasi kompartemen tangki #3 dan pengambilan sampel uji darurat',
           revision: 3,
@@ -1170,6 +1241,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         },
         qcProductAnalysis: {
           create: jest.fn().mockResolvedValue({ id: 'analysis-chem-rej-1' }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -1178,6 +1250,12 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientReject),
       );
+      jest
+        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
+        .mockReturnValueOnce({
+          approvalStatus: 'APPROVED',
+          documentSource: 'QA Approved Rapid Klen Specification SOP-GSP-2026.1',
+        });
 
       const rejectRes = await qcAnalysisService.submitProductAnalysis(
         chemRejectTx.id,

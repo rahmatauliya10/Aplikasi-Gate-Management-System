@@ -1074,7 +1074,6 @@ export class OperationLogCorrectionService {
             TransactionStatus.REGISTERED,
             TransactionStatus.QC_VEHICLE_PENDING,
             TransactionStatus.QC_VEHICLE_PASSED,
-            TransactionStatus.INCOMING_CHECK_PENDING,
           ],
           GBJ: [
             TransactionStatus.REGISTERED,
@@ -1256,7 +1255,12 @@ export class OperationLogCorrectionService {
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_PENDING ||
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
         ) {
-          // Reopen to Incoming QC stage (GBB / GSP)
+          if (processType !== 'GBB') {
+            throw new BadRequestException(
+              `Tahap Incoming QC hanya berlaku untuk proses GBB. Proses ${processType} tidak diizinkan reopen ke Incoming QC.`,
+            );
+          }
+          // Reopen to Incoming QC stage (GBB only)
           txUpdateData.incomingQcStartAt =
             targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
               ? tx.incomingQcStartAt || new Date()

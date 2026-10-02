@@ -1636,10 +1636,16 @@ const currentProcessType = computed(() => {
 
 const allowedReopenTargets = computed(() => {
   const processType = currentProcessType.value
-  if (processType === 'GBJ') {
+  if (processType === 'GBJ' || processType === 'GSP') {
     return [
       { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-      { value: 'QC_VEHICLE_PENDING', label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)' },
+      {
+        value: 'QC_VEHICLE_PENDING',
+        label:
+          processType === 'GSP'
+            ? '2. QC Lab / Sampling Pending (Menunggu Product Analysis)'
+            : '2. QC Vehicle Pending (Menunggu QC Kendaraan)',
+      },
       { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
     ]
   }

@@ -230,38 +230,176 @@ export class WarehouseService {
       });
     }
 
-    // Guard: allow start for QC_VEHICLE_PASSED or PA_NOT_REQUIRED (Solar exempt via verified catalog)
-    const exemptionEval = evaluatePaExemption(tx.productCatalog, {
-      processType: tx.processType,
-      cargoType: tx.cargoType,
-      cargoSubType: tx.cargoSubType,
-    });
-    const isSolarExempt =
-      tx.processType === 'GSP' &&
-      tx.status === TransactionStatus.PA_NOT_REQUIRED &&
-      exemptionEval.isExempt;
-    const isQcPassed = tx.status === TransactionStatus.QC_VEHICLE_PASSED;
-
-    if (!isSolarExempt && !isQcPassed) {
-      await this.activityLogsService
-        .logAction({
-          userId: user.id,
-          action: 'WAREHOUSE_FLOW_REJECTED',
-          module: 'WAREHOUSE',
-          referenceId: transactionId,
-          description:
-            `Warehouse start rejected: Current status is ${tx.status}. ` +
-            `Required: QC_VEHICLE_PASSED or PA_NOT_REQUIRED (verified Solar exemption).`,
-          status: 'SUCCESS',
-        })
-        .catch(() => {});
-      throw new BadRequestException({
-        success: false,
-        message:
-          `Gudang tidak dapat memulai proses: Transaksi berstatus ${tx.status} ` +
-          `belum memperoleh persetujuan RELEASE PA Analysis atau bukan produk berizin bypass PA.`,
-        errors: [],
+    // ─── Guard: GSP vs Non-GSP Verification (Defense-in-Depth Proof-of-PA Gate) ───
+    if (tx.processType === 'GSP') {
+      const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+        processType: tx.processType,
+        cargoType: tx.cargoType,
+        cargoSubType: tx.cargoSubType,
       });
+
+      if (exemptionEval.isExempt) {
+        // Solar BBM exemption branch: Must have physical weigh-in and valid catalog
+        const isSolarValid =
+          [
+            TransactionStatus.PA_NOT_REQUIRED,
+            TransactionStatus.QC_VEHICLE_PASSED,
+            TransactionStatus.QC_VEHICLE_PENDING,
+          ].includes(tx.status) &&
+          tx.weighInAt != null &&
+          tx.grossWeight != null &&
+          Number(tx.grossWeight) > 0 &&
+          tx.productCatalog != null &&
+          tx.productCatalog.isActive === true &&
+          tx.productCatalog.processType === 'GSP';
+
+        if (!isSolarValid) {
+          await this.activityLogsService
+            .logAction({
+              userId: user.id,
+              action: 'WAREHOUSE_FLOW_REJECTED',
+              module: 'WAREHOUSE',
+              referenceId: transactionId,
+              description:
+                `Warehouse start rejected for GSP Solar: Incomplete weigh-in or invalid exemption catalog. Status: ${tx.status}`,
+              status: 'FAILED',
+            })
+            .catch(() => {});
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gudang menolak memulai proses GSP Solar: Transaksi belum memiliki bukti weigh-in yang sah, gross weight valid, atau katalog produk tidak aktif/tidak valid.',
+            errors: [],
+          });
+        }
+      } else {
+        // Non-Solar GSP (Batubara, PAC, Rapid Klen) - Mandatory Proof-of-PA
+        if (tx.status !== TransactionStatus.QC_VEHICLE_PASSED) {
+          await this.activityLogsService
+            .logAction({
+              userId: user.id,
+              action: 'WAREHOUSE_FLOW_REJECTED',
+              module: 'WAREHOUSE',
+              referenceId: transactionId,
+              description:
+                `Warehouse start rejected: GSP cargo ${tx.cargoSubType} has status ${tx.status}, expected QC_VEHICLE_PASSED.`,
+              status: 'FAILED',
+            })
+            .catch(() => {});
+          throw new BadRequestException({
+            success: false,
+            message:
+              `Gudang tidak dapat memulai proses: Transaksi GSP ${tx.cargoSubType} berstatus ${tx.status}. Wajib berstatus QC_VEHICLE_PASSED dari rilis PA yang sah.`,
+            errors: [],
+          });
+        }
+
+        if (
+          !tx.weighInAt ||
+          tx.grossWeight == null ||
+          Number(tx.grossWeight) <= 0
+        ) {
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gudang menolak memulai proses GSP: Transaksi belum melalui penimbangan masuk (weigh-in) atau berat kotor (gross weight) tidak valid.',
+            errors: [],
+          });
+        }
+
+        if (
+          !tx.productCatalog ||
+          tx.productCatalog.processType !== 'GSP' ||
+          !tx.productCatalog.isActive
+        ) {
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gudang menolak memulai proses GSP: Katalog produk tidak terdaftar, tidak aktif, atau bukan scope proses GSP.',
+            errors: [],
+          });
+        }
+
+        // Query current active (non-voided) PA record
+        const activePa = await this.prisma.qcProductAnalysis.findFirst({
+          where: {
+            transactionId,
+            isVoided: false,
+          },
+          orderBy: { testRound: 'desc' },
+        });
+
+        if (!activePa) {
+          await this.activityLogsService
+            .logAction({
+              userId: user.id,
+              action: 'WAREHOUSE_FLOW_REJECTED',
+              module: 'WAREHOUSE',
+              referenceId: transactionId,
+              description:
+                `Security violation: Attempted warehouse start on GSP transaction with forged/missing PA record.`,
+              status: 'FAILED',
+            })
+            .catch(() => {});
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gudang menolak memulai proses: Bukti analisis laboratorium (PA) aktif tidak ditemukan. Status QC_VEHICLE_PASSED tidak sah tanpa rekaman PA.',
+            errors: [],
+          });
+        }
+
+        if (activePa.productCatalogId !== tx.productCatalogId) {
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gudang menolak memulai proses: Katalog produk pada analisis PA tidak sesuai dengan katalog produk transaksi aktif.',
+            errors: [],
+          });
+        }
+
+        // Validate workflow release evidence:
+        // Either directly RELEASED by QC Analyst
+        // Or ACCEPT_WITH_DEVIATION via valid Utility disposition
+        const isDirectRelease =
+          activePa.status === 'RELEASE' &&
+          (!activePa.result || ['PASS', 'PASSED'].includes(activePa.result));
+        const isUtilityAccepted =
+          (activePa.status === 'ACCEPT_WITH_DEVIATION' ||
+            activePa.dispositionAction === 'ACCEPT_WITH_DEVIATION') &&
+          Boolean(activePa.dispositionById);
+
+        if (!isDirectRelease && !isUtilityAccepted) {
+          throw new BadRequestException({
+            success: false,
+            message:
+              `Gudang menolak memulai proses: Analisis PA terakhir belum memperoleh keputusan rilis yang sah (Status PA: ${activePa.status}, Disposisi: ${activePa.dispositionAction || 'NONE'}). Tidak ada izin bongkar.`,
+            errors: [],
+          });
+        }
+      }
+    } else {
+      // Non-GSP (GBB, GBJ)
+      const isQcPassed = tx.status === TransactionStatus.QC_VEHICLE_PASSED;
+      if (!isQcPassed) {
+        await this.activityLogsService
+          .logAction({
+            userId: user.id,
+            action: 'WAREHOUSE_FLOW_REJECTED',
+            module: 'WAREHOUSE',
+            referenceId: transactionId,
+            description:
+              `Warehouse start rejected: Current status is ${tx.status}. Required: QC_VEHICLE_PASSED.`,
+            status: 'SUCCESS',
+          })
+          .catch(() => {});
+        throw new BadRequestException({
+          success: false,
+          message:
+            `Gudang tidak dapat memulai proses: Transaksi berstatus ${tx.status} belum lulus QC pemeriksaan kendaraan.`,
+          errors: [],
+        });
+      }
     }
 
     assertValidStatusTransition(tx.status, 'WAREHOUSE_IN_PROGRESS');

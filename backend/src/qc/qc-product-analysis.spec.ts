@@ -12,10 +12,13 @@ import { AnalysisDecision } from './dto/submit-product-analysis.dto';
 import { DispositionAction } from './dto/utility-disposition.dto';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+
 describe('QcProductAnalysisService (Task 5)', () => {
   let service: QcProductAnalysisService;
   let mockPrismaService: any;
   let mockActivityLogsService: any;
+  let mockAuthScopeService: any;
 
   const mockAnalystUser: JwtPayloadUser = {
     id: 'user-analyst-1',
@@ -30,6 +33,12 @@ describe('QcProductAnalysisService (Task 5)', () => {
   } as unknown as JwtPayloadUser;
 
   beforeEach(async () => {
+    mockAuthScopeService = {
+      assertProcessAccess: jest.fn(),
+      assertScopeNotEmpty: jest.fn(),
+      getTransactionScope: jest.fn().mockReturnValue({}),
+    };
+
     mockPrismaService = {
       $transaction: jest.fn(),
       transaction: {
@@ -63,6 +72,10 @@ describe('QcProductAnalysisService (Task 5)', () => {
         QcProductAnalysisService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
+        {
+          provide: AuthorizationScopeService,
+          useValue: mockAuthScopeService,
+        },
       ],
     }).compile();
 
@@ -90,6 +103,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           create: jest
             .fn()
             .mockResolvedValue({ id: 'analysis-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -159,6 +173,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           create: jest
             .fn()
             .mockResolvedValue({ id: 'analysis-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -168,6 +183,12 @@ describe('QcProductAnalysisService (Task 5)', () => {
       mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
         cb(mockTxClient),
       );
+      jest
+        .spyOn(service, 'checkSpecificationApprovalStatus')
+        .mockReturnValueOnce({
+          approvalStatus: 'APPROVED',
+          documentSource: 'Test Harness Fixture (Simulated Approved Spec)',
+        });
 
       const res = await service.submitProductAnalysis(
         'tx-coal-1',
@@ -203,6 +224,9 @@ describe('QcProductAnalysisService (Task 5)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(retestTx);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        { id: 'analysis-1', testRound: 1, isVoided: false },
+      ]);
 
       const mockTxClient = {
         transaction: {
@@ -212,6 +236,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           create: jest
             .fn()
             .mockResolvedValue({ id: 'analysis-2', testRound: 2 }),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -221,6 +246,12 @@ describe('QcProductAnalysisService (Task 5)', () => {
       mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
         cb(mockTxClient),
       );
+      jest
+        .spyOn(service, 'checkSpecificationApprovalStatus')
+        .mockReturnValueOnce({
+          approvalStatus: 'APPROVED',
+          documentSource: 'Test Harness Fixture (Simulated Approved Spec)',
+        });
 
       const res = await service.submitProductAnalysis(
         'tx-coal-retest',

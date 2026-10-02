@@ -28,6 +28,7 @@ export class ActiveTransactionAmendmentService {
   /**
    * Amend product details on an ACTIVE transaction before unloading has started.
    * Auto-downgrades PA_NOT_REQUIRED to QC_VEHICLE_PENDING if changed to a non-exempt product.
+   * Ensures REGISTERED transactions remaining prior to weigh-in stay REGISTERED even when amended to Solar.
    */
   async amendActiveProduct(
     transactionId: string,
@@ -75,12 +76,41 @@ export class ActiveTransactionAmendmentService {
       );
     }
 
-    // Look up the new product's catalog
+    // Look up and validate the target product's catalog
     let newCatalog: any = null;
     if (dto.productCatalogId) {
       newCatalog = await this.prisma.productCatalog.findUnique({
         where: { id: dto.productCatalogId },
       });
+      if (!newCatalog) {
+        throw new BadRequestException(
+          'Katalog produk yang ditentukan tidak ditemukan.',
+        );
+      }
+      if (!newCatalog.isActive) {
+        throw new BadRequestException(
+          'Katalog produk yang ditentukan berstatus tidak aktif.',
+        );
+      }
+      if (newCatalog.processType !== tx.processType) {
+        throw new BadRequestException(
+          `Katalog produk (${newCatalog.processType}) tidak sesuai dengan tipe proses transaksi (${tx.processType}).`,
+        );
+      }
+      if (dto.cargoSubType) {
+        const sub = dto.cargoSubType.toLowerCase();
+        const catName = (newCatalog.name || '').toLowerCase();
+        const catSub = (newCatalog.subCategory || '').toLowerCase();
+        if (
+          !catName.includes(sub) &&
+          !catSub.includes(sub) &&
+          !sub.includes(catName)
+        ) {
+          throw new BadRequestException(
+            'Identitas katalog produk tidak sesuai dengan kargo yang dipilih.',
+          );
+        }
+      }
     } else if (dto.cargoSubType && tx.processType) {
       newCatalog = await this.prisma.productCatalog.findFirst({
         where: {
@@ -92,6 +122,11 @@ export class ActiveTransactionAmendmentService {
           ],
         },
       });
+      if (!newCatalog) {
+        throw new BadRequestException(
+          `Katalog produk aktif untuk ${dto.cargoSubType} (${tx.processType}) tidak ditemukan.`,
+        );
+      }
     }
 
     // Determine exemption status for the new product strictly via catalog
@@ -105,15 +140,25 @@ export class ActiveTransactionAmendmentService {
     let statusDowngraded = false;
 
     if (willBeExempt) {
-      newStatus = TransactionStatus.PA_NOT_REQUIRED;
-      if (tx.status !== TransactionStatus.PA_NOT_REQUIRED) {
-        statusDowngraded = true;
+      // CRITICAL FIX: If transaction has not weighed in yet (REGISTERED),
+      // amending to Solar MUST remain REGISTERED!
+      // PA_NOT_REQUIRED can ONLY be reached after physical weigh-in.
+      if (tx.status === TransactionStatus.REGISTERED) {
+        newStatus = TransactionStatus.REGISTERED;
+      } else {
+        newStatus = TransactionStatus.PA_NOT_REQUIRED;
+        if (tx.status !== TransactionStatus.PA_NOT_REQUIRED) {
+          statusDowngraded = true;
+        }
       }
     } else {
       // Non-exempt product strictly requires QC PA verification
-      if (
+      if (tx.status === TransactionStatus.REGISTERED) {
+        newStatus = TransactionStatus.REGISTERED;
+      } else if (
         tx.status === TransactionStatus.PA_NOT_REQUIRED ||
         tx.status === TransactionStatus.QC_VEHICLE_PASSED ||
+        tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS ||
         tx.status === TransactionStatus.QC_RETEST_REQUIRED ||
         tx.status === TransactionStatus.WAITING_UTILITY_DISPOSITION
       ) {
@@ -224,6 +269,11 @@ export class ActiveTransactionAmendmentService {
   /**
    * Record an Operational Incident for post-unloading corrections.
    * Does NOT alter physical unloading facts or change transaction status automatically.
+   * Enforces:
+   * 1. Actual post-unloading verification
+   * 2. Evidence attachment belongs to the SAME transaction
+   * 3. UUID validation on evidenceAttachmentId
+   * 4. CAS revision conflict detection
    */
   async recordOperationalIncident(
     transactionId: string,
@@ -253,7 +303,34 @@ export class ActiveTransactionAmendmentService {
       );
     }
 
-    // Validate evidence attachment exists
+    // 1. Mandatory Post-Unloading Verification
+    const postUnloadingStatuses: TransactionStatus[] = [
+      TransactionStatus.WAREHOUSE_IN_PROGRESS,
+      TransactionStatus.WAREHOUSE_DONE,
+      TransactionStatus.WEIGH_OUT_DONE,
+    ];
+
+    const isPostUnloading =
+      Boolean(tx.warehouseStartAt) || postUnloadingStatuses.includes(tx.status);
+    if (!isPostUnloading) {
+      throw new BadRequestException(
+        'Pencatatan insiden operasional hanya berlaku untuk transaksi yang sudah memulai atau menyelesaikan proses bongkar muatan.',
+      );
+    }
+
+    // 2. UUID Validation on evidenceAttachmentId
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (
+      !dto.evidenceAttachmentId ||
+      !uuidRegex.test(dto.evidenceAttachmentId)
+    ) {
+      throw new BadRequestException(
+        'Format evidenceAttachmentId tidak valid (harus berupa UUID).',
+      );
+    }
+
+    // 3. Validate evidence attachment exists AND belongs to the SAME transaction
     const attachment = await this.prisma.attachment.findUnique({
       where: { id: dto.evidenceAttachmentId },
     });
@@ -264,7 +341,31 @@ export class ActiveTransactionAmendmentService {
       );
     }
 
+    if (attachment.transactionId !== transactionId) {
+      throw new BadRequestException(
+        'Lampiran bukti insiden tidak terasosiasi dengan transaksi ini (cross-transaction evidence rejected).',
+      );
+    }
+
+    // 4. Compare-And-Swap (CAS) Concurrency Enforcement
+    if (dto.revision !== tx.revision) {
+      throw new ConflictException(
+        'Revisi transaksi tidak sesuai (Stale Revision Conflict). Transaksi telah diperbarui oleh pengguna lain.',
+      );
+    }
+
     await this.prisma.$transaction(async (prismaTx) => {
+      const claimed = await prismaTx.transaction.updateMany({
+        where: { id: transactionId, revision: dto.revision },
+        data: { revision: { increment: 1 } },
+      });
+
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          'Transaksi telah diperbarui oleh pengguna lain (konflik konkurensi)',
+        );
+      }
+
       await prismaTx.transactionCorrection.create({
         data: {
           transactionId,
