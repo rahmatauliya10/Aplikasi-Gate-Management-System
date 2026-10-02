@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -12,6 +13,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -182,7 +184,7 @@ export class UsersService {
     };
   }
 
-  async update(id: string, dto: UpdateUserDto) {
+  async update(id: string, dto: UpdateUserDto, currentUser?: JwtPayloadUser) {
     const user = await this.prisma.user.findFirst({
       where: { id, isDeleted: false },
       include: { warehouseAccess: true },
@@ -193,6 +195,23 @@ export class UsersService {
         message: 'User not found',
         errors: [],
       });
+
+    // Self-privilege escalation guard:
+    // A user cannot grant themselves UTILITY_DISPOSITION_AUTHORITY
+    if (
+      currentUser &&
+      currentUser.id === id &&
+      dto.area &&
+      dto.area !== user.area &&
+      dto.area.includes('UTILITY_DISPOSITION_AUTHORITY')
+    ) {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Pemberian kewenangan disposisi Utility kepada akun sendiri dilarang (Self-privilege escalation prohibited).',
+        errors: [],
+      });
+    }
 
     const data: any = {};
     if (dto.email) {
@@ -263,7 +282,7 @@ export class UsersService {
             errors: [],
           });
         }
-      } else if (user.warehouseAccess.length === 0) {
+      } else if ((user.warehouseAccess || []).length === 0) {
         throw new BadRequestException({
           success: false,
           message: `${
@@ -321,6 +340,20 @@ export class UsersService {
         return { updated: resUser, finalAccess: accessList };
       },
     );
+
+    // Audit Log: Record area/privilege updates
+    if (dto.area !== undefined && dto.area !== user.area) {
+      await this.activityLogsService
+        .logAction({
+          userId: currentUser?.id || 'SYSTEM',
+          action: 'USER_PRIVILEGE_CHANGED',
+          module: 'USERS',
+          referenceId: id,
+          description: `User '${user.username}' area privilege changed from '${user.area || 'NONE'}' to '${dto.area || 'NONE'}' by actor '${currentUser?.email || currentUser?.name || currentUser?.id || 'SYSTEM'}'`,
+          status: 'SUCCESS',
+        })
+        .catch(() => {});
+    }
 
     return {
       success: true,

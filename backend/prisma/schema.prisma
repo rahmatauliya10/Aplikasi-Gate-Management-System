@@ -56,6 +56,9 @@ enum TransactionStatus {
   QC_VEHICLE_IN_PROGRESS
   QC_VEHICLE_PASSED
   QC_VEHICLE_REJECTED
+  PA_NOT_REQUIRED
+  QC_RETEST_REQUIRED
+  WAITING_UTILITY_DISPOSITION
   WAREHOUSE_IN_PROGRESS
   WAREHOUSE_DONE
   INCOMING_CHECK_PENDING
@@ -120,6 +123,8 @@ enum CorrectionAction {
   CORRECT_DATA
   CORRECT_RECORDED_STATUS
   REOPEN_WORKFLOW
+  AMEND_ACTIVE
+  OPERATIONAL_INCIDENT
 }
 
 model User {
@@ -163,6 +168,8 @@ model User {
   cancelledTransactions     Transaction[]           @relation("CancelledByUser")
   voidedTransactions        Transaction[]           @relation("VoidedByUser")
   statusHistoryChanges      TransactionStatusHistory[] @relation("StatusChangedBy")
+  productAnalysesAsTester    QcProductAnalysis[]       @relation("ProductAnalysisTestedBy")
+  productAnalysesAsDisposer  QcProductAnalysis[]       @relation("ProductAnalysisDispositionBy")
 }
 
 model UserWarehouseAccess {
@@ -245,8 +252,13 @@ model Transaction {
   qcVehicleChecks        QcVehicleCheck[]
   incomingMaterialChecks IncomingMaterialCheck[]
   fraudChecks            FraudCheck[]
-  attachments            Attachment[]
-  corrections            TransactionCorrection[]
+  attachments              Attachment[]
+  corrections              TransactionCorrection[]
+  productCatalogId         String?
+  productCatalog           ProductCatalog?            @relation(fields: [productCatalogId], references: [id], onDelete: SetNull)
+  paExemptionReason        String?
+  paPolicyVersion          String?
+  qcProductAnalyses        QcProductAnalysis[]
 
   @@index([status])
   @@index([plateNumber])
@@ -587,4 +599,63 @@ model TransactionCorrectionItem {
 
   @@index([correctionId])
   @@index([targetModule, targetRecordId])
+}
+
+// ── Product Catalog (Master Data) ─────────────────────────────────────
+// Canonical source of truth for product identity and PA exemption rules.
+// PA exemption is resolved by joining Transaction.productCatalogId → ProductCatalog.isPaRequired.
+// Free-text cargoType/cargoSubType matching is a transitional fallback only.
+model ProductCatalog {
+  id             String      @id @default(uuid())
+  code           String      @unique   // e.g. "SOLAR-001", "PAC280-001"
+  name           String                // Display name: "Solar", "PAC 280 AC"
+  category       String                // "Fuel", "Coal", "Chemicals"
+  subCategory    String?               // Finer grouping if needed
+  processType    ProcessType           // GSP, GBB, GBJ
+  isPaRequired   Boolean     @default(true)
+  policyVersion  String      @default("SOP-GSP-2026.1")
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  transactions   Transaction[]
+  qcAnalyses     QcProductAnalysis[]
+
+  @@index([processType, isActive])
+  @@index([category])
+}
+
+model QcProductAnalysis {
+  id                    String             @id @default(uuid())
+  transactionId         String
+  productCatalogId      String?
+  testRound             Int                @default(1)
+  productCategory       String
+  productName           String
+  policyVersion         String             @default("SOP-GSP-2026.1")
+  parameters            Json
+  result                QcResult
+  status                String             // e.g. RELEASE, REJECT, RETEST, PENDING_DISPOSITION, VOIDED
+  isVoided              Boolean            @default(false)
+  voidedAt              DateTime?
+  voidReason            String?
+  dispositionAction     String?
+  dispositionReason     String?
+  dispositionById       String?
+  dispositionAt         DateTime?
+  testedById            String?
+  testedAt              DateTime           @default(now())
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  transaction           Transaction        @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  productCatalog        ProductCatalog?    @relation(fields: [productCatalogId], references: [id], onDelete: SetNull)
+  testedBy              User?              @relation("ProductAnalysisTestedBy", fields: [testedById], references: [id], onDelete: SetNull)
+  dispositionBy         User?              @relation("ProductAnalysisDispositionBy", fields: [dispositionById], references: [id], onDelete: SetNull)
+
+  @@index([transactionId])
+  @@index([productCategory])
+  @@index([productCatalogId])
+  @@index([testedById])
+  @@index([dispositionById])
 }

@@ -308,21 +308,25 @@ jobs:
           echo "Step 3: Running production preflight duplicate audit on rehearsal DB..."
           cd backend
           npm run prisma:preflight -- --report-only --fail-on-duplicates
-          echo "Step 4: Executing Prisma migration deployment on rehearsal DB (upgrading schema 6 -> 20)..."
+          echo "Step 4: Executing Prisma migration deployment on rehearsal DB..."
           npx prisma migrate deploy
           cd ..
 
-          echo "Step 4.5: Verifying upgraded migration count (= 20)..."
+          echo "Step 4.5: Verifying upgraded migration count..."
           node -e "
             const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+            const migrationsDir = 'backend/prisma/migrations';
+            const expectedCount = fs.readdirSync(migrationsDir).filter(f => fs.statSync(path.join(migrationsDir, f)).isDirectory() && fs.existsSync(path.join(migrationsDir, f, 'migration.sql'))).length;
             const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
             const postUpgradeCount = parseInt(out, 10);
-            console.log('Post-upgrade migration count:', postUpgradeCount);
-            if (postUpgradeCount !== 20) {
-              console.error('FATAL: Post-upgrade migration count is not 20! Found: ' + postUpgradeCount);
+            console.log('Post-upgrade migration count:', postUpgradeCount, 'Expected:', expectedCount);
+            if (postUpgradeCount !== expectedCount) {
+              console.error('FATAL: Post-upgrade migration count is not ' + expectedCount + '! Found: ' + postUpgradeCount);
               process.exit(1);
             }
-            console.log('Schema upgrade from historical baseline to 20 migrations succeeded [PASS].');
+            console.log('Schema upgrade from historical baseline to ' + expectedCount + ' migrations succeeded [PASS].');
           "
 
           echo "Step 5: Verifying migration checksums..."
@@ -655,6 +659,14 @@ jobs:
                 EXECUTE 'ALTER SEQUENCE public.' || quote_ident(r.sequence_name) || ' OWNER TO gms_owner;';
                 EXECUTE 'GRANT ALL ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_owner;';
                 EXECUTE 'GRANT USAGE, SELECT, UPDATE ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_app;';
+              END LOOP;
+              FOR r IN (
+                SELECT t.typname
+                FROM pg_type t
+                JOIN pg_namespace n ON n.oid = t.typnamespace
+                WHERE n.nspname = 'public' AND t.typtype = 'e'
+              ) LOOP
+                EXECUTE 'ALTER TYPE public.' || quote_ident(r.typname) || ' OWNER TO gms_owner;';
               END LOOP;
             END \$\$;
           "

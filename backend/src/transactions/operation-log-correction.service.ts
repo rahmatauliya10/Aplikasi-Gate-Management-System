@@ -19,6 +19,7 @@ import * as crypto from 'crypto';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { sanitizeAuditData } from '../common/utils/mask-pii.util';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 
 const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   TRANSACTION: [
@@ -232,6 +233,7 @@ export class OperationLogCorrectionService {
       const tx: any = await prismaTx.transaction.findUnique({
         where: { id },
         include: {
+          productCatalog: true,
           weighbridgeRecords: { where: { isCurrent: true } },
           warehouseProcesses: { where: { isCurrent: true } },
           qcVehicleChecks: { where: { isCurrent: true } },
@@ -1074,7 +1076,6 @@ export class OperationLogCorrectionService {
             TransactionStatus.REGISTERED,
             TransactionStatus.QC_VEHICLE_PENDING,
             TransactionStatus.QC_VEHICLE_PASSED,
-            TransactionStatus.INCOMING_CHECK_PENDING,
           ],
           GBJ: [
             TransactionStatus.REGISTERED,
@@ -1092,7 +1093,7 @@ export class OperationLogCorrectionService {
         }
 
         // Accept QC_VEHICLE_PASSED or legacy WAREHOUSE_IN_PROGRESS mapping to QC_VEHICLE_PASSED
-        const effectiveTarget =
+        let effectiveTarget =
           targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS
             ? TransactionStatus.QC_VEHICLE_PASSED
             : targetReopenStatus;
@@ -1105,6 +1106,22 @@ export class OperationLogCorrectionService {
             `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW transaksi tipe ${processType}. Target status harus sesuai dengan workflow matriks tipe proses.`,
           );
         }
+
+        // For GSP PA-exempt commodities (e.g. Solar BBM): post-weigh-in stage is PA_NOT_REQUIRED (not QC_VEHICLE_PENDING)
+        if (
+          processType === 'GSP' &&
+          effectiveTarget === TransactionStatus.QC_VEHICLE_PENDING
+        ) {
+          const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+            processType: tx.processType,
+            cargoType: tx.cargoType,
+            cargoSubType: tx.cargoSubType,
+          });
+          if (exemptionEval.isExempt) {
+            effectiveTarget = TransactionStatus.PA_NOT_REQUIRED;
+          }
+        }
+
         statusUpdatedTo = effectiveTarget;
         txUpdateData.status = effectiveTarget;
 
@@ -1182,7 +1199,8 @@ export class OperationLogCorrectionService {
             },
           });
         } else if (
-          targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING
+          targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING ||
+          effectiveTarget === TransactionStatus.PA_NOT_REQUIRED
         ) {
           // Weigh-in completed, reopening to QC Vehicle stage
           txUpdateData.qcEndAt = null;
@@ -1256,7 +1274,12 @@ export class OperationLogCorrectionService {
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_PENDING ||
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
         ) {
-          // Reopen to Incoming QC stage (GBB / GSP)
+          if (processType !== 'GBB') {
+            throw new BadRequestException(
+              `Tahap Incoming QC hanya berlaku untuk proses GBB. Proses ${processType} tidak diizinkan reopen ke Incoming QC.`,
+            );
+          }
+          // Reopen to Incoming QC stage (GBB only)
           txUpdateData.incomingQcStartAt =
             targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
               ? tx.incomingQcStartAt || new Date()

@@ -17,7 +17,6 @@ const REOPEN_ALLOWED_TARGETS = {
     'REGISTERED',
     'QC_VEHICLE_PENDING',
     'QC_VEHICLE_PASSED',
-    'INCOMING_CHECK_PENDING',
   ],
   GBJ: [
     'REGISTERED',
@@ -39,11 +38,16 @@ describe('Frontend REOPEN Matrix Contract', () => {
     expect(targets).toHaveLength(4)
   })
 
-  it('should include Incoming QC stage for GSP process type', () => {
+  it('should EXCLUDE Incoming QC stage for GSP process type', () => {
     const targets = getAllowedReopenTargets('GSP')
-    expect(targets).toContain('INCOMING_CHECK_PENDING')
+    expect(targets).not.toContain('INCOMING_CHECK_PENDING')
     expect(targets).toContain('QC_VEHICLE_PASSED')
-    expect(targets).toHaveLength(4)
+    expect(targets).toHaveLength(3)
+    expect(targets).toEqual([
+      'REGISTERED',
+      'QC_VEHICLE_PENDING',
+      'QC_VEHICLE_PASSED',
+    ])
   })
 
   it('should EXCLUDE Incoming QC stage for GBJ process type', () => {

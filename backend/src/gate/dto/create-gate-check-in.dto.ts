@@ -71,6 +71,15 @@ export class CreateGateCheckInDto {
   cargoSubType?: string;
 
   @ApiProperty({
+    example: 'd9b93220-4a8d-4e92-9ff0-123456789abc',
+    description: 'Product Catalog ID (Master Data link)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  productCatalogId?: string;
+
+  @ApiProperty({
     enum: CargoProcessType,
     example: 'INBOUND',
     description: 'Flow direction (INBOUND, OUTBOUND)',

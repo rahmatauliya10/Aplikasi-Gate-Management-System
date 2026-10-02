@@ -287,6 +287,98 @@ async function main() {
     });
   }
 
+  // 6. GSP Product Catalog (Master Data)
+  console.log('Seeding GSP Product Catalog...');
+  const gspProducts = [
+    {
+      code: 'SOLAR-001',
+      name: 'Solar',
+      category: 'Fuel',
+      subCategory: 'Solar',
+      processType: 'GSP' as const,
+      isPaRequired: false,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'COAL-001',
+      name: 'Batubara',
+      category: 'Coal',
+      subCategory: 'Batubara',
+      processType: 'GSP' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'PAC-001',
+      name: 'PAC 280 AC',
+      category: 'Chemicals',
+      subCategory: 'PAC 280 AC',
+      processType: 'GSP' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'PAC-002',
+      name: 'POLYCOR P9',
+      category: 'Chemicals',
+      subCategory: 'POLYCOR P9',
+      processType: 'GSP' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'PAC-003',
+      name: 'IPAC CIP A200',
+      category: 'Chemicals',
+      subCategory: 'IPAC CIP A200',
+      processType: 'GSP' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'RPD-001',
+      name: 'Rapid Klen',
+      category: 'Chemicals',
+      subCategory: 'Rapid Klen',
+      processType: 'GSP' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'RPD-002',
+      name: 'PRO-CIP B++',
+      category: 'Chemicals',
+      subCategory: 'PRO-CIP B++',
+      processType: 'GSP' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+  ];
+
+  for (const prod of gspProducts) {
+    await prisma.productCatalog.upsert({
+      where: { code: prod.code },
+      update: {
+        name: prod.name,
+        category: prod.category,
+        subCategory: prod.subCategory,
+        isPaRequired: prod.isPaRequired,
+        policyVersion: prod.policyVersion,
+        isActive: true,
+      },
+      create: {
+        code: prod.code,
+        name: prod.name,
+        category: prod.category,
+        subCategory: prod.subCategory,
+        processType: prod.processType,
+        isPaRequired: prod.isPaRequired,
+        policyVersion: prod.policyVersion,
+        isActive: true,
+      },
+    });
+  }
+
   console.log('Database seeding finished.');
 }
 

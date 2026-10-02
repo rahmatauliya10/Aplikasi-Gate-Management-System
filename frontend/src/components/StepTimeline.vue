@@ -70,9 +70,8 @@ const steps = computed(() => {
     return [
       { key: 'gate_in', label: 'Gate In' },
       { key: 'weigh_in', label: 'WB In' },
-      { key: 'qc_vehicle', label: 'Sampling GSP' },
-      { key: 'warehouse', label: 'Process GSP' },
-      { key: 'incoming_check', label: 'Material Check' },
+      { key: 'qc_vehicle', label: 'QC / PA' },
+      { key: 'warehouse', label: 'Bongkar GSP' },
       { key: 'weigh_out', label: 'WB Out' },
       { key: 'completed', label: 'Dispatch' }
     ]
@@ -95,10 +94,13 @@ const mappedStepKey = computed(() => {
   if (status === 'WEIGH_IN_DONE') return 'qc_vehicle';
   if (status === 'QC_VEHICLE_PENDING') return 'qc_vehicle';
   if (status === 'QC_VEHICLE_IN_PROGRESS') return 'qc_vehicle';
+  if (status === 'QC_RETEST_REQUIRED') return 'qc_vehicle';
+  if (status === 'WAITING_UTILITY_DISPOSITION') return 'qc_vehicle';
   if (status === 'QC_VEHICLE_PASSED') return 'warehouse';
+  if (status === 'PA_NOT_REQUIRED') return 'warehouse';
   if (status === 'WAREHOUSE_IN_PROGRESS') return 'warehouse';
   if (status === 'WAREHOUSE_DONE') {
-    return props.processType === 'GBJ' ? 'weigh_out' : 'incoming_check';
+    return (props.processType === 'GBJ' || props.processType === 'GSP') ? 'weigh_out' : 'incoming_check';
   }
   if (status === 'INCOMING_CHECK_PENDING') return 'incoming_check';
   if (status === 'INCOMING_CHECK_IN_PROGRESS') return 'incoming_check';

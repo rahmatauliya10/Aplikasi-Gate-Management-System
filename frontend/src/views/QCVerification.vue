@@ -53,18 +53,41 @@
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9"><StepTimeline :current-step="selectedTruck.status" :process-type="getProcessType(selectedTruck)" /></div>
 
             <div class="mt-6 space-y-5">
-              <!-- Stage 1: QC Vehicle / Sampling Awal based on Process Type -->
+              <!-- Stage 1: QC Vehicle / GSP PA Analysis / Sampling Awal -->
               <div v-if="selectedTruck.status === 'QC_VEHICLE_PENDING' || selectedTruck.status === 'QC_VEHICLE_IN_PROGRESS'" class="space-y-4">
                 <button @click="openQcStage1Modal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
-                  :style="getProcessType(selectedTruck) === 'GBJ' ? 'background:linear-gradient(135deg,#3B82F6,#1D4ED8);' : 'background:linear-gradient(135deg,#6366f1,#3730a3);'">
+                  :style="getProcessType(selectedTruck) === 'GBJ' ? 'background:linear-gradient(135deg,#3B82F6,#1D4ED8);' : getProcessType(selectedTruck) === 'GSP' ? 'background:linear-gradient(135deg,#0F766E,#115E59);' : 'background:linear-gradient(135deg,#6366f1,#3730a3);'"
+                  id="btn-start-qc-action">
                   <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
                   <span v-else class="material-icons text-xl">{{ getProcessType(selectedTruck) === 'GBJ' ? 'fact_check' : 'biotech' }}</span>
-                  <span class="text-base tracking-wide">{{ isProcessing ? 'Starting QC...' : (getProcessType(selectedTruck) === 'GBJ' ? '📋 Input QC Vehicle Checklist (GBJ)' : '🧪 Enter Initial QC Sampling (Pre-Unloading)') }}</span>
+                  <span class="text-base tracking-wide">{{ isProcessing ? 'Starting QC...' : (getProcessType(selectedTruck) === 'GBJ' ? '📋 Input QC Vehicle Checklist (GBJ)' : getProcessType(selectedTruck) === 'GSP' ? '🧪 Analisis PA Laboratorium (Pre-Unloading)' : '🧪 Enter Initial QC Sampling (Pre-Unloading)') }}</span>
                 </button>
               </div>
 
-              <!-- Stage 3: QC Analisis Mutu Lengkap (Post-Unloading) for GBB & GSP -->
-              <div v-else-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="space-y-4">
+              <!-- GSP Batubara Retest Mode -->
+              <div v-else-if="selectedTruck.status === 'QC_RETEST_REQUIRED'" class="space-y-4">
+                <button @click="openGspPaModal(selectedTruck, 2)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
+                  style="background:linear-gradient(135deg,#F97316,#C2410C);"
+                  id="btn-start-coal-retest">
+                  <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
+                  <span v-else class="material-icons text-xl">refresh</span>
+                  <span class="text-base tracking-wide">🔄 Lakukan Uji Ulang PA Batubara (Round 2)</span>
+                </button>
+              </div>
+
+              <!-- GSP Waiting Utility Disposition -->
+              <div v-else-if="selectedTruck.status === 'WAITING_UTILITY_DISPOSITION'" class="space-y-4">
+                <button @click="openUtilityDispositionModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
+                  style="background:linear-gradient(135deg,#D97706,#B45309);"
+                  id="btn-open-utility-disposition">
+                  <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
+                  <span v-else class="material-icons text-xl">gavel</span>
+                  <span class="text-base tracking-wide">⚖️ Disposisi Utility (Four-Eyes Principle)</span>
+                </button>
+              </div>
+
+              <!-- Stage 3: QC Analisis Mutu Lengkap (Post-Unloading) for GBB -->
+              <div v-else-if="(selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(selectedTruck) === 'GBB'" class="space-y-4">
                 <button @click="openGbbModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
                   style="background:linear-gradient(135deg,#10B981,#064e3b);">
                   <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
@@ -600,6 +623,64 @@
         </div>
       </transition>
     </teleport>
+
+    <!-- GSP PA Analysis Modal -->
+    <teleport to="body">
+      <div v-if="showGspPaModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6"
+        style="background:rgba(2,8,23,0.7);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);">
+        <div class="absolute inset-0" @click="showGspPaModal = false"></div>
+        <div class="bg-white rounded-3xl shadow-2xl w-[95vw] sm:max-w-2xl mx-auto relative z-10 overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+          <!-- Header -->
+          <div class="bg-gradient-to-r from-slate-50 to-indigo-50/50 px-6 py-5 border-b border-slate-200 flex justify-between items-center shrink-0">
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-sm">
+                <span class="material-icons">science</span>
+              </div>
+              <div>
+                <h3 class="text-base font-black text-slate-800 tracking-tight">Product Assurance (PA) Analysis</h3>
+                <p class="text-xs font-bold text-slate-500 uppercase">{{ getPlateNumber(selectedTruck) }} • {{ selectedTruck?.cargoSubType }}</p>
+              </div>
+            </div>
+            <button @click="showGspPaModal = false" class="w-8 h-8 rounded-full bg-white hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-slate-800 transition-colors">
+              <span class="material-icons text-xl">close</span>
+            </button>
+          </div>
+          <!-- Body -->
+          <div class="p-6 overflow-y-auto hide-scrollbar flex-1">
+            <CoalAnalysisForm
+              v-if="isBatubara(selectedTruck)"
+              :transaction="selectedTruck"
+              :test-round="gspTestRound"
+              :is-submitting="isProcessing"
+              @submit="handleGspPaSubmit"
+            />
+            <ChemicalPacForm
+              v-else-if="isPac(selectedTruck)"
+              :transaction="selectedTruck"
+              :is-submitting="isProcessing"
+              @submit="handleGspPaSubmit"
+            />
+            <ChemicalRapidKlenForm
+              v-else-if="isRapidKlen(selectedTruck)"
+              :transaction="selectedTruck"
+              :is-submitting="isProcessing"
+              @submit="handleGspPaSubmit"
+            />
+            <div v-else class="p-8 text-center text-slate-500">
+              <p class="font-bold">Formulir analisis untuk produk ini belum dikonfigurasi.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </teleport>
+
+    <!-- Utility Disposition Modal -->
+    <UtilityDispositionModal
+      :show="showUtilityModal"
+      :is-submitting="isProcessing"
+      @close="showUtilityModal = false"
+      @submit="handleUtilityDispositionSubmit"
+    />
   </div>
 </template>
 
@@ -618,12 +699,32 @@ import PageHeader from '../components/PageHeader.vue'
 import StepTimeline from '../components/StepTimeline.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import Pagination from '../components/Pagination.vue'
+import CoalAnalysisForm from '../components/qc/CoalAnalysisForm.vue'
+import ChemicalPacForm from '../components/qc/ChemicalPacForm.vue'
+import ChemicalRapidKlenForm from '../components/qc/ChemicalRapidKlenForm.vue'
+import UtilityDispositionModal from '../components/qc/UtilityDispositionModal.vue'
+import api from '../services/api'
 import {
   GBJ_VEHICLE_CHECKLIST,
   getQcStage1Mode,
   evaluateGbjChecklist,
   buildGbjQcPayload
 } from '../utils/gbjQcFlow'
+
+// GSP Product Helpers
+const isBatubara = (truck) => {
+  const sub = (truck?.cargoSubType || '').toLowerCase()
+  const cat = (truck?.cargoType || '').toLowerCase()
+  return sub.includes('batubara') || cat.includes('coal')
+}
+const isPac = (truck) => {
+  const sub = (truck?.cargoSubType || '').toUpperCase()
+  return sub.includes('PAC') || sub.includes('POLYCOR') || sub.includes('IPAC')
+}
+const isRapidKlen = (truck) => {
+  const sub = (truck?.cargoSubType || '').toUpperCase()
+  return sub.includes('RAPID') || sub.includes('PRO-CIP') || sub.includes('CIP')
+}
 
 // Safety Helpers at the top
 const getPlateNumber = (truck) => {
@@ -903,8 +1004,70 @@ const triggerStartQc = async (truck) => {
   return true;
 }
 
+// GSP PA State and Handlers
+const showGspPaModal = ref(false);
+const showUtilityModal = ref(false);
+const gspTestRound = ref(1);
+
+const openGspPaModal = async (truck, round = 1) => {
+  gspTestRound.value = round;
+  const success = await triggerStartQc(truck);
+  if (success) {
+    showGspPaModal.value = true;
+  }
+};
+
+const openUtilityDispositionModal = (truck) => {
+  showUtilityModal.value = true;
+};
+
+const handleGspPaSubmit = async (payload) => {
+  if (!selectedTruck.value || isProcessing.value) return;
+  isProcessing.value = true;
+  try {
+    const res = await api.post(`/qc/product-analysis/${selectedTruck.value.id}`, {
+      ...payload,
+      revision: selectedTruck.value.revision,
+    });
+    const data = res.data;
+    toast.success(data.message || 'Analisis PA berhasil dicatat');
+    await qcStore.fetchQueue();
+    selectedTruck.value = null;
+    showGspPaModal.value = false;
+  } catch (err) {
+    toast.error(err.response?.data?.message || 'Gagal menyimpan analisis PA');
+  } finally {
+    isProcessing.value = false;
+  }
+};
+
+const handleUtilityDispositionSubmit = async (payload) => {
+  if (!selectedTruck.value || isProcessing.value) return;
+  isProcessing.value = true;
+  try {
+    const res = await api.post(`/qc/disposition/${selectedTruck.value.id}`, {
+      ...payload,
+      revision: selectedTruck.value.revision,
+    });
+    const data = res.data;
+    toast.success(data.message || 'Disposisi Utility berhasil diproses');
+    await qcStore.fetchQueue();
+    selectedTruck.value = null;
+    showUtilityModal.value = false;
+  } catch (err) {
+    toast.error(err.response?.data?.message || 'Gagal memproses disposisi Utility');
+  } finally {
+    isProcessing.value = false;
+  }
+};
+
 const openQcStage1Modal = (truck) => {
   if (!truck) return;
+  const pType = getProcessType(truck);
+  if (pType === 'GSP') {
+    openGspPaModal(truck, 1);
+    return;
+  }
   const mode = getQcStage1Mode(truck);
   if (mode === 'GBJ_VEHICLE_CHECK') {
     openGbjModal(truck);
@@ -975,8 +1138,9 @@ const submitSamplingAwal = async (truck, passed) => {
       const updatedTruck = response?.data || response;
       if (updatedTruck) truckStore.upsertTruck(updatedTruck);
 
+      const targetWarehouse = getProcessType(truck) === 'GSP' ? 'Gudang GSP' : 'Gudang GBB';
       if (passed) {
-        toast.success(`Sampling Awal ${getPlateNumber(truck)} disetujui. Siap dibongkar di Gudang GBB.`);
+        toast.success(`Sampling Awal ${getPlateNumber(truck)} disetujui. Siap dibongkar di ${targetWarehouse}.`);
       } else {
         toast.error(`Sampling Awal ${getPlateNumber(truck)} DITOLAK.`);
       }

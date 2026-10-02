@@ -193,10 +193,18 @@ async function main() {
   const postMigrationEntities = capture16Entities();
   console.log('Post-migration state (Target):', postMigrationEntities);
 
-  if (postMigrationEntities.migrations !== 20) {
-    throw new Error(`Expected exactly 20 migrations post-deploy, got ${postMigrationEntities.migrations}`);
+  const migrationsDir = path.join(backendDir, 'prisma/migrations');
+  const expectedMigrations = fs.existsSync(migrationsDir)
+    ? fs.readdirSync(migrationsDir).filter(f => {
+        const full = path.join(migrationsDir, f);
+        return fs.statSync(full).isDirectory() && /^\d{14}_/.test(f);
+      }).length
+    : 22;
+
+  if (postMigrationEntities.migrations !== expectedMigrations) {
+    throw new Error(`Expected exactly ${expectedMigrations} migrations post-deploy, got ${postMigrationEntities.migrations}`);
   }
-  console.log('  Forward schema migration successfully verified (20 migrations applied).');
+  console.log(`  Forward schema migration successfully verified (${expectedMigrations} migrations applied).`);
 
   // ------------------------------------------------------------------------------
   // Step 4: Inject Failure Trigger & Execute Coordinated Rollback

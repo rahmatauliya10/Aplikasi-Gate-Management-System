@@ -8,19 +8,39 @@ export const VALID_STATUS_TRANSITIONS: Record<
   REGISTERED: [
     TransactionStatus.WEIGH_IN_DONE,
     TransactionStatus.QC_VEHICLE_PENDING,
+    TransactionStatus.PA_NOT_REQUIRED,
     TransactionStatus.CANCELLED,
   ],
   WEIGH_IN_DONE: [
     TransactionStatus.QC_VEHICLE_PENDING,
+    TransactionStatus.PA_NOT_REQUIRED,
     TransactionStatus.CANCELLED,
   ],
   QC_VEHICLE_PENDING: [
     TransactionStatus.QC_VEHICLE_IN_PROGRESS,
     TransactionStatus.QC_VEHICLE_PASSED,
     TransactionStatus.QC_VEHICLE_REJECTED,
+    TransactionStatus.QC_RETEST_REQUIRED,
     TransactionStatus.CANCELLED,
   ],
   QC_VEHICLE_IN_PROGRESS: [
+    TransactionStatus.QC_VEHICLE_PASSED,
+    TransactionStatus.QC_VEHICLE_REJECTED,
+    TransactionStatus.QC_RETEST_REQUIRED,
+    TransactionStatus.CANCELLED,
+  ],
+  PA_NOT_REQUIRED: [
+    TransactionStatus.WAREHOUSE_IN_PROGRESS,
+    TransactionStatus.CANCELLED,
+  ],
+  QC_RETEST_REQUIRED: [
+    TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+    TransactionStatus.QC_VEHICLE_PASSED,
+    TransactionStatus.QC_VEHICLE_REJECTED,
+    TransactionStatus.WAITING_UTILITY_DISPOSITION,
+    TransactionStatus.CANCELLED,
+  ],
+  WAITING_UTILITY_DISPOSITION: [
     TransactionStatus.QC_VEHICLE_PASSED,
     TransactionStatus.QC_VEHICLE_REJECTED,
     TransactionStatus.CANCELLED,

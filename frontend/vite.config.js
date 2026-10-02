@@ -6,9 +6,26 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     host: '0.0.0.0',
+    port: 8081,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
+    },
     watch: {
       usePolling: true,
     }
+  },
+  preview: {
+    host: '0.0.0.0',
+    port: 8081,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:3001',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     target: 'es2020',
