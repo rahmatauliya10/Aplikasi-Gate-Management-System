@@ -660,6 +660,14 @@ jobs:
                 EXECUTE 'GRANT ALL ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_owner;';
                 EXECUTE 'GRANT USAGE, SELECT, UPDATE ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_app;';
               END LOOP;
+              FOR r IN (
+                SELECT t.typname
+                FROM pg_type t
+                JOIN pg_namespace n ON n.oid = t.typnamespace
+                WHERE n.nspname = 'public' AND t.typtype = 'e'
+              ) LOOP
+                EXECUTE 'ALTER TYPE public.' || quote_ident(r.typname) || ' OWNER TO gms_owner;';
+              END LOOP;
             END \$\$;
           "
 
