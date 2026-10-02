@@ -304,20 +304,9 @@ async function runE2ESmoke() {
   if (!isSuccessStatus(gspWhComp.statusCode)) {
     throw new Error(`GSP Warehouse Complete FAILED: Status ${gspWhComp.statusCode}, Body: ${JSON.stringify(gspWhComp.body)}`);
   }
-  log(`  4. GSP Warehouse Unload SUCCESS (Status: INCOMING_CHECK_PENDING)`);
+  log(`  4. GSP Warehouse Unload SUCCESS (Status: WAREHOUSE_DONE)`);
 
-  // 5e. QC Incoming Check for GSP
-  const gspQcInc = await request(`/api/qc/incoming-result/${gspTxId}`, { method: 'POST', headers: authHeader }, {
-    result: 'PASS',
-    odor: 'NORMAL',
-    color: 'GOOD',
-  });
-  if (!isSuccessStatus(gspQcInc.statusCode)) {
-    throw new Error(`GSP QC Incoming Check FAILED: Status ${gspQcInc.statusCode}, Body: ${JSON.stringify(gspQcInc.body)}`);
-  }
-  log(`  5. GSP QC Incoming Check SUCCESS (Status: INCOMING_CHECK_PASSED)`);
-
-  // 5f. Weigh Out
+  // 5e. Weigh Out
   const gspWbOut = await request(`/api/weighbridge/out/${gspTxId}`, { method: 'POST', headers: authHeader }, {
     weight: 4000,
     ticketNumber: `WB-OUT-GSP-${timestampSuffix}`,
@@ -325,14 +314,14 @@ async function runE2ESmoke() {
   if (!isSuccessStatus(gspWbOut.statusCode)) {
     throw new Error(`GSP Weigh-Out FAILED: Status ${gspWbOut.statusCode}, Body: ${JSON.stringify(gspWbOut.body)}`);
   }
-  log(`  6. GSP Weigh-Out SUCCESS (Tare: 4,000 kg, Net: 8,000 kg, Status: WEIGH_OUT_DONE)`);
+  log(`  5. GSP Weigh-Out SUCCESS (Tare: 4,000 kg, Net: 8,000 kg, Status: WEIGH_OUT_DONE)`);
 
-  // 5g. Gate Check-Out
+  // 5f. Gate Check-Out
   const gspCheckOut = await request(`/api/gate/check-out/${gspTxId}`, { method: 'POST', headers: authHeader });
   if (!isSuccessStatus(gspCheckOut.statusCode)) {
     throw new Error(`GSP Gate Check-Out FAILED: Status ${gspCheckOut.statusCode}, Body: ${JSON.stringify(gspCheckOut.body)}`);
   }
-  log(`  7. GSP Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
+  log(`  6. GSP Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
 
 
   // Step 6: FULL GBJ WORKFLOW (Check-In -> Weigh In -> QC Vehicle -> Warehouse Loading -> Weigh Out -> Gate Out -> COMPLETED)
@@ -458,7 +447,7 @@ async function runE2ESmoke() {
         unit: 'BAG',
         remarks: 'Rerun WH complete',
       }), 'Warehouse Complete');
-      if (processType === 'GBB' || processType === 'GSP') {
+      if (processType === 'GBB') {
         await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
           odor: 'NORMAL',
@@ -479,7 +468,7 @@ async function runE2ESmoke() {
         unit: 'BAG',
         remarks: 'Rerun WH complete',
       }), 'Warehouse Complete');
-      if (processType === 'GBB' || processType === 'GSP') {
+      if (processType === 'GBB') {
         await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
           odor: 'NORMAL',
@@ -499,7 +488,7 @@ async function runE2ESmoke() {
         unit: 'BAG',
         remarks: 'Rerun WH complete',
       }), 'Warehouse Complete');
-      if (processType === 'GBB' || processType === 'GSP') {
+      if (processType === 'GBB') {
         await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
           odor: 'NORMAL',
