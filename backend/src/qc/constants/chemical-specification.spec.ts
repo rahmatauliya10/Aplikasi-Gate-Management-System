@@ -229,7 +229,9 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1)', () => {
       expect(resExact.result).toBe('REJECT');
       expect(resExact.decision).toBe('REJECT');
       expect(
-        resExact.violations.some((v) => v.includes('Na2O') && v.includes('> 35%')),
+        resExact.violations.some(
+          (v) => v.includes('Na2O') && v.includes('> 35%'),
+        ),
       ).toBe(true);
 
       const resAbove = evaluateRapidKlenAnalysis(

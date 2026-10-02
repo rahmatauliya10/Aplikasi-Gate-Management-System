@@ -41,17 +41,18 @@ export const OPERATIONAL_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
     'Provisional PAC parameters. Automated decisions (RELEASE/REJECT) prohibited until formal QA validation.',
 };
 
-export const RAPID_KLEN_DOC_STRICT_GT_METADATA: ChemicalSpecificationMetadata = {
-  version: '1.0.0-doc-strict-gt',
-  documentSource:
-    'Supplier CIP Technical Specification Doc #CIP-STRICT-01 (Specifies strict GT > 35.0%)',
-  approvalStatus: 'PENDING_SIGNOFF',
-  approvedBy: null,
-  approvedAt: null,
-  minOperator: 'GT',
-  notes:
-    'Document explicitly specifies strict greater-than (> 35.0%). Automated decisions withheld until formal QA validation.',
-};
+export const RAPID_KLEN_DOC_STRICT_GT_METADATA: ChemicalSpecificationMetadata =
+  {
+    version: '1.0.0-doc-strict-gt',
+    documentSource:
+      'Supplier CIP Technical Specification Doc #CIP-STRICT-01 (Specifies strict GT > 35.0%)',
+    approvalStatus: 'PENDING_SIGNOFF',
+    approvedBy: null,
+    approvedAt: null,
+    minOperator: 'GT',
+    notes:
+      'Document explicitly specifies strict greater-than (> 35.0%). Automated decisions withheld until formal QA validation.',
+  };
 
 export const RAPID_KLEN_DOC_STANDARD_GTE_METADATA: ChemicalSpecificationMetadata =
   {
@@ -79,25 +80,27 @@ export const TEST_FIXTURE_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
   notes: 'Simulated approved spec for automated testing.',
 };
 
-export const TEST_FIXTURE_RAPID_KLEN_STRICT_GT: ChemicalSpecificationMetadata = {
-  version: 'test-fixture-strict-gt',
-  documentSource: 'QA Approved Test Fixture with strict GT (> 35.0%)',
-  approvalStatus: 'APPROVED',
-  approvedBy: 'QA_HEAD_SIMULATED',
-  approvedAt: '2026-09-30T00:00:00.000Z',
-  minOperator: 'GT',
-  notes: 'Simulated approved spec specifying strict operator GT.',
-};
+export const TEST_FIXTURE_RAPID_KLEN_STRICT_GT: ChemicalSpecificationMetadata =
+  {
+    version: 'test-fixture-strict-gt',
+    documentSource: 'QA Approved Test Fixture with strict GT (> 35.0%)',
+    approvalStatus: 'APPROVED',
+    approvedBy: 'QA_HEAD_SIMULATED',
+    approvedAt: '2026-09-30T00:00:00.000Z',
+    minOperator: 'GT',
+    notes: 'Simulated approved spec specifying strict operator GT.',
+  };
 
-export const TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE: ChemicalSpecificationMetadata = {
-  version: 'test-fixture-standard-gte',
-  documentSource: 'QA Approved Test Fixture with standard GTE (>= 35.0%)',
-  approvalStatus: 'APPROVED',
-  approvedBy: 'QA_HEAD_SIMULATED',
-  approvedAt: '2026-09-30T00:00:00.000Z',
-  minOperator: 'GTE',
-  notes: 'Simulated approved spec specifying standard operator GTE.',
-};
+export const TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE: ChemicalSpecificationMetadata =
+  {
+    version: 'test-fixture-standard-gte',
+    documentSource: 'QA Approved Test Fixture with standard GTE (>= 35.0%)',
+    approvalStatus: 'APPROVED',
+    approvedBy: 'QA_HEAD_SIMULATED',
+    approvedAt: '2026-09-30T00:00:00.000Z',
+    minOperator: 'GTE',
+    notes: 'Simulated approved spec specifying standard operator GTE.',
+  };
 
 export const TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA: ChemicalSpecificationMetadata =
   TEST_FIXTURE_RAPID_KLEN_STANDARD_GTE;

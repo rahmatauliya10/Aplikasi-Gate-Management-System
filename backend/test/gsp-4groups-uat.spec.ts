@@ -1309,9 +1309,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           data: expect.objectContaining({
             type: WeighbridgeType.OUT,
             weight: 21970, // Actual scale weight recorded
-            remarks: expect.stringContaining(
-              'Selisih skala fisik 30 kg',
-            ),
+            remarks: expect.stringContaining('Selisih skala fisik 30 kg'),
           }),
         }),
       );

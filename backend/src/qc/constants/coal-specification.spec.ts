@@ -101,7 +101,9 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     expect(evalResult.result).toBe('REJECT');
     expect(evalResult.decision).toBe('RETEST_REQUIRED');
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
-    expect(evalResult.notes).toContain('Kadar air melebihi batas spesifikasi teresahkan');
+    expect(evalResult.notes).toContain(
+      'Kadar air melebihi batas spesifikasi teresahkan',
+    );
   });
 
   it('triggers PENDING_DISPOSITION in Round 2 when moisture still exceeds limit under approved specification', () => {
