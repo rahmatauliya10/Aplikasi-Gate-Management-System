@@ -804,15 +804,24 @@ async function runE2ESmoke() {
   });
   await request(`/api/qc/product-analysis/${pacTxId}/start`, { method: 'POST', headers: qcAuthHeader });
   const pacDetail = await request(`/api/transactions/${pacTxId}`, { headers: authHeader });
-  await request(`/api/qc/product-analysis/${pacTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+  const pacSubmitRes = await request(`/api/qc/product-analysis/${pacTxId}`, { method: 'POST', headers: qcAuthHeader }, {
     productCategory: 'Chemicals',
     productName: 'PAC 280 AC',
     testRound: 1,
-    parameters: { appearance: 'Clear Yellow', al2o3Pct: 10.2, specificGravity: 1.2 },
+    parameters: {
+      sensory: { visual: true, odor: true, packaging: true },
+      ph: 4.2,
+      density: 1.20,
+      aluminaContent: 10.2,
+    },
     result: 'PASS',
-    decision: 'RELEASE',
+    decision: 'PENDING_DISPOSITION',
+    notes: 'Provisional PAC analysis compliant with draft spec but awaiting formal QA/Utility signoff',
     revision: pacDetail.body?.data?.revision,
   });
+  if (!isSuccessStatus(pacSubmitRes.statusCode)) {
+    throw new Error(`PAC Submit FAILED: Status ${pacSubmitRes.statusCode}, Body: ${JSON.stringify(pacSubmitRes.body)}`);
+  }
   // Since operational spec is PENDING_SIGNOFF, system routes to WAITING_UTILITY_DISPOSITION
   const pacAfterSubmit = await request(`/api/transactions/${pacTxId}`, { headers: authHeader });
   if (pacAfterSubmit.body?.data?.status !== 'WAITING_UTILITY_DISPOSITION') {
