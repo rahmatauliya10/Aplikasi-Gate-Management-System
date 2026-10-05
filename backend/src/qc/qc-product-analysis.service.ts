@@ -86,17 +86,12 @@ export class QcProductAnalysisService {
       );
     }
 
-    // Idempotent check: if already in progress, safely return existing state without overwriting qcStartAt
+    // Idempotent check: if already in progress, safely return existing authoritative state without overwriting qcStartAt
     if (tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
       return {
         success: true,
         message: 'Proses analisis laboratorium sudah berjalan (in-progress).',
-        data: {
-          transactionId: tx.id,
-          status: tx.status,
-          qcStartAt: tx.qcStartAt,
-          revision: tx.revision,
-        },
+        data: tx,
       };
     }
 
@@ -124,7 +119,7 @@ export class QcProductAnalysisService {
 
     assertValidStatusTransition(tx.status, nextStatus);
 
-    await this.prisma.$transaction(async (prismaTx) => {
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
       const claimed = await prismaTx.transaction.updateMany({
         where: { id: transactionId, revision: tx.revision },
         data: {
@@ -150,6 +145,11 @@ export class QcProductAnalysisService {
             'Analis memulai pemeriksaan dan pengujian laboratorium (PA Start)',
         },
       });
+
+      return prismaTx.transaction.findUnique({
+        where: { id: transactionId },
+        include: { productCatalog: true },
+      });
     });
 
     await this.activityLogsService
@@ -166,11 +166,7 @@ export class QcProductAnalysisService {
     return {
       success: true,
       message: 'Proses analisis laboratorium berhasil dimulai',
-      data: {
-        transactionId,
-        status: nextStatus,
-        qcStartAt: tx.qcStartAt || now,
-      },
+      data: updated,
     };
   }
 

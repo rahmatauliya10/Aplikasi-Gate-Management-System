@@ -1031,11 +1031,16 @@ const openGspPaModal = async (truck, round = 1) => {
     isProcessing.value = true;
     try {
       const response = await qcStore.startProductAnalysis(truck.id);
-      const updatedTruck = response?.data || response;
-      if (updatedTruck) {
-        truckStore.upsertTruck(updatedTruck);
-        selectedTruck.value = updatedTruck;
-      }
+      const updated = response?.data || response;
+      const originalId = truck.id || truck.transactionId;
+      const authoritativeId = updated?.id || updated?.transactionId || originalId;
+      const normalizedUpdated = {
+        ...truck,
+        ...updated,
+        id: authoritativeId,
+      };
+      truckStore.upsertTruck(normalizedUpdated);
+      selectedTruck.value = truckStore.getTruckById(authoritativeId) || normalizedUpdated;
     } catch (e) {
       toast.error(e.response?.data?.message || 'Gagal memulai analisis PA');
       isProcessing.value = false;
@@ -1043,6 +1048,8 @@ const openGspPaModal = async (truck, round = 1) => {
     } finally {
       isProcessing.value = false;
     }
+  } else {
+    selectedTruck.value = truck;
   }
 
   showGspPaModal.value = true;
@@ -1094,18 +1101,18 @@ const handleUtilityDispositionSubmit = async (payload) => {
   }
 };
 
-const openQcStage1Modal = (truck) => {
+const openQcStage1Modal = async (truck) => {
   if (!truck) return;
   const pType = getProcessType(truck);
   if (pType === 'GSP') {
-    openGspPaModal(truck, 1);
+    await openGspPaModal(truck, 1);
     return;
   }
   const mode = getQcStage1Mode(truck);
   if (mode === 'GBJ_VEHICLE_CHECK') {
     openGbjModal(truck);
   } else if (mode === 'SAMPLING_AWAL') {
-    openSamplingAwalModal(truck);
+    await openSamplingAwalModal(truck);
   } else {
     toast.error('Process Type transaksi tidak valid. QC tidak dapat dilanjutkan.');
   }

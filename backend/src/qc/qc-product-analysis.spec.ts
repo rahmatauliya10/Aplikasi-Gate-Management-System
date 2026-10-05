@@ -1134,6 +1134,12 @@ describe('QcProductAnalysisService (Task 5)', () => {
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue({
+            ...coalTx,
+            status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+            revision: 3,
+            qcStartAt: new Date(),
+          }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -1150,7 +1156,10 @@ describe('QcProductAnalysisService (Task 5)', () => {
       );
 
       expect(res.success).toBe(true);
+      expect(res.data.id).toBe('tx-coal-start-1');
       expect(res.data.status).toBe(TransactionStatus.QC_VEHICLE_IN_PROGRESS);
+      expect(res.data.revision).toBe(3);
+      expect(res.data.cargoSubType).toBe('Batubara');
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
