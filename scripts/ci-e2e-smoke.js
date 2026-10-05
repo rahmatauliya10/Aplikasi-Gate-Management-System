@@ -107,28 +107,32 @@ async function getOrCreateUser(adminAuthHeader, userConfig) {
     password: userConfig.password,
   });
 
-  if (loginRes.statusCode === 200 && loginRes.body?.data?.accessToken) {
-    if (loginRes.body.data.mustChangePassword) {
+  const loginData = loginRes.body?.data || loginRes.body;
+  if (loginRes.statusCode === 200 && loginData?.accessToken) {
+    if (loginData.mustChangePassword) {
       await request('/api/auth/change-password', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${loginRes.body.data.accessToken}` },
+        headers: { Authorization: `Bearer ${loginData.accessToken}` },
       }, {
         currentPassword: userConfig.password,
-        newPassword: `${userConfig.password}1!`,
-        confirmPassword: `${userConfig.password}1!`,
+        newPassword: `${userConfig.password}Updated!`,
+        confirmPassword: `${userConfig.password}Updated!`,
       });
-      userConfig.password = `${userConfig.password}1!`;
+      userConfig.password = `${userConfig.password}Updated!`;
       loginRes = await request('/api/auth/login', { method: 'POST' }, {
         identifier: userConfig.username,
         password: userConfig.password,
       });
+      const reloginData = loginRes.body?.data || loginRes.body;
+      return { token: reloginData.accessToken, user: reloginData.user || reloginData };
     }
-    return { token: loginRes.body.data.accessToken, user: loginRes.body.data.user || loginRes.body.data };
+    return { token: loginData.accessToken, user: loginData.user || loginData };
   }
 
   // 2. Query users list to check if user already exists
   const usersList = await request('/api/users', { headers: adminAuthHeader });
-  const found = usersList.body?.data?.find(u => u.username === userConfig.username || u.email === userConfig.email);
+  const usersArray = usersList.body?.data || (Array.isArray(usersList.body) ? usersList.body : []);
+  const found = usersArray.find(u => u.username === userConfig.username || u.email === userConfig.email);
 
   if (found) {
     // Ensure department/area/warehouseAccess are up to date
@@ -139,16 +143,17 @@ async function getOrCreateUser(adminAuthHeader, userConfig) {
     });
 
     const resetRes = await request(`/api/users/${found.id}/reset-password`, { method: 'POST', headers: adminAuthHeader });
-    const tempPass = resetRes.body?.temporaryPassword;
+    const tempPass = resetRes.body?.data?.temporaryPassword || resetRes.body?.temporaryPassword;
     if (tempPass) {
       const tempLogin = await request('/api/auth/login', { method: 'POST' }, {
         identifier: userConfig.username,
         password: tempPass,
       });
-      if (tempLogin.statusCode === 200 && tempLogin.body?.data?.accessToken) {
+      const tempLoginData = tempLogin.body?.data || tempLogin.body;
+      if (tempLogin.statusCode === 200 && tempLoginData?.accessToken) {
         await request('/api/auth/change-password', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${tempLogin.body.data.accessToken}` },
+          headers: { Authorization: `Bearer ${tempLoginData.accessToken}` },
         }, {
           currentPassword: tempPass,
           newPassword: userConfig.password,
@@ -158,7 +163,8 @@ async function getOrCreateUser(adminAuthHeader, userConfig) {
           identifier: userConfig.username,
           password: userConfig.password,
         });
-        return { token: finalLogin.body.data.accessToken, user: finalLogin.body.data.user || finalLogin.body.data };
+        const finalLoginData = finalLogin.body?.data || finalLogin.body;
+        return { token: finalLoginData.accessToken, user: finalLoginData.user || finalLoginData };
       }
     }
   }
@@ -179,31 +185,41 @@ async function getOrCreateUser(adminAuthHeader, userConfig) {
     throw new Error(`Failed to create user ${userConfig.username}: HTTP ${createRes.statusCode}, body: ${JSON.stringify(createRes.body)}`);
   }
 
-  const tempPass = createRes.body?.temporaryPassword;
+  const tempPass = createRes.body?.data?.temporaryPassword || createRes.body?.temporaryPassword;
+  if (!tempPass) {
+    throw new Error(`No temporary password returned for ${userConfig.username}: body: ${JSON.stringify(createRes.body)}`);
+  }
+
   const tempLogin = await request('/api/auth/login', { method: 'POST' }, {
     identifier: userConfig.username,
     password: tempPass,
   });
 
-  if (!tempLogin.body?.data?.accessToken) {
-    throw new Error(`Login with temporary password failed for ${userConfig.username}: ${JSON.stringify(tempLogin.body)}`);
+  const tempLoginData = tempLogin.body?.data || tempLogin.body;
+  if (!tempLoginData?.accessToken) {
+    throw new Error(`Login with temporary password failed for ${userConfig.username}: HTTP ${tempLogin.statusCode}, body: ${JSON.stringify(tempLogin.body)}`);
   }
 
-  await request('/api/auth/change-password', {
+  const changeRes = await request('/api/auth/change-password', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${tempLogin.body.data.accessToken}` },
+    headers: { Authorization: `Bearer ${tempLoginData.accessToken}` },
   }, {
     currentPassword: tempPass,
     newPassword: userConfig.password,
     confirmPassword: userConfig.password,
   });
 
+  if (!isSuccessStatus(changeRes.statusCode)) {
+    throw new Error(`Failed to change password for ${userConfig.username}: HTTP ${changeRes.statusCode}, body: ${JSON.stringify(changeRes.body)}`);
+  }
+
   const finalLogin = await request('/api/auth/login', { method: 'POST' }, {
     identifier: userConfig.username,
     password: userConfig.password,
   });
 
-  return { token: finalLogin.body.data.accessToken, user: finalLogin.body.data.user || finalLogin.body.data };
+  const finalLoginData = finalLogin.body?.data || finalLogin.body;
+  return { token: finalLoginData.accessToken, user: finalLoginData.user || finalLoginData };
 }
 
 async function runE2ESmoke() {
@@ -476,7 +492,7 @@ async function runE2ESmoke() {
     department: 'QUALITY_CONTROL',
     area: 'LAB_TESTING',
     warehouseAccess: ['GSP'],
-    password: 'QcPassword123!',
+    password: 'QcSecurePassword2026!',
   });
   const qcAuthHeader = { Authorization: `Bearer ${qcAnalyst.token}` };
 
@@ -488,7 +504,7 @@ async function runE2ESmoke() {
     department: 'UTILITY',
     area: 'UTILITY_DISPOSITION_AUTHORITY',
     warehouseAccess: ['GSP'],
-    password: 'UtilityPassword123!',
+    password: 'UtilitySecurePass2026!',
   });
   const utilityAuthHeader = { Authorization: `Bearer ${utilityOfficer.token}` };
 
@@ -499,7 +515,7 @@ async function runE2ESmoke() {
     role: 'QC',
     department: 'QUALITY_CONTROL',
     warehouseAccess: ['GBB'],
-    password: 'QcPassword123!',
+    password: 'GbbQcSecurePass2026!',
   });
   const gbbQcAuthHeader = { Authorization: `Bearer ${gbbQcUser.token}` };
 
