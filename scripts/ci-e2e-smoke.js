@@ -744,8 +744,8 @@ async function runE2ESmoke() {
   await stepOk(request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start unloading Batubara in coal yard' }), 'Batubara Warehouse Start');
   const coalWhComp = await request(`/api/warehouse/complete/${coalTxId}`, { method: 'POST', headers: authHeader }, {
     actualWeight: 28500,
-    actualQuantity: 1,
-    unit: 'BULK',
+    actualQuantity: 28500,
+    unit: 'KG',
     remarks: 'Batubara unloading complete at Coal Bunker A',
   });
   if (!isSuccessStatus(coalWhComp.statusCode)) {
