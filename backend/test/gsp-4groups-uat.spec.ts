@@ -21,6 +21,12 @@ import { AnalysisDecision } from '../src/qc/dto/submit-product-analysis.dto';
 import { DispositionAction } from '../src/qc/dto/utility-disposition.dto';
 import { JwtPayloadUser } from '../src/common/decorators/current-user.decorator';
 import { isValidStatusTransition } from '../src/common/state-machine/workflow-state-machine';
+import { SpecificationProvider } from '../src/qc/providers/specification.provider';
+import { TEST_FIXTURE_COAL_SPEC_METADATA } from '../src/qc/constants/coal-specification';
+import {
+  TEST_FIXTURE_PAC_SPEC_METADATA,
+  TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+} from '../src/qc/constants/chemical-specification';
 
 describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
   let weighbridgeService: WeighbridgeService;
@@ -139,6 +145,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         WeighbridgeService,
         WarehouseService,
         QcProductAnalysisService,
+        SpecificationProvider,
         ActiveTransactionAmendmentService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
@@ -154,6 +161,19 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
     amendmentService = module.get<ActiveTransactionAmendmentService>(
       ActiveTransactionAmendmentService,
     );
+
+    const specProvider = module.get<SpecificationProvider>(
+      SpecificationProvider,
+    );
+    jest
+      .spyOn(specProvider, 'getCoalSpec')
+      .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+    jest
+      .spyOn(specProvider, 'getPacSpec')
+      .mockReturnValue(TEST_FIXTURE_PAC_SPEC_METADATA);
+    jest
+      .spyOn(specProvider, 'getRapidKlenSpec')
+      .mockReturnValue(TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA);
   });
 
   // =========================================================================

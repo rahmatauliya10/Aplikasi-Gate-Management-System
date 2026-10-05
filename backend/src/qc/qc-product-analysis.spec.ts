@@ -13,9 +13,12 @@ import { DispositionAction } from './dto/utility-disposition.dto';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+import { SpecificationProvider } from './providers/specification.provider';
+import { TEST_FIXTURE_COAL_SPEC_METADATA } from './constants/coal-specification';
 
 describe('QcProductAnalysisService (Task 5)', () => {
   let service: QcProductAnalysisService;
+  let specProvider: SpecificationProvider;
   let mockPrismaService: any;
   let mockActivityLogsService: any;
   let mockAuthScopeService: any;
@@ -70,6 +73,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         QcProductAnalysisService,
+        SpecificationProvider,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: ActivityLogsService, useValue: mockActivityLogsService },
         {
@@ -80,6 +84,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
     }).compile();
 
     service = module.get<QcProductAnalysisService>(QcProductAnalysisService);
+    specProvider = module.get<SpecificationProvider>(SpecificationProvider);
   });
 
   describe('submitProductAnalysis', () => {
@@ -114,11 +119,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         cb(mockTxClient),
       );
       jest
-        .spyOn(service, 'checkSpecificationApprovalStatus')
-        .mockReturnValueOnce({
-          approvalStatus: 'APPROVED',
-          documentSource: 'Test Harness Fixture (Simulated Approved Spec)',
-        });
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
 
       const res = await service.submitProductAnalysis(
         'tx-coal-1',
@@ -184,11 +186,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         cb(mockTxClient),
       );
       jest
-        .spyOn(service, 'checkSpecificationApprovalStatus')
-        .mockReturnValueOnce({
-          approvalStatus: 'APPROVED',
-          documentSource: 'Test Harness Fixture (Simulated Approved Spec)',
-        });
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
 
       const res = await service.submitProductAnalysis(
         'tx-coal-1',
@@ -343,6 +342,68 @@ describe('QcProductAnalysisService (Task 5)', () => {
         ),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('evaluates Rapid Klen exactly 35.0% alkalinity as failing GT 35.0% operational spec', async () => {
+      const rkTx = {
+        id: 'tx-rk-1',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'Rapid Klen',
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rkTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-rk-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      // Under operational spec (minOperator = 'GT'), 35.0% is not greater than 35.0%, so isCompliant = false.
+      // Decision will be PENDING_DISPOSITION because operational spec is PENDING_SIGNOFF.
+      const res = await service.submitProductAnalysis(
+        'tx-rk-1',
+        {
+          productCategory: 'Chemical',
+          productName: 'Rapid Klen',
+          parameters: {
+            sensory: { visual: true, packaging: true },
+            alkalinityNa2O: 35.0, // Exactly at 35.0%
+            ph: 13.0,
+            density: 1.45,
+          },
+          result: QcResult.REJECT,
+          decision: AnalysisDecision.PENDING_DISPOSITION,
+          revision: 2,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.qcProductAnalysis.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            result: QcResult.REJECT,
+            status: 'PENDING_DISPOSITION',
+          }),
+        }),
+      );
+    });
   });
 
   describe('submitUtilityDisposition - Four-Eyes Principle', () => {
@@ -432,6 +493,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -479,6 +542,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -526,6 +591,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -571,6 +638,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -616,6 +685,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -666,6 +737,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -714,6 +787,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -762,6 +837,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-waiting-disp',
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 4,
       };
 
@@ -824,6 +901,154 @@ describe('QcProductAnalysisService (Task 5)', () => {
           }),
         }),
       );
+    });
+
+    it('rejects disposition on non-Coal cargo (PAC / Rapid Klen) with ForbiddenException (open governance dependency)', async () => {
+      const pacTx = {
+        id: 'tx-pac-disp',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'PAC Liquid',
+        productCatalog: { name: 'PAC Liquid' },
+        revision: 4,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'analysis-pac',
+        transactionId: 'tx-pac-disp',
+        status: 'PENDING_DISPOSITION',
+        productName: 'PAC Liquid',
+      });
+
+      await expect(
+        service.submitUtilityDisposition(
+          'tx-pac-disp',
+          {
+            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
+            dispositionReason: 'Chemical attempt',
+            revision: 4,
+          },
+          mockUtilityUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('startProductAnalysis', () => {
+    it('rejects start if transaction is not GSP', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+        id: 'tx-gbb-start',
+        processType: ProcessType.GBB,
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+      });
+
+      await expect(
+        service.startProductAnalysis('tx-gbb-start', mockAnalystUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects start for Solar / PA-exempt commodity with BadRequestException', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+        id: 'tx-solar-start',
+        processType: ProcessType.GSP,
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar B30',
+        productCatalog: { name: 'Solar B30' },
+        status: TransactionStatus.PA_NOT_REQUIRED,
+      });
+
+      await expect(
+        service.startProductAnalysis('tx-solar-start', mockAnalystUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects start if transaction is not in QC_VEHICLE_PENDING', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+        id: 'tx-wrong-status',
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        grossWeight: 15000,
+        weighInAt: new Date(),
+      });
+
+      await expect(
+        service.startProductAnalysis('tx-wrong-status', mockAnalystUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('successfully starts PA, sets qcStartAt and transitions status to QC_VEHICLE_IN_PROGRESS', async () => {
+      const coalTx = {
+        id: 'tx-coal-start-1',
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        grossWeight: 15000,
+        weighInAt: new Date(),
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.startProductAnalysis(
+        'tx-coal-start-1',
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.status).toBe(TransactionStatus.QC_VEHICLE_IN_PROGRESS);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+            qcStartAt: expect.any(Date),
+          }),
+        }),
+      );
+    });
+
+    it('is idempotent on repeated start and preserves initial qcStartAt without overwrite', async () => {
+      const initialStartAt = new Date('2026-10-02T10:00:00Z');
+      const inProgressTx = {
+        id: 'tx-already-started',
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+        grossWeight: 15000,
+        weighInAt: new Date(),
+        qcStartAt: initialStartAt,
+        revision: 3,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        inProgressTx,
+      );
+
+      const res = await service.startProductAnalysis(
+        'tx-already-started',
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.message).toContain('in-progress');
+      expect(res.data.qcStartAt).toEqual(initialStartAt);
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
     });
   });
 });

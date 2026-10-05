@@ -20,14 +20,11 @@ import {
 import { QcResult, TransactionStatus } from '@prisma/client';
 import {
   OPERATIONAL_COAL_SPEC_METADATA,
-  TEST_FIXTURE_COAL_SPEC_METADATA,
   evaluateCoalAnalysis,
 } from './constants/coal-specification';
 import {
   OPERATIONAL_PAC_SPEC_METADATA,
-  TEST_FIXTURE_PAC_SPEC_METADATA,
   OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
-  TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
   evaluatePacAnalysis,
   evaluateRapidKlenAnalysis,
   PacAnalysisParameters,
@@ -36,6 +33,7 @@ import {
 import { isProductPaExempt } from './constants/pa-exemption-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { SpecificationProvider } from './providers/specification.provider';
 
 @Injectable()
 export class QcProductAnalysisService {
@@ -45,7 +43,136 @@ export class QcProductAnalysisService {
     private readonly prisma: PrismaService,
     private readonly activityLogsService: ActivityLogsService,
     private readonly authorizationScopeService: AuthorizationScopeService,
+    private readonly specProvider: SpecificationProvider,
   ) {}
+
+  /**
+   * Canonical Start Product Analysis event.
+   * Transitions QC_VEHICLE_PENDING -> QC_VEHICLE_IN_PROGRESS and records actual qcStartAt.
+   * Enforces:
+   * 1. GSP process-scope authorization
+   * 2. Transaction must be GSP processType
+   * 3. Solar/PA-exempt commodities are rejected (HTTP 400)
+   * 4. Initial start: QC_VEHICLE_PENDING -> QC_VEHICLE_IN_PROGRESS
+   * 5. Idempotent: repeated start on QC_VEHICLE_IN_PROGRESS does not overwrite original qcStartAt
+   * 6. Requires valid weigh-in (weighInAt != null, grossWeight > 0)
+   */
+  async startProductAnalysis(transactionId: string, user: JwtPayloadUser) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: { productCatalog: true },
+    });
+
+    if (!tx) {
+      throw new NotFoundException('Transaksi tidak ditemukan');
+    }
+
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Analisis PA laboratorium hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+
+    const isExempt = isProductPaExempt(tx.productCatalog, {
+      processType: tx.processType,
+      cargoType: tx.cargoType,
+      cargoSubType: tx.cargoSubType,
+    });
+    if (tx.status === TransactionStatus.PA_NOT_REQUIRED || isExempt) {
+      throw new BadRequestException(
+        `Komoditas bebas PA (${tx.cargoSubType || 'Solar'}) tidak memerlukan proses analisis laboratorium.`,
+      );
+    }
+
+    // Idempotent check: if already in progress, safely return existing state without overwriting qcStartAt
+    if (tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
+      return {
+        success: true,
+        message: 'Proses analisis laboratorium sudah berjalan (in-progress).',
+        data: {
+          transactionId: tx.id,
+          status: tx.status,
+          qcStartAt: tx.qcStartAt,
+          revision: tx.revision,
+        },
+      };
+    }
+
+    if (
+      tx.status !== TransactionStatus.QC_VEHICLE_PENDING &&
+      tx.status !== TransactionStatus.QC_RETEST_REQUIRED
+    ) {
+      throw new BadRequestException(
+        `Tidak dapat memulai analisis produk pada transaksi dengan status ${tx.status}. Wajib berstatus QC_VEHICLE_PENDING atau QC_RETEST_REQUIRED.`,
+      );
+    }
+
+    if (
+      !tx.weighInAt ||
+      tx.grossWeight == null ||
+      Number(tx.grossWeight) <= 0
+    ) {
+      throw new BadRequestException(
+        'Penimbangan masuk (weigh-in) belum selesai atau berat kotor (gross weight) tidak valid.',
+      );
+    }
+
+    const now = new Date();
+    const nextStatus = TransactionStatus.QC_VEHICLE_IN_PROGRESS;
+
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    await this.prisma.$transaction(async (prismaTx) => {
+      const claimed = await prismaTx.transaction.updateMany({
+        where: { id: transactionId, revision: tx.revision },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+          qcStartAt: tx.qcStartAt || now, // Never overwrite existing qcStartAt
+        },
+      });
+
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          'Transaksi telah diperbarui oleh pengguna lain (konflik konkurensi).',
+        );
+      }
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes:
+            'Analis memulai pemeriksaan dan pengujian laboratorium (PA Start)',
+        },
+      });
+    });
+
+    await this.activityLogsService
+      .logAction({
+        userId: user.id,
+        action: 'QC_PA_STARTED',
+        module: 'QC',
+        referenceId: transactionId,
+        description: `Proses analisis laboratorium dimulai oleh ${user.email}`,
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
+
+    return {
+      success: true,
+      message: 'Proses analisis laboratorium berhasil dimulai',
+      data: {
+        transactionId,
+        status: nextStatus,
+        qcStartAt: tx.qcStartAt || now,
+      },
+    };
+  }
 
   /**
    * Submit initial or retest lab analysis for a cargo transaction.
@@ -209,10 +336,7 @@ export class QcProductAnalysisService {
     const rawParams = (dto.parameters || {}) as any;
 
     if (isCoal) {
-      const coalSpecMeta =
-        specStatus.approvalStatus === 'APPROVED'
-          ? TEST_FIXTURE_COAL_SPEC_METADATA
-          : OPERATIONAL_COAL_SPEC_METADATA;
+      const coalSpecMeta = this.specProvider.getCoalSpec();
 
       evalResult = evaluateCoalAnalysis(
         {
@@ -232,10 +356,7 @@ export class QcProductAnalysisService {
         coalSpecMeta,
       );
     } else if (isPac) {
-      const pacSpecMeta =
-        specStatus.approvalStatus === 'APPROVED'
-          ? TEST_FIXTURE_PAC_SPEC_METADATA
-          : OPERATIONAL_PAC_SPEC_METADATA;
+      const pacSpecMeta = this.specProvider.getPacSpec();
 
       evalResult = evaluatePacAnalysis(
         {
@@ -270,10 +391,7 @@ export class QcProductAnalysisService {
         pacSpecMeta,
       );
     } else if (isRapidKlen) {
-      const rkSpecMeta =
-        specStatus.approvalStatus === 'APPROVED'
-          ? TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA
-          : OPERATIONAL_RAPID_KLEN_SPEC_METADATA;
+      const rkSpecMeta = this.specProvider.getRapidKlenSpec();
 
       evalResult = evaluateRapidKlenAnalysis(
         {
@@ -384,7 +502,13 @@ export class QcProductAnalysisService {
         );
       }
 
-      // 2. CAS claim on Transaction
+      if (!tx.qcStartAt) {
+        this.logger.warn(
+          `[submitProductAnalysis] Transaction ${transactionId} submitted without preceding startProductAnalysis event. Falling back qcStartAt to submission time.`,
+        );
+      }
+
+      // 2. CAS claim on Transaction (Preserve existing qcStartAt if recorded at start event)
       const claimed = await prismaTx.transaction.updateMany({
         where: { id: transactionId, revision: dto.revision },
         data: {
@@ -471,21 +595,24 @@ export class QcProductAnalysisService {
       cat.includes('BATUBARA') ||
       name.includes('BATUBARA')
     ) {
+      const spec = this.specProvider.getCoalSpec();
       return {
-        approvalStatus: OPERATIONAL_COAL_SPEC_METADATA.approvalStatus,
-        documentSource: OPERATIONAL_COAL_SPEC_METADATA.documentSource,
+        approvalStatus: spec.approvalStatus,
+        documentSource: spec.documentSource,
       };
     }
     if (name.includes('PAC')) {
+      const spec = this.specProvider.getPacSpec();
       return {
-        approvalStatus: OPERATIONAL_PAC_SPEC_METADATA.approvalStatus,
-        documentSource: OPERATIONAL_PAC_SPEC_METADATA.documentSource,
+        approvalStatus: spec.approvalStatus,
+        documentSource: spec.documentSource,
       };
     }
     if (name.includes('RAPID') || name.includes('KLEN')) {
+      const spec = this.specProvider.getRapidKlenSpec();
       return {
-        approvalStatus: OPERATIONAL_RAPID_KLEN_SPEC_METADATA.approvalStatus,
-        documentSource: OPERATIONAL_RAPID_KLEN_SPEC_METADATA.documentSource,
+        approvalStatus: spec.approvalStatus,
+        documentSource: spec.documentSource,
       };
     }
     return {
@@ -558,6 +685,19 @@ export class QcProductAnalysisService {
     ) {
       throw new BadRequestException(
         'Katalog produk pada analisis PA tidak sesuai dengan transaksi aktif.',
+      );
+    }
+
+    // 0. Commodity Scope Verification: Utility disposition is SOLELY authorized for Coal
+    const isCoal =
+      (tx.cargoType || '').toUpperCase().includes('COAL') ||
+      (tx.cargoSubType || '').toUpperCase().includes('BATUBARA') ||
+      (latestAnalysis.productCategory || '').toUpperCase().includes('COAL') ||
+      (latestAnalysis.productName || '').toUpperCase().includes('BATUBARA');
+
+    if (!isCoal) {
+      throw new ForbiddenException(
+        `Disposisi Utility hanya berwenang untuk komoditas Batubara. Komoditas kimia (${latestAnalysis.productName || tx.cargoSubType || 'Bahan Kimia'}) memerlukan pengesahan kewenangan terpisah (QA/QC Supervisor) yang saat ini berstatus PENDING_SIGNOFF (Open Governance Dependency).`,
       );
     }
 

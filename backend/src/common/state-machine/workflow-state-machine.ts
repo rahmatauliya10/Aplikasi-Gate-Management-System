@@ -21,12 +21,14 @@ export const VALID_STATUS_TRANSITIONS: Record<
     TransactionStatus.QC_VEHICLE_PASSED,
     TransactionStatus.QC_VEHICLE_REJECTED,
     TransactionStatus.QC_RETEST_REQUIRED,
+    TransactionStatus.WAITING_UTILITY_DISPOSITION,
     TransactionStatus.CANCELLED,
   ],
   QC_VEHICLE_IN_PROGRESS: [
     TransactionStatus.QC_VEHICLE_PASSED,
     TransactionStatus.QC_VEHICLE_REJECTED,
     TransactionStatus.QC_RETEST_REQUIRED,
+    TransactionStatus.WAITING_UTILITY_DISPOSITION,
     TransactionStatus.CANCELLED,
   ],
   PA_NOT_REQUIRED: [

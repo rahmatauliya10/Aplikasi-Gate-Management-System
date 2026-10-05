@@ -22,6 +22,7 @@ import { AuthorizationScopeService } from '../src/auth/authorization-scope.servi
 import { AnalysisDecision } from '../src/qc/dto/submit-product-analysis.dto';
 import { DispositionAction } from '../src/qc/dto/utility-disposition.dto';
 import { JwtPayloadUser } from '../src/common/decorators/current-user.decorator';
+import { SpecificationProvider } from '../src/qc/providers/specification.provider';
 
 describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation)', () => {
   let qcService: QcService;
@@ -84,7 +85,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         findUnique: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn(),
-        updateMany: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       warehouseProcess: {
         findFirst: jest.fn(),
@@ -164,6 +165,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         QcService,
         WarehouseService,
         QcProductAnalysisService,
+        SpecificationProvider,
         ActiveTransactionAmendmentService,
         OperationLogCorrectionService,
         { provide: PrismaService, useValue: mockPrismaService },
@@ -422,6 +424,8 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         id: 'tx-coal-waiting',
         processType: ProcessType.GSP,
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
         revision: 2,
       };
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
@@ -740,6 +744,321 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           adminNonUtilityUser,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // =========================================================================
+  // Category F: Phase 3 Invariants & Canonical Lifecycle Hardening (Vectors 22-29)
+  // =========================================================================
+  describe('Category F: Phase 3 Invariants & Canonical Lifecycle Hardening', () => {
+    it('Vector 22: WarehouseService rejects GSP Solar with forged QC_VEHICLE_PASSED status', async () => {
+      const solarTxForged = {
+        id: 'tx-solar-forged-passed',
+        processType: ProcessType.GSP,
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar B30',
+        status: TransactionStatus.QC_VEHICLE_PASSED, // FORGED / INVALID for Solar!
+        weighInAt: new Date(),
+        grossWeight: 15000,
+        revision: 3,
+        productCatalog: {
+          id: 'cat-solar',
+          code: 'SOLAR-001',
+          name: 'Solar B30',
+          category: 'Fuel',
+          subCategory: 'Solar',
+          processType: 'GSP',
+          isPaRequired: false,
+          policyVersion: 'SOP-GSP-2026.1',
+          isActive: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        solarTxForged,
+      );
+
+      await expect(
+        warehouseService.startWarehouse(
+          'tx-solar-forged-passed',
+          {},
+          warehouseUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('Vector 23: PA start endpoint rejects Solar / PA-exempt commodity with BadRequestException', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+        id: 'tx-solar-pa-start',
+        processType: ProcessType.GSP,
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar B30',
+        status: TransactionStatus.PA_NOT_REQUIRED,
+        productCatalog: {
+          name: 'Solar B30',
+          isPaRequired: false,
+          isActive: true,
+        },
+      });
+
+      await expect(
+        qcAnalysisService.startProductAnalysis(
+          'tx-solar-pa-start',
+          qcAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('Vector 24: PA start transitions QC_VEHICLE_PENDING to QC_VEHICLE_IN_PROGRESS and sets qcStartAt', async () => {
+      const coalTx = {
+        id: 'tx-coal-start-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        grossWeight: 18000,
+        weighInAt: new Date(),
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+
+      const res = await qcAnalysisService.startProductAnalysis(
+        'tx-coal-start-adv',
+        qcAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.status).toBe(TransactionStatus.QC_VEHICLE_IN_PROGRESS);
+      expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+            qcStartAt: expect.any(Date),
+          }),
+        }),
+      );
+    });
+
+    it('Vector 25: PA start is idempotent and preserves initial qcStartAt without overwrite', async () => {
+      const initialStartAt = new Date('2026-10-02T08:00:00.000Z');
+      const inProgressTx = {
+        id: 'tx-coal-already-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+        grossWeight: 18000,
+        weighInAt: new Date(),
+        qcStartAt: initialStartAt,
+        revision: 3,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        inProgressTx,
+      );
+
+      const res = await qcAnalysisService.startProductAnalysis(
+        'tx-coal-already-adv',
+        qcAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.qcStartAt).toEqual(initialStartAt);
+      expect(mockPrismaService.transaction.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('Vector 26: Utility disposition rejected on non-Coal cargo (PAC / Rapid Klen) with ForbiddenException', async () => {
+      const pacTxWaiting = {
+        id: 'tx-pac-disp-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'PAC Liquid',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        revision: 4,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        pacTxWaiting,
+      );
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-pac-adv',
+        transactionId: pacTxWaiting.id,
+        status: 'PENDING_DISPOSITION',
+        productName: 'PAC Liquid',
+        productCategory: 'Chemical',
+      });
+
+      await expect(
+        qcAnalysisService.submitUtilityDisposition(
+          pacTxWaiting.id,
+          {
+            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
+            dispositionReason: 'Chemical attempt by Utility lead',
+            revision: 4,
+          },
+          utilityOfficerUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('Vector 27: Rapid Klen exact 35.0% alkalinity fails GT 35.0% operational spec', async () => {
+      const rkTx = {
+        id: 'tx-rk-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'Rapid Klen',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rkTx);
+      mockPrismaService.qcProductAnalysis.create.mockResolvedValueOnce({
+        id: 'pa-rk-1',
+        testRound: 1,
+      });
+
+      const res = await qcAnalysisService.submitProductAnalysis(
+        'tx-rk-adv',
+        {
+          productCategory: 'Chemical',
+          productName: 'Rapid Klen',
+          parameters: {
+            sensory: { visual: true, packaging: true },
+            alkalinityNa2O: 35.0, // Exactly 35.0%
+            ph: 13.0,
+            density: 1.45,
+          },
+          result: QcResult.REJECT,
+          decision: AnalysisDecision.PENDING_DISPOSITION,
+          revision: 2,
+        },
+        qcAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockPrismaService.qcProductAnalysis.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            result: QcResult.REJECT,
+            status: 'PENDING_DISPOSITION',
+          }),
+        }),
+      );
+    });
+
+    it('Vector 28: Solar REOPEN with target QC_VEHICLE_PASSED normalizes to PA_NOT_REQUIRED', async () => {
+      const solarCompletedTx = {
+        id: 'tx-solar-reopen-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar B30',
+        status: TransactionStatus.COMPLETED,
+        grossWeight: 15000,
+        tareWeight: 5000,
+        netWeight: 10000,
+        weighInAt: new Date(),
+        revision: 5,
+        isVoided: false,
+        productCatalog: {
+          id: 'cat-solar-adv',
+          name: 'Solar B30',
+          category: 'Fuel',
+          subCategory: 'Solar',
+          processType: 'GSP',
+          isPaRequired: false,
+          policyVersion: 'SOP-GSP-2026.1',
+          isActive: true,
+        },
+        weighbridgeRecords: [],
+        warehouseProcesses: [],
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        solarCompletedTx,
+      );
+      mockPrismaService.transactionCorrection.create.mockResolvedValueOnce({
+        id: 'corr-solar-1',
+      });
+
+      const res = await correctionService.correctOperationLog(
+        'tx-solar-reopen-adv',
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reasonCode: 'SALAH_INPUT_ANGKA',
+          remark: 'Reopen Solar completed workflow',
+          expectedRevision: 5,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED, // Requested QC_VEHICLE_PASSED
+        },
+        adminNonUtilityUser,
+      );
+
+      expect(res.success).toBe(true);
+      // Persisted status MUST be PA_NOT_REQUIRED, NOT QC_VEHICLE_PASSED
+      expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.PA_NOT_REQUIRED,
+          }),
+        }),
+      );
+    });
+
+    it('Vector 29: Non-exempt GSP REOPEN with target QC_VEHICLE_PASSED downgrades to QC_VEHICLE_PENDING without active PA release evidence', async () => {
+      const coalCompletedTx = {
+        id: 'tx-coal-reopen-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        status: TransactionStatus.COMPLETED,
+        grossWeight: 18000,
+        tareWeight: 6000,
+        netWeight: 12000,
+        weighInAt: new Date(),
+        revision: 6,
+        isVoided: false,
+        productCatalog: {
+          id: 'cat-coal-adv',
+          name: 'Batubara GAR 4200',
+          category: 'Coal',
+          processType: 'GSP',
+          isPaRequired: true,
+          isActive: true,
+        },
+        weighbridgeRecords: [],
+        warehouseProcesses: [],
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalCompletedTx,
+      );
+      mockPrismaService.transactionCorrection.create.mockResolvedValueOnce({
+        id: 'corr-coal-1',
+      });
+      // Active PA not found or voided
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(null);
+
+      const res = await correctionService.correctOperationLog(
+        'tx-coal-reopen-adv',
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reasonCode: 'SALAH_INPUT_ANGKA',
+          remark: 'Reopen Coal completed workflow without PA release evidence',
+          expectedRevision: 6,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+        },
+        adminNonUtilityUser,
+      );
+
+      expect(res.success).toBe(true);
+      // Because active PA release evidence was absent, downgraded to QC_VEHICLE_PENDING
+      expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PENDING,
+          }),
+        }),
+      );
     });
   });
 });

@@ -1634,17 +1634,35 @@ const currentProcessType = computed(() => {
   return (props.truck?.processType || 'GBB').toUpperCase()
 })
 
+const isSolarCommodity = computed(() => {
+  const cargo = (props.truck?.cargoSubType || props.truck?.cargoType || props.truck?.productCatalog?.name || '').toLowerCase()
+  return cargo.includes('solar')
+})
+
 const allowedReopenTargets = computed(() => {
   const processType = currentProcessType.value
-  if (processType === 'GBJ' || processType === 'GSP') {
+  if (processType === 'GSP') {
+    if (isSolarCommodity.value) {
+      return [
+        { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
+        { value: 'PA_NOT_REQUIRED', label: '2. Post-Weighin / PA Not Required (Siap Gudang)' },
+      ]
+    }
     return [
       { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
       {
         value: 'QC_VEHICLE_PENDING',
-        label:
-          processType === 'GSP'
-            ? '2. QC Lab / Sampling Pending (Menunggu Product Analysis)'
-            : '2. QC Vehicle Pending (Menunggu QC Kendaraan)',
+        label: '2. QC Lab / Sampling Pending (Menunggu Product Analysis)',
+      },
+      { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
+    ]
+  }
+  if (processType === 'GBJ') {
+    return [
+      { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
+      {
+        value: 'QC_VEHICLE_PENDING',
+        label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)',
       },
       { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
     ]

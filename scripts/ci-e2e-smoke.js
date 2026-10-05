@@ -295,6 +295,14 @@ async function runE2ESmoke() {
   }
   log(`  3. Legacy QC Vehicle endpoint on GSP blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
 
+  // 5c.1: Testing PA Start endpoint on Solar (Must FAIL with HTTP 400 because Solar is PA-exempt)
+  log(`  3a. Testing PA Start endpoint on Solar GSP transaction (Must FAIL with HTTP 400)...`);
+  const solarPaStart = await request(`/api/qc/product-analysis/${gspTxId}/start`, { method: 'POST', headers: authHeader });
+  if (solarPaStart.statusCode !== 400) {
+    throw new Error(`PA start on Solar did NOT fail with 400! Received status: ${solarPaStart.statusCode}`);
+  }
+  log(`  3a. PA Start on Solar GSP transaction blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
+
   // 5d. Warehouse Start & Complete (Unloading)
   await stepOk(request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GSP unloading' }), 'GSP Warehouse Start');
   const gspWhComp = await request(`/api/warehouse/complete/${gspTxId}`, { method: 'POST', headers: authHeader }, {
@@ -486,7 +494,7 @@ async function runE2ESmoke() {
         ticketNumber: `WB-OUT-${processType}-RERUN-${suffix}`,
       }), 'Weighbridge Out');
       await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
-    } else if (targetStatus === 'QC_VEHICLE_PASSED') {
+    } else if (targetStatus === 'QC_VEHICLE_PASSED' || targetStatus === 'PA_NOT_REQUIRED') {
       await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
       await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
         actualWeight: 15000,
@@ -584,6 +592,8 @@ async function runE2ESmoke() {
   }
 
   // 7c. GSP Reopen Matrix (REGISTERED, QC_VEHICLE_PENDING, QC_VEHICLE_PASSED)
+  // Canonical Solar Invariant: Solar MUST NEVER persist as QC_VEHICLE_PASSED.
+  // Reopening Solar to QC_VEHICLE_PENDING or QC_VEHICLE_PASSED must canonically normalize to PA_NOT_REQUIRED.
   const gspTargets = ['REGISTERED', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_PASSED'];
   for (const target of gspTargets) {
     const detailRes = await request(`/api/transactions/${gspTxId}`, { headers: authHeader });
@@ -604,6 +614,23 @@ async function runE2ESmoke() {
     if (!isSuccessStatus(reopenRes.statusCode)) {
       throw new Error(`GSP REOPEN to ${target} FAILED! HTTP ${reopenRes.statusCode}, body: ${JSON.stringify(reopenRes.body)}`);
     }
+
+    // Verify persisted canonical state for Solar:
+    const detailAfter = await request(`/api/transactions/${gspTxId}`, { headers: authHeader });
+    const actualStatus = detailAfter.body?.data?.status;
+
+    if (target === 'REGISTERED') {
+      if (actualStatus !== 'REGISTERED') {
+        throw new Error(`Expected persisted status 'REGISTERED' after GSP Solar reopen to REGISTERED, received '${actualStatus}'`);
+      }
+    } else {
+      // Both QC_VEHICLE_PENDING and QC_VEHICLE_PASSED must canonically normalize to PA_NOT_REQUIRED for Solar
+      if (actualStatus !== 'PA_NOT_REQUIRED') {
+        throw new Error(`CANONICAL VIOLATION: Solar GSP reopened to ${target} MUST persist as 'PA_NOT_REQUIRED', but persisted as '${actualStatus}'! Solar must NEVER be QC_VEHICLE_PASSED.`);
+      }
+      log(`    ✓ Requested target ${target} canonically normalized to persisted PA_NOT_REQUIRED [PASS]`, 'SUCCESS');
+    }
+
     await rerunToCompleted(gspTxId, 'GSP', target, authHeader, `${timestampSuffix}-${target}`);
     log(`    ✓ GSP REOPEN -> ${target} rerun to COMPLETED [PASS]`, 'SUCCESS');
   }

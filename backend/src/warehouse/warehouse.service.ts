@@ -239,14 +239,29 @@ export class WarehouseService {
       });
 
       if (exemptionEval.isExempt) {
-        // Solar BBM exemption branch: Must have physical weigh-in and valid catalog
+        // Solar BBM exemption branch: CANONICAL invariant: Solar MUST NEVER generate or use QC_VEHICLE_PASSED.
+        // Post-weighin status for Solar is strictly PA_NOT_REQUIRED.
+        if (tx.status === TransactionStatus.QC_VEHICLE_PASSED) {
+          await this.activityLogsService
+            .logAction({
+              userId: user.id,
+              action: 'WAREHOUSE_FLOW_REJECTED',
+              module: 'WAREHOUSE',
+              referenceId: transactionId,
+              description: `Warehouse start rejected for GSP Solar: Invalid state QC_VEHICLE_PASSED. Solar is PA-exempt and must only have status PA_NOT_REQUIRED.`,
+              status: 'FAILED',
+            })
+            .catch(() => {});
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gudang menolak memulai proses GSP Solar: Transaksi Solar tidak boleh berstatus QC_VEHICLE_PASSED. Status sah untuk Solar adalah PA_NOT_REQUIRED.',
+            errors: [],
+          });
+        }
+
         const isSolarValid =
-          (
-            [
-              TransactionStatus.PA_NOT_REQUIRED,
-              TransactionStatus.QC_VEHICLE_PASSED,
-            ] as TransactionStatus[]
-          ).includes(tx.status) &&
+          tx.status === TransactionStatus.PA_NOT_REQUIRED &&
           tx.weighInAt != null &&
           tx.grossWeight != null &&
           Number(tx.grossWeight) > 0 &&
@@ -261,14 +276,14 @@ export class WarehouseService {
               action: 'WAREHOUSE_FLOW_REJECTED',
               module: 'WAREHOUSE',
               referenceId: transactionId,
-              description: `Warehouse start rejected for GSP Solar: Incomplete weigh-in or invalid exemption catalog. Status: ${tx.status}`,
+              description: `Warehouse start rejected for GSP Solar: Incomplete weigh-in, non-exempt status (${tx.status}), or invalid exemption catalog.`,
               status: 'FAILED',
             })
             .catch(() => {});
           throw new BadRequestException({
             success: false,
             message:
-              'Gudang menolak memulai proses GSP Solar: Transaksi belum memiliki bukti weigh-in yang sah, gross weight valid, atau katalog produk tidak aktif/tidak valid.',
+              'Gudang menolak memulai proses GSP Solar: Transaksi wajib berstatus PA_NOT_REQUIRED, memiliki bukti weigh-in yang sah, gross weight valid, dan katalog produk aktif.',
             errors: [],
           });
         }

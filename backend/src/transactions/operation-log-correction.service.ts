@@ -1076,6 +1076,7 @@ export class OperationLogCorrectionService {
             TransactionStatus.REGISTERED,
             TransactionStatus.QC_VEHICLE_PENDING,
             TransactionStatus.QC_VEHICLE_PASSED,
+            TransactionStatus.PA_NOT_REQUIRED,
           ],
           GBJ: [
             TransactionStatus.REGISTERED,
@@ -1107,18 +1108,49 @@ export class OperationLogCorrectionService {
           );
         }
 
-        // For GSP PA-exempt commodities (e.g. Solar BBM): post-weigh-in stage is PA_NOT_REQUIRED (not QC_VEHICLE_PENDING)
-        if (
-          processType === 'GSP' &&
-          effectiveTarget === TransactionStatus.QC_VEHICLE_PENDING
-        ) {
+        // For GSP commodities:
+        if (processType === 'GSP') {
           const exemptionEval = evaluatePaExemption(tx.productCatalog, {
             processType: tx.processType,
             cargoType: tx.cargoType,
             cargoSubType: tx.cargoSubType,
           });
+
           if (exemptionEval.isExempt) {
-            effectiveTarget = TransactionStatus.PA_NOT_REQUIRED;
+            // Solar BBM is PA-exempt: CANONICAL invariant: MUST NEVER persist as QC_VEHICLE_PASSED
+            if (
+              effectiveTarget === TransactionStatus.QC_VEHICLE_PENDING ||
+              effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED
+            ) {
+              effectiveTarget = TransactionStatus.PA_NOT_REQUIRED;
+            }
+          } else {
+            // Non-exempt GSP: QC_VEHICLE_PASSED requires legitimate active PA release evidence
+            if (effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED) {
+              const activePa = await prismaTx.qcProductAnalysis.findFirst({
+                where: { transactionId: id, isVoided: false },
+                orderBy: { testRound: 'desc' },
+              });
+              const isDirectRelease =
+                activePa &&
+                activePa.status === 'RELEASE' &&
+                (!activePa.result ||
+                  ['PASS', 'PASSED'].includes(activePa.result));
+              const isUtilityAccepted =
+                activePa &&
+                (activePa.status === 'ACCEPT_WITH_DEVIATION' ||
+                  activePa.dispositionAction === 'ACCEPT_WITH_DEVIATION') &&
+                activePa.dispositionById != null;
+              const hasValidRelease =
+                activePa &&
+                activePa.productCatalogId === tx.productCatalogId &&
+                (isDirectRelease || isUtilityAccepted);
+
+              if (!hasValidRelease) {
+                // If PA evidence is missing or invalid/superseded, downgrade to QC_VEHICLE_PENDING
+                effectiveTarget = TransactionStatus.QC_VEHICLE_PENDING;
+              }
+            }
           }
         }
 

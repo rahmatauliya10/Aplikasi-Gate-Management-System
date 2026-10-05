@@ -32,6 +32,48 @@ export class QcProductAnalysisController {
     private readonly productAnalysisService: QcProductAnalysisService,
   ) {}
 
+  @Post('product-analysis/:transactionId/start')
+  @Roles('QC', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Start product analysis for GSP cargo (QC_VEHICLE_PENDING -> QC_VEHICLE_IN_PROGRESS)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Product analysis started successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid transition, exempt product (Solar), or state mismatch',
+  })
+  startProductAnalysis(
+    @Param('transactionId') transactionId: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.productAnalysisService.startProductAnalysis(
+      transactionId,
+      user,
+    );
+  }
+
+  @Post('product-analysis/start/:transactionId')
+  @Roles('QC', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Start product analysis for GSP cargo (alias path)',
+  })
+  startProductAnalysisAlias(
+    @Param('transactionId') transactionId: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.productAnalysisService.startProductAnalysis(
+      transactionId,
+      user,
+    );
+  }
+
   @Post('product-analysis/:transactionId')
   @Roles('QC', 'ADMIN')
   @HttpCode(HttpStatus.OK)
