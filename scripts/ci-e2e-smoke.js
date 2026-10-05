@@ -726,9 +726,7 @@ async function runE2ESmoke() {
   log(`  7. Authorized Utility Section Head processing Technical Disposition...`);
   const utilityDispRes = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: utilityAuthHeader }, {
     dispositionAction: 'ACCEPT_WITH_DEVIATION',
-    dispositionReason: 'Technical concession approved by Utility Section Head due to urgent boiler feed requirements.',
-    concessionTerms: 'Gradual blending with dry GAR 5000 stockpile. Supplier penalized -2.5% invoice deduction.',
-    penaltyPercentage: 2.5,
+    dispositionReason: 'Technical concession approved by Utility Section Head due to urgent boiler feed requirements: gradual blending with dry GAR 5000 stockpile. Supplier penalized -2.5% invoice deduction.',
     revision: coalTxRev,
   });
   if (!isSuccessStatus(utilityDispRes.statusCode)) {
