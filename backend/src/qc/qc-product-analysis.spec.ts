@@ -276,6 +276,144 @@ describe('QcProductAnalysisService (Task 5)', () => {
       );
     });
 
+    it('submits Round 2 successfully when status is QC_VEHICLE_IN_PROGRESS following retest start', async () => {
+      const retestInProgressTx = {
+        id: 'tx-coal-retest-inprogress',
+        status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 4,
+        qcStartAt: new Date(),
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        retestInProgressTx,
+      );
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        { id: 'analysis-1', testRound: 1, isVoided: false },
+      ]);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-2', testRound: 2 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+
+      const res = await service.submitProductAnalysis(
+        'tx-coal-retest-inprogress',
+        {
+          productCategory: 'Coal',
+          productName: 'Batubara',
+          parameters: { visual: 'OK', moisture: 30.5 },
+          result: QcResult.PASSED,
+          decision: AnalysisDecision.RELEASE,
+          revision: 4,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.qcProductAnalysis.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            testRound: 2,
+            result: QcResult.PASS,
+            status: 'RELEASE',
+          }),
+        }),
+      );
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PASSED,
+          }),
+        }),
+      );
+    });
+
+    it('resets authoritative test round to Round 1 if previous PA records were voided (after REOPEN to pre-PA stage)', async () => {
+      const reopenedTx = {
+        id: 'tx-coal-reopened',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 5,
+        weighInAt: new Date(),
+        grossWeight: 25000,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        reopenedTx,
+      );
+      // All previous PA records are voided (isVoided: true), so findMany({ where: { isVoided: false } }) returns []
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-new-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+
+      const res = await service.submitProductAnalysis(
+        'tx-coal-reopened',
+        {
+          productCategory: 'Coal',
+          productName: 'Batubara',
+          testRound: 1,
+          parameters: { visual: 'OK', moisture: 30.5 },
+          result: QcResult.PASSED,
+          decision: AnalysisDecision.RELEASE,
+          revision: 5,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.qcProductAnalysis.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            testRound: 1,
+            result: QcResult.PASS,
+            status: 'RELEASE',
+          }),
+        }),
+      );
+    });
+
     it('blocks PA analysis submission for Solar (exempt)', async () => {
       const solarTx = {
         id: 'tx-solar-1',

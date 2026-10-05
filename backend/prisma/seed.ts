@@ -260,8 +260,53 @@ async function main() {
     } else {
       console.log('User security already exists, skipped.');
     }
+
+    // 5. Utility Officer (for GSP Batubara Four-Eyes Disposition)
+    console.log('Checking utility user...');
+    const existingUtility = await prisma.user.findUnique({
+      where: { email: 'agus.utility@gms.local' },
+    });
+
+    if (!existingUtility) {
+      console.log('Seeding utility user...');
+      const tempUtilityPassword =
+        process.env.DEFAULT_UTILITY_PASSWORD ||
+        process.env.UTILITY_PASSWORD ||
+        (isTest ? 'UtilityPassword123!' : generateTempPassword());
+      const utilityUser = await prisma.user.create({
+        data: {
+          email: 'agus.utility@gms.local',
+          username: 'utility_lead',
+          name: 'Agus Utility Head',
+          role: Role.ADMIN,
+          department: 'UTILITY',
+          area: 'UTILITY_DISPOSITION_AUTHORITY',
+          isActive: true,
+          passwordHash: await argon2.hash(tempUtilityPassword, hashOptions),
+          mustChangePassword: false,
+          temporaryPasswordExpiresAt: new Date(
+            Date.now() + 24 * 60 * 60 * 1000,
+          ),
+        },
+      });
+      await prisma.userWarehouseAccess.createMany({
+        data: [
+          { userId: utilityUser.id, processType: 'GBB' },
+          { userId: utilityUser.id, processType: 'GBJ' },
+          { userId: utilityUser.id, processType: 'GSP' },
+        ],
+        skipDuplicates: true,
+      });
+      if (!isTest) {
+        console.log(`[SEED] Utility Lead created.`);
+      }
+    } else {
+      console.log('User utility_lead already exists, skipped.');
+    }
   } else {
-    console.log('Production or non-development environment detected, skipping non-admin user seeding.');
+    console.log(
+      'Production or non-development environment detected, skipping non-admin user seeding.',
+    );
   }
 
   // 5. Default Anti-Fraud Warning Announcement

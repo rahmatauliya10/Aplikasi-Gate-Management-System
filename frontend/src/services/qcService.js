@@ -27,6 +27,14 @@ const qcService = {
   },
 
   /**
+   * Start Product Analysis (PA) inspection for GSP
+   * @param {Number|String} transactionId
+   */
+  startProductAnalysis(transactionId) {
+    return api.post(`/qc/product-analysis/${transactionId}/start`)
+  },
+
+  /**
    * Submit QC Vehicle result (approve/reject) - For GBJ
    * @param {Number|String} transactionId
    * @param {Object} data - { result: 'PASS'|'REJECT', vehicleCleanliness, ... }

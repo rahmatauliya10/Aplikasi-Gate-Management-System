@@ -160,6 +160,7 @@
             <transition-group name="list" tag="div" class="relative z-10 space-y-3">
               <div v-for="(truck, i) in paginatedQcTrucks" :key="truck.id"
                 @click="selectTruck(truck)"
+                :data-testid="'truck-card-' + truck.id"
                 class="group relative bg-white/70 backdrop-blur-md p-5 rounded-[2rem] cursor-pointer transition-all duration-500 border border-white shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden"
                 :class="selectedTruck?.id === truck.id ? 'border-[#4A8BDF] shadow-[0_15px_40px_rgba(74,139,223,0.15)] -translate-y-1.5 bg-white/90' : 'hover:border-indigo-400 hover:border-opacity-40 hover:shadow-[0_15px_40px_rgba(74,139,223,0.12)] hover:-translate-y-1.5'"
               >
@@ -804,6 +805,10 @@ const qcTrucks = computed(() => {
     if (t.status === 'QC_VEHICLE_PENDING' || t.status === 'QC_VEHICLE_IN_PROGRESS') {
       return true
     }
+    // GSP Retest or Waiting Utility Disposition
+    if (t.status === 'QC_RETEST_REQUIRED' || t.status === 'WAITING_UTILITY_DISPOSITION') {
+      return true
+    }
     // QC Lab Analysis (Stage 3) for GBB and GSP
     if (t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') {
       return true
@@ -1010,11 +1015,37 @@ const showUtilityModal = ref(false);
 const gspTestRound = ref(1);
 
 const openGspPaModal = async (truck, round = 1) => {
-  gspTestRound.value = round;
-  const success = await triggerStartQc(truck);
-  if (success) {
-    showGspPaModal.value = true;
+  if (!truck) return;
+
+  const cargoName = (truck.product?.name || truck.cargoSubType || truck.cargoType || '').toUpperCase();
+  if (cargoName.includes('SOLAR')) {
+    toast.error('Komoditas Solar berstatus PA_NOT_REQUIRED dan tidak memerlukan analisis laboratorium.');
+    return;
   }
+
+  gspTestRound.value = round;
+
+  // Canonical PA start for GSP:
+  // Triggered when status is QC_VEHICLE_PENDING (Round 1) or QC_RETEST_REQUIRED (Round 2)
+  if (truck.status === 'QC_VEHICLE_PENDING' || truck.status === 'QC_RETEST_REQUIRED') {
+    isProcessing.value = true;
+    try {
+      const response = await qcStore.startProductAnalysis(truck.id);
+      const updatedTruck = response?.data || response;
+      if (updatedTruck) {
+        truckStore.upsertTruck(updatedTruck);
+        selectedTruck.value = updatedTruck;
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.message || 'Gagal memulai analisis PA');
+      isProcessing.value = false;
+      return;
+    } finally {
+      isProcessing.value = false;
+    }
+  }
+
+  showGspPaModal.value = true;
 };
 
 const openUtilityDispositionModal = (truck) => {
@@ -1031,6 +1062,7 @@ const handleGspPaSubmit = async (payload) => {
     });
     const data = res.data;
     toast.success(data.message || 'Analisis PA berhasil dicatat');
+    await truckStore.fetchTrucks();
     await qcStore.fetchQueue();
     selectedTruck.value = null;
     showGspPaModal.value = false;
@@ -1051,6 +1083,7 @@ const handleUtilityDispositionSubmit = async (payload) => {
     });
     const data = res.data;
     toast.success(data.message || 'Disposisi Utility berhasil diproses');
+    await truckStore.fetchTrucks();
     await qcStore.fetchQueue();
     selectedTruck.value = null;
     showUtilityModal.value = false;

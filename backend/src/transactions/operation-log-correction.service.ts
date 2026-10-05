@@ -1230,8 +1230,22 @@ export class OperationLogCorrectionService {
               supersededByCorrectionId: correction.id,
             },
           });
+
+          // Invalidate active GSP PA evidence when reopening to REGISTERED (pre-PA stage)
+          if (processType === 'GSP') {
+            await prismaTx.qcProductAnalysis.updateMany({
+              where: { transactionId: id, isVoided: false },
+              data: {
+                isVoided: true,
+                voidedAt: new Date(),
+                voidReason: `Superseded by REOPEN_WORKFLOW to ${effectiveTarget} (Correction ID: ${correction.id})`,
+                status: 'VOIDED',
+              },
+            });
+          }
         } else if (
           targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING ||
+          effectiveTarget === TransactionStatus.QC_VEHICLE_PENDING ||
           effectiveTarget === TransactionStatus.PA_NOT_REQUIRED
         ) {
           // Weigh-in completed, reopening to QC Vehicle stage
@@ -1272,6 +1286,19 @@ export class OperationLogCorrectionService {
               supersededByCorrectionId: correction.id,
             },
           });
+
+          // Invalidate active GSP PA evidence when reopening to QC_VEHICLE_PENDING (pre-PA stage)
+          if (processType === 'GSP') {
+            await prismaTx.qcProductAnalysis.updateMany({
+              where: { transactionId: id, isVoided: false },
+              data: {
+                isVoided: true,
+                voidedAt: new Date(),
+                voidReason: `Superseded by REOPEN_WORKFLOW to ${effectiveTarget} (Correction ID: ${correction.id})`,
+                status: 'VOIDED',
+              },
+            });
+          }
         } else if (effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED) {
           // Reopen to Warehouse ready stage (QC_VEHICLE_PASSED)
           // Clears warehouse fields so actual Warehouse user triggers startWarehouse() for clean SoD & audit attribution

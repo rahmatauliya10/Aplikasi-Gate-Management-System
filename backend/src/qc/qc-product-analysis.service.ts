@@ -298,10 +298,11 @@ export class QcProductAnalysisService {
 
     if (
       authoritativeTestRound > 1 &&
-      tx.status !== TransactionStatus.QC_RETEST_REQUIRED
+      tx.status !== TransactionStatus.QC_RETEST_REQUIRED &&
+      tx.status !== TransactionStatus.QC_VEHICLE_IN_PROGRESS
     ) {
       throw new BadRequestException(
-        `Uji ulang (Round ${authoritativeTestRound}) hanya dapat diproses saat status transaksi QC_RETEST_REQUIRED (saat ini: ${tx.status})`,
+        `Uji ulang (Round ${authoritativeTestRound}) hanya dapat diproses saat status transaksi QC_RETEST_REQUIRED atau QC_VEHICLE_IN_PROGRESS (saat ini: ${tx.status})`,
       );
     }
 

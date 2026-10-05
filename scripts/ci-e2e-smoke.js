@@ -92,6 +92,120 @@ async function waitForHealth(maxWaitMs = 60000) {
   throw new Error(`Timeout waiting for backend to become ready after ${maxWaitMs}ms.`);
 }
 
+async function stepOk(reqPromise, stepName) {
+  const res = await reqPromise;
+  if (!isSuccessStatus(res.statusCode)) {
+    throw new Error(`Step '${stepName}' FAILED with status ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  }
+  return res;
+}
+
+async function getOrCreateUser(adminAuthHeader, userConfig) {
+  // 1. Try logging in first
+  let loginRes = await request('/api/auth/login', { method: 'POST' }, {
+    identifier: userConfig.username,
+    password: userConfig.password,
+  });
+
+  if (loginRes.statusCode === 200 && loginRes.body?.data?.accessToken) {
+    if (loginRes.body.data.mustChangePassword) {
+      await request('/api/auth/change-password', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${loginRes.body.data.accessToken}` },
+      }, {
+        currentPassword: userConfig.password,
+        newPassword: `${userConfig.password}1!`,
+        confirmPassword: `${userConfig.password}1!`,
+      });
+      userConfig.password = `${userConfig.password}1!`;
+      loginRes = await request('/api/auth/login', { method: 'POST' }, {
+        identifier: userConfig.username,
+        password: userConfig.password,
+      });
+    }
+    return { token: loginRes.body.data.accessToken, user: loginRes.body.data.user || loginRes.body.data };
+  }
+
+  // 2. Query users list to check if user already exists
+  const usersList = await request('/api/users', { headers: adminAuthHeader });
+  const found = usersList.body?.data?.find(u => u.username === userConfig.username || u.email === userConfig.email);
+
+  if (found) {
+    // Ensure department/area/warehouseAccess are up to date
+    await request(`/api/users/${found.id}`, { method: 'PATCH', headers: adminAuthHeader }, {
+      department: userConfig.department,
+      area: userConfig.area,
+      warehouseAccess: userConfig.warehouseAccess || ['GSP'],
+    });
+
+    const resetRes = await request(`/api/users/${found.id}/reset-password`, { method: 'POST', headers: adminAuthHeader });
+    const tempPass = resetRes.body?.temporaryPassword;
+    if (tempPass) {
+      const tempLogin = await request('/api/auth/login', { method: 'POST' }, {
+        identifier: userConfig.username,
+        password: tempPass,
+      });
+      if (tempLogin.statusCode === 200 && tempLogin.body?.data?.accessToken) {
+        await request('/api/auth/change-password', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tempLogin.body.data.accessToken}` },
+        }, {
+          currentPassword: tempPass,
+          newPassword: userConfig.password,
+          confirmPassword: userConfig.password,
+        });
+        const finalLogin = await request('/api/auth/login', { method: 'POST' }, {
+          identifier: userConfig.username,
+          password: userConfig.password,
+        });
+        return { token: finalLogin.body.data.accessToken, user: finalLogin.body.data.user || finalLogin.body.data };
+      }
+    }
+  }
+
+  // 3. User does not exist, create new
+  log(`Creating user ${userConfig.username} via Admin API...`);
+  const createRes = await request('/api/users', { method: 'POST', headers: adminAuthHeader }, {
+    email: userConfig.email,
+    username: userConfig.username,
+    name: userConfig.name,
+    role: userConfig.role,
+    department: userConfig.department,
+    area: userConfig.area,
+    warehouseAccess: userConfig.warehouseAccess || ['GSP'],
+  });
+
+  if (!isSuccessStatus(createRes.statusCode)) {
+    throw new Error(`Failed to create user ${userConfig.username}: HTTP ${createRes.statusCode}, body: ${JSON.stringify(createRes.body)}`);
+  }
+
+  const tempPass = createRes.body?.temporaryPassword;
+  const tempLogin = await request('/api/auth/login', { method: 'POST' }, {
+    identifier: userConfig.username,
+    password: tempPass,
+  });
+
+  if (!tempLogin.body?.data?.accessToken) {
+    throw new Error(`Login with temporary password failed for ${userConfig.username}: ${JSON.stringify(tempLogin.body)}`);
+  }
+
+  await request('/api/auth/change-password', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${tempLogin.body.data.accessToken}` },
+  }, {
+    currentPassword: tempPass,
+    newPassword: userConfig.password,
+    confirmPassword: userConfig.password,
+  });
+
+  const finalLogin = await request('/api/auth/login', { method: 'POST' }, {
+    identifier: userConfig.username,
+    password: userConfig.password,
+  });
+
+  return { token: finalLogin.body.data.accessToken, user: finalLogin.body.data.user || finalLogin.body.data };
+}
+
 async function runE2ESmoke() {
   log('Starting GMS Cross-Stack E2E Complete Business Lifecycle & API Smoke Gate (P0-07)...');
 
@@ -333,6 +447,403 @@ async function runE2ESmoke() {
   }
   log(`  6. GSP Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
 
+  // ==============================================================================
+  // Step 5B: FULL NON-SOLAR GSP BATUBARA WORKFLOW
+  // (Check-in -> Weigh-In [QC_VEHICLE_PENDING] -> PA Start Round 1 [QC_VEHICLE_IN_PROGRESS]
+  //  -> Submit Round 1 fail [QC_RETEST_REQUIRED] -> PA Start Round 2 [QC_VEHICLE_IN_PROGRESS]
+  //  -> Submit Round 2 fail [WAITING_UTILITY_DISPOSITION] -> Authorized Four-Eyes Utility Disposition [QC_VEHICLE_PASSED]
+  //  -> Warehouse Start -> Warehouse Complete -> Weigh-Out -> Gate-Out -> COMPLETED)
+  // Plus exhaustive negative assertions:
+  // - Legacy /qc/start on GSP = 400
+  // - Forged RELEASE without conforming parameters = 400
+  // - Warehouse start without active PA = 400
+  // - Scope violation on PA = 403
+  // - Four-Eyes violation: Analyst cannot give Utility disposition = 403
+  // - Non-Utility department user cannot give Utility disposition = 403
+  // - Chemical (non-Coal) utility disposition blocked by fail-closed governance = 403
+  // ==============================================================================
+  log(`[WORKFLOW 2B] Executing Complete GSP Batubara Lifecycle to COMPLETED...`);
+
+  // Setup distinct actors for Separation of Duties & Four-Eyes Principle:
+  // Actor 1: QC Analyst (performs lab testing)
+  // Actor 2: Utility Section Head (performs Four-Eyes technical disposition)
+  // Actor 3: GBB-scoped QC User (for process scope violation assertion)
+  const qcAnalyst = await getOrCreateUser(authHeader, {
+    username: 'qc_analyst_e2e',
+    email: 'qc.analyst.e2e@gms.local',
+    name: 'QC Analyst E2E',
+    role: 'QC',
+    department: 'QUALITY_CONTROL',
+    area: 'LAB_TESTING',
+    warehouseAccess: ['GSP'],
+    password: 'QcPassword123!',
+  });
+  const qcAuthHeader = { Authorization: `Bearer ${qcAnalyst.token}` };
+
+  const utilityOfficer = await getOrCreateUser(authHeader, {
+    username: 'utility_lead_e2e',
+    email: 'utility.lead.e2e@gms.local',
+    name: 'Agus Utility Section Head',
+    role: 'ADMIN',
+    department: 'UTILITY',
+    area: 'UTILITY_DISPOSITION_AUTHORITY',
+    warehouseAccess: ['GSP'],
+    password: 'UtilityPassword123!',
+  });
+  const utilityAuthHeader = { Authorization: `Bearer ${utilityOfficer.token}` };
+
+  const gbbQcUser = await getOrCreateUser(authHeader, {
+    username: 'qc_gbb_only_e2e',
+    email: 'qc.gbb.only@gms.local',
+    name: 'QC GBB Only',
+    role: 'QC',
+    department: 'QUALITY_CONTROL',
+    warehouseAccess: ['GBB'],
+    password: 'QcPassword123!',
+  });
+  const gbbQcAuthHeader = { Authorization: `Bearer ${gbbQcUser.token}` };
+
+  // 1. Check-In Batubara
+  const coalPlate = `B88${timestampSuffix}CB`;
+  const coalCheckInRes = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
+    plateNumber: coalPlate,
+    driverName: 'E2E Driver Batubara',
+    driverPhone: '081234567895',
+    vendorName: 'PT Tambang Batubara Prima',
+    vehicleType: 'TRUCK',
+    processType: 'GSP',
+    cargoType: 'Coal',
+    cargoSubType: 'Batubara',
+    cargoProcessType: 'INBOUND',
+    suratJalanNumber: `SJ-COAL-${timestampSuffix}`,
+    poNumber: `PO-COAL-${timestampSuffix}`,
+  });
+  if (!isSuccessStatus(coalCheckInRes.statusCode) || !coalCheckInRes.body?.data?.id) {
+    throw new Error(`Batubara Check-In FAILED: Status ${coalCheckInRes.statusCode}, Body: ${JSON.stringify(coalCheckInRes.body)}`);
+  }
+  const coalTxId = coalCheckInRes.body.data.id;
+  let coalTxRev = coalCheckInRes.body.data.revision || 1;
+  log(`  1. Batubara Check-In SUCCESS (ID: ${coalTxId}, Status: REGISTERED)`);
+
+  // Negative assertion: Warehouse start before weigh-in & PA MUST FAIL (HTTP 400)
+  log(`  Testing Warehouse start before weigh-in & PA (Must FAIL with HTTP 400)...`);
+  const prematureWhStart = await request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader });
+  if (prematureWhStart.statusCode !== 400) {
+    throw new Error(`Warehouse start before PA did NOT fail with 400! Received: ${prematureWhStart.statusCode}`);
+  }
+  log(`  Warehouse start before PA blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
+
+  // 2. Weigh In
+  const coalWbIn = await request(`/api/weighbridge/in/${coalTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 28500,
+    ticketNumber: `WB-IN-COAL-${timestampSuffix}`,
+  });
+  if (!isSuccessStatus(coalWbIn.statusCode)) {
+    throw new Error(`Batubara Weigh-In FAILED: Status ${coalWbIn.statusCode}, Body: ${JSON.stringify(coalWbIn.body)}`);
+  }
+  const coalAfterWb = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalAfterWb.body?.data?.status !== 'QC_VEHICLE_PENDING') {
+    throw new Error(`Expected Batubara status QC_VEHICLE_PENDING after weigh-in, received: ${coalAfterWb.body?.data?.status}`);
+  }
+  coalTxRev = coalAfterWb.body?.data?.revision;
+  log(`  2. Batubara Weigh-In SUCCESS (Gross: 28,500 kg, Status: QC_VEHICLE_PENDING)`);
+
+  // Negative assertion: Legacy QC Start on GSP Batubara MUST FAIL (HTTP 400)
+  log(`  Testing legacy /qc/start on GSP Batubara (Must FAIL with HTTP 400)...`);
+  const legacyQcStart = await request(`/api/qc/start/${coalTxId}`, { method: 'POST', headers: qcAuthHeader });
+  if (legacyQcStart.statusCode !== 400) {
+    throw new Error(`Legacy /qc/start on GSP did NOT fail with 400! Received status: ${legacyQcStart.statusCode}`);
+  }
+  log(`  Legacy /qc/start on GSP Batubara blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
+
+  // Negative assertion: Process Scope Violation on PA start (Must FAIL with HTTP 403 Forbidden)
+  log(`  Testing Process Scope Violation on PA start (Must FAIL with HTTP 403)...`);
+  const scopeViolationRes = await request(`/api/qc/product-analysis/${coalTxId}/start`, { method: 'POST', headers: gbbQcAuthHeader });
+  if (scopeViolationRes.statusCode !== 403) {
+    throw new Error(`Process scope violation did NOT fail with 403! Received status: ${scopeViolationRes.statusCode}`);
+  }
+  log(`  Process scope violation blocked with HTTP 403 as expected [PASS]`, 'SUCCESS');
+
+  // Negative assertion: Warehouse start without active PA MUST FAIL (HTTP 400)
+  log(`  Testing Warehouse start while in QC_VEHICLE_PENDING (Must FAIL with HTTP 400)...`);
+  const whStartPending = await request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader });
+  if (whStartPending.statusCode !== 400) {
+    throw new Error(`Warehouse start without active PA did NOT fail with 400! Received: ${whStartPending.statusCode}`);
+  }
+  log(`  Warehouse start without active PA blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
+
+  // 3. Start Product Analysis Round 1
+  log(`  3. Analyst starting PA Round 1...`);
+  const paStartR1 = await request(`/api/qc/product-analysis/${coalTxId}/start`, { method: 'POST', headers: qcAuthHeader });
+  if (!isSuccessStatus(paStartR1.statusCode)) {
+    throw new Error(`PA Start Round 1 FAILED: Status ${paStartR1.statusCode}, Body: ${JSON.stringify(paStartR1.body)}`);
+  }
+  const coalAfterStartR1 = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalAfterStartR1.body?.data?.status !== 'QC_VEHICLE_IN_PROGRESS') {
+    throw new Error(`Expected status QC_VEHICLE_IN_PROGRESS after PA Start, received: ${coalAfterStartR1.body?.data?.status}`);
+  }
+  coalTxRev = coalAfterStartR1.body?.data?.revision;
+  log(`  3. PA Start Round 1 SUCCESS (Status: QC_VEHICLE_IN_PROGRESS, qcStartAt recorded)`);
+
+  // Negative assertion: Forged RELEASE (client sends PASS/RELEASE but moisture 36.5% exceeds limit) MUST FAIL (HTTP 400)
+  log(`  Testing Forged RELEASE on PA Round 1 (Must FAIL with HTTP 400)...`);
+  const forgedRelease = await request(`/api/qc/product-analysis/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Coal',
+    productName: 'Batubara',
+    testRound: 1,
+    parameters: { visual: 'OK', moisture: 36.5, grossCalorie: 4200 },
+    result: 'PASS',
+    decision: 'RELEASE',
+    notes: 'Illegal attempt to forge RELEASE with out-of-spec moisture',
+    revision: coalTxRev,
+  });
+  if (forgedRelease.statusCode !== 400) {
+    throw new Error(`Forged RELEASE did NOT fail with 400! Received: ${forgedRelease.statusCode}`);
+  }
+  log(`  Forged RELEASE rejected by server-authoritative spec with HTTP 400 [PASS]`, 'SUCCESS');
+
+  // 4. Submit PA Round 1 with failing moisture -> RETEST_REQUIRED
+  log(`  4. Submitting PA Round 1 (failing moisture 36.5% -> triggers RETEST_REQUIRED)...`);
+  const paSubmitR1 = await request(`/api/qc/product-analysis/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Coal',
+    productName: 'Batubara',
+    testRound: 1,
+    parameters: { visual: 'OK', moisture: 36.5, grossCalorie: 4200 },
+    result: 'REJECT',
+    decision: 'RETEST_REQUIRED',
+    notes: 'Round 1 Moisture 36.5% exceeds 34.0% threshold. Retest triggered.',
+    revision: coalTxRev,
+  });
+  if (!isSuccessStatus(paSubmitR1.statusCode)) {
+    throw new Error(`PA Submit Round 1 FAILED: Status ${paSubmitR1.statusCode}, Body: ${JSON.stringify(paSubmitR1.body)}`);
+  }
+  const coalAfterSubmitR1 = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalAfterSubmitR1.body?.data?.status !== 'QC_RETEST_REQUIRED') {
+    throw new Error(`Expected status QC_RETEST_REQUIRED after Round 1 fail, received: ${coalAfterSubmitR1.body?.data?.status}`);
+  }
+  coalTxRev = coalAfterSubmitR1.body?.data?.revision;
+  log(`  4. PA Submit Round 1 SUCCESS (Status: QC_RETEST_REQUIRED)`);
+
+  // Negative assertion: Submitting Round 2 with mismatched round number (e.g. 1) MUST FAIL (HTTP 400)
+  const wrongRoundSubmit = await request(`/api/qc/product-analysis/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Coal',
+    productName: 'Batubara',
+    testRound: 1,
+    parameters: { visual: 'OK', moisture: 37.0, grossCalorie: 4200 },
+    result: 'REJECT',
+    decision: 'PENDING_DISPOSITION',
+    revision: coalTxRev,
+  });
+  if (wrongRoundSubmit.statusCode !== 400) {
+    throw new Error(`Mismatched test round did NOT fail with 400! Received: ${wrongRoundSubmit.statusCode}`);
+  }
+  log(`  Mismatched test round rejected with HTTP 400 [PASS]`, 'SUCCESS');
+
+  // 5. Start PA Round 2 (Retest Start: QC_RETEST_REQUIRED -> QC_VEHICLE_IN_PROGRESS)
+  log(`  5. Starting PA Round 2 (Retest Start)...`);
+  const paStartR2 = await request(`/api/qc/product-analysis/${coalTxId}/start`, { method: 'POST', headers: qcAuthHeader });
+  if (!isSuccessStatus(paStartR2.statusCode)) {
+    throw new Error(`PA Start Round 2 FAILED: Status ${paStartR2.statusCode}, Body: ${JSON.stringify(paStartR2.body)}`);
+  }
+  const coalAfterStartR2 = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalAfterStartR2.body?.data?.status !== 'QC_VEHICLE_IN_PROGRESS') {
+    throw new Error(`Expected status QC_VEHICLE_IN_PROGRESS after Retest Start, received: ${coalAfterStartR2.body?.data?.status}`);
+  }
+  coalTxRev = coalAfterStartR2.body?.data?.revision;
+  log(`  5. PA Start Round 2 SUCCESS (Status: QC_VEHICLE_IN_PROGRESS, retest active)`);
+
+  // 6. Submit PA Round 2 with failing moisture -> WAITING_UTILITY_DISPOSITION
+  log(`  6. Submitting PA Round 2 (failing moisture 37.0% -> routes to WAITING_UTILITY_DISPOSITION)...`);
+  const paSubmitR2 = await request(`/api/qc/product-analysis/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Coal',
+    productName: 'Batubara',
+    testRound: 2,
+    parameters: { visual: 'OK', moisture: 37.0, grossCalorie: 4200 },
+    result: 'REJECT',
+    decision: 'PENDING_DISPOSITION',
+    notes: 'Round 2 Retest moisture 37.0% still out-of-spec. Escalated to Utility Disposition.',
+    revision: coalTxRev,
+  });
+  if (!isSuccessStatus(paSubmitR2.statusCode)) {
+    throw new Error(`PA Submit Round 2 FAILED: Status ${paSubmitR2.statusCode}, Body: ${JSON.stringify(paSubmitR2.body)}`);
+  }
+  const coalAfterSubmitR2 = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalAfterSubmitR2.body?.data?.status !== 'WAITING_UTILITY_DISPOSITION') {
+    throw new Error(`Expected status WAITING_UTILITY_DISPOSITION after Round 2 fail, received: ${coalAfterSubmitR2.body?.data?.status}`);
+  }
+  coalTxRev = coalAfterSubmitR2.body?.data?.revision;
+  log(`  6. PA Submit Round 2 SUCCESS (Status: WAITING_UTILITY_DISPOSITION)`);
+
+  // Negative assertion: Four-Eyes Principle enforcement
+  // Analyst who conducted testing attempts to approve disposition -> MUST FAIL (HTTP 403 Forbidden)
+  log(`  Testing Four-Eyes Principle: Analyst attempting to self-disposition (Must FAIL with HTTP 403)...`);
+  const analystDispositionAttempt = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+    dispositionAction: 'ACCEPT_WITH_DEVIATION',
+    dispositionReason: 'Self-approval attempt by analyst',
+    revision: coalTxRev,
+  });
+  if (analystDispositionAttempt.statusCode !== 403) {
+    throw new Error(`Analyst self-disposition did NOT fail with 403! Received: ${analystDispositionAttempt.statusCode}`);
+  }
+  log(`  Four-Eyes Principle enforced: Analyst forbidden from self-disposition with HTTP 403 [PASS]`, 'SUCCESS');
+
+  // Negative assertion: Non-Utility user (Security) attempts disposition -> MUST FAIL (HTTP 403)
+  log(`  Testing Department Authority: Security attempting Utility disposition (Must FAIL with HTTP 403)...`);
+  const secUserLoginForDisp = await request('/api/auth/login', { method: 'POST' }, {
+    identifier: 'security',
+    password: process.env.DEFAULT_SECURITY_PASSWORD || 'test-sec-password-12345',
+  });
+  if (secUserLoginForDisp.body?.data?.accessToken) {
+    const secDispHeader = { Authorization: `Bearer ${secUserLoginForDisp.body.data.accessToken}` };
+    const secDispositionAttempt = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: secDispHeader }, {
+      dispositionAction: 'ACCEPT_WITH_DEVIATION',
+      dispositionReason: 'Unauthorized role disposition attempt',
+      revision: coalTxRev,
+    });
+    if (secDispositionAttempt.statusCode !== 403) {
+      throw new Error(`Non-utility user disposition did NOT fail with 403! Received: ${secDispositionAttempt.statusCode}`);
+    }
+    log(`  Department authority enforced: Non-utility user rejected with HTTP 403 [PASS]`, 'SUCCESS');
+  }
+
+  // 7. Authorized Utility Officer Disposition (ACCEPT_WITH_DEVIATION -> QC_VEHICLE_PASSED)
+  log(`  7. Authorized Utility Section Head processing Technical Disposition...`);
+  const utilityDispRes = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: utilityAuthHeader }, {
+    dispositionAction: 'ACCEPT_WITH_DEVIATION',
+    dispositionReason: 'Technical concession approved by Utility Section Head due to urgent boiler feed requirements.',
+    concessionTerms: 'Gradual blending with dry GAR 5000 stockpile. Supplier penalized -2.5% invoice deduction.',
+    penaltyPercentage: 2.5,
+    revision: coalTxRev,
+  });
+  if (!isSuccessStatus(utilityDispRes.statusCode)) {
+    throw new Error(`Utility Disposition FAILED: Status ${utilityDispRes.statusCode}, Body: ${JSON.stringify(utilityDispRes.body)}`);
+  }
+  const coalAfterDisp = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalAfterDisp.body?.data?.status !== 'QC_VEHICLE_PASSED') {
+    throw new Error(`Expected status QC_VEHICLE_PASSED after Utility Disposition, received: ${coalAfterDisp.body?.data?.status}`);
+  }
+  coalTxRev = coalAfterDisp.body?.data?.revision;
+  log(`  7. Utility Disposition SUCCESS (Status: QC_VEHICLE_PASSED, Four-Eyes & Audit verified)`, 'SUCCESS');
+
+  // 8. Warehouse Start & Complete
+  log(`  8. Unloading Batubara at Warehouse...`);
+  await stepOk(request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start unloading Batubara in coal yard' }), 'Batubara Warehouse Start');
+  const coalWhComp = await request(`/api/warehouse/complete/${coalTxId}`, { method: 'POST', headers: authHeader }, {
+    actualWeight: 28500,
+    actualQuantity: 1,
+    unit: 'BULK',
+    remarks: 'Batubara unloading complete at Coal Bunker A',
+  });
+  if (!isSuccessStatus(coalWhComp.statusCode)) {
+    throw new Error(`Batubara Warehouse Complete FAILED: Status ${coalWhComp.statusCode}, Body: ${JSON.stringify(coalWhComp.body)}`);
+  }
+  const coalAfterWh = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalAfterWh.body?.data?.status !== 'WAREHOUSE_DONE') {
+    throw new Error(`Expected status WAREHOUSE_DONE after unloading, received: ${coalAfterWh.body?.data?.status}`);
+  }
+  log(`  8. Batubara Warehouse Unload SUCCESS (Status: WAREHOUSE_DONE)`);
+
+  // 9. Weigh Out
+  const coalWbOut = await request(`/api/weighbridge/out/${coalTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 8500,
+    ticketNumber: `WB-OUT-COAL-${timestampSuffix}`,
+  });
+  if (!isSuccessStatus(coalWbOut.statusCode)) {
+    throw new Error(`Batubara Weigh-Out FAILED: Status ${coalWbOut.statusCode}, Body: ${JSON.stringify(coalWbOut.body)}`);
+  }
+  log(`  9. Batubara Weigh-Out SUCCESS (Gross: 28,500 kg, Tare: 8,500 kg, Net: 20,000 kg, Status: WEIGH_OUT_DONE)`);
+
+  // 10. Gate Check-Out -> COMPLETED
+  const coalCheckOut = await request(`/api/gate/check-out/${coalTxId}`, { method: 'POST', headers: authHeader });
+  if (!isSuccessStatus(coalCheckOut.statusCode)) {
+    throw new Error(`Batubara Gate Check-Out FAILED: Status ${coalCheckOut.statusCode}, Body: ${JSON.stringify(coalCheckOut.body)}`);
+  }
+  const coalFinal = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalFinal.body?.data?.status !== 'COMPLETED') {
+    throw new Error(`Expected Batubara final status COMPLETED, received: ${coalFinal.body?.data?.status}`);
+  }
+  log(`  10. Batubara Gate Check-Out SUCCESS (Final Status: COMPLETED)`, 'SUCCESS');
+
+  // ==============================================================================
+  // Step 5C: FAIL-CLOSED GOVERNANCE ON CHEMICAL GSP COMMODITIES (PAC / Rapid Klen)
+  // Non-Coal GSP commodities must be routed to WAITING_UTILITY_DISPOSITION because
+  // their operational specs are PENDING_SIGNOFF.
+  // Utility officer disposition on non-Coal MUST BE REJECTED with HTTP 403 Forbidden.
+  // ==============================================================================
+  log(`[GOVERNANCE TEST] Testing Fail-Closed Governance on Chemical GSP (PAC)...`);
+  const pacCheckIn = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
+    plateNumber: `B99${timestampSuffix}PC`,
+    driverName: 'E2E Driver PAC',
+    driverPhone: '081234567896',
+    vendorName: 'PT Kimia Industri Sejahtera',
+    vehicleType: 'TRUCK',
+    processType: 'GSP',
+    cargoType: 'Chemicals',
+    cargoSubType: 'PAC 280 AC',
+    cargoProcessType: 'INBOUND',
+    suratJalanNumber: `SJ-PAC-${timestampSuffix}`,
+  });
+  const pacTxId = pacCheckIn.body?.data?.id;
+  await request(`/api/weighbridge/in/${pacTxId}`, { method: 'POST', headers: authHeader }, {
+    weight: 16000,
+    ticketNumber: `WB-IN-PAC-${timestampSuffix}`,
+  });
+  await request(`/api/qc/product-analysis/${pacTxId}/start`, { method: 'POST', headers: qcAuthHeader });
+  const pacDetail = await request(`/api/transactions/${pacTxId}`, { headers: authHeader });
+  await request(`/api/qc/product-analysis/${pacTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Chemicals',
+    productName: 'PAC 280 AC',
+    testRound: 1,
+    parameters: { appearance: 'Clear Yellow', al2o3Pct: 10.2, specificGravity: 1.2 },
+    result: 'PASS',
+    decision: 'RELEASE',
+    revision: pacDetail.body?.data?.revision,
+  });
+  // Since operational spec is PENDING_SIGNOFF, system routes to WAITING_UTILITY_DISPOSITION
+  const pacAfterSubmit = await request(`/api/transactions/${pacTxId}`, { headers: authHeader });
+  if (pacAfterSubmit.body?.data?.status !== 'WAITING_UTILITY_DISPOSITION') {
+    throw new Error(`Expected PAC status WAITING_UTILITY_DISPOSITION due to PENDING_SIGNOFF, got: ${pacAfterSubmit.body?.data?.status}`);
+  }
+  log(`  PAC automatically routed to WAITING_UTILITY_DISPOSITION (Provisional spec protection verified) [PASS]`, 'SUCCESS');
+
+  // Utility Officer attempting disposition on non-Coal MUST FAIL with HTTP 403 Forbidden
+  const pacUtilityAttempt = await request(`/api/qc/disposition/${pacTxId}`, { method: 'POST', headers: utilityAuthHeader }, {
+    dispositionAction: 'ACCEPT_WITH_DEVIATION',
+    dispositionReason: 'Attempt to disposition non-Coal chemical',
+    revision: pacAfterSubmit.body?.data?.revision,
+  });
+  if (pacUtilityAttempt.statusCode !== 403) {
+    throw new Error(`Utility disposition on non-Coal chemical did NOT fail with 403! Received: ${pacUtilityAttempt.statusCode}`);
+  }
+  log(`  Utility disposition on non-Coal PAC rejected with HTTP 403 Forbidden (Open Governance Dependency intact) [PASS]`, 'SUCCESS');
+
+  // ==============================================================================
+  // Step 5D: REOPEN PRE-PA INACTIVATION E2E TEST
+  // Reopening completed Batubara to REGISTERED or QC_VEHICLE_PENDING must void active PA
+  // so that next round starts at Round 1 and warehouse cannot start without new PA.
+  // ==============================================================================
+  log(`[REOPEN PA VOID TEST] Verifying REOPEN to pre-PA stage voids active PA...`);
+  const reopenCoalRes = await request(`/api/transactions/${coalTxId}/operation-log-corrections`, { method: 'POST', headers: authHeader }, {
+    action: 'REOPEN_WORKFLOW',
+    reopenTargetStatus: 'QC_VEHICLE_PENDING',
+    reasonCode: 'SALAH_INPUT_ANGKA',
+    remark: 'E2E Test: Reopen Batubara to QC_VEHICLE_PENDING to verify PA voiding',
+    expectedRevision: coalFinal.body?.data?.revision,
+  });
+  if (!isSuccessStatus(reopenCoalRes.statusCode)) {
+    throw new Error(`REOPEN to QC_VEHICLE_PENDING failed: Status ${reopenCoalRes.statusCode}, Body: ${JSON.stringify(reopenCoalRes.body)}`);
+  }
+  const coalReopenedDetail = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
+  if (coalReopenedDetail.body?.data?.status !== 'QC_VEHICLE_PENDING') {
+    throw new Error(`Expected status QC_VEHICLE_PENDING after REOPEN, got: ${coalReopenedDetail.body?.data?.status}`);
+  }
+  // Negative assertion: Warehouse start must fail because PA is voided!
+  const whAfterVoidedPa = await request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader });
+  if (whAfterVoidedPa.statusCode !== 400) {
+    throw new Error(`Warehouse start with voided PA did NOT fail with 400! Received: ${whAfterVoidedPa.statusCode}`);
+  }
+  log(`  Warehouse start blocked with HTTP 400 when PA evidence is voided [PASS]`, 'SUCCESS');
+
 
   // Step 6: FULL GBJ WORKFLOW (Check-In -> Weigh In -> QC Vehicle -> Warehouse Loading -> Weigh Out -> Gate Out -> COMPLETED)
   log(`[WORKFLOW 3/3] Executing Complete GBJ Lifecycle to COMPLETED...`);
@@ -414,15 +925,6 @@ async function runE2ESmoke() {
     throw new Error(`GBJ Gate Check-Out FAILED: Status ${gbjCheckOut.statusCode}, Body: ${JSON.stringify(gbjCheckOut.body)}`);
   }
   log(`  6. GBJ Gate Check-Out SUCCESS (Status: COMPLETED)`, 'SUCCESS');
-
-
-  async function stepOk(reqPromise, stepName) {
-    const res = await reqPromise;
-    if (!isSuccessStatus(res.statusCode)) {
-      throw new Error(`Rerun step '${stepName}' FAILED with status ${res.statusCode}: ${JSON.stringify(res.body)}`);
-    }
-    return res;
-  }
 
   // Helper function to re-run workflow from target status back to COMPLETED
   async function rerunToCompleted(txId, processType, targetStatus, authHeader, suffix) {
