@@ -14,7 +14,10 @@ import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { SpecificationProvider } from './providers/specification.provider';
-import { TEST_FIXTURE_COAL_SPEC_METADATA } from './constants/coal-specification';
+import {
+  TEST_FIXTURE_COAL_SPEC_METADATA,
+  OPERATIONAL_COAL_SPEC_METADATA,
+} from './constants/coal-specification';
 
 describe('QcProductAnalysisService (Task 5)', () => {
   let service: QcProductAnalysisService;
@@ -128,7 +131,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           productCategory: 'Coal',
           productName: 'Batubara',
           parameters: { visual: 'OK', moisture: 30.5 },
-          result: QcResult.PASSED,
+          result: QcResult.PASS,
           decision: AnalysisDecision.RELEASE,
           revision: 2,
         },
@@ -322,7 +325,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           productCategory: 'Coal',
           productName: 'Batubara',
           parameters: { visual: 'OK', moisture: 30.5 },
-          result: QcResult.PASSED,
+          result: QcResult.PASS,
           decision: AnalysisDecision.RELEASE,
           revision: 4,
         },
@@ -395,7 +398,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           productName: 'Batubara',
           testRound: 1,
           parameters: { visual: 'OK', moisture: 30.5 },
-          result: QcResult.PASSED,
+          result: QcResult.PASS,
           decision: AnalysisDecision.RELEASE,
           revision: 5,
         },
@@ -1196,6 +1199,132 @@ describe('QcProductAnalysisService (Task 5)', () => {
       expect(res.message).toContain('in-progress');
       expect(res.data.qcStartAt).toEqual(initialStartAt);
       expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('evaluates authoritatively when result and decision are omitted by client', async () => {
+      const coalTx = {
+        id: 'tx-coal-authoritative',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest.fn().mockResolvedValue({ id: 'pa-auto-1' }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(
+        async (cb: any) => await cb(mockTxClient),
+      );
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+
+      const res = await service.submitProductAnalysis(
+        'tx-coal-authoritative',
+        {
+          productCategory: 'Coal',
+          productName: 'Batubara',
+          parameters: { visual: 'OK', moisture: 30.5 },
+          // result and decision are intentionally omitted
+          revision: 2,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PASSED,
+          }),
+        }),
+      );
+      expect(mockTxClient.qcProductAnalysis.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            result: QcResult.PASS,
+            status: 'RELEASE',
+          }),
+        }),
+      );
+    });
+
+    it('throws BadRequestException when client result tampered (sent PASS but server computes REJECT)', async () => {
+      const coalTx = {
+        id: 'tx-coal-tamper-result',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-coal-tamper-result',
+          {
+            productCategory: 'Coal',
+            productName: 'Batubara',
+            // Moisture 38.0% exceeds threshold -> server computes REJECT / RETEST_REQUIRED
+            parameters: { visual: 'OK', moisture: 38.0 },
+            result: QcResult.PASS, // TAMPERED
+            decision: AnalysisDecision.RETEST_REQUIRED,
+            revision: 2,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when client decision tampered (sent RELEASE but server computes PENDING_DISPOSITION)', async () => {
+      const coalTx = {
+        id: 'tx-coal-tamper-decision',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      // Operational metadata is PENDING_SIGNOFF -> server computes PENDING_DISPOSITION
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(OPERATIONAL_COAL_SPEC_METADATA);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-coal-tamper-decision',
+          {
+            productCategory: 'Coal',
+            productName: 'Batubara',
+            parameters: { visual: 'OK', moisture: 30.0 },
+            result: QcResult.PASS,
+            decision: AnalysisDecision.RELEASE, // TAMPERED (server computes PENDING_DISPOSITION)
+            revision: 2,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

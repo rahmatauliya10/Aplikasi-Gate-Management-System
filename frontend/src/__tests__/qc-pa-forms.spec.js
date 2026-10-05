@@ -4,9 +4,9 @@ import CoalAnalysisForm from '../components/qc/CoalAnalysisForm.vue'
 import ChemicalPacForm from '../components/qc/ChemicalPacForm.vue'
 import ChemicalRapidKlenForm from '../components/qc/ChemicalRapidKlenForm.vue'
 
-describe('QC PA Dynamic Forms Tests (Task 7)', () => {
+describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
   describe('CoalAnalysisForm', () => {
-    it('renders Batubara form and displays RELEASE button when within moisture spec', async () => {
+    it('renders Batubara form and emits factual measurements WITHOUT client result or decision when within moisture spec', async () => {
       const wrapper = mount(CoalAnalysisForm, {
         props: {
           transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
@@ -30,9 +30,26 @@ describe('QC PA Dynamic Forms Tests (Task 7)', () => {
       const releaseBtn = wrapper.find('#btn-coal-release')
       expect(releaseBtn.exists()).toBe(true)
       expect(releaseBtn.attributes('disabled')).toBeUndefined()
+      expect(releaseBtn.text()).toContain('Kirim Hasil Analisis PA')
+
+      // Click submit
+      await releaseBtn.trigger('click')
+      expect(wrapper.emitted('submit')).toBeTruthy()
+      const emittedPayload = wrapper.emitted('submit')[0][0]
+
+      // Assert factual parameters emitted
+      expect(emittedPayload.productCategory).toBe('Coal')
+      expect(emittedPayload.productName).toBe('Batubara')
+      expect(emittedPayload.testRound).toBe(1)
+      expect(emittedPayload.parameters.totalMoisture).toBe(30)
+      expect(emittedPayload.parameters.sensory.visual).toBe(true)
+
+      // CRITICAL ARCHITECTURAL CONTRACT: No client result or decision
+      expect(emittedPayload.result).toBeUndefined()
+      expect(emittedPayload.decision).toBeUndefined()
     })
 
-    it('displays RETEST_REQUIRED button in Round 1 when moisture exceeds limit', async () => {
+    it('displays Retest indication in Round 1 when moisture exceeds limit and emits WITHOUT client result or decision', async () => {
       const wrapper = mount(CoalAnalysisForm, {
         props: {
           transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
@@ -41,13 +58,28 @@ describe('QC PA Dynamic Forms Tests (Task 7)', () => {
       })
 
       const moistureInput = wrapper.find('#input-coal-moisture')
-      await moistureInput.setValue(36) // 36% > 33%
+      await moistureInput.setValue(38) // 38% > 33%
 
-      expect(wrapper.find('#btn-coal-retest').exists()).toBe(true)
+      const retestBtn = wrapper.find('#btn-coal-retest')
+      expect(retestBtn.exists()).toBe(true)
+      expect(retestBtn.text()).toContain('Hasil di atas batas — akan dievaluasi untuk Retest')
       expect(wrapper.find('#btn-coal-release').exists()).toBe(false)
+
+      await retestBtn.trigger('click')
+      expect(wrapper.emitted('submit')).toBeTruthy()
+      const emittedPayload = wrapper.emitted('submit')[0][0]
+
+      expect(emittedPayload.productCategory).toBe('Coal')
+      expect(emittedPayload.productName).toBe('Batubara')
+      expect(emittedPayload.testRound).toBe(1)
+      expect(emittedPayload.parameters.totalMoisture).toBe(38)
+
+      // Server-authoritative contract: No client result or decision
+      expect(emittedPayload.result).toBeUndefined()
+      expect(emittedPayload.decision).toBeUndefined()
     })
 
-    it('displays PENDING_DISPOSITION button in Round 2 when moisture still exceeds limit', async () => {
+    it('displays Utility Disposition indication in Round 2 when moisture exceeds limit and emits WITHOUT client result or decision', async () => {
       const wrapper = mount(CoalAnalysisForm, {
         props: {
           transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
@@ -56,15 +88,30 @@ describe('QC PA Dynamic Forms Tests (Task 7)', () => {
       })
 
       const moistureInput = wrapper.find('#input-coal-moisture')
-      await moistureInput.setValue(35.5) // still exceeds limit
+      await moistureInput.setValue(36.5) // still exceeds limit in Round 2
 
-      expect(wrapper.find('#btn-coal-utility-disp').exists()).toBe(true)
+      const utilBtn = wrapper.find('#btn-coal-utility-disp')
+      expect(utilBtn.exists()).toBe(true)
+      expect(utilBtn.text()).toContain('Hasil di atas batas — akan dievaluasi untuk Disposisi Utility')
       expect(wrapper.find('#btn-coal-retest').exists()).toBe(false)
+
+      await utilBtn.trigger('click')
+      expect(wrapper.emitted('submit')).toBeTruthy()
+      const emittedPayload = wrapper.emitted('submit')[0][0]
+
+      expect(emittedPayload.productCategory).toBe('Coal')
+      expect(emittedPayload.productName).toBe('Batubara')
+      expect(emittedPayload.testRound).toBe(2)
+      expect(emittedPayload.parameters.totalMoisture).toBe(36.5)
+
+      // Server-authoritative contract: No client result or decision
+      expect(emittedPayload.result).toBeUndefined()
+      expect(emittedPayload.decision).toBeUndefined()
     })
   })
 
   describe('ChemicalPacForm', () => {
-    it('disables release button when pH or density are out of specification', async () => {
+    it('disables submit button when parameters out-of-spec, and on submit emits factual parameters WITHOUT client result or decision', async () => {
       const wrapper = mount(ChemicalPacForm, {
         props: {
           transaction: { id: 'tx-pac', cargoSubType: 'PAC 280 AC' },
@@ -89,11 +136,27 @@ describe('QC PA Dynamic Forms Tests (Task 7)', () => {
       // Fix pH to valid (4.25 in 3.50 - 5.00)
       await wrapper.find('#input-pac-ph').setValue(4.25)
       expect(releaseBtn.attributes('disabled')).toBeUndefined()
+      expect(releaseBtn.text()).toContain('Kirim Hasil Analisis PA')
+
+      // Submit
+      await releaseBtn.trigger('click')
+      expect(wrapper.emitted('submit')).toBeTruthy()
+      const emittedPayload = wrapper.emitted('submit')[0][0]
+
+      expect(emittedPayload.productCategory).toBe('Chemicals')
+      expect(emittedPayload.productName).toBe('PAC 280 AC')
+      expect(emittedPayload.testRound).toBe(1)
+      expect(emittedPayload.parameters.ph).toBe(4.25)
+      expect(emittedPayload.parameters.density).toBe(1.20)
+
+      // Server-authoritative contract: No client result or decision
+      expect(emittedPayload.result).toBeUndefined()
+      expect(emittedPayload.decision).toBeUndefined()
     })
   })
 
   describe('ChemicalRapidKlenForm', () => {
-    it('validates alkalinity and pH thresholds before permitting release', async () => {
+    it('validates thresholds before permitting submission, and emits factual parameters WITHOUT client result or decision', async () => {
       const wrapper = mount(ChemicalRapidKlenForm, {
         props: {
           transaction: { id: 'tx-rapid', cargoSubType: 'Rapid Klen' },
@@ -115,6 +178,23 @@ describe('QC PA Dynamic Forms Tests (Task 7)', () => {
 
       const releaseBtn = wrapper.find('#btn-rapid-release')
       expect(releaseBtn.attributes('disabled')).toBeUndefined()
+      expect(releaseBtn.text()).toContain('Kirim Hasil Analisis PA')
+
+      // Submit
+      await releaseBtn.trigger('click')
+      expect(wrapper.emitted('submit')).toBeTruthy()
+      const emittedPayload = wrapper.emitted('submit')[0][0]
+
+      expect(emittedPayload.productCategory).toBe('Chemicals')
+      expect(emittedPayload.productName).toBe('Rapid Klen')
+      expect(emittedPayload.testRound).toBe(1)
+      expect(emittedPayload.parameters.alkalinityNa2O).toBe(36.5)
+      expect(emittedPayload.parameters.ph).toBe(13.2)
+      expect(emittedPayload.parameters.density).toBe(1.42)
+
+      // Server-authoritative contract: No client result or decision
+      expect(emittedPayload.result).toBeUndefined()
+      expect(emittedPayload.decision).toBeUndefined()
     })
   })
 })

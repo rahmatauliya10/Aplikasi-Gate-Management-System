@@ -58,16 +58,23 @@ export class SubmitProductAnalysisDto {
   @IsNotEmpty()
   parameters: Record<string, any>;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     enum: QcResult,
-    description: 'Overall lab result (PASSED or REJECTED)',
+    description:
+      'Overall lab result (PASS or REJECT). Optional: server calculates authoritative result if omitted.',
   })
+  @IsOptional()
   @IsEnum(QcResult)
-  result: QcResult;
+  result?: QcResult;
 
-  @ApiProperty({ enum: AnalysisDecision, description: 'Workflow decision' })
+  @ApiPropertyOptional({
+    enum: AnalysisDecision,
+    description:
+      'Workflow decision (RELEASE, REJECT, RETEST_REQUIRED, PENDING_DISPOSITION). Optional: server calculates authoritative decision if omitted.',
+  })
+  @IsOptional()
   @IsEnum(AnalysisDecision)
-  decision: AnalysisDecision;
+  decision?: AnalysisDecision;
 
   @ApiPropertyOptional({ description: 'Analyst remarks or observation notes' })
   @IsOptional()

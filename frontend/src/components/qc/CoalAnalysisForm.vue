@@ -95,55 +95,55 @@
 
     <!-- Decision Action Buttons -->
     <div class="pt-4 border-t border-slate-100 flex flex-col md:flex-row gap-3">
-      <!-- Normal Release (when within spec) -->
+      <!-- Normal Submission (within spec preview) -->
       <button
         v-if="!isMoistureExceeded"
         type="button"
-        @click="submitDecision('RELEASE')"
+        @click="submitAnalysis"
         :disabled="isSubmitting || !isSensoryComplete || formData.totalMoisture == null"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-coal-release"
       >
-        <span class="material-icons text-base">check_circle</span>
-        <span>Lulus Uji & Izinkan Bongkar (RELEASE)</span>
+        <span class="material-icons text-base">send</span>
+        <span>Kirim Hasil Analisis PA</span>
       </button>
 
-      <!-- Retest Required (Round 1 exceeded) -->
+      <!-- Retest Required Indication (Round 1 exceeded) -->
       <button
         v-if="isMoistureExceeded && testRound === 1"
         type="button"
-        @click="submitDecision('RETEST_REQUIRED')"
+        @click="submitAnalysis"
         :disabled="isSubmitting"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-coal-retest"
       >
         <span class="material-icons text-base">refresh</span>
-        <span>Kadar Air Melebihi Batas — Lakukan Uji Ulang (RETEST)</span>
+        <span>Hasil di atas batas — akan dievaluasi untuk Retest</span>
       </button>
 
-      <!-- Utility Disposition Required (Round 2 exceeded) -->
+      <!-- Utility Disposition Required Indication (Round 2 exceeded) -->
       <button
         v-if="isMoistureExceeded && testRound > 1"
         type="button"
-        @click="submitDecision('PENDING_DISPOSITION')"
+        @click="submitAnalysis"
         :disabled="isSubmitting"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-coal-utility-disp"
       >
         <span class="material-icons text-base">gavel</span>
-        <span>Teruskan ke Disposisi Utility (Four-Eyes Principle)</span>
+        <span>Hasil di atas batas — akan dievaluasi untuk Disposisi Utility</span>
       </button>
 
-      <!-- Reject Button -->
+      <!-- Secondary submit / deviation button -->
       <button
         type="button"
-        @click="submitDecision('REJECT')"
+        @click="submitAnalysis"
         :disabled="isSubmitting"
-        class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition-all flex items-center justify-center gap-2"
+        class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all flex items-center justify-center gap-2"
         id="btn-coal-reject"
       >
-        <span class="material-icons text-base">cancel</span>
-        <span>Tolak Mutu (REJECT)</span>
+        <span class="material-icons text-base">send</span>
+        <span>Kirim Hasil Analisis PA</span>
       </button>
     </div>
   </div>
@@ -201,8 +201,7 @@ const isSensoryComplete = computed(() => {
   return Object.values(formData.sensory).every(v => v === true)
 })
 
-const submitDecision = (decision) => {
-  const result = (decision === 'RELEASE') ? 'PASSED' : 'REJECTED'
+const submitAnalysis = () => {
   emit('submit', {
     productCategory: 'Coal',
     productName: 'Batubara',
@@ -213,8 +212,6 @@ const submitDecision = (decision) => {
       totalMoisture: formData.totalMoisture,
       maxAllowedMoisture: maxAllowedMoisture.value,
     },
-    result,
-    decision,
     notes: formData.notes,
   })
 }

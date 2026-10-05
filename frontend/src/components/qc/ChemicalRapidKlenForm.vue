@@ -135,24 +135,24 @@
     <div class="pt-4 border-t border-slate-100 flex flex-col md:flex-row gap-3">
       <button
         type="button"
-        @click="submitDecision('RELEASE')"
+        @click="submitAnalysis"
         :disabled="isSubmitting || !isFormComplete || !isAllInSpec"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-rapid-release"
       >
-        <span class="material-icons text-base">check_circle</span>
-        <span>Lulus Uji & Izinkan Bongkar (RELEASE)</span>
+        <span class="material-icons text-base">send</span>
+        <span>Kirim Hasil Analisis PA</span>
       </button>
 
       <button
         type="button"
-        @click="submitDecision('REJECT')"
+        @click="submitAnalysis"
         :disabled="isSubmitting"
-        class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 transition-all flex items-center justify-center gap-2"
+        class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all flex items-center justify-center gap-2"
         id="btn-rapid-reject"
       >
-        <span class="material-icons text-base">cancel</span>
-        <span>Tolak Mutu (REJECT)</span>
+        <span class="material-icons text-base">send</span>
+        <span>Kirim Hasil Analisis PA</span>
       </button>
     </div>
   </div>
@@ -213,8 +213,7 @@ const isAllInSpec = computed(() => {
   return isNa2OValid.value && isPhValid.value && isDensityValid.value
 })
 
-const submitDecision = (decision) => {
-  const result = (decision === 'RELEASE') ? 'PASSED' : 'REJECTED'
+const submitAnalysis = () => {
   emit('submit', {
     productCategory: 'Chemicals',
     productName: props.transaction.cargoSubType || 'Rapid Klen',
@@ -226,8 +225,6 @@ const submitDecision = (decision) => {
       ph: formData.ph,
       density: formData.density,
     },
-    result,
-    decision,
     notes: formData.notes,
   })
 }
