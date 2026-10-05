@@ -72,19 +72,30 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
   });
 
-  it('withholds automated REJECT (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF and moisture exceeds limit', () => {
-    const evalResult = evaluateCoalAnalysis({
+  it('triggers RETEST_REQUIRED in Round 1 and PENDING_DISPOSITION in Round 2 when operational spec is PENDING_SIGNOFF', () => {
+    const round1Result = evaluateCoalAnalysis({
       targetCalorie: '5500',
       totalMoisture: 28.5,
       testRound: 1,
       sensoryPassed: true,
     });
 
-    expect(evalResult.result).toBe('REJECT');
-    expect(evalResult.decision).toBe('PENDING_DISPOSITION');
-    expect(evalResult.maxAllowedMoisture).toBe(26.0);
-    expect(evalResult.notes).toContain('Penolakan mutu otomatis ditahan');
-    expect(evalResult.notes).toContain('spesifikasi belum disahkan');
+    expect(round1Result.result).toBe('REJECT');
+    expect(round1Result.decision).toBe('RETEST_REQUIRED');
+    expect(round1Result.maxAllowedMoisture).toBe(26.0);
+    expect(round1Result.notes).toContain('Diperlukan uji ulang (Round 2)');
+
+    const round2Result = evaluateCoalAnalysis({
+      targetCalorie: '5500',
+      totalMoisture: 28.5,
+      testRound: 2,
+      sensoryPassed: true,
+    });
+
+    expect(round2Result.result).toBe('REJECT');
+    expect(round2Result.decision).toBe('PENDING_DISPOSITION');
+    expect(round2Result.maxAllowedMoisture).toBe(26.0);
+    expect(round2Result.notes).toContain('Dialihkan ke Disposisi Utility');
   });
 
   it('triggers RETEST_REQUIRED in Round 1 when moisture exceeds 26% on GAR 5500 under approved specification', () => {

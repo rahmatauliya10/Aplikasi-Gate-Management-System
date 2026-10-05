@@ -141,9 +141,11 @@ export function evaluateCoalAnalysis(
   const isWithinSpec =
     params.sensoryPassed && params.totalMoisture <= maxAllowedMoisture;
 
-  // Audit Rule: Specifications that are NOT formally 'APPROVED' CANNOT produce automated decisions.
-  // Both automated RELEASE and automated REJECT based on provisional spec limits are withheld
-  // and routed to manual review (PENDING_DISPOSITION) with reason: "spesifikasi belum disahkan".
+  // Audit Rule: Specifications that are NOT formally 'APPROVED' CANNOT produce automated RELEASE.
+  // Automated RELEASE is withheld and routed to manual review (PENDING_DISPOSITION).
+  // Quality evaluation for moisture threshold enforces canonical retest lifecycle:
+  // - Round 1 moisture exceeded -> RETEST_REQUIRED (triggers mandatory Round 2 retest)
+  // - Round 2 moisture exceeded -> PENDING_DISPOSITION (escalated to Utility disposition)
   if (specMetadata.approvalStatus !== 'APPROVED') {
     if (isWithinSpec) {
       return {
@@ -156,13 +158,36 @@ export function evaluateCoalAnalysis(
       };
     }
 
+    if (!params.sensoryPassed) {
+      return {
+        result: 'REJECT',
+        decision: 'REJECT',
+        maxAllowedMoisture,
+        isWithinSpec: false,
+        specMetadata,
+        notes:
+          'Pemeriksaan sensori/visual batubara tidak memenuhi standar kebersihan/homogenitas.',
+      };
+    }
+
+    if (params.testRound === 1) {
+      return {
+        result: 'REJECT',
+        decision: 'RETEST_REQUIRED',
+        maxAllowedMoisture,
+        isWithinSpec: false,
+        specMetadata,
+        notes: `Kadar air melebihi batas acuan kontrak (${params.totalMoisture}% > ${maxAllowedMoisture}%). Diperlukan uji ulang (Round 2).`,
+      };
+    }
+
     return {
       result: 'REJECT',
       decision: 'PENDING_DISPOSITION',
       maxAllowedMoisture,
       isWithinSpec: false,
       specMetadata,
-      notes: `Hasil kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%) melampaui acuan kontrak sementara, namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Penolakan mutu otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`,
+      notes: `Hasil kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%) melampaui acuan kontrak pada uji ulang. Dialihkan ke Disposisi Utility.`,
     };
   }
 
