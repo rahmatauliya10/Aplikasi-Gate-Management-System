@@ -821,7 +821,14 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         revision: 2,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.transaction.findUnique
+        .mockResolvedValueOnce(coalTx)
+        .mockResolvedValueOnce({
+          ...coalTx,
+          status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+          revision: 3,
+          qcStartAt: new Date(),
+        });
 
       const res = await qcAnalysisService.startProductAnalysis(
         'tx-coal-start-adv',
@@ -829,7 +836,10 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       );
 
       expect(res.success).toBe(true);
+      expect(res.data.id).toBe('tx-coal-start-adv');
       expect(res.data.status).toBe(TransactionStatus.QC_VEHICLE_IN_PROGRESS);
+      expect(res.data.revision).toBe(3);
+      expect(res.data.cargoSubType).toBe('Batubara');
       expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({

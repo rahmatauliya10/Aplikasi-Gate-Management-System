@@ -166,7 +166,12 @@ export class QcProductAnalysisService {
     return {
       success: true,
       message: 'Proses analisis laboratorium berhasil dimulai',
-      data: updated,
+      data: updated || {
+        ...tx,
+        status: nextStatus,
+        revision: tx.revision + 1,
+        qcStartAt: tx.qcStartAt || now,
+      },
     };
   }
 
