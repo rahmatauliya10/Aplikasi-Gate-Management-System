@@ -689,17 +689,29 @@ async function runE2ESmoke() {
 
   // 7. Verify Round 2 Out-of-Spec Rejection Gate (Round 2 OOS -> QC_VEHICLE_REJECTED, NO Utility disposition)
   log(`  7. Verifying Round 2 Out-of-Spec Rejection Gate on secondary delivery...`);
-  const coalTxRejRes = await request('/api/transactions/security-check-in', { method: 'POST', headers: authHeader }, {
-    licensePlate: 'B 9999 OOS',
+  const coalRejPlate = `B99${timestampSuffix}RJ`;
+  const coalTxRejRes = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
+    plateNumber: coalRejPlate,
     driverName: 'Driver Coal Fail',
-    origin: 'Dermaga Barat',
+    driverPhone: '081234567899',
+    vendorName: 'PT Tambang Batubara Prima',
+    vehicleType: 'TRUCK',
     processType: 'GSP',
-    cargoType: 'Coal',
-    cargoSubType: 'Batubara',
-    productCatalogId: coalCatalog.id,
+    productCatalogId: coalCatalog?.id,
+    cargoType: coalCatalog?.category || 'Coal',
+    cargoSubType: coalCatalog?.name || 'Batubara',
+    cargoProcessType: 'INBOUND',
+    suratJalanNumber: `SJ-COAL-REJ-${timestampSuffix}`,
+    poNumber: `PO-COAL-REJ-${timestampSuffix}`,
   });
+  if (!isSuccessStatus(coalTxRejRes.statusCode) || !coalTxRejRes.body?.data?.id) {
+    throw new Error(`Coal Rejection Check-In FAILED: Status ${coalTxRejRes.statusCode}, Body: ${JSON.stringify(coalTxRejRes.body)}`);
+  }
   const coalRejId = coalTxRejRes.body?.data?.id;
-  await stepOk(request(`/api/transactions/${coalRejId}/weigh-in`, { method: 'POST', headers: authHeader }, { grossWeight: 31000 }), 'Weigh In Coal Rej');
+  await stepOk(request(`/api/weighbridge/in/${coalRejId}`, { method: 'POST', headers: authHeader }, {
+    weight: 31000,
+    ticketNumber: `WB-IN-COAL-REJ-${timestampSuffix}`,
+  }), 'Weigh In Coal Rej');
   const rejTxDetail = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
   let rejRev = rejTxDetail.body?.data?.revision;
   await stepOk(request(`/api/qc/product-analysis/${coalRejId}/start`, { method: 'POST', headers: qcAuthHeader }), 'Start R1 Coal Rej');
