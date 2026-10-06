@@ -2,15 +2,66 @@ import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
 import { PrismaClient } from '@prisma/client';
+import dotenv from 'dotenv';
 
-const PRISMA_URL = 'postgresql://postgres:postgres@127.0.0.1:5433/gms?schema=public';
-const prisma = new PrismaClient({
-  datasources: { db: { url: PRISMA_URL } },
-});
+// Load local environment if present (root or backend)
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') });
+
+const API_BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:3001';
+const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'http://localhost:8081';
+const CDP_PORT = parseInt(process.env.CDP_PORT || '9222', 10);
+
+const PRISMA_URL = process.env.DATABASE_URL || process.env.DATABASE_URL_TEST;
+const prisma = new PrismaClient(
+  PRISMA_URL ? { datasources: { db: { url: PRISMA_URL } } } : undefined
+);
 
 const SCREENSHOT_DIR = path.resolve(process.cwd(), 'artifacts', 'screenshots_live_uat_20261006');
 if (!fs.existsSync(SCREENSHOT_DIR)) {
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+}
+
+// Credentials loaded safely from environment variables
+const UAT_ADMIN_USER = process.env.UAT_ADMIN_USER || 'admin';
+const UAT_ADMIN_PASSWORD = process.env.UAT_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || process.env.DEFAULT_ADMIN_PASSWORD || process.env.TEST_PASSWORD;
+const UAT_SEC_USER = process.env.UAT_SEC_USER || 'security';
+const UAT_SEC_PASSWORD = process.env.UAT_SEC_PASSWORD || process.env.SECURITY_PASSWORD || process.env.DEFAULT_SECURITY_PASSWORD || process.env.TEST_PASSWORD;
+const UAT_WH_USER = process.env.UAT_WH_USER || 'warehouse';
+const UAT_WH_PASSWORD = process.env.UAT_WH_PASSWORD || process.env.WAREHOUSE_PASSWORD || process.env.DEFAULT_WAREHOUSE_PASSWORD || process.env.TEST_PASSWORD;
+const UAT_QC_USER = process.env.UAT_QC_USER || 'qc';
+const UAT_QC_PASSWORD = process.env.UAT_QC_PASSWORD || process.env.QC_PASSWORD || process.env.DEFAULT_QC_PASSWORD || process.env.TEST_PASSWORD;
+
+function validateEnvironment() {
+  const missing = [];
+  if (!UAT_ADMIN_PASSWORD) missing.push('UAT_ADMIN_PASSWORD (or ADMIN_PASSWORD/TEST_PASSWORD)');
+  if (!UAT_SEC_PASSWORD) missing.push('UAT_SEC_PASSWORD (or SECURITY_PASSWORD/TEST_PASSWORD)');
+  if (!UAT_WH_PASSWORD) missing.push('UAT_WH_PASSWORD (or WAREHOUSE_PASSWORD/TEST_PASSWORD)');
+  if (!UAT_QC_PASSWORD) missing.push('UAT_QC_PASSWORD (or QC_PASSWORD/TEST_PASSWORD)');
+  if (missing.length > 0) {
+    throw new Error(`UAT credentials missing from environment: ${missing.join(', ')}`);
+  }
+}
+
+// Cross-platform browser resolver
+function resolveBrowserPath() {
+  if (process.env.BROWSER_PATH) return process.env.BROWSER_PATH;
+  if (process.env.CHROME_BIN) return process.env.CHROME_BIN;
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+  const candidates = [
+    path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/microsoft-edge',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'msedge';
 }
 
 // Minimal CDP Client using Node standard WebSocket
@@ -70,7 +121,7 @@ class CdpClient {
   }
 }
 
-async function getWsEndpoint(port = 9222) {
+async function getWsEndpoint(port = CDP_PORT) {
   for (let i = 0; i < 30; i++) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json`);
@@ -88,7 +139,7 @@ async function getWsEndpoint(port = 9222) {
 }
 
 async function getJwtToken(identifier, password) {
-  const res = await fetch('http://127.0.0.1:3001/api/auth/login', {
+  const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ identifier, password }),
@@ -105,9 +156,11 @@ async function main() {
   console.log('   GSP COMPREHENSIVE LIVE UAT & BROWSER VERIFICATION (OCTOBER 2026)    ');
   console.log('========================================================================\n');
 
+  validateEnvironment();
+
   // Verify database connectivity and seed state
   const catalogs = await prisma.productCatalog.findMany({ where: { processType: 'GSP' } });
-  console.log(`[DB] Verified ${catalogs.length} canonical GSP products in PostgreSQL 5433.`);
+  console.log(`[DB] Verified ${catalogs.length} canonical GSP products in database.`);
   if (catalogs.length < 7) {
     throw new Error('Database does not have the 7 canonical GSP products seeded.');
   }
@@ -119,15 +172,15 @@ async function main() {
 
   // Obtain JWT tokens for each role
   console.log('[Auth] Obtaining JWT tokens for test actors...');
-  const adminToken = await getJwtToken('admin', 'AdminPassword123!');
-  const secToken = await getJwtToken('security', 'SecurityPassword123!');
-  const whToken = await getJwtToken('warehouse', 'WarehousePassword123!');
-  const qcToken = await getJwtToken('qc', 'QcPassword123!');
+  const adminToken = await getJwtToken(UAT_ADMIN_USER, UAT_ADMIN_PASSWORD);
+  const secToken = await getJwtToken(UAT_SEC_USER, UAT_SEC_PASSWORD);
+  const whToken = await getJwtToken(UAT_WH_USER, UAT_WH_PASSWORD);
+  const qcToken = await getJwtToken(UAT_QC_USER, UAT_QC_PASSWORD);
   console.log('[Auth] Authenticated Admin, Security, Warehouse, and QC actors successfully.\n');
 
-  // Launch Edge in Headless mode with CDP
-  const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-  const cdpPort = 9222;
+  // Launch Browser in Headless mode with CDP
+  const browserPath = resolveBrowserPath();
+  const cdpPort = CDP_PORT;
   const edgeArgs = [
     `--remote-debugging-port=${cdpPort}`,
     '--headless=new',
@@ -135,11 +188,11 @@ async function main() {
     '--no-first-run',
     '--no-default-browser-check',
     '--window-size=1440,900',
-    'http://localhost:8081',
+    FRONTEND_BASE_URL,
   ];
 
-  console.log('[Browser] Launching Headless Edge...');
-  const browserProc = spawn(edgePath, edgeArgs, { stdio: 'ignore' });
+  console.log(`[Browser] Launching Headless Browser: ${browserPath}...`);
+  const browserProc = spawn(browserPath, edgeArgs, { stdio: 'ignore' });
 
   let cdp;
   try {
@@ -164,9 +217,9 @@ async function main() {
         const passInp = document.getElementById('input-password');
         const submitBtn = document.getElementById('login-submit');
         if (userInp && passInp && submitBtn) {
-          userInp.value = 'admin';
+          userInp.value = ${JSON.stringify(UAT_ADMIN_USER)};
           userInp.dispatchEvent(new Event('input', { bubbles: true }));
-          passInp.value = 'AdminPassword123!';
+          passInp.value = ${JSON.stringify(UAT_ADMIN_PASSWORD)};
           passInp.dispatchEvent(new Event('input', { bubbles: true }));
           submitBtn.click();
         }
@@ -449,7 +502,7 @@ async function main() {
         cargoProcessType: 'INBOUND',
       };
 
-      const res = await fetch('http://127.0.0.1:3001/api/gate/check-in', {
+      const res = await fetch(`${API_BASE_URL}/api/gate/check-in`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -491,7 +544,7 @@ async function main() {
     // ──────────────────────────────────────────────────────────────────────────
     console.log('\n--- SCENARIO 4: Weighbridge Routing by Locked Analysis Profile ---');
     async function submitWeighIn(transactionId, weight) {
-      const res = await fetch(`http://127.0.0.1:3001/api/weighbridge/in/${transactionId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/weighbridge/in/${transactionId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -499,50 +552,48 @@ async function main() {
         },
         body: JSON.stringify({
           weight,
-          ticketNumber: `WB-IN-${Date.now().toString().slice(-4)}`,
-          remarks: 'Timbang masuk UAT live',
+          operatorName: 'Petugas Timbang UAT',
         }),
       });
-      return { status: res.status, body: await res.json() };
+      const body = await res.json();
+      return { status: res.status, body };
     }
 
-    // 1. Batubara weigh-in -> expected QC_VEHICLE_PENDING
-    const wiCoal = await submitWeighIn(dbCoal.id, 28000);
-    const postWiCoal = await prisma.transaction.findUniqueOrThrow({ where: { id: dbCoal.id } });
-    console.log(`[Weigh-In] Batubara (COAL_PA): Status=${postWiCoal.status} (Expected: QC_VEHICLE_PENDING)`);
+    // 1. Batubara (COAL_PA -> QC_VEHICLE_PENDING)
+    const wbCoal = await submitWeighIn(dbCoal.id, 24500);
+    const dbWbCoal = await prisma.transaction.findUniqueOrThrow({ where: { id: dbCoal.id } });
+    console.log(`[Weigh-In] Batubara (COAL_PA): Status=${dbWbCoal.status} (Expected: QC_VEHICLE_PENDING)`);
 
-    // 2. Solar weigh-in -> expected PA_NOT_REQUIRED
-    const wiSolar = await submitWeighIn(dbSolar.id, 16000);
-    const postWiSolar = await prisma.transaction.findUniqueOrThrow({ where: { id: dbSolar.id } });
-    console.log(`[Weigh-In] Solar (PA_EXEMPT): Status=${postWiSolar.status} (Expected: PA_NOT_REQUIRED)`);
+    // 2. Solar (PA_EXEMPT -> PA_NOT_REQUIRED)
+    const wbSolar = await submitWeighIn(dbSolar.id, 18000);
+    const dbWbSolar = await prisma.transaction.findUniqueOrThrow({ where: { id: dbSolar.id } });
+    console.log(`[Weigh-In] Solar (PA_EXEMPT): Status=${dbWbSolar.status} (Expected: PA_NOT_REQUIRED)`);
 
-    // 3. PAC 280 AC weigh-in -> expected QC_VEHICLE_PENDING
-    const wiPac = await submitWeighIn(dbPac.id, 22000);
-    const postWiPac = await prisma.transaction.findUniqueOrThrow({ where: { id: dbPac.id } });
-    console.log(`[Weigh-In] PAC (PAC_PA): Status=${postWiPac.status} (Expected: QC_VEHICLE_PENDING)`);
+    // 3. PAC 280 AC (PAC_PA -> QC_VEHICLE_PENDING)
+    const wbPac = await submitWeighIn(dbPac.id, 15000);
+    const dbWbPac = await prisma.transaction.findUniqueOrThrow({ where: { id: dbPac.id } });
+    console.log(`[Weigh-In] PAC (PAC_PA): Status=${dbWbPac.status} (Expected: QC_VEHICLE_PENDING)`);
 
-    // 4. Rapid Klen weigh-in -> expected QC_VEHICLE_PENDING
-    const wiRpd = await submitWeighIn(dbRpd.id, 19000);
-    const postWiRpd = await prisma.transaction.findUniqueOrThrow({ where: { id: dbRpd.id } });
-    console.log(`[Weigh-In] Rapid Klen (RAPID_KLEN_PA): Status=${postWiRpd.status} (Expected: QC_VEHICLE_PENDING)`);
+    // 4. Rapid Klen (RAPID_KLEN_PA -> QC_VEHICLE_PENDING)
+    const wbRpd = await submitWeighIn(dbRpd.id, 16200);
+    const dbWbRpd = await prisma.transaction.findUniqueOrThrow({ where: { id: dbRpd.id } });
+    console.log(`[Weigh-In] Rapid Klen (RAPID_KLEN_PA): Status=${dbWbRpd.status} (Expected: QC_VEHICLE_PENDING)`);
 
     // ──────────────────────────────────────────────────────────────────────────
-    // STEP 5: QC VERIFICATION & FORM ROUTING UI
+    // STEP 5: QC FORM ROUTING & SUBMISSION TEST
     // ──────────────────────────────────────────────────────────────────────────
     console.log('\n--- SCENARIO 5: QC Form Routing UI & Server Evaluation ---');
-    // Navigate to QC page in browser
+    // Navigate QC to /qc
     await cdp.evaluate(`
       (() => {
-        const link = document.querySelector('a[href="/qc"]') || Array.from(document.querySelectorAll('a')).find(a => a.textContent.includes('Quality Control') || a.textContent.includes('QC Verification'));
-        if (link) link.click();
-        else window.location.href = '/qc';
+        window.location.href = '/qc';
       })()
     `);
     await new Promise((r) => setTimeout(r, 2000));
     await cdp.captureScreenshot('09_qc_verification_queue.png');
 
     // QC Batubara PA Start and Form Routing
-    const startCoalRes = await fetch(`http://127.0.0.1:3001/api/qc/product-analysis/${dbCoal.id}/start`, {
+    const startCoalRes = await fetch(`${API_BASE_URL}/api/qc/product-analysis/${dbCoal.id}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
       body: JSON.stringify({}),
@@ -551,7 +602,7 @@ async function main() {
 
     // Submit actual compliant measurements for Batubara
     const curCoal = await prisma.transaction.findUniqueOrThrow({ where: { id: dbCoal.id } });
-    const submitCoalPa = await fetch(`http://127.0.0.1:3001/api/qc/product-analysis/${dbCoal.id}`, {
+    const submitCoalPa = await fetch(`${API_BASE_URL}/api/qc/product-analysis/${dbCoal.id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
       body: JSON.stringify({
@@ -574,7 +625,7 @@ async function main() {
     console.log(`[QC Submit] Batubara PA Evaluation: HTTP ${submitCoalPa.status}, Result=${coalPaBody.data?.analysis?.result}, Decision=${coalPaBody.data?.analysis?.decision}`);
 
     // Verify Solar PA rejection (cannot start PA for PA_EXEMPT)
-    const startSolarRes = await fetch(`http://127.0.0.1:3001/api/qc/product-analysis/${dbSolar.id}/start`, {
+    const startSolarRes = await fetch(`${API_BASE_URL}/api/qc/product-analysis/${dbSolar.id}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
       body: JSON.stringify({}),
@@ -582,13 +633,13 @@ async function main() {
     console.log(`[QC Solar] PA_EXEMPT Start PA Rejection: HTTP ${startSolarRes.status} (Expected: 400 Bad Request)`);
 
     // QC PAC 280 AC Start and Evaluation
-    await fetch(`http://127.0.0.1:3001/api/qc/product-analysis/${dbPac.id}/start`, {
+    await fetch(`${API_BASE_URL}/api/qc/product-analysis/${dbPac.id}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
       body: JSON.stringify({}),
     });
     const curPac = await prisma.transaction.findUniqueOrThrow({ where: { id: dbPac.id } });
-    const submitPacPa = await fetch(`http://127.0.0.1:3001/api/qc/product-analysis/${dbPac.id}`, {
+    const submitPacPa = await fetch(`${API_BASE_URL}/api/qc/product-analysis/${dbPac.id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
       body: JSON.stringify({
@@ -609,13 +660,13 @@ async function main() {
     console.log(`[QC Submit] PAC PA Evaluation: HTTP ${submitPacPa.status}, Result=${pacPaBody.data?.analysis?.result}, Decision=${pacPaBody.data?.analysis?.decision}`);
 
     // QC Rapid Klen Start and Evaluation
-    await fetch(`http://127.0.0.1:3001/api/qc/product-analysis/${dbRpd.id}/start`, {
+    await fetch(`${API_BASE_URL}/api/qc/product-analysis/${dbRpd.id}/start`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
       body: JSON.stringify({}),
     });
     const curRpd = await prisma.transaction.findUniqueOrThrow({ where: { id: dbRpd.id } });
-    const submitRpdPa = await fetch(`http://127.0.0.1:3001/api/qc/product-analysis/${dbRpd.id}`, {
+    const submitRpdPa = await fetch(`${API_BASE_URL}/api/qc/product-analysis/${dbRpd.id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${qcToken}` },
       body: JSON.stringify({
@@ -634,19 +685,17 @@ async function main() {
     const rpdPaBody = await submitRpdPa.json();
     console.log(`[QC Submit] Rapid Klen PA Evaluation: HTTP ${submitRpdPa.status}, Result=${rpdPaBody.data?.analysis?.result}, Decision=${rpdPaBody.data?.analysis?.decision}`);
 
-    // Refresh and capture final screenshot of QC page
-    await cdp.evaluate(`window.location.reload();`);
-    await new Promise((r) => setTimeout(r, 2000));
     await cdp.captureScreenshot('10_qc_final_evaluation_state.png');
 
     // ──────────────────────────────────────────────────────────────────────────
-    // STEP 6: NEGATIVE SECURITY & FAIL-CLOSED CHECKS
+    // STEP 6: NEGATIVE & FAIL-CLOSED INVARIANT VERIFICATION
     // ──────────────────────────────────────────────────────────────────────────
     console.log('\n--- SCENARIO 6: Negative & Fail-Closed Invariant Verification ---');
-    // 1. Cross-process catalog rejection: Try creating GSP transaction using GBB catalog
+
+    // 1. Cross-process ProductCatalog rejection (GBB catalog passed with GSP processType)
     const gbbCatalog = await prisma.productCatalog.create({
       data: {
-        code: 'GBB-TEST-CROSS-01',
+        code: 'GBB-CROSS-PROC-TEST',
         name: 'Kopi Robusta Lampung',
         category: 'Raw Coffee',
         processType: 'GBB',
@@ -655,7 +704,7 @@ async function main() {
       },
     });
 
-    const crossProcRes = await fetch('http://127.0.0.1:3001/api/gate/check-in', {
+    const crossProcRes = await fetch(`${API_BASE_URL}/api/gate/check-in`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secToken}` },
       body: JSON.stringify({
@@ -686,7 +735,7 @@ async function main() {
         isActive: false,
       },
     });
-    const inactiveRes = await fetch('http://127.0.0.1:3001/api/gate/check-in', {
+    const inactiveRes = await fetch(`${API_BASE_URL}/api/gate/check-in`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secToken}` },
       body: JSON.stringify({
@@ -706,8 +755,8 @@ async function main() {
     await prisma.productCatalog.delete({ where: { id: inactiveCatalog.id } });
 
     // 3. API rejection of active GSP product without profile
-    const freshAdminToken = await getJwtToken('admin', 'AdminPassword123!');
-    const noProfileRes = await fetch('http://127.0.0.1:3001/api/product-catalog', {
+    const freshAdminToken = await getJwtToken(UAT_ADMIN_USER, UAT_ADMIN_PASSWORD);
+    const noProfileRes = await fetch(`${API_BASE_URL}/api/product-catalog`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${freshAdminToken}` },
       body: JSON.stringify({
@@ -721,7 +770,7 @@ async function main() {
     console.log(`[Negative Check 3] Active GSP product without profile rejection: HTTP ${noProfileRes.status} (Expected: 400 Bad Request)`);
 
     // 4. Client identity tampering rejection (client cargoType !== catalog.category)
-    const tamperRes = await fetch('http://127.0.0.1:3001/api/gate/check-in', {
+    const tamperRes = await fetch(`${API_BASE_URL}/api/gate/check-in`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secToken}` },
       body: JSON.stringify({
@@ -750,6 +799,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('❌ UAT Execution Error:', err);
+  console.error('\n❌ UAT FAILED WITH ERROR:', err);
   process.exit(1);
 });

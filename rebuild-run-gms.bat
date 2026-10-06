@@ -7,8 +7,6 @@ echo.
 if defined DATABASE_URL set "DATABASE_URL=%DATABASE_URL:"=%"
 if defined DATABASE_URL_TEST set "DATABASE_URL_TEST=%DATABASE_URL_TEST:"=%"
 
-if not defined DOCKER_HOST set "DOCKER_HOST=tcp://127.0.0.1:2375"
-
 set COMPOSE_CMD=docker compose --env-file backend/.env
 
 echo [1/5] Menghentikan dan membersihkan kontainer lama...
