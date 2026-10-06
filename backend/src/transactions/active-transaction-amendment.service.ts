@@ -12,7 +12,11 @@ import {
   AmendActiveProductDto,
   RecordOperationalIncidentDto,
 } from './dto/amend-active-transaction.dto';
-import { CorrectionAction, TransactionStatus, GspAnalysisProfile } from '@prisma/client';
+import {
+  CorrectionAction,
+  TransactionStatus,
+  GspAnalysisProfile,
+} from '@prisma/client';
 import { isProductPaExempt } from '../qc/constants/pa-exemption-policy';
 import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
@@ -282,7 +286,9 @@ export class ActiveTransactionAmendmentService {
           newValues: {
             cargoType: authoritativeCargoType,
             cargoSubType: authoritativeCargoSubType,
-            productCatalogId: newCatalog ? newCatalog.id : dto.productCatalogId || null,
+            productCatalogId: newCatalog
+              ? newCatalog.id
+              : dto.productCatalogId || null,
             gspAnalysisProfile,
             status: newStatus,
           },

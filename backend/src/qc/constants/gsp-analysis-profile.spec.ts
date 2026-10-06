@@ -134,9 +134,7 @@ describe('GSP Analysis Profile Invariant Enforcement', () => {
       );
       expect(proCip).toBeDefined();
       expect(proCip?.category).toBe('Chemical PROD');
-      expect(proCip?.gspAnalysisProfile).toBe(
-        GspAnalysisProfile.RAPID_KLEN_PA,
-      );
+      expect(proCip?.gspAnalysisProfile).toBe(GspAnalysisProfile.RAPID_KLEN_PA);
       expect(proCip?.isPaRequired).toBe(true);
     });
 

@@ -17,7 +17,11 @@ import {
   UtilityDispositionDto,
   DispositionAction,
 } from './dto/utility-disposition.dto';
-import { QcResult, TransactionStatus, GspAnalysisProfile } from '@prisma/client';
+import {
+  QcResult,
+  TransactionStatus,
+  GspAnalysisProfile,
+} from '@prisma/client';
 import {
   OPERATIONAL_COAL_SPEC_METADATA,
   evaluateCoalAnalysis,

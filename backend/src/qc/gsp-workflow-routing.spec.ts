@@ -85,8 +85,12 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
     }).compile();
 
     weighbridgeService = module.get<WeighbridgeService>(WeighbridgeService);
-    qcAnalysisService = module.get<QcProductAnalysisService>(QcProductAnalysisService);
-    amendmentService = module.get<ActiveTransactionAmendmentService>(ActiveTransactionAmendmentService);
+    qcAnalysisService = module.get<QcProductAnalysisService>(
+      QcProductAnalysisService,
+    );
+    amendmentService = module.get<ActiveTransactionAmendmentService>(
+      ActiveTransactionAmendmentService,
+    );
 
     jest.clearAllMocks();
     mockPrismaService.$transaction.mockImplementation((cb: any) =>
@@ -119,11 +123,13 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       });
 
       mockPrismaService.weighbridgeRecord.findFirst.mockResolvedValueOnce(null);
-      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({ count: 1 });
+      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
 
       await weighbridgeService.submitWeighIn(
         'tx-solar-wb',
-        { weight: 15000, ticketNumber: 'TKT-001' } as any,
+        { weight: 15000, ticketNumber: 'TKT-001' },
         testUser,
       );
 
@@ -161,11 +167,13 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       });
 
       mockPrismaService.weighbridgeRecord.findFirst.mockResolvedValueOnce(null);
-      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({ count: 1 });
+      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
 
       await weighbridgeService.submitWeighIn(
         'tx-coal-wb',
-        { weight: 24000, ticketNumber: 'TKT-002' } as any,
+        { weight: 24000, ticketNumber: 'TKT-002' },
         testUser,
       );
 
@@ -203,11 +211,13 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       });
 
       mockPrismaService.weighbridgeRecord.findFirst.mockResolvedValueOnce(null);
-      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({ count: 1 });
+      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
 
       await weighbridgeService.submitWeighIn(
         'tx-pac-wb',
-        { weight: 12000 } as any,
+        { weight: 12000 },
         testUser,
       );
 
@@ -244,11 +254,13 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       });
 
       mockPrismaService.weighbridgeRecord.findFirst.mockResolvedValueOnce(null);
-      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({ count: 1 });
+      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
 
       await weighbridgeService.submitWeighIn(
         'tx-rpd-wb',
-        { weight: 14000 } as any,
+        { weight: 14000 },
         testUser,
       );
 
@@ -338,9 +350,15 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
         policyVersion: 'SOP-GSP-2026.1',
       });
 
-      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({ count: 1 });
-      mockPrismaService.qcProductAnalysis.updateMany.mockResolvedValueOnce({ count: 1 });
-      mockPrismaService.transactionCorrection.create.mockResolvedValueOnce({ id: 'corr-1' });
+      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
+      mockPrismaService.qcProductAnalysis.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
+      mockPrismaService.transactionCorrection.create.mockResolvedValueOnce({
+        id: 'corr-1',
+      });
 
       await amendmentService.amendActiveProduct(
         'tx-amend-target',
@@ -355,7 +373,9 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       );
 
       // Verify stale QC PA evidence was voided
-      expect(mockPrismaService.qcProductAnalysis.updateMany).toHaveBeenCalledWith(
+      expect(
+        mockPrismaService.qcProductAnalysis.updateMany,
+      ).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { transactionId: 'tx-amend-target', isVoided: false },
           data: expect.objectContaining({ isVoided: true, status: 'VOIDED' }),
@@ -402,11 +422,13 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       });
 
       mockPrismaService.weighbridgeRecord.findFirst.mockResolvedValueOnce(null);
-      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({ count: 1 });
+      mockPrismaService.transaction.updateMany.mockResolvedValueOnce({
+        count: 1,
+      });
 
       await weighbridgeService.submitWeighIn(
         'tx-legacy-coal',
-        { weight: 20000 } as any,
+        { weight: 20000 },
         testUser,
       );
 

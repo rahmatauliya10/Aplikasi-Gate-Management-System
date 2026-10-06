@@ -64,7 +64,9 @@ export class ProductCatalogService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Katalog produk dengan ID ${id} tidak ditemukan`);
+      throw new NotFoundException(
+        `Katalog produk dengan ID ${id} tidak ditemukan`,
+      );
     }
 
     return product;
@@ -99,7 +101,9 @@ export class ProductCatalogService {
 
       if (dto.gspAnalysisProfile) {
         const expectedPaRequired =
-          dto.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT ? false : true;
+          dto.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT
+            ? false
+            : true;
 
         if (isPaRequired !== undefined && isPaRequired !== expectedPaRequired) {
           assertValidGspProfileInvariant(dto.gspAnalysisProfile, isPaRequired);
@@ -149,7 +153,9 @@ export class ProductCatalogService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Katalog produk dengan ID ${id} tidak ditemukan`);
+      throw new NotFoundException(
+        `Katalog produk dengan ID ${id} tidak ditemukan`,
+      );
     }
 
     if (dto.code && dto.code !== existing.code) {
@@ -166,7 +172,8 @@ export class ProductCatalogService {
     }
 
     const targetProcessType = dto.processType ?? existing.processType;
-    const targetIsActive = dto.isActive !== undefined ? dto.isActive : existing.isActive;
+    const targetIsActive =
+      dto.isActive !== undefined ? dto.isActive : existing.isActive;
     const targetProfile =
       dto.gspAnalysisProfile !== undefined
         ? dto.gspAnalysisProfile
@@ -190,9 +197,15 @@ export class ProductCatalogService {
         const expectedPaRequired =
           targetProfile === GspAnalysisProfile.PA_EXEMPT ? false : true;
 
-        if (dto.isPaRequired !== undefined && dto.isPaRequired !== expectedPaRequired) {
+        if (
+          dto.isPaRequired !== undefined &&
+          dto.isPaRequired !== expectedPaRequired
+        ) {
           assertValidGspProfileInvariant(targetProfile, dto.isPaRequired);
-        } else if (dto.isPaRequired === undefined && dto.gspAnalysisProfile !== undefined) {
+        } else if (
+          dto.isPaRequired === undefined &&
+          dto.gspAnalysisProfile !== undefined
+        ) {
           targetIsPaRequired = expectedPaRequired;
         }
       }
@@ -204,9 +217,15 @@ export class ProductCatalogService {
         code: dto.code ? dto.code.trim().toUpperCase() : undefined,
         name: dto.name ? dto.name.trim() : undefined,
         category: dto.category ? dto.category.trim() : undefined,
-        subCategory: dto.subCategory !== undefined ? (dto.subCategory?.trim() || null) : undefined,
+        subCategory:
+          dto.subCategory !== undefined
+            ? dto.subCategory?.trim() || null
+            : undefined,
         processType: dto.processType ?? undefined,
-        gspAnalysisProfile: dto.gspAnalysisProfile !== undefined ? dto.gspAnalysisProfile : undefined,
+        gspAnalysisProfile:
+          dto.gspAnalysisProfile !== undefined
+            ? dto.gspAnalysisProfile
+            : undefined,
         isPaRequired: targetIsPaRequired,
         policyVersion: dto.policyVersion ?? undefined,
         isActive: dto.isActive !== undefined ? dto.isActive : undefined,
@@ -240,7 +259,9 @@ export class ProductCatalogService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Katalog produk dengan ID ${id} tidak ditemukan`);
+      throw new NotFoundException(
+        `Katalog produk dengan ID ${id} tidak ditemukan`,
+      );
     }
 
     // Historical Integrity Protection: Never hard delete if transactions or QC analyses reference this product!

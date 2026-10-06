@@ -2,7 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ProductCatalogService } from './product-catalog.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ProcessType, GspAnalysisProfile, Role } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
@@ -46,7 +50,9 @@ describe('ProductCatalogService', () => {
 
   describe('create', () => {
     it('1. rejects duplicate product code with ConflictException', async () => {
-      prisma.productCatalog.findUnique.mockResolvedValueOnce({ id: 'existing-id' });
+      prisma.productCatalog.findUnique.mockResolvedValueOnce({
+        id: 'existing-id',
+      });
 
       await expect(
         service.create(
@@ -259,7 +265,9 @@ describe('ProductCatalogService', () => {
         _count: { transactions: 0, qcAnalyses: 0 },
       });
 
-      prisma.productCatalog.delete.mockResolvedValueOnce({ id: 'cat-unused-1' });
+      prisma.productCatalog.delete.mockResolvedValueOnce({
+        id: 'cat-unused-1',
+      });
 
       const res = await service.remove('cat-unused-1', mockAdminUser);
       expect(res.success).toBe(true);

@@ -5,7 +5,11 @@ import { WarehouseService } from '../src/warehouse/warehouse.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ActivityLogsService } from '../src/activity-logs/activity-logs.service';
 import { JwtPayloadUser } from '../src/common/decorators/current-user.decorator';
-import { ProcessType, TransactionStatus, CargoProcessType } from '@prisma/client';
+import {
+  ProcessType,
+  TransactionStatus,
+  CargoProcessType,
+} from '@prisma/client';
 
 describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () => {
   let gateService: GateService;
@@ -42,10 +46,12 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
       create: jest.fn(),
     },
     userWarehouseAccess: {
-      findMany: jest.fn().mockResolvedValue([
-        { processType: ProcessType.GBB },
-        { processType: ProcessType.GBJ },
-      ]),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([
+          { processType: ProcessType.GBB },
+          { processType: ProcessType.GBJ },
+        ]),
     },
     fraudCheck: {
       create: jest.fn(),
@@ -91,7 +97,9 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
     warehouseService = module.get<WarehouseService>(WarehouseService);
 
     jest.clearAllMocks();
-    mockPrismaService.$transaction.mockImplementation((cb: any) => cb(mockPrismaService));
+    mockPrismaService.$transaction.mockImplementation((cb: any) =>
+      cb(mockPrismaService),
+    );
     mockPrismaService.userWarehouseAccess.findMany.mockResolvedValue([
       { processType: ProcessType.GBB },
       { processType: ProcessType.GBJ },
@@ -101,12 +109,14 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
   describe('GBB (Gudang Bahan Baku) Inbound Lifecycle & Multi-Subtype Support', () => {
     it('1. GBB Check-In accepts multiple cargo sub-types without requiring productCatalogId or GSP profile', async () => {
       mockPrismaService.transaction.findFirst.mockResolvedValue(null);
-      mockPrismaService.transaction.create.mockImplementation(({ data }: any) => ({
-        id: 'tx-gbb-101',
-        ...data,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }));
+      mockPrismaService.transaction.create.mockImplementation(
+        ({ data }: any) => ({
+          id: 'tx-gbb-101',
+          ...data,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+      );
 
       const gbbPayload = {
         processType: ProcessType.GBB,
@@ -121,11 +131,13 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
         cargoProcessType: CargoProcessType.INBOUND,
       };
 
-      const result = await gateService.checkIn(gbbPayload as any, securityUser);
+      const result = await gateService.checkIn(gbbPayload, securityUser);
 
       expect(result.success).toBe(true);
       expect(result.data.processType).toBe(ProcessType.GBB);
-      expect(result.data.cargoSubType).toBe('Kopi Robusta Lampung, Kopi Arabika Mandheling');
+      expect(result.data.cargoSubType).toBe(
+        'Kopi Robusta Lampung, Kopi Arabika Mandheling',
+      );
       expect(result.data.gspAnalysisProfile).toBeNull();
       expect(result.data.status).toBe(TransactionStatus.REGISTERED);
     });
@@ -149,7 +161,7 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
 
       const wbResult = await weighbridgeService.submitWeighIn(
         'tx-gbb-101',
-        { weight: 22500 } as any,
+        { weight: 22500 },
         weighbridgeUser,
       );
 
@@ -177,7 +189,9 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
         revision: 2,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValue(gbbUnloadingTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValue(
+        gbbUnloadingTx,
+      );
       mockPrismaService.warehouseProcess.findFirst.mockResolvedValue(null);
       mockPrismaService.warehouseProcess.create.mockResolvedValue({
         id: 'wh-proc-1',
@@ -218,7 +232,7 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
 
       const wbOutResult = await weighbridgeService.submitWeighOut(
         'tx-gbb-101',
-        { weight: 7500 } as any,
+        { weight: 7500 },
         weighbridgeUser,
       );
 
@@ -249,7 +263,10 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
       mockPrismaService.transaction.findUnique.mockResolvedValue(gbbGateOutTx);
       mockPrismaService.transaction.updateMany.mockResolvedValue({ count: 1 });
 
-      const checkOutResult = await gateService.checkOut('tx-gbb-101', securityUser);
+      const checkOutResult = await gateService.checkOut(
+        'tx-gbb-101',
+        securityUser,
+      );
 
       expect(checkOutResult.success).toBe(true);
       expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
@@ -270,12 +287,14 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
   describe('GBJ (Gudang Barang Jadi) Independent Lifecycle', () => {
     it('1. GBJ Check-In: creates outbound transaction without requiring GSP catalog ID', async () => {
       mockPrismaService.transaction.findFirst.mockResolvedValue(null);
-      mockPrismaService.transaction.create.mockImplementation(({ data }: any) => ({
-        id: 'tx-gbj-201',
-        ...data,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }));
+      mockPrismaService.transaction.create.mockImplementation(
+        ({ data }: any) => ({
+          id: 'tx-gbj-201',
+          ...data,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }),
+      );
 
       const gbjPayload = {
         processType: ProcessType.GBJ,
@@ -289,7 +308,7 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
         cargoProcessType: CargoProcessType.OUTBOUND,
       };
 
-      const result = await gateService.checkIn(gbjPayload as any, securityUser);
+      const result = await gateService.checkIn(gbjPayload, securityUser);
 
       expect(result.success).toBe(true);
       expect(result.data.processType).toBe(ProcessType.GBJ);
@@ -316,7 +335,7 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
 
       const wbResult = await weighbridgeService.submitWeighIn(
         'tx-gbj-201',
-        { weight: 8200 } as any,
+        { weight: 8200 },
         weighbridgeUser,
       );
 
@@ -351,7 +370,7 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
 
       const wbOutResult = await weighbridgeService.submitWeighOut(
         'tx-gbj-201',
-        { weight: 24200 } as any,
+        { weight: 24200 },
         weighbridgeUser,
       );
 

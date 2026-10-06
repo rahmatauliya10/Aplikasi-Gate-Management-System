@@ -35,7 +35,8 @@ export class ProductCatalogController {
   @Get()
   @Roles('ADMIN', 'SECURITY', 'QC', 'WAREHOUSE')
   @ApiOperation({
-    summary: 'Get product catalogs with optional processType and isActive filters',
+    summary:
+      'Get product catalogs with optional processType and isActive filters',
   })
   @ApiResponse({ status: 200, description: 'List of product catalogs' })
   findAll(@Query() query: QueryProductCatalogDto) {
@@ -84,7 +85,10 @@ export class ProductCatalogController {
     summary:
       'Delete product catalog or deactivate if referenced by transactions (Admin only)',
   })
-  @ApiResponse({ status: 200, description: 'Product catalog deleted or deactivated' })
+  @ApiResponse({
+    status: 200,
+    description: 'Product catalog deleted or deactivated',
+  })
   @ApiResponse({ status: 404, description: 'Product catalog not found' })
   remove(@Param('id') id: string, @CurrentUser() user: JwtPayloadUser) {
     return this.productCatalogService.remove(id, user);

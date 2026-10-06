@@ -46,9 +46,15 @@ describe('ProductCatalogController', () => {
 
   it('delegates findAll to service with query params', async () => {
     service.findAll.mockResolvedValueOnce([{ id: 'cat-1' }]);
-    const res = await controller.findAll({ processType: ProcessType.GSP, isActive: true });
+    const res = await controller.findAll({
+      processType: ProcessType.GSP,
+      isActive: true,
+    });
     expect(res).toEqual([{ id: 'cat-1' }]);
-    expect(service.findAll).toHaveBeenCalledWith({ processType: ProcessType.GSP, isActive: true });
+    expect(service.findAll).toHaveBeenCalledWith({
+      processType: ProcessType.GSP,
+      isActive: true,
+    });
   });
 
   it('delegates findById to service', async () => {
@@ -75,9 +81,17 @@ describe('ProductCatalogController', () => {
 
   it('delegates update to service', async () => {
     service.update.mockResolvedValueOnce({ id: 'cat-1', name: 'Updated' });
-    const res = await controller.update('cat-1', { name: 'Updated' }, mockAdminUser);
+    const res = await controller.update(
+      'cat-1',
+      { name: 'Updated' },
+      mockAdminUser,
+    );
     expect(res.name).toBe('Updated');
-    expect(service.update).toHaveBeenCalledWith('cat-1', { name: 'Updated' }, mockAdminUser);
+    expect(service.update).toHaveBeenCalledWith(
+      'cat-1',
+      { name: 'Updated' },
+      mockAdminUser,
+    );
   });
 
   it('delegates remove to service', async () => {
