@@ -30,7 +30,7 @@ describe('ProductCatalogService', () => {
     };
 
     activityLogsService = {
-      log: jest.fn().mockResolvedValue(undefined),
+      logAction: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({

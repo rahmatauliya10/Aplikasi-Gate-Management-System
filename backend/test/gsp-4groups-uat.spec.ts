@@ -9,6 +9,7 @@ import {
   Role,
   CorrectionAction,
   WeighbridgeType,
+  GspAnalysisProfile,
 } from '@prisma/client';
 import { WeighbridgeService } from '../src/weighbridge/weighbridge.service';
 import { WarehouseService } from '../src/warehouse/warehouse.service';
@@ -1113,6 +1114,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         category: 'Coal',
         subCategory: 'Batubara',
         processType: ProcessType.GSP,
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         isActive: true,
         isPaRequired: true,
         policyVersion: 'SOP-GSP-2026.1',
@@ -1437,6 +1439,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         category: 'Chemicals',
         subCategory: 'PAC 280 AC',
         processType: ProcessType.GSP,
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
         isPaRequired: true,
         isActive: true,
       };

@@ -364,7 +364,7 @@ export class QcProductAnalysisService {
       );
     }
 
-    if (targetProfile === GspAnalysisProfile.PA_EXEMPT) {
+    if ((targetProfile as any) === GspAnalysisProfile.PA_EXEMPT) {
       throw new BadRequestException(
         'Produk dengan profil PA_EXEMPT tidak dapat menjalankan analisis PA laboratorium.',
       );

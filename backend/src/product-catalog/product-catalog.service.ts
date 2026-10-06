@@ -128,7 +128,7 @@ export class ProductCatalogService {
     });
 
     this.activityLogsService
-      .log({
+      .logAction({
         userId: user.id,
         userName: user.name,
         role: user.role,
@@ -138,7 +138,7 @@ export class ProductCatalogService {
         description: `Created ProductCatalog ${created.code} (${created.name}) process=${created.processType} profile=${created.gspAnalysisProfile}`,
         status: 'SUCCESS',
       })
-      .catch((err) => this.logger.error('Activity log error:', err));
+      .catch((err: any) => this.logger.error('Activity log error:', err));
 
     return created;
   }
@@ -214,7 +214,7 @@ export class ProductCatalogService {
     });
 
     this.activityLogsService
-      .log({
+      .logAction({
         userId: user.id,
         userName: user.name,
         role: user.role,
@@ -224,7 +224,7 @@ export class ProductCatalogService {
         description: `Updated ProductCatalog ${updated.code} (${updated.name}) active=${updated.isActive} profile=${updated.gspAnalysisProfile}`,
         status: 'SUCCESS',
       })
-      .catch((err) => this.logger.error('Activity log error:', err));
+      .catch((err: any) => this.logger.error('Activity log error:', err));
 
     return updated;
   }
@@ -251,7 +251,7 @@ export class ProductCatalogService {
       });
 
       this.activityLogsService
-        .log({
+        .logAction({
           userId: user.id,
           userName: user.name,
           role: user.role,
@@ -261,7 +261,7 @@ export class ProductCatalogService {
           description: `ProductCatalog ${existing.code} was deactivated instead of deleted because ${existing._count.transactions} transaction(s) reference it.`,
           status: 'SUCCESS',
         })
-        .catch((err) => this.logger.error('Activity log error:', err));
+        .catch((err: any) => this.logger.error('Activity log error:', err));
 
       return {
         success: true,
@@ -277,7 +277,7 @@ export class ProductCatalogService {
     });
 
     this.activityLogsService
-      .log({
+      .logAction({
         userId: user.id,
         userName: user.name,
         role: user.role,
@@ -287,7 +287,7 @@ export class ProductCatalogService {
         description: `Permanently deleted unused ProductCatalog ${existing.code}`,
         status: 'SUCCESS',
       })
-      .catch((err) => this.logger.error('Activity log error:', err));
+      .catch((err: any) => this.logger.error('Activity log error:', err));
 
     return {
       success: true,
