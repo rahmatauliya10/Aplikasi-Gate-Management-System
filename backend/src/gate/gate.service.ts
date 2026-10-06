@@ -9,8 +9,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { CreateGateCheckInDto } from './dto/create-gate-check-in.dto';
 import { GateQueryDto } from './dto/gate-query.dto';
-import { TransactionStatus, Prisma } from '@prisma/client';
+import { TransactionStatus, Prisma, GspAnalysisProfile } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
 
 import { GATE_DETAIL_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
@@ -99,42 +100,115 @@ export class GateService {
           }
 
           let resolvedCatalogId: string | null = null;
-          if (dto.productCatalogId && tx.productCatalog) {
-            const cat = await tx.productCatalog.findUnique({
+          let authoritativeCargoType = dto.cargoType;
+          let authoritativeCargoSubType = dto.cargoSubType;
+          let gspAnalysisProfile: GspAnalysisProfile | null = null;
+          let paPolicyVersion: string | null = null;
+          let paExemptionReason: string | null = null;
+
+          if (dto.processType === 'GSP') {
+            // Fail-closed enforcement for GSP check-in:
+            if (!dto.productCatalogId) {
+              throw new BadRequestException({
+                success: false,
+                message:
+                  'productCatalogId wajib disertakan untuk registrasi transaksi proses GSP.',
+                errors: ['MISSING_PRODUCT_CATALOG_ID'],
+              });
+            }
+
+            const catalog = await tx.productCatalog.findUnique({
               where: { id: dto.productCatalogId },
             });
-            if (cat) {
-              resolvedCatalogId = cat.id;
+
+            if (!catalog) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk dengan ID '${dto.productCatalogId}' tidak ditemukan.`,
+                errors: ['CATALOG_NOT_FOUND'],
+              });
             }
-          } else if (
-            (dto.cargoSubType || dto.cargoType) &&
-            dto.processType &&
-            tx.productCatalog
-          ) {
-            const term = dto.cargoSubType || dto.cargoType;
-            const cat = await tx.productCatalog.findFirst({
-              where: {
-                processType: dto.processType,
-                isActive: true,
-                OR: [
-                  { name: { equals: term, mode: 'insensitive' } },
-                  {
-                    subCategory: {
-                      equals: term,
-                      mode: 'insensitive',
-                    },
-                  },
-                  {
-                    category: {
-                      equals: term,
-                      mode: 'insensitive',
-                    },
-                  },
-                ],
-              },
-            });
-            if (cat) {
-              resolvedCatalogId = cat.id;
+
+            if (!catalog.isActive) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' (${catalog.code}) berstatus nonaktif dan tidak dapat digunakan untuk registrasi.`,
+                errors: ['CATALOG_INACTIVE'],
+              });
+            }
+
+            if (catalog.processType !== 'GSP') {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' bertipe proses ${catalog.processType}, tidak sesuai dengan proses transaksi GSP.`,
+                errors: ['PROCESS_MISMATCH'],
+              });
+            }
+
+            if (!catalog.gspAnalysisProfile) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' belum memiliki profil analisis PA terkonfigurasi.`,
+                errors: ['MISSING_ANALYSIS_PROFILE'],
+              });
+            }
+
+            // Invariant verification between profile and isPaRequired
+            assertValidGspProfileInvariant(
+              catalog.gspAnalysisProfile,
+              catalog.isPaRequired,
+            );
+
+            // Server-Authoritative Cargo Identity & Anti-tamper check (Section 18)
+            if (dto.cargoType) {
+              const clientCat = dto.cargoType.trim().toLowerCase();
+              const canonCat = catalog.category.trim().toLowerCase();
+              if (clientCat !== canonCat) {
+                throw new BadRequestException({
+                  success: false,
+                  message: `Kategori kargo '${dto.cargoType}' tidak sesuai dengan data katalog master '${catalog.category}'.`,
+                  errors: ['CARGO_IDENTITY_CONFLICT'],
+                });
+              }
+            }
+
+            if (dto.cargoSubType) {
+              const clientSub = dto.cargoSubType.trim().toLowerCase();
+              const canonName = catalog.name.trim().toLowerCase();
+              const canonSub = (catalog.subCategory || '').trim().toLowerCase();
+              if (clientSub !== canonName && clientSub !== canonSub) {
+                throw new BadRequestException({
+                  success: false,
+                  message: `Subtipe kargo '${dto.cargoSubType}' tidak sesuai dengan data katalog master '${catalog.name}'.`,
+                  errors: ['CARGO_IDENTITY_CONFLICT'],
+                });
+              }
+            }
+
+            resolvedCatalogId = catalog.id;
+            authoritativeCargoType = catalog.category;
+            authoritativeCargoSubType = catalog.name;
+            gspAnalysisProfile = catalog.gspAnalysisProfile;
+            paPolicyVersion = catalog.policyVersion || 'SOP-GSP-2026.1';
+            if (catalog.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT) {
+              paExemptionReason = `SOP Exemption Rule [${paPolicyVersion}]: Produk ${catalog.name} (${catalog.code}) terverifikasi dari katalog master resmi bebas analisis PA laboratorium.`;
+            }
+          } else {
+            // Non-GSP processes (GBB / GBJ): preserve transitional catalog resolution if present
+            if (dto.productCatalogId && tx.productCatalog) {
+              const cat = await tx.productCatalog.findUnique({
+                where: { id: dto.productCatalogId },
+              });
+              if (cat) {
+                if (cat.processType !== dto.processType) {
+                  throw new BadRequestException({
+                    success: false,
+                    message: `Katalog produk '${cat.name}' bertipe proses ${cat.processType}, tidak sesuai dengan transaksi ${dto.processType}.`,
+                    errors: ['PROCESS_MISMATCH'],
+                  });
+                }
+                resolvedCatalogId = cat.id;
+              }
             }
           }
 
@@ -147,9 +221,12 @@ export class GateService {
               vendorName: dto.vendorName,
               vehicleType: dto.vehicleType,
               processType: dto.processType,
-              cargoType: dto.cargoType,
-              cargoSubType: dto.cargoSubType,
+              cargoType: authoritativeCargoType,
+              cargoSubType: authoritativeCargoSubType,
               productCatalogId: resolvedCatalogId,
+              gspAnalysisProfile,
+              paPolicyVersion,
+              paExemptionReason,
               cargoProcessType: dto.cargoProcessType,
               suratJalanNumber: dto.suratJalanNumber,
               poNumber: dto.poNumber,
