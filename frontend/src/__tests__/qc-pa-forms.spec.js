@@ -79,7 +79,7 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(emittedPayload.decision).toBeUndefined()
     })
 
-    it('displays Utility Disposition indication in Round 2 when moisture exceeds limit and emits WITHOUT client result or decision', async () => {
+    it('displays Reject indication in Round 2 when moisture exceeds limit and emits WITHOUT client result or decision (NO Utility Disposition)', async () => {
       const wrapper = mount(CoalAnalysisForm, {
         props: {
           transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
@@ -90,12 +90,16 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       const moistureInput = wrapper.find('#input-coal-moisture')
       await moistureInput.setValue(36.5) // still exceeds limit in Round 2
 
-      const utilBtn = wrapper.find('#btn-coal-utility-disp')
-      expect(utilBtn.exists()).toBe(true)
-      expect(utilBtn.text()).toContain('Hasil di atas batas — akan dievaluasi untuk Disposisi Utility')
+      // Assert NO Utility disposition button exists
+      expect(wrapper.find('#btn-coal-utility-disp').exists()).toBe(false)
       expect(wrapper.find('#btn-coal-retest').exists()).toBe(false)
 
-      await utilBtn.trigger('click')
+      // Assert Round 2 rejection button is displayed
+      const rejectBtn = wrapper.find('#btn-coal-reject')
+      expect(rejectBtn.exists()).toBe(true)
+      expect(rejectBtn.text()).toContain('Muatan Ditolak (REJECT)')
+
+      await rejectBtn.trigger('click')
       expect(wrapper.emitted('submit')).toBeTruthy()
       const emittedPayload = wrapper.emitted('submit')[0][0]
 

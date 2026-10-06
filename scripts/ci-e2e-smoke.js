@@ -504,18 +504,6 @@ async function runE2ESmoke() {
   });
   const qcAuthHeader = { Authorization: `Bearer ${qcAnalyst.token}` };
 
-  const utilityOfficer = await getOrCreateUser(authHeader, {
-    username: 'utility_lead_e2e',
-    email: 'utility.lead.e2e@gms.local',
-    name: 'Agus Utility Section Head',
-    role: 'ADMIN',
-    department: 'UTILITY',
-    area: 'UTILITY_DISPOSITION_AUTHORITY',
-    warehouseAccess: ['GSP'],
-    password: 'UtilitySecurePass2026!',
-  });
-  const utilityAuthHeader = { Authorization: `Bearer ${utilityOfficer.token}` };
-
   const gbbQcUser = await getOrCreateUser(authHeader, {
     username: 'qc_gbb_only_e2e',
     email: 'qc.gbb.only@gms.local',
@@ -677,76 +665,72 @@ async function runE2ESmoke() {
   coalTxRev = coalAfterStartR2.body?.data?.revision;
   log(`  5. PA Start Round 2 SUCCESS (Status: QC_VEHICLE_IN_PROGRESS, retest active)`);
 
-  // 6. Submit PA Round 2 with failing moisture -> WAITING_UTILITY_DISPOSITION
-  log(`  6. Submitting PA Round 2 (failing moisture 37.0% -> routes to WAITING_UTILITY_DISPOSITION)...`);
+  // 6. Submit PA Round 2 with compliant moisture (31.0%) -> QC_VEHICLE_PASSED (NO Utility Disposition)
+  log(`  6. Submitting PA Round 2 (compliant moisture 31.0% -> QC_VEHICLE_PASSED, NO Utility Disposition)...`);
   const paSubmitR2 = await request(`/api/qc/product-analysis/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
     productCategory: 'Coal',
     productName: 'Batubara',
     testRound: 2,
-    parameters: { visual: 'OK', moisture: 37.0, grossCalorie: 4200 },
-    result: 'REJECT',
-    decision: 'PENDING_DISPOSITION',
-    notes: 'Round 2 Retest moisture 37.0% still out-of-spec. Escalated to Utility Disposition.',
+    parameters: { visual: 'OK', moisture: 31.0, grossCalorie: 4200 },
+    result: 'PASS',
+    decision: 'RELEASE',
+    notes: 'Round 2 Retest moisture 31.0% compliant with standard. Authoritative QC result -> QC_VEHICLE_PASSED.',
     revision: coalTxRev,
   });
   if (!isSuccessStatus(paSubmitR2.statusCode)) {
     throw new Error(`PA Submit Round 2 FAILED: Status ${paSubmitR2.statusCode}, Body: ${JSON.stringify(paSubmitR2.body)}`);
   }
   const coalAfterSubmitR2 = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
-  if (coalAfterSubmitR2.body?.data?.status !== 'WAITING_UTILITY_DISPOSITION') {
-    throw new Error(`Expected status WAITING_UTILITY_DISPOSITION after Round 2 fail, received: ${coalAfterSubmitR2.body?.data?.status}`);
+  if (coalAfterSubmitR2.body?.data?.status !== 'QC_VEHICLE_PASSED') {
+    throw new Error(`Expected status QC_VEHICLE_PASSED after Round 2 compliant, received: ${coalAfterSubmitR2.body?.data?.status}`);
   }
   coalTxRev = coalAfterSubmitR2.body?.data?.revision;
-  log(`  6. PA Submit Round 2 SUCCESS (Status: WAITING_UTILITY_DISPOSITION)`);
+  log(`  6. PA Submit Round 2 SUCCESS (Status: QC_VEHICLE_PASSED, NO Utility disposition needed)`, 'SUCCESS');
 
-  // Negative assertion: Four-Eyes Principle enforcement
-  // Analyst who conducted testing attempts to approve disposition -> MUST FAIL (HTTP 403 Forbidden)
-  log(`  Testing Four-Eyes Principle: Analyst attempting to self-disposition (Must FAIL with HTTP 403)...`);
-  const analystDispositionAttempt = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
-    dispositionAction: 'ACCEPT_WITH_DEVIATION',
-    dispositionReason: 'Self-approval attempt by analyst',
-    revision: coalTxRev,
+  // 7. Verify Round 2 Out-of-Spec Rejection Gate (Round 2 OOS -> QC_VEHICLE_REJECTED, NO Utility disposition)
+  log(`  7. Verifying Round 2 Out-of-Spec Rejection Gate on secondary delivery...`);
+  const coalTxRejRes = await request('/api/transactions/security-check-in', { method: 'POST', headers: authHeader }, {
+    licensePlate: 'B 9999 OOS',
+    driverName: 'Driver Coal Fail',
+    origin: 'Dermaga Barat',
+    processType: 'GSP',
+    cargoType: 'Coal',
+    cargoSubType: 'Batubara',
+    productCatalogId: coalCatalog.id,
   });
-  if (analystDispositionAttempt.statusCode !== 403) {
-    throw new Error(`Analyst self-disposition did NOT fail with 403! Received: ${analystDispositionAttempt.statusCode}`);
+  const coalRejId = coalTxRejRes.body?.data?.id;
+  await stepOk(request(`/api/transactions/${coalRejId}/weigh-in`, { method: 'POST', headers: authHeader }, { grossWeight: 31000 }), 'Weigh In Coal Rej');
+  const rejTxDetail = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
+  let rejRev = rejTxDetail.body?.data?.revision;
+  await stepOk(request(`/api/qc/product-analysis/${coalRejId}/start`, { method: 'POST', headers: qcAuthHeader }), 'Start R1 Coal Rej');
+  const rejAfterStart1 = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
+  rejRev = rejAfterStart1.body?.data?.revision;
+  // Round 1 OOS -> QC_RETEST_REQUIRED
+  await stepOk(request(`/api/qc/product-analysis/${coalRejId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Coal', productName: 'Batubara', testRound: 1,
+    parameters: { visual: 'OK', moisture: 38.0, grossCalorie: 4200 },
+    revision: rejRev,
+  }), 'Submit R1 OOS Coal Rej');
+  const rejAfterR1 = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
+  if (rejAfterR1.body?.data?.status !== 'QC_RETEST_REQUIRED') {
+    throw new Error(`Expected QC_RETEST_REQUIRED, got: ${rejAfterR1.body?.data?.status}`);
   }
-  log(`  Four-Eyes Principle enforced: Analyst forbidden from self-disposition with HTTP 403 [PASS]`, 'SUCCESS');
-
-  // Negative assertion: Non-Utility user (Security) attempts disposition -> MUST FAIL (HTTP 403)
-  log(`  Testing Department Authority: Security attempting Utility disposition (Must FAIL with HTTP 403)...`);
-  const secUserLoginForDisp = await request('/api/auth/login', { method: 'POST' }, {
-    identifier: 'security',
-    password: process.env.DEFAULT_SECURITY_PASSWORD || 'test-sec-password-12345',
-  });
-  if (secUserLoginForDisp.body?.data?.accessToken) {
-    const secDispHeader = { Authorization: `Bearer ${secUserLoginForDisp.body.data.accessToken}` };
-    const secDispositionAttempt = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: secDispHeader }, {
-      dispositionAction: 'ACCEPT_WITH_DEVIATION',
-      dispositionReason: 'Unauthorized role disposition attempt',
-      revision: coalTxRev,
-    });
-    if (secDispositionAttempt.statusCode !== 403) {
-      throw new Error(`Non-utility user disposition did NOT fail with 403! Received: ${secDispositionAttempt.statusCode}`);
-    }
-    log(`  Department authority enforced: Non-utility user rejected with HTTP 403 [PASS]`, 'SUCCESS');
+  rejRev = rejAfterR1.body?.data?.revision;
+  // Round 2 Start
+  await stepOk(request(`/api/qc/product-analysis/${coalRejId}/start`, { method: 'POST', headers: qcAuthHeader }), 'Start R2 Coal Rej');
+  const rejAfterStart2 = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
+  rejRev = rejAfterStart2.body?.data?.revision;
+  // Round 2 OOS -> QC_VEHICLE_REJECTED (Must NOT be WAITING_UTILITY_DISPOSITION)
+  await stepOk(request(`/api/qc/product-analysis/${coalRejId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Coal', productName: 'Batubara', testRound: 2,
+    parameters: { visual: 'OK', moisture: 37.5, grossCalorie: 4200 },
+    revision: rejRev,
+  }), 'Submit R2 OOS Coal Rej');
+  const rejAfterR2 = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
+  if (rejAfterR2.body?.data?.status !== 'QC_VEHICLE_REJECTED') {
+    throw new Error(`Expected QC_VEHICLE_REJECTED for Round 2 OOS, got: ${rejAfterR2.body?.data?.status}`);
   }
-
-  // 7. Authorized Utility Officer Disposition (ACCEPT_WITH_DEVIATION -> QC_VEHICLE_PASSED)
-  log(`  7. Authorized Utility Section Head processing Technical Disposition...`);
-  const utilityDispRes = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: utilityAuthHeader }, {
-    dispositionAction: 'ACCEPT_WITH_DEVIATION',
-    dispositionReason: 'Technical concession approved by Utility Section Head due to urgent boiler feed requirements: gradual blending with dry GAR 5000 stockpile. Supplier penalized -2.5% invoice deduction.',
-    revision: coalTxRev,
-  });
-  if (!isSuccessStatus(utilityDispRes.statusCode)) {
-    throw new Error(`Utility Disposition FAILED: Status ${utilityDispRes.statusCode}, Body: ${JSON.stringify(utilityDispRes.body)}`);
-  }
-  const coalAfterDisp = await request(`/api/transactions/${coalTxId}`, { headers: authHeader });
-  if (coalAfterDisp.body?.data?.status !== 'QC_VEHICLE_PASSED') {
-    throw new Error(`Expected status QC_VEHICLE_PASSED after Utility Disposition, received: ${coalAfterDisp.body?.data?.status}`);
-  }
-  coalTxRev = coalAfterDisp.body?.data?.revision;
-  log(`  7. Utility Disposition SUCCESS (Status: QC_VEHICLE_PASSED, Four-Eyes & Audit verified)`, 'SUCCESS');
+  log(`  Round 2 Out-of-Spec strictly produced QC_VEHICLE_REJECTED (Zero WAITING_UTILITY_DISPOSITION verified) [PASS]`, 'SUCCESS');
 
   // 8. Warehouse Start & Complete
   log(`  8. Unloading Batubara at Warehouse...`);
@@ -826,30 +810,18 @@ async function runE2ESmoke() {
       aluminaContent: 10.2,
     },
     result: 'PASS',
-    decision: 'PENDING_DISPOSITION',
-    notes: 'Provisional PAC analysis compliant with draft spec but awaiting formal QA/Utility signoff',
+    notes: 'Provisional PAC analysis compliant with draft spec but awaiting formal QA signoff',
     revision: pacDetail.body?.data?.revision,
   });
-  if (!isSuccessStatus(pacSubmitRes.statusCode)) {
-    throw new Error(`PAC Submit FAILED: Status ${pacSubmitRes.statusCode}, Body: ${JSON.stringify(pacSubmitRes.body)}`);
+  // Since operational spec is PENDING_SIGNOFF, system blocks release with HTTP 400 (fail-closed governance blocker)
+  if (pacSubmitRes.statusCode !== 400) {
+    throw new Error(`Expected PAC submit to fail-closed with 400 due to PENDING_SIGNOFF, got: ${pacSubmitRes.statusCode}`);
   }
-  // Since operational spec is PENDING_SIGNOFF, system routes to WAITING_UTILITY_DISPOSITION
   const pacAfterSubmit = await request(`/api/transactions/${pacTxId}`, { headers: authHeader });
-  if (pacAfterSubmit.body?.data?.status !== 'WAITING_UTILITY_DISPOSITION') {
-    throw new Error(`Expected PAC status WAITING_UTILITY_DISPOSITION due to PENDING_SIGNOFF, got: ${pacAfterSubmit.body?.data?.status}`);
+  if (pacAfterSubmit.body?.data?.status === 'WAITING_UTILITY_DISPOSITION') {
+    throw new Error(`PAC transaction erroneously entered WAITING_UTILITY_DISPOSITION!`);
   }
-  log(`  PAC automatically routed to WAITING_UTILITY_DISPOSITION (Provisional spec protection verified) [PASS]`, 'SUCCESS');
-
-  // Utility Officer attempting disposition on non-Coal MUST FAIL with HTTP 403 Forbidden
-  const pacUtilityAttempt = await request(`/api/qc/disposition/${pacTxId}`, { method: 'POST', headers: utilityAuthHeader }, {
-    dispositionAction: 'ACCEPT_WITH_DEVIATION',
-    dispositionReason: 'Attempt to disposition non-Coal chemical',
-    revision: pacAfterSubmit.body?.data?.revision,
-  });
-  if (pacUtilityAttempt.statusCode !== 403) {
-    throw new Error(`Utility disposition on non-Coal chemical did NOT fail with 403! Received: ${pacUtilityAttempt.statusCode}`);
-  }
-  log(`  Utility disposition on non-Coal PAC rejected with HTTP 403 Forbidden (Open Governance Dependency intact) [PASS]`, 'SUCCESS');
+  log(`  PAC fail-closed governance blocker verified (HTTP 400, never routes to WAITING_UTILITY_DISPOSITION) [PASS]`, 'SUCCESS');
 
   // ==============================================================================
   // Step 5D: REOPEN PRE-PA INACTIVATION E2E TEST

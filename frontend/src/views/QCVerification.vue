@@ -75,15 +75,31 @@
                 </button>
               </div>
 
-              <!-- GSP Waiting Utility Disposition -->
-              <div v-else-if="selectedTruck.status === 'WAITING_UTILITY_DISPOSITION'" class="space-y-4">
-                <button @click="openUtilityDispositionModal(selectedTruck)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
-                  style="background:linear-gradient(135deg,#D97706,#B45309);"
-                  id="btn-open-utility-disposition">
-                  <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
-                  <span v-else class="material-icons text-xl">gavel</span>
-                  <span class="text-base tracking-wide">⚖️ Disposisi Utility (Four-Eyes Principle)</span>
-                </button>
+              <!-- QC Passed (Ready for Downstream Unloading) -->
+              <div v-else-if="selectedTruck.status === 'QC_VEHICLE_PASSED'" class="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 text-center space-y-2 shadow-sm" id="card-qc-passed">
+                <div class="flex items-center justify-center gap-2 text-emerald-800 font-black text-sm">
+                  <span class="material-icons text-xl text-emerald-600">check_circle</span>
+                  <span>QC Selesai: Muatan Lolos (PASSED)</span>
+                </div>
+                <p class="text-xs text-emerald-700 font-medium">Pemeriksaan QC telah disetujui. Kendaraan siap untuk melanjutkan proses bongkar muatan di gudang / GSP.</p>
+              </div>
+
+              <!-- QC Rejected (Process Stopped) -->
+              <div v-else-if="selectedTruck.status === 'QC_VEHICLE_REJECTED'" class="p-5 rounded-2xl bg-rose-50 border border-rose-200 text-center space-y-2 shadow-sm" id="card-qc-rejected">
+                <div class="flex items-center justify-center gap-2 text-rose-800 font-black text-sm">
+                  <span class="material-icons text-xl text-rose-600">cancel</span>
+                  <span>Muatan Ditolak (QC REJECTED)</span>
+                </div>
+                <p class="text-xs text-rose-700 font-medium">Hasil evaluasi mutu tidak memenuhi standar acuan operasional. Proses dihentikan dan muatan ditolak.</p>
+              </div>
+
+              <!-- GSP Waiting Utility Disposition (Legacy Read-Only Notice) -->
+              <div v-else-if="selectedTruck.status === 'WAITING_UTILITY_DISPOSITION'" class="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-center space-y-2 shadow-sm" id="card-utility-legacy">
+                <div class="flex items-center justify-center gap-2 text-amber-800 font-black text-sm">
+                  <span class="material-icons text-xl text-amber-600">history</span>
+                  <span>Status Historis: Menunggu Disposisi (Legacy)</span>
+                </div>
+                <p class="text-xs text-amber-700 font-medium">Alur Disposisi Utility dinonaktifkan pada alur GSP aktif saat ini.</p>
               </div>
 
               <!-- Stage 3: QC Analisis Mutu Lengkap (Post-Unloading) for GBB -->

@@ -7,7 +7,7 @@ import {
   OPERATIONAL_COAL_SPEC_METADATA,
 } from './coal-specification';
 
-describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
+describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 - No Utility Flow)', () => {
   it('correctly maps all calorie tiers to their specified moisture thresholds', () => {
     expect(COAL_CALORIE_SPECIFICATIONS['3800'].maxTotalMoisturePct).toBe(36.0);
     expect(COAL_CALORIE_SPECIFICATIONS['4200'].maxTotalMoisturePct).toBe(33.0);
@@ -24,7 +24,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     expect(getCoalMoistureLimit('9999')).toBe(33.0);
   });
 
-  it('withholds automated RELEASE (returns PENDING_DISPOSITION) when operational spec is PENDING_SIGNOFF', () => {
+  it('evaluates PASS / RELEASE under operational specification when moisture within limit', () => {
     const evalResult = evaluateCoalAnalysis({
       targetCalorie: '4200',
       totalMoisture: 31.5,
@@ -33,10 +33,10 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     });
 
     expect(evalResult.result).toBe('PASS');
-    expect(evalResult.decision).toBe('PENDING_DISPOSITION');
+    expect(evalResult.decision).toBe('RELEASE');
     expect(evalResult.isWithinSpec).toBe(true);
-    expect(evalResult.specMetadata.approvalStatus).toBe('PENDING_SIGNOFF');
-    expect(evalResult.notes).toContain('Keputusan RELEASE otomatis ditahan');
+    expect(evalResult.specMetadata.approvalStatus).toBe('APPROVED');
+    expect(evalResult.notes).toContain('Lulus spesifikasi kadar air batubara');
   });
 
   it('evaluates PASS / RELEASE when within limit for standard GAR 4200 using approved fixture specification', () => {
@@ -72,7 +72,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
   });
 
-  it('triggers RETEST_REQUIRED in Round 1 and PENDING_DISPOSITION in Round 2 when operational spec is PENDING_SIGNOFF', () => {
+  it('triggers RETEST_REQUIRED in Round 1 and strict REJECT in Round 2 (NO Utility disposition)', () => {
     const round1Result = evaluateCoalAnalysis({
       targetCalorie: '5500',
       totalMoisture: 28.5,
@@ -93,9 +93,12 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     });
 
     expect(round2Result.result).toBe('REJECT');
-    expect(round2Result.decision).toBe('PENDING_DISPOSITION');
+    expect(round2Result.decision).toBe('REJECT');
     expect(round2Result.maxAllowedMoisture).toBe(26.0);
-    expect(round2Result.notes).toContain('Dialihkan ke Disposisi Utility');
+    expect(round2Result.notes).toContain(
+      'Muatan ditolak (QC_VEHICLE_REJECTED)',
+    );
+    expect(round2Result.notes).not.toContain('Utility');
   });
 
   it('triggers RETEST_REQUIRED in Round 1 when moisture exceeds 26% on GAR 5500 under approved specification', () => {
@@ -112,12 +115,10 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     expect(evalResult.result).toBe('REJECT');
     expect(evalResult.decision).toBe('RETEST_REQUIRED');
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
-    expect(evalResult.notes).toContain(
-      'Kadar air melebihi batas spesifikasi teresahkan',
-    );
+    expect(evalResult.notes).toContain('Kadar air melebihi batas spesifikasi');
   });
 
-  it('triggers PENDING_DISPOSITION in Round 2 when moisture still exceeds limit under approved specification', () => {
+  it('triggers strict REJECT in Round 2 when moisture still exceeds limit (NO Utility disposition)', () => {
     const evalResult = evaluateCoalAnalysis(
       {
         targetCalorie: '5500',
@@ -129,8 +130,9 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1)', () => {
     );
 
     expect(evalResult.result).toBe('REJECT');
-    expect(evalResult.decision).toBe('PENDING_DISPOSITION');
+    expect(evalResult.decision).toBe('REJECT');
     expect(evalResult.maxAllowedMoisture).toBe(26.0);
+    expect(evalResult.notes).toContain('Muatan ditolak (QC_VEHICLE_REJECTED)');
   });
 
   it('immediately rejects if sensory check fails on approved specification', () => {

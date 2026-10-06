@@ -505,7 +505,7 @@ export class QcProductAnalysisService {
       case AnalysisDecision.RELEASE:
         if (specStatus.approvalStatus !== 'APPROVED') {
           throw new BadRequestException(
-            `Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk ${authoritativeProductName} belum berstatus disahkan oleh QA/Utility (Status: ${specStatus.approvalStatus}).`,
+            `Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk ${authoritativeProductName} belum berstatus disahkan oleh QA (Status: ${specStatus.approvalStatus}).`,
           );
         }
         nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
@@ -517,8 +517,11 @@ export class QcProductAnalysisService {
         nextStatus = TransactionStatus.QC_RETEST_REQUIRED;
         break;
       case AnalysisDecision.PENDING_DISPOSITION:
-        nextStatus = TransactionStatus.WAITING_UTILITY_DISPOSITION;
-        break;
+        // NEW canonical GSP transactions must NEVER enter WAITING_UTILITY_DISPOSITION
+        // Fail-closed governance blocker without routing to Utility disposition
+        throw new BadRequestException(
+          `Pengujian laboratorium untuk ${authoritativeProductName} tidak dapat diproses rilis: Spesifikasi operasional berstatus ${specStatus.approvalStatus} (${specStatus.documentSource}). Kebijakan mutu memblokir rilis muatan tanpa spesifikasi teresahkan.`,
+        );
       default:
         throw new BadRequestException(
           `Keputusan analisis tidak valid: ${authoritativeDecision}`,

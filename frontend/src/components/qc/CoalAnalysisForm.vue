@@ -76,7 +76,7 @@
           </div>
           <p v-if="isMoistureExceeded" class="text-[11px] font-bold text-orange-600 mt-1 flex items-center gap-1">
             <span class="material-icons text-sm">warning</span>
-            Melebihi batas spesifikasi max ({{ maxAllowedMoisture }}%). Perlu Uji Ulang atau Disposisi Utility.
+            Melebihi batas spesifikasi max ({{ maxAllowedMoisture }}%). Round 1: Wajib Uji Ulang. Round 2: Muatan Ditolak (REJECT).
           </p>
         </div>
       </div>
@@ -121,29 +121,17 @@
         <span>Hasil di atas batas — akan dievaluasi untuk Retest</span>
       </button>
 
-      <!-- Utility Disposition Required Indication (Round 2 exceeded) -->
+      <!-- Rejection Indication (Round 2 exceeded) -->
       <button
         v-if="isMoistureExceeded && testRound > 1"
         type="button"
         @click="submitAnalysis"
         :disabled="isSubmitting"
-        class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 shadow-md transition-all flex items-center justify-center gap-2"
-        id="btn-coal-utility-disp"
-      >
-        <span class="material-icons text-base">gavel</span>
-        <span>Hasil di atas batas — akan dievaluasi untuk Disposisi Utility</span>
-      </button>
-
-      <!-- Secondary submit / deviation button -->
-      <button
-        type="button"
-        @click="submitAnalysis"
-        :disabled="isSubmitting"
-        class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all flex items-center justify-center gap-2"
+        class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-coal-reject"
       >
-        <span class="material-icons text-base">send</span>
-        <span>Kirim Hasil Analisis PA</span>
+        <span class="material-icons text-base">cancel</span>
+        <span>Hasil di atas batas pada Uji Ulang — Muatan Ditolak (REJECT)</span>
       </button>
     </div>
   </div>

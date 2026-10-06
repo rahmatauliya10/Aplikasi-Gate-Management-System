@@ -18,6 +18,7 @@ import {
   TEST_FIXTURE_COAL_SPEC_METADATA,
   OPERATIONAL_COAL_SPEC_METADATA,
 } from './constants/coal-specification';
+import { TEST_FIXTURE_RAPID_KLEN_STRICT_GT } from './constants/chemical-specification';
 
 describe('QcProductAnalysisService (Task 5)', () => {
   let service: QcProductAnalysisService;
@@ -215,7 +216,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
       );
     });
 
-    it('transitions to WAITING_UTILITY_DISPOSITION if retest (round 2) fails', async () => {
+    it('transitions to QC_VEHICLE_REJECTED if retest (round 2) fails (NO Utility disposition)', async () => {
       const retestTx = {
         id: 'tx-coal-retest',
         status: TransactionStatus.QC_RETEST_REQUIRED,
@@ -263,7 +264,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           testRound: 2,
           parameters: { visual: 'OK', moisture: 35.5 },
           result: QcResult.REJECT,
-          decision: AnalysisDecision.PENDING_DISPOSITION,
+          decision: AnalysisDecision.REJECT,
           revision: 3,
         },
         mockAnalystUser,
@@ -271,6 +272,13 @@ describe('QcProductAnalysisService (Task 5)', () => {
 
       expect(res.success).toBe(true);
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_REJECTED,
+          }),
+        }),
+      );
+      expect(mockTxClient.transaction.updateMany).not.toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
@@ -467,6 +475,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      jest.spyOn(specProvider, 'getCoalSpec').mockReturnValueOnce({
+        ...OPERATIONAL_COAL_SPEC_METADATA,
+        approvalStatus: 'PENDING_SIGNOFF',
+        documentSource: 'Provisional Benchmark (Awaiting Formal QA Signoff)',
+      });
 
       await expect(
         service.submitProductAnalysis(
@@ -514,9 +527,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
       mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
         cb(mockTxClient),
       );
+      jest
+        .spyOn(specProvider, 'getRapidKlenSpec')
+        .mockReturnValue(TEST_FIXTURE_RAPID_KLEN_STRICT_GT);
 
-      // Under operational spec (minOperator = 'GT'), 35.0% is not greater than 35.0%, so isCompliant = false.
-      // Decision will be PENDING_DISPOSITION because operational spec is PENDING_SIGNOFF.
+      // Under strict GT operational spec (> 35.0%), 35.0% fails spec -> REJECT
       const res = await service.submitProductAnalysis(
         'tx-rk-1',
         {
@@ -524,12 +539,12 @@ describe('QcProductAnalysisService (Task 5)', () => {
           productName: 'Rapid Klen',
           parameters: {
             sensory: { visual: true, packaging: true },
-            alkalinityNa2O: 35.0, // Exactly at 35.0%
+            alkalinityNa2O: 35.0, // Exactly at 35.0%, not > 35.0%
             ph: 13.0,
             density: 1.45,
           },
           result: QcResult.REJECT,
-          decision: AnalysisDecision.PENDING_DISPOSITION,
+          decision: AnalysisDecision.REJECT,
           revision: 2,
         },
         mockAnalystUser,
@@ -540,7 +555,21 @@ describe('QcProductAnalysisService (Task 5)', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             result: QcResult.REJECT,
-            status: 'PENDING_DISPOSITION',
+            status: 'REJECT',
+          }),
+        }),
+      );
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_REJECTED,
+          }),
+        }),
+      );
+      expect(mockTxClient.transaction.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
           }),
         }),
       );
@@ -1295,7 +1324,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('throws BadRequestException when client decision tampered (sent RELEASE but server computes PENDING_DISPOSITION)', async () => {
+    it('throws BadRequestException when client decision tampered (sent RELEASE on unapproved spec)', async () => {
       const coalTx = {
         id: 'tx-coal-tamper-decision',
         status: TransactionStatus.QC_VEHICLE_PENDING,
@@ -1306,10 +1335,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      // Operational metadata is PENDING_SIGNOFF -> server computes PENDING_DISPOSITION
-      jest
-        .spyOn(specProvider, 'getCoalSpec')
-        .mockReturnValue(OPERATIONAL_COAL_SPEC_METADATA);
+      // Unapproved spec -> server withholds automated RELEASE
+      jest.spyOn(specProvider, 'getCoalSpec').mockReturnValue({
+        ...OPERATIONAL_COAL_SPEC_METADATA,
+        approvalStatus: 'PENDING_SIGNOFF',
+      });
 
       await expect(
         service.submitProductAnalysis(
@@ -1319,7 +1349,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
             productName: 'Batubara',
             parameters: { visual: 'OK', moisture: 30.0 },
             result: QcResult.PASS,
-            decision: AnalysisDecision.RELEASE, // TAMPERED (server computes PENDING_DISPOSITION)
+            decision: AnalysisDecision.RELEASE, // TAMPERED: client attempts automated RELEASE on unapproved spec
             revision: 2,
           },
           mockAnalystUser,

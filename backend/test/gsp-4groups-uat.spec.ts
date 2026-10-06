@@ -827,9 +827,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           testRound: 2,
           parameters: { sensory: 'OK', moisture: 35.5 },
           result: QcResult.REJECTED,
-          decision: AnalysisDecision.PENDING_DISPOSITION,
+          decision: AnalysisDecision.REJECT,
           notes:
-            'Hasil uji ulang tetap melewati batas (35.5%). Menunggu disposisi Utility.',
+            'Hasil uji ulang tetap melewati batas (35.5%). Muatan ditolak (QC_VEHICLE_REJECTED).',
           revision: 3,
         },
         qcAnalystUser,
@@ -838,25 +838,40 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       expect(mockTxClientRound2.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_REJECTED,
+          }),
+        }),
+      );
+      // Assert NEW Coal flow never enters WAITING_UTILITY_DISPOSITION
+      expect(
+        mockTxClientRound2.transaction.updateMany,
+      ).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
             status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
           }),
         }),
       );
 
-      // Verify unloading is blocked during WAITING_UTILITY_DISPOSITION
-      const coalWaiting = {
+      // Verify unloading is blocked when vehicle is rejected
+      const coalRejected = {
         ...coalTx,
-        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        status: TransactionStatus.QC_VEHICLE_REJECTED,
         revision: 4,
       };
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalWaiting,
+        coalRejected,
       );
       await expect(
         warehouseService.startWarehouse(coalTx.id, {}, warehouseUser),
       ).rejects.toThrow(BadRequestException);
 
-      // 3. Four-Eyes Enforcement across ALL rounds:
+      // 3. Legacy Compatibility & Four-Eyes Enforcement for Historical WAITING_UTILITY_DISPOSITION Records:
+      const coalWaiting = {
+        ...coalTx,
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+        revision: 4,
+      };
       // Case 3a: Round 2 analyst attempts self-approval -> MUST BE FORBIDDEN
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
         coalWaiting,

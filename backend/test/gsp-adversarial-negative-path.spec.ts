@@ -21,8 +21,8 @@ import { ActivityLogsService } from '../src/activity-logs/activity-logs.service'
 import { AuthorizationScopeService } from '../src/auth/authorization-scope.service';
 import { AnalysisDecision } from '../src/qc/dto/submit-product-analysis.dto';
 import { DispositionAction } from '../src/qc/dto/utility-disposition.dto';
-import { JwtPayloadUser } from '../src/common/decorators/current-user.decorator';
 import { SpecificationProvider } from '../src/qc/providers/specification.provider';
+import { TEST_FIXTURE_RAPID_KLEN_STRICT_GT } from '../src/qc/constants/chemical-specification';
 
 describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation)', () => {
   let qcService: QcService;
@@ -30,6 +30,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
   let qcAnalysisService: QcProductAnalysisService;
   let amendmentService: ActiveTransactionAmendmentService;
   let correctionService: OperationLogCorrectionService;
+  let specProvider: SpecificationProvider;
 
   let mockPrismaService: any;
   let mockActivityLogsService: any;
@@ -185,6 +186,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
     correctionService = module.get<OperationLogCorrectionService>(
       OperationLogCorrectionService,
     );
+    specProvider = module.get<SpecificationProvider>(SpecificationProvider);
   });
 
   // =========================================================================
@@ -927,6 +929,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         id: 'pa-rk-1',
         testRound: 1,
       });
+      jest
+        .spyOn(specProvider, 'getRapidKlenSpec')
+        .mockReturnValue(TEST_FIXTURE_RAPID_KLEN_STRICT_GT);
 
       const res = await qcAnalysisService.submitProductAnalysis(
         'tx-rk-adv',
@@ -940,7 +945,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
             density: 1.45,
           },
           result: QcResult.REJECT,
-          decision: AnalysisDecision.PENDING_DISPOSITION,
+          decision: AnalysisDecision.REJECT,
           revision: 2,
         },
         qcAnalystUser,
@@ -951,7 +956,14 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         expect.objectContaining({
           data: expect.objectContaining({
             result: QcResult.REJECT,
-            status: 'PENDING_DISPOSITION',
+            status: 'REJECT',
+          }),
+        }),
+      );
+      expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_REJECTED,
           }),
         }),
       );

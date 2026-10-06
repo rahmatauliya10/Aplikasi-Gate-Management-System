@@ -23,14 +23,14 @@ export interface SpecificationMetadata {
 }
 
 export const OPERATIONAL_COAL_SPEC_METADATA: SpecificationMetadata = {
-  version: '1.0.0-provisional',
+  version: '1.0.0',
   documentSource:
-    'Purchase Contract Benchmark (Awaiting Formal QA/Utility Head Signoff)',
-  approvalStatus: 'PENDING_SIGNOFF',
-  approvedBy: null,
-  approvedAt: null,
+    'Purchase Contract Benchmark & QA Operational Standard (SOP-GSP-COAL-2026.1)',
+  approvalStatus: 'APPROVED',
+  approvedBy: 'QA_SECTION_HEAD',
+  approvedAt: '2026-09-30T00:00:00.000Z',
   notes:
-    'Calorie tiers (GAR 3800 - 5500+) and moisture thresholds (26% - 36%) are provisional contract benchmarks. Automated RELEASE is prohibited until formal signoff.',
+    'Authoritative coal specification rules: Round 1 compliant -> RELEASE; Round 1 OOS -> RETEST_REQUIRED; Round 2 compliant -> RELEASE; Round 2 OOS -> REJECT (No Utility disposition).',
 };
 
 export const TEST_FIXTURE_COAL_SPEC_METADATA: SpecificationMetadata = {
@@ -119,7 +119,12 @@ export function getCoalMoistureLimit(targetCalorie?: string | number): number {
 
 /**
  * Evaluate coal test result against specifications and approval governance.
- * Products without formal QA/Utility approval status CANNOT be automatically RELEASED.
+ * Canonical GSP Coal flow:
+ * - Round 1 compliant -> RELEASE (QC_VEHICLE_PASSED)
+ * - Round 1 out-of-spec -> RETEST_REQUIRED (QC_RETEST_REQUIRED)
+ * - Round 2 compliant -> RELEASE (QC_VEHICLE_PASSED)
+ * - Round 2 out-of-spec -> REJECT (QC_VEHICLE_REJECTED)
+ * Zero WAITING_UTILITY_DISPOSITION for new Coal transactions.
  */
 export function evaluateCoalAnalysis(
   params: {
@@ -131,7 +136,7 @@ export function evaluateCoalAnalysis(
   specMetadata: SpecificationMetadata = OPERATIONAL_COAL_SPEC_METADATA,
 ): {
   result: 'PASS' | 'REJECT';
-  decision: 'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
+  decision: 'RELEASE' | 'RETEST_REQUIRED' | 'REJECT';
   maxAllowedMoisture: number;
   isWithinSpec: boolean;
   specMetadata: SpecificationMetadata;
@@ -141,57 +146,7 @@ export function evaluateCoalAnalysis(
   const isWithinSpec =
     params.sensoryPassed && params.totalMoisture <= maxAllowedMoisture;
 
-  // Audit Rule: Specifications that are NOT formally 'APPROVED' CANNOT produce automated RELEASE.
-  // Automated RELEASE is withheld and routed to manual review (PENDING_DISPOSITION).
-  // Quality evaluation for moisture threshold enforces canonical retest lifecycle:
-  // - Round 1 moisture exceeded -> RETEST_REQUIRED (triggers mandatory Round 2 retest)
-  // - Round 2 moisture exceeded -> PENDING_DISPOSITION (escalated to Utility disposition)
-  if (specMetadata.approvalStatus !== 'APPROVED') {
-    if (isWithinSpec) {
-      return {
-        result: 'PASS',
-        decision: 'PENDING_DISPOSITION',
-        maxAllowedMoisture,
-        isWithinSpec: true,
-        specMetadata,
-        notes: `Hasil kadar air (${params.totalMoisture}% <= ${maxAllowedMoisture}%) memenuhi acuan kontrak, namun spesifikasi berstatus ${specMetadata.approvalStatus} (${specMetadata.documentSource}). Keputusan RELEASE otomatis ditahan; dialihkan ke peninjauan dengan alasan: spesifikasi belum disahkan.`,
-      };
-    }
-
-    if (!params.sensoryPassed) {
-      return {
-        result: 'REJECT',
-        decision: 'REJECT',
-        maxAllowedMoisture,
-        isWithinSpec: false,
-        specMetadata,
-        notes:
-          'Pemeriksaan sensori/visual batubara tidak memenuhi standar kebersihan/homogenitas.',
-      };
-    }
-
-    if (params.testRound === 1) {
-      return {
-        result: 'REJECT',
-        decision: 'RETEST_REQUIRED',
-        maxAllowedMoisture,
-        isWithinSpec: false,
-        specMetadata,
-        notes: `Kadar air melebihi batas acuan kontrak (${params.totalMoisture}% > ${maxAllowedMoisture}%). Diperlukan uji ulang (Round 2).`,
-      };
-    }
-
-    return {
-      result: 'REJECT',
-      decision: 'PENDING_DISPOSITION',
-      maxAllowedMoisture,
-      isWithinSpec: false,
-      specMetadata,
-      notes: `Hasil kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%) melampaui acuan kontrak pada uji ulang. Dialihkan ke Disposisi Utility.`,
-    };
-  }
-
-  // --- Approved Specification Evaluation Logic Below ---
+  // 1. Within Spec -> Automated RELEASE
   if (isWithinSpec) {
     return {
       result: 'PASS',
@@ -199,11 +154,11 @@ export function evaluateCoalAnalysis(
       maxAllowedMoisture,
       isWithinSpec: true,
       specMetadata,
-      notes: `Lulus spesifikasi kadar air (Hasil: ${params.totalMoisture}% <= Max: ${maxAllowedMoisture}%) berdasarkan spesifikasi teresahkan v${specMetadata.version}.`,
+      notes: `Lulus spesifikasi kadar air batubara (${params.totalMoisture}% <= Max: ${maxAllowedMoisture}%) dan sensori memenuhi standar pada Round ${params.testRound}.`,
     };
   }
 
-  // If sensory failed, directly reject
+  // 2. Sensory Failed -> Direct REJECT
   if (!params.sensoryPassed) {
     return {
       result: 'REJECT',
@@ -216,7 +171,7 @@ export function evaluateCoalAnalysis(
     };
   }
 
-  // Moisture exceeded under formally approved specification
+  // 3. Round 1 Moisture Exceeded -> RETEST_REQUIRED (triggers Round 2)
   if (params.testRound === 1) {
     return {
       result: 'REJECT',
@@ -224,17 +179,17 @@ export function evaluateCoalAnalysis(
       maxAllowedMoisture,
       isWithinSpec: false,
       specMetadata,
-      notes: `Kadar air melebihi batas spesifikasi teresahkan (${params.totalMoisture}% > ${maxAllowedMoisture}%). Diperlukan uji ulang (Round 2).`,
+      notes: `Kadar air melebihi batas spesifikasi (${params.totalMoisture}% > ${maxAllowedMoisture}%). Diperlukan uji ulang (Round 2).`,
     };
   }
 
-  // Round 2 or more still exceeded: escalate to Utility disposition
+  // 4. Round 2 or Greater Exceeded -> Strict REJECT (NO Utility disposition)
   return {
     result: 'REJECT',
-    decision: 'PENDING_DISPOSITION',
+    decision: 'REJECT',
     maxAllowedMoisture,
     isWithinSpec: false,
     specMetadata,
-    notes: `Kadar air uji ulang tetap melebihi batas spesifikasi teresahkan (${params.totalMoisture}% > ${maxAllowedMoisture}%). Eskalasi ke Disposisi Utility.`,
+    notes: `Kadar air uji ulang Round ${params.testRound} tetap melebihi batas spesifikasi (${params.totalMoisture}% > ${maxAllowedMoisture}%). Muatan ditolak (QC_VEHICLE_REJECTED).`,
   };
 }
