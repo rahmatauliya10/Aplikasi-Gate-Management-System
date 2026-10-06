@@ -649,24 +649,29 @@
           <!-- Body -->
           <div class="p-6 overflow-y-auto hide-scrollbar flex-1">
             <CoalAnalysisForm
-              v-if="isBatubara(selectedTruck)"
+              v-if="isProfileCoal(selectedTruck)"
               :transaction="selectedTruck"
               :test-round="gspTestRound"
               :is-submitting="isProcessing"
               @submit="handleGspPaSubmit"
             />
             <ChemicalPacForm
-              v-else-if="isPac(selectedTruck)"
+              v-else-if="isProfilePac(selectedTruck)"
               :transaction="selectedTruck"
               :is-submitting="isProcessing"
               @submit="handleGspPaSubmit"
             />
             <ChemicalRapidKlenForm
-              v-else-if="isRapidKlen(selectedTruck)"
+              v-else-if="isProfileRapidKlen(selectedTruck)"
               :transaction="selectedTruck"
               :is-submitting="isProcessing"
               @submit="handleGspPaSubmit"
             />
+            <div v-else-if="isProfileExempt(selectedTruck)" class="p-8 text-center text-emerald-700 bg-emerald-50 rounded-2xl border border-emerald-200">
+              <span class="material-icons text-3xl mb-2 text-emerald-600">verified</span>
+              <p class="font-black text-sm">Produk ini berstatus PA EXEMPT (Bebas Analisis PA Laboratorium).</p>
+              <p class="text-xs text-emerald-600 mt-1">Tidak memerlukan formulir analisis QC Laboratorium.</p>
+            </div>
             <div v-else class="p-8 text-center text-slate-500">
               <p class="font-bold">Formulir analisis untuk produk ini belum dikonfigurasi.</p>
             </div>
@@ -712,20 +717,55 @@ import {
   buildGbjQcPayload
 } from '../utils/gbjQcFlow'
 
-// GSP Product Helpers
-const isBatubara = (truck) => {
+// GSP Product Profile Router (Section 22)
+// Primary Router: selectedTruck.gspAnalysisProfile
+const isProfileCoal = (truck) => {
+  if (truck?.gspAnalysisProfile) {
+    return truck.gspAnalysisProfile === 'COAL_PA'
+  }
+  // LEGACY COMPATIBILITY FALLBACK: for historical transactions where gspAnalysisProfile == null
+  return isBatubaraLegacy(truck)
+}
+
+const isProfilePac = (truck) => {
+  if (truck?.gspAnalysisProfile) {
+    return truck.gspAnalysisProfile === 'PAC_PA'
+  }
+  // LEGACY COMPATIBILITY FALLBACK: for historical transactions where gspAnalysisProfile == null
+  return isPacLegacy(truck)
+}
+
+const isProfileRapidKlen = (truck) => {
+  if (truck?.gspAnalysisProfile) {
+    return truck.gspAnalysisProfile === 'RAPID_KLEN_PA'
+  }
+  // LEGACY COMPATIBILITY FALLBACK: for historical transactions where gspAnalysisProfile == null
+  return isRapidKlenLegacy(truck)
+}
+
+const isProfileExempt = (truck) => {
+  return truck?.gspAnalysisProfile === 'PA_EXEMPT'
+}
+
+// LEGACY COMPATIBILITY FALLBACK: string-based matching for historical records
+const isBatubaraLegacy = (truck) => {
   const sub = (truck?.cargoSubType || '').toLowerCase()
   const cat = (truck?.cargoType || '').toLowerCase()
   return sub.includes('batubara') || cat.includes('coal')
 }
-const isPac = (truck) => {
+const isPacLegacy = (truck) => {
   const sub = (truck?.cargoSubType || '').toUpperCase()
   return sub.includes('PAC') || sub.includes('POLYCOR') || sub.includes('IPAC')
 }
-const isRapidKlen = (truck) => {
+const isRapidKlenLegacy = (truck) => {
   const sub = (truck?.cargoSubType || '').toUpperCase()
   return sub.includes('RAPID') || sub.includes('PRO-CIP') || sub.includes('CIP')
 }
+
+// Aliases for backward compatibility
+const isBatubara = isProfileCoal
+const isPac = isProfilePac
+const isRapidKlen = isProfileRapidKlen
 
 // Safety Helpers at the top
 const getPlateNumber = (truck) => {
@@ -1017,10 +1057,16 @@ const gspTestRound = ref(1);
 const openGspPaModal = async (truck, round = 1) => {
   if (!truck) return;
 
-  const cargoName = (truck.product?.name || truck.cargoSubType || truck.cargoType || '').toUpperCase();
+  // Profile check for PA_EXEMPT (Section 22)
+  if (truck.gspAnalysisProfile === 'PA_EXEMPT') {
+    toast.error('Produk berstatus PA_EXEMPT dan tidak memerlukan analisis laboratorium.')
+    return
+  }
+
+  const cargoName = (truck.product?.name || truck.cargoSubType || truck.cargoType || '').toUpperCase()
   if (cargoName.includes('SOLAR')) {
-    toast.error('Komoditas Solar berstatus PA_NOT_REQUIRED dan tidak memerlukan analisis laboratorium.');
-    return;
+    toast.error('Komoditas Solar berstatus PA_NOT_REQUIRED dan tidak memerlukan analisis laboratorium.')
+    return
   }
 
   gspTestRound.value = round;

@@ -11,6 +11,7 @@ import {
   TransactionStatus,
   ProcessType,
   CorrectionAction,
+  GspAnalysisProfile,
 } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
@@ -93,6 +94,7 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         processType: ProcessType.GSP,
         isActive: true,
         isPaRequired: true,
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
       });
 
       const mockTxClient = {

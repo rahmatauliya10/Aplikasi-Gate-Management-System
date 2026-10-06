@@ -17,7 +17,7 @@ import {
   UtilityDispositionDto,
   DispositionAction,
 } from './dto/utility-disposition.dto';
-import { QcResult, TransactionStatus } from '@prisma/client';
+import { QcResult, TransactionStatus, GspAnalysisProfile } from '@prisma/client';
 import {
   OPERATIONAL_COAL_SPEC_METADATA,
   evaluateCoalAnalysis,
@@ -80,7 +80,11 @@ export class QcProductAnalysisService {
       cargoType: tx.cargoType,
       cargoSubType: tx.cargoSubType,
     });
-    if (tx.status === TransactionStatus.PA_NOT_REQUIRED || isExempt) {
+    if (
+      tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT ||
+      tx.status === TransactionStatus.PA_NOT_REQUIRED ||
+      isExempt
+    ) {
       throw new BadRequestException(
         `Komoditas bebas PA (${tx.cargoSubType || 'Solar'}) tidak memerlukan proses analisis laboratorium.`,
       );
@@ -211,7 +215,12 @@ export class QcProductAnalysisService {
       cargoType: tx.cargoType,
       cargoSubType: tx.cargoSubType,
     });
-    if (tx.status === TransactionStatus.PA_NOT_REQUIRED || isExempt) {
+    // Exempt products (Solar) must never undergo lab PA analysis (Section 23)
+    if (
+      tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT ||
+      tx.status === TransactionStatus.PA_NOT_REQUIRED ||
+      isExempt
+    ) {
       throw new BadRequestException(
         `Produk ini (${tx.cargoSubType || 'Solar'}) berizin bypass PA. Analisis PA tidak diperlukan.`,
       );
@@ -320,24 +329,50 @@ export class QcProductAnalysisService {
       notes?: string;
     };
 
-    const isCoal =
-      authoritativeProductCategory.toUpperCase().includes('COAL') ||
-      authoritativeProductName.toUpperCase().includes('BATUBARA') ||
-      (tx.cargoSubType || '').toUpperCase().includes('BATUBARA');
+    // ─── 3. Determine Evaluator by Snapshot Profile (Section 23) ───
+    let targetProfile = tx.gspAnalysisProfile;
 
-    const isPac =
-      authoritativeProductName.toUpperCase().includes('PAC') ||
-      (tx.cargoSubType || '').toUpperCase().includes('PAC');
+    // LEGACY COMPATIBILITY FALLBACK: for historical transactions where gspAnalysisProfile == null
+    if (!targetProfile) {
+      const isCoalLegacy =
+        authoritativeProductCategory.toUpperCase().includes('COAL') ||
+        authoritativeProductName.toUpperCase().includes('BATUBARA') ||
+        (tx.cargoSubType || '').toUpperCase().includes('BATUBARA');
 
-    const isRapidKlen =
-      authoritativeProductName.toUpperCase().includes('RAPID') ||
-      authoritativeProductName.toUpperCase().includes('KLEN') ||
-      (tx.cargoSubType || '').toUpperCase().includes('RAPID') ||
-      (tx.cargoSubType || '').toUpperCase().includes('KLEN');
+      const isPacLegacy =
+        authoritativeProductName.toUpperCase().includes('PAC') ||
+        authoritativeProductName.toUpperCase().includes('POLYCOR') ||
+        authoritativeProductName.toUpperCase().includes('IPAC') ||
+        (tx.cargoSubType || '').toUpperCase().includes('PAC');
+
+      const isRapidKlenLegacy =
+        authoritativeProductName.toUpperCase().includes('RAPID') ||
+        authoritativeProductName.toUpperCase().includes('KLEN') ||
+        authoritativeProductName.toUpperCase().includes('PRO-CIP') ||
+        (tx.cargoSubType || '').toUpperCase().includes('RAPID') ||
+        (tx.cargoSubType || '').toUpperCase().includes('KLEN');
+
+      if (isCoalLegacy) targetProfile = GspAnalysisProfile.COAL_PA;
+      else if (isPacLegacy) targetProfile = GspAnalysisProfile.PAC_PA;
+      else if (isRapidKlenLegacy)
+        targetProfile = GspAnalysisProfile.RAPID_KLEN_PA;
+    }
+
+    if (!targetProfile) {
+      throw new BadRequestException(
+        `Tidak dapat menentukan profil analisis laboratorium untuk produk '${authoritativeProductName}'.`,
+      );
+    }
+
+    if (targetProfile === GspAnalysisProfile.PA_EXEMPT) {
+      throw new BadRequestException(
+        'Produk dengan profil PA_EXEMPT tidak dapat menjalankan analisis PA laboratorium.',
+      );
+    }
 
     const rawParams = (dto.parameters || {}) as any;
 
-    if (isCoal) {
+    if (targetProfile === GspAnalysisProfile.COAL_PA) {
       const coalSpecMeta = this.specProvider.getCoalSpec();
 
       evalResult = evaluateCoalAnalysis(
@@ -357,7 +392,7 @@ export class QcProductAnalysisService {
         },
         coalSpecMeta,
       );
-    } else if (isPac) {
+    } else if (targetProfile === GspAnalysisProfile.PAC_PA) {
       const pacSpecMeta = this.specProvider.getPacSpec();
 
       evalResult = evaluatePacAnalysis(
@@ -392,7 +427,7 @@ export class QcProductAnalysisService {
         authoritativeProductName,
         pacSpecMeta,
       );
-    } else if (isRapidKlen) {
+    } else if (targetProfile === GspAnalysisProfile.RAPID_KLEN_PA) {
       const rkSpecMeta = this.specProvider.getRapidKlenSpec();
 
       evalResult = evaluateRapidKlenAnalysis(

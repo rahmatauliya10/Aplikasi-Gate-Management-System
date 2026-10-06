@@ -12,8 +12,9 @@ import {
   AmendActiveProductDto,
   RecordOperationalIncidentDto,
 } from './dto/amend-active-transaction.dto';
-import { CorrectionAction, TransactionStatus } from '@prisma/client';
+import { CorrectionAction, TransactionStatus, GspAnalysisProfile } from '@prisma/client';
 import { isProductPaExempt } from '../qc/constants/pa-exemption-policy';
+import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 @Injectable()
@@ -129,41 +130,101 @@ export class ActiveTransactionAmendmentService {
       }
     }
 
-    // Determine exemption status for the new product strictly via catalog
-    const willBeExempt = isProductPaExempt(newCatalog, {
-      processType: tx.processType,
-      cargoType: dto.cargoType,
-      cargoSubType: dto.cargoSubType,
-    });
-
+    let authoritativeCargoType = dto.cargoType;
+    let authoritativeCargoSubType = dto.cargoSubType;
+    let gspAnalysisProfile: GspAnalysisProfile | null = tx.gspAnalysisProfile;
+    let paPolicyVersion = tx.paPolicyVersion;
+    let paExemptionReason = tx.paExemptionReason;
     let newStatus: TransactionStatus = tx.status;
     let statusDowngraded = false;
 
-    if (willBeExempt) {
-      // CRITICAL FIX: If transaction has not weighed in yet (REGISTERED),
-      // amending to Solar MUST remain REGISTERED!
-      // PA_NOT_REQUIRED can ONLY be reached after physical weigh-in.
-      if (tx.status === TransactionStatus.REGISTERED) {
-        newStatus = TransactionStatus.REGISTERED;
+    if (tx.processType === 'GSP') {
+      if (!newCatalog) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Katalog produk target wajib ditentukan untuk perubahan transaksi GSP.',
+          errors: ['MISSING_TARGET_CATALOG'],
+        });
+      }
+
+      if (newCatalog.processType !== 'GSP') {
+        throw new BadRequestException({
+          success: false,
+          message: `Katalog produk target '${newCatalog.name}' bukan bertipe proses GSP.`,
+          errors: ['PROCESS_MISMATCH'],
+        });
+      }
+
+      if (!newCatalog.gspAnalysisProfile) {
+        throw new BadRequestException({
+          success: false,
+          message: `Katalog produk target '${newCatalog.name}' belum memiliki profil analisis GSP.`,
+          errors: ['MISSING_ANALYSIS_PROFILE'],
+        });
+      }
+
+      assertValidGspProfileInvariant(
+        newCatalog.gspAnalysisProfile,
+        newCatalog.isPaRequired,
+      );
+
+      authoritativeCargoType = newCatalog.category;
+      authoritativeCargoSubType = newCatalog.name;
+      gspAnalysisProfile = newCatalog.gspAnalysisProfile;
+      paPolicyVersion = newCatalog.policyVersion || 'SOP-GSP-2026.1';
+
+      if (newCatalog.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT) {
+        paExemptionReason = `SOP Exemption Rule [${paPolicyVersion}]: Produk ${newCatalog.name} (${newCatalog.code}) terverifikasi dari katalog master resmi bebas analisis PA laboratorium.`;
+        if (tx.status === TransactionStatus.REGISTERED) {
+          newStatus = TransactionStatus.REGISTERED;
+        } else {
+          newStatus = TransactionStatus.PA_NOT_REQUIRED;
+          if (tx.status !== TransactionStatus.PA_NOT_REQUIRED) {
+            statusDowngraded = true;
+          }
+        }
       } else {
-        newStatus = TransactionStatus.PA_NOT_REQUIRED;
-        if (tx.status !== TransactionStatus.PA_NOT_REQUIRED) {
-          statusDowngraded = true;
+        paExemptionReason = null;
+        if (tx.status === TransactionStatus.REGISTERED) {
+          newStatus = TransactionStatus.REGISTERED;
+        } else {
+          newStatus = TransactionStatus.QC_VEHICLE_PENDING;
+          if (tx.status !== TransactionStatus.QC_VEHICLE_PENDING) {
+            statusDowngraded = true;
+          }
         }
       }
     } else {
-      // Non-exempt product strictly requires QC PA verification
-      if (tx.status === TransactionStatus.REGISTERED) {
-        newStatus = TransactionStatus.REGISTERED;
-      } else if (
-        tx.status === TransactionStatus.PA_NOT_REQUIRED ||
-        tx.status === TransactionStatus.QC_VEHICLE_PASSED ||
-        tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS ||
-        tx.status === TransactionStatus.QC_RETEST_REQUIRED ||
-        tx.status === TransactionStatus.WAITING_UTILITY_DISPOSITION
-      ) {
-        newStatus = TransactionStatus.QC_VEHICLE_PENDING;
-        statusDowngraded = true;
+      // Determine exemption status for non-GSP product strictly via catalog
+      const willBeExempt = isProductPaExempt(newCatalog, {
+        processType: tx.processType,
+        cargoType: dto.cargoType,
+        cargoSubType: dto.cargoSubType,
+      });
+
+      if (willBeExempt) {
+        if (tx.status === TransactionStatus.REGISTERED) {
+          newStatus = TransactionStatus.REGISTERED;
+        } else {
+          newStatus = TransactionStatus.PA_NOT_REQUIRED;
+          if (tx.status !== TransactionStatus.PA_NOT_REQUIRED) {
+            statusDowngraded = true;
+          }
+        }
+      } else {
+        if (tx.status === TransactionStatus.REGISTERED) {
+          newStatus = TransactionStatus.REGISTERED;
+        } else if (
+          tx.status === TransactionStatus.PA_NOT_REQUIRED ||
+          tx.status === TransactionStatus.QC_VEHICLE_PASSED ||
+          tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS ||
+          tx.status === TransactionStatus.QC_RETEST_REQUIRED ||
+          tx.status === TransactionStatus.WAITING_UTILITY_DISPOSITION
+        ) {
+          newStatus = TransactionStatus.QC_VEHICLE_PENDING;
+          statusDowngraded = true;
+        }
       }
     }
 
@@ -182,21 +243,17 @@ export class ActiveTransactionAmendmentService {
       const claimed = await prismaTx.transaction.updateMany({
         where: { id: transactionId, revision: dto.revision },
         data: {
-          cargoType: dto.cargoType,
-          cargoSubType: dto.cargoSubType,
+          cargoType: authoritativeCargoType,
+          cargoSubType: authoritativeCargoSubType,
           productCatalogId: newCatalog
             ? newCatalog.id
             : dto.productCatalogId !== undefined
               ? dto.productCatalogId
               : tx.productCatalogId,
+          gspAnalysisProfile,
+          paPolicyVersion,
+          paExemptionReason,
           status: newStatus,
-          paExemptionReason: willBeExempt
-            ? newCatalog?.exemptionReason ||
-              'SOP Exemption Rule v1.0: Komoditas Solar BBM tidak memerlukan uji laboratorium pra-bongkar.'
-            : null,
-          paPolicyVersion: willBeExempt
-            ? newCatalog?.policyVersion || 'SOP-GSP-2026.1'
-            : null,
           revision: { increment: 1 },
         },
       });
@@ -214,17 +271,19 @@ export class ActiveTransactionAmendmentService {
           action: CorrectionAction.AMEND_ACTIVE,
           reasonCode: 'PRODUCT_AMENDMENT',
           reason: dto.reason,
-          remark: `Koreksi produk aktif sebelum bongkar: ${tx.cargoSubType} -> ${dto.cargoSubType}. Hasil PA lama dibatalkan.`,
+          remark: `Koreksi produk aktif sebelum bongkar: ${tx.cargoSubType} -> ${authoritativeCargoSubType}. Hasil PA lama dibatalkan.`,
           oldValues: {
             cargoType: tx.cargoType,
             cargoSubType: tx.cargoSubType,
             productCatalogId: tx.productCatalogId,
+            gspAnalysisProfile: tx.gspAnalysisProfile,
             status: tx.status,
           },
           newValues: {
-            cargoType: dto.cargoType,
-            cargoSubType: dto.cargoSubType,
-            productCatalogId: dto.productCatalogId || null,
+            cargoType: authoritativeCargoType,
+            cargoSubType: authoritativeCargoSubType,
+            productCatalogId: newCatalog ? newCatalog.id : dto.productCatalogId || null,
+            gspAnalysisProfile,
             status: newStatus,
           },
           expectedRevision: dto.revision,

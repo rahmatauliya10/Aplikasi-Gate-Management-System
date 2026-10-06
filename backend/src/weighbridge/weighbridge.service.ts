@@ -10,7 +10,7 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { WeighInDto } from './dto/weigh-in.dto';
 import { WeighOutDto } from './dto/weigh-out.dto';
 import { WeighbridgeQueryDto } from './dto/weighbridge-query.dto';
-import { TransactionStatus, Prisma } from '@prisma/client';
+import { TransactionStatus, Prisma, GspAnalysisProfile } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
@@ -245,10 +245,25 @@ export class WeighbridgeService {
       cargoSubType: tx.cargoSubType,
     });
 
-    if (tx.processType === 'GSP' && exemptionEval.isExempt) {
+    if (tx.processType === 'GSP') {
       grossWeight = dto.weight;
-      nextStatus = TransactionStatus.PA_NOT_REQUIRED;
-    } else if (tx.processType === 'GBB' || tx.processType === 'GSP') {
+      if (tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT) {
+        nextStatus = TransactionStatus.PA_NOT_REQUIRED;
+      } else if (
+        tx.gspAnalysisProfile === GspAnalysisProfile.COAL_PA ||
+        tx.gspAnalysisProfile === GspAnalysisProfile.PAC_PA ||
+        tx.gspAnalysisProfile === GspAnalysisProfile.RAPID_KLEN_PA
+      ) {
+        nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
+      } else {
+        // LEGACY COMPATIBILITY FALLBACK: for historical transactions where gspAnalysisProfile is null
+        if (exemptionEval.isExempt) {
+          nextStatus = TransactionStatus.PA_NOT_REQUIRED;
+        } else {
+          nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
+        }
+      }
+    } else if (tx.processType === 'GBB') {
       grossWeight = dto.weight;
       nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
     } else if (tx.processType === 'GBJ') {
