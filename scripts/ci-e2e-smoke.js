@@ -384,6 +384,13 @@ async function runE2ESmoke() {
   // Step 5: FULL GSP WORKFLOW (Check-In -> Weigh In -> Legacy QC Block Verification -> Warehouse -> Weigh Out -> Gate Out -> COMPLETED)
   log(`[WORKFLOW 2/3] Executing Complete GSP Lifecycle to COMPLETED...`);
 
+  // Query GSP master product catalog for authoritative commodities
+  const gspCatalogRes = await request('/api/product-catalog?processType=GSP', { method: 'GET', headers: authHeader });
+  const gspCatalogs = gspCatalogRes.body?.data || (Array.isArray(gspCatalogRes.body) ? gspCatalogRes.body : []);
+  const solarCatalog = gspCatalogs.find(c => c.name.toLowerCase().includes('solar')) || gspCatalogs[0];
+  const coalCatalog = gspCatalogs.find(c => c.name.toLowerCase().includes('batubara')) || gspCatalogs.find(c => c.category === 'Coal');
+  const pacCatalog = gspCatalogs.find(c => c.name.toLowerCase().includes('pac')) || gspCatalogs.find(c => c.category === 'Chemical UTL');
+
   // 5a. Check-In
   const gspRes = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
     plateNumber: `B34${timestampSuffix}GS`,
@@ -392,8 +399,9 @@ async function runE2ESmoke() {
     vendorName: 'PT E2E Supplier GSP',
     vehicleType: 'TRUCK',
     processType: 'GSP',
-    cargoType: 'Solar',
-    cargoSubType: 'Solar',
+    productCatalogId: solarCatalog?.id,
+    cargoType: solarCatalog?.category || 'Fuel',
+    cargoSubType: solarCatalog?.name || 'Solar',
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-GSP-${timestampSuffix}`,
   });
@@ -528,8 +536,9 @@ async function runE2ESmoke() {
     vendorName: 'PT Tambang Batubara Prima',
     vehicleType: 'TRUCK',
     processType: 'GSP',
-    cargoType: 'Coal',
-    cargoSubType: 'Batubara',
+    productCatalogId: coalCatalog?.id,
+    cargoType: coalCatalog?.category || 'Coal',
+    cargoSubType: coalCatalog?.name || 'Batubara',
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-COAL-${timestampSuffix}`,
     poNumber: `PO-COAL-${timestampSuffix}`,
@@ -792,8 +801,9 @@ async function runE2ESmoke() {
     vendorName: 'PT Kimia Industri Sejahtera',
     vehicleType: 'TRUCK',
     processType: 'GSP',
-    cargoType: 'Chemicals',
-    cargoSubType: 'PAC 280 AC',
+    productCatalogId: pacCatalog?.id,
+    cargoType: pacCatalog?.category || 'Chemical UTL',
+    cargoSubType: pacCatalog?.name || 'PAC 280 AC',
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-PAC-${timestampSuffix}`,
   });
@@ -805,8 +815,9 @@ async function runE2ESmoke() {
   await request(`/api/qc/product-analysis/${pacTxId}/start`, { method: 'POST', headers: qcAuthHeader });
   const pacDetail = await request(`/api/transactions/${pacTxId}`, { headers: authHeader });
   const pacSubmitRes = await request(`/api/qc/product-analysis/${pacTxId}`, { method: 'POST', headers: qcAuthHeader }, {
-    productCategory: 'Chemicals',
-    productName: 'PAC 280 AC',
+    productCatalogId: pacCatalog?.id,
+    productCategory: pacCatalog?.category || 'Chemical UTL',
+    productName: pacCatalog?.name || 'PAC 280 AC',
     testRound: 1,
     parameters: {
       sensory: { visual: true, odor: true, packaging: true },
