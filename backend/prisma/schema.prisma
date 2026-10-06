@@ -23,6 +23,13 @@ enum ProcessType {
   GSP
 }
 
+enum GspAnalysisProfile {
+  PA_EXEMPT
+  COAL_PA
+  PAC_PA
+  RAPID_KLEN_PA
+}
+
 enum CargoProcessType {
   INBOUND
   OUTBOUND
@@ -256,6 +263,7 @@ model Transaction {
   corrections              TransactionCorrection[]
   productCatalogId         String?
   productCatalog           ProductCatalog?            @relation(fields: [productCatalogId], references: [id], onDelete: SetNull)
+  gspAnalysisProfile       GspAnalysisProfile?
   paExemptionReason        String?
   paPolicyVersion          String?
   qcProductAnalyses        QcProductAnalysis[]
@@ -265,6 +273,7 @@ model Transaction {
   @@index([plateNumberNormalized])
   @@index([processType, status])
   @@index([createdAt])
+  @@index([gspAnalysisProfile])
   @@index([id, status, revision], map: "idx_transaction_cas_status_revision")
 }
 
@@ -611,18 +620,20 @@ model ProductCatalog {
   name           String                // Display name: "Solar", "PAC 280 AC"
   category       String                // "Fuel", "Coal", "Chemicals"
   subCategory    String?               // Finer grouping if needed
-  processType    ProcessType           // GSP, GBB, GBJ
-  isPaRequired   Boolean     @default(true)
-  policyVersion  String      @default("SOP-GSP-2026.1")
-  isActive       Boolean     @default(true)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  processType        ProcessType           // GSP, GBB, GBJ
+  gspAnalysisProfile GspAnalysisProfile?
+  isPaRequired       Boolean     @default(true)
+  policyVersion      String      @default("SOP-GSP-2026.1")
+  isActive           Boolean     @default(true)
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   transactions   Transaction[]
   qcAnalyses     QcProductAnalysis[]
 
   @@index([processType, isActive])
   @@index([category])
+  @@index([gspAnalysisProfile])
 }
 
 model QcProductAnalysis {
