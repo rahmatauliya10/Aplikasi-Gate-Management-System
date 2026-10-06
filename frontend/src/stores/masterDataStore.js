@@ -71,8 +71,9 @@ export const useMasterDataStore = defineStore('masterData', {
         const response = await api.get('/product-catalog', {
           params: { processType: 'GSP' }
         })
-        if (Array.isArray(response.data) && response.data.length > 0) {
-          this.gspProducts = response.data
+        const items = Array.isArray(response.data) ? response.data : (response.data?.data || [])
+        if (Array.isArray(items) && items.length > 0) {
+          this.gspProducts = items
         }
       } catch (error) {
         console.error('Failed to fetch GSP product catalog:', error)
