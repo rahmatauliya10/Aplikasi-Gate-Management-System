@@ -11,7 +11,12 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { StartWarehouseDto } from './dto/start-warehouse.dto';
 import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
 import { WarehouseQueryDto } from './dto/warehouse-query.dto';
-import { TransactionStatus, Prisma, ProcessType } from '@prisma/client';
+import {
+  TransactionStatus,
+  Prisma,
+  ProcessType,
+  QcResult,
+} from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
@@ -371,10 +376,9 @@ export class WarehouseService {
         }
 
         // Validate workflow release evidence:
-        // Canonical active PA release evidence: status === 'RELEASE' and result === 'PASS'/'PASSED'
+        // Canonical active PA release evidence: status === 'RELEASE' and result === QcResult.PASS
         const isDirectRelease =
-          activePa.status === 'RELEASE' &&
-          (!activePa.result || ['PASS', 'PASSED'].includes(activePa.result));
+          activePa.status === 'RELEASE' && activePa.result === QcResult.PASS;
 
         if (!isDirectRelease) {
           throw new BadRequestException({

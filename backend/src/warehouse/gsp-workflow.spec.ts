@@ -10,6 +10,7 @@ import {
   ProcessType,
   WarehouseCondition,
   WarehouseUnit,
+  QcResult,
 } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
@@ -423,7 +424,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         transactionId: 'tx-coal-1',
         productCatalogId: 'cat-coal-1',
         status: 'RELEASE',
-        result: 'PASSED',
+        result: QcResult.PASS,
         isVoided: false,
       });
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
@@ -567,6 +568,266 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       await expect(
         warehouseService.startWarehouse('tx-coal-rejected', {}, mockUser),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('A: status = RELEASE, result = null -> Warehouse Start REJECTED', async () => {
+      const coalTx = {
+        id: 'tx-coal-res-null',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-null-res',
+        transactionId: 'tx-coal-res-null',
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: null,
+        isVoided: false,
+      } as any);
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-res-null', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('B: status = RELEASE, result = "PASSED" (legacy non-enum string) -> Warehouse Start REJECTED', async () => {
+      const coalTx = {
+        id: 'tx-coal-res-passed',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-passed-res',
+        transactionId: 'tx-coal-res-passed',
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: 'PASSED',
+        isVoided: false,
+      } as any);
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-res-passed', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('C: status = RELEASE, result = REJECT -> Warehouse Start REJECTED', async () => {
+      const coalTx = {
+        id: 'tx-coal-res-reject',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-reject-res',
+        transactionId: 'tx-coal-res-reject',
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: QcResult.REJECT,
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-res-reject', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('D: status = RELEASE, result = PASS, productCatalogId mismatch -> REJECTED', async () => {
+      const coalTx = {
+        id: 'tx-coal-mismatch',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-mismatch-res',
+        transactionId: 'tx-coal-mismatch',
+        productCatalogId: 'cat-other-999',
+        status: 'RELEASE',
+        result: QcResult.PASS,
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-mismatch', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('E: status = RELEASE, result = PASS, isVoided = true / no active PA returned -> REJECTED', async () => {
+      const coalTx = {
+        id: 'tx-coal-voided',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(null);
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-voided', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('F: status = RELEASE, result = PASS, catalog matches, active non-voided -> Warehouse Start ALLOWED', async () => {
+      const coalTx = {
+        id: 'tx-coal-canonical-pass',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-canonical-release',
+        transactionId: 'tx-coal-canonical-pass',
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: QcResult.PASS,
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue({
+            ...coalTx,
+            status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            warehouseStartBy: { id: mockUser.id, name: 'Admin', role: 'ADMIN' },
+          }),
+        },
+        warehouseProcess: {
+          aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+          create: jest.fn().mockResolvedValue({ id: 'wp-canonical-1' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await warehouseService.startWarehouse(
+        'tx-coal-canonical-pass',
+        {},
+        mockUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+          }),
+        }),
+      );
     });
 
     it('strictly blocks startWarehouse when GSP Batubara is still QC_VEHICLE_PENDING', async () => {

@@ -522,7 +522,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             density: 1.22,
             al2o3Content: 10.5,
           },
-          result: QcResult.PASSED,
+          result: QcResult.PASS,
           decision: AnalysisDecision.RELEASE,
           revision: 2,
         },
@@ -552,6 +552,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         transactionId: pacTx.id,
         productCatalogId: pacTx.productCatalog.id,
         status: 'RELEASE',
+        result: QcResult.PASS,
         isVoided: false,
       });
 
@@ -647,7 +648,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             alkalinityNa2o: 28.0, // Out of spec: < 35%
             ph: 11.2,
           },
-          result: QcResult.REJECTED,
+          result: QcResult.REJECT,
           decision: AnalysisDecision.REJECT,
           notes: 'Alkalinitas Na2O di bawah batas minimal SOP (28% < 35%)',
           revision: 2,
@@ -906,7 +907,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         transactionId: coalTx.id,
         productCatalogId: coalTx.productCatalog.id,
         status: 'RELEASE',
-        result: 'PASS',
+        result: QcResult.PASS,
         isVoided: false,
       });
 

@@ -9,7 +9,12 @@ import {
   NotFoundException,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { CorrectionAction, CorrectionTargetModule } from '@prisma/client';
+import {
+  CorrectionAction,
+  CorrectionTargetModule,
+  TransactionStatus,
+  QcResult,
+} from '@prisma/client';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 describe('OperationLogCorrectionService', () => {
@@ -1907,7 +1912,7 @@ describe('OperationLogCorrectionService', () => {
         testRound: 1,
         productCatalogId: 'cat-coal-1',
         status: 'RELEASE',
-        result: 'PASS',
+        result: QcResult.PASS,
         isVoided: false,
       });
 
@@ -1917,7 +1922,7 @@ describe('OperationLogCorrectionService', () => {
 
       const dto = {
         action: CorrectionAction.REOPEN_WORKFLOW,
-        reopenTargetStatus: 'QC_VEHICLE_PASSED' as any,
+        reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
         reasonCode: 'REOPEN_WORKFLOW',
         remark: 'Reopen Batubara to Warehouse stage with valid PA',
         expectedRevision: 3,
@@ -1932,6 +1937,172 @@ describe('OperationLogCorrectionService', () => {
 
       expect(res.success).toBe(true);
       expect(mockTxClient.qcProductAnalysis.updateMany).not.toHaveBeenCalled();
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PASSED,
+          }),
+        }),
+      );
+    });
+
+    it('downgrades to QC_VEHICLE_PENDING when REOPEN target QC_VEHICLE_PASSED has PA result = null', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-null-res',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalogId: 'cat-coal-1',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
+        id: 'pa-null',
+        testRound: 1,
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: null,
+        isVoided: false,
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.correctOperationLog(
+        mockTx.id,
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara with null PA result',
+          expectedRevision: 3,
+          items: [],
+        },
+        { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PENDING,
+          }),
+        }),
+      );
+    });
+
+    it('downgrades to QC_VEHICLE_PENDING when REOPEN target QC_VEHICLE_PASSED has PA result = "PASSED"', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-passed-res',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalogId: 'cat-coal-1',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
+        id: 'pa-passed',
+        testRound: 1,
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: 'PASSED',
+        isVoided: false,
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.correctOperationLog(
+        mockTx.id,
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara with non-enum PASSED result',
+          expectedRevision: 3,
+          items: [],
+        },
+        { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PENDING,
+          }),
+        }),
+      );
+    });
+
+    it('downgrades to QC_VEHICLE_PENDING when REOPEN target QC_VEHICLE_PASSED has PA result = REJECT', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-reject-res',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalogId: 'cat-coal-1',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
+        id: 'pa-reject',
+        testRound: 1,
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: QcResult.REJECT,
+        isVoided: false,
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.correctOperationLog(
+        mockTx.id,
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara with REJECT result',
+          expectedRevision: 3,
+          items: [],
+        },
+        { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PENDING,
+          }),
+        }),
+      );
     });
   });
 });

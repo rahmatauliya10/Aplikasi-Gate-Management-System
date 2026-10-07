@@ -14,6 +14,7 @@ import {
   CorrectionAction,
   CorrectionTargetModule,
   TransactionStatus,
+  QcResult,
 } from '@prisma/client';
 import * as crypto from 'crypto';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
@@ -1134,8 +1135,8 @@ export class OperationLogCorrectionService {
               const isDirectRelease =
                 activePa &&
                 activePa.status === 'RELEASE' &&
-                (!activePa.result ||
-                  ['PASS', 'PASSED'].includes(activePa.result));
+                activePa.result === QcResult.PASS &&
+                activePa.isVoided === false;
               const hasValidRelease =
                 activePa &&
                 activePa.productCatalogId === tx.productCatalogId &&

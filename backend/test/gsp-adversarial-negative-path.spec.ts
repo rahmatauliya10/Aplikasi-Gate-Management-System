@@ -199,7 +199,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       await expect(
         qcService.submitVehicleCheck(
           'tx-gsp-adv-1',
-          { result: QcResult.PASSED, revision: 1 } as any,
+          { result: QcResult.PASS, revision: 1 } as any,
           qcAnalystUser,
         ),
       ).rejects.toThrow(BadRequestException);
@@ -210,7 +210,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       await expect(
         qcService.submitIncomingCheck(
           'tx-gsp-adv-1',
-          { result: QcResult.PASSED, revision: 1 } as any,
+          { result: QcResult.PASS, revision: 1 } as any,
           qcAnalystUser,
         ),
       ).rejects.toThrow(BadRequestException);
@@ -342,7 +342,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         transactionId: 'tx-mismatch-cat',
         productCatalogId: 'cat-pac-999', // Mismatched!
         status: 'RELEASE',
-        result: 'PASSED',
+        result: QcResult.PASS,
         isVoided: false,
       });
 
@@ -492,7 +492,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
               ashContent: 8,
               sulfurContent: 0.8,
             },
-            result: QcResult.PASSED, // FORGED CLAIM
+            result: QcResult.PASS, // FORGED CLAIM
             decision: AnalysisDecision.RELEASE, // FORGED CLAIM
             revision: 1,
           },
