@@ -9,7 +9,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { TransactionStatus, ProcessType, QcResult } from '@prisma/client';
 import { AnalysisDecision } from './dto/submit-product-analysis.dto';
-import { DispositionAction } from './dto/utility-disposition.dto';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
@@ -31,12 +30,6 @@ describe('QcProductAnalysisService (Task 5)', () => {
     id: 'user-analyst-1',
     role: 'QC',
     email: 'analyst@gms.local',
-  } as unknown as JwtPayloadUser;
-
-  const mockUtilityUser: JwtPayloadUser = {
-    id: 'user-utility-1',
-    role: 'ADMIN',
-    email: 'utility.lead@gms.local',
   } as unknown as JwtPayloadUser;
 
   beforeEach(async () => {
@@ -574,44 +567,6 @@ describe('QcProductAnalysisService (Task 5)', () => {
         }),
       );
     });
-  });
-
-  describe('submitUtilityDisposition - Explicitly Disabled', () => {
-    it('strictly rejects any utility disposition attempt with BadRequestException (workflow disabled)', async () => {
-      await expect(
-        service.submitUtilityDisposition(
-          'tx-waiting-disp',
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Any attempt',
-            revision: 4,
-          },
-          mockUtilityUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
-    });
-
-    it('rejects disposition even if action is REJECT (legacy mutation disabled)', async () => {
-      await expect(
-        service.submitUtilityDisposition(
-          'tx-waiting-disp',
-          {
-            dispositionAction: DispositionAction.REJECT,
-            dispositionReason: 'Legacy reject attempt',
-            revision: 4,
-          },
-          mockUtilityUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
-    });
 
     it('fails closed when attempting RELEASE on Coal under unapproved operational metadata (PENDING_SIGNOFF)', async () => {
       const coalTx = {
@@ -650,6 +605,13 @@ describe('QcProductAnalysisService (Task 5)', () => {
       );
     });
   });
+
+  describe('Utility Disposition - Completely Removed', () => {
+    it('verifies submitUtilityDisposition is not present on service', () => {
+      expect((service as any).submitUtilityDisposition).toBeUndefined();
+    });
+  });
+
 
   describe('startProductAnalysis', () => {
     it('rejects start if transaction is not GSP', async () => {

@@ -20,7 +20,6 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { ActivityLogsService } from '../src/activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../src/auth/authorization-scope.service';
 import { AnalysisDecision } from '../src/qc/dto/submit-product-analysis.dto';
-import { DispositionAction } from '../src/qc/dto/utility-disposition.dto';
 import { SpecificationProvider } from '../src/qc/providers/specification.provider';
 import { TEST_FIXTURE_RAPID_KLEN_STRICT_GT } from '../src/qc/constants/chemical-specification';
 
@@ -421,85 +420,8 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('Vector 13: Utility disposition endpoint rejects self-approval attempt (workflow disabled)', async () => {
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          'tx-coal-waiting',
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Self-approval attempt by Round 2 tester',
-            revision: 2,
-          },
-          qcAnalystUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
-    });
-
-    it('Vector 14: Utility disposition endpoint rejects cross-analyst attempt (workflow disabled)', async () => {
-      const round1User = {
-        id: 'round1-user-id',
-        role: Role.ADMIN,
-        department: 'UTILITY',
-        isActive: true,
-        isDeleted: false,
-        area: 'UTILITY_DISPOSITION_AUTHORITY',
-      } as any;
-
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          'tx-coal-waiting-2',
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Round 1 analyst approving Round 2',
-            revision: 2,
-          },
-          round1User,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
-    });
-
-    it('Vector 15: Utility disposition endpoint rejects non-Utility admin attempt (workflow disabled)', async () => {
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          'tx-coal-waiting-3',
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Admin Ops attempt without Utility department',
-            revision: 2,
-          },
-          adminNonUtilityUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
-    });
-
-    it('Vector 16: Utility disposition endpoint rejects unauthorized utility user attempt (workflow disabled)', async () => {
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          'tx-coal-waiting-4',
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Utility user lacking explicit disposition area',
-            revision: 2,
-          },
-          utilityWithoutAuthorityUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
+    it('Vector 13-16: Utility disposition method is completely removed from service (Zero Utility API surface)', () => {
+      expect((qcAnalysisService as any).submitUtilityDisposition).toBeUndefined();
     });
   });
 
@@ -807,22 +729,8 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       expect(mockPrismaService.transaction.updateMany).not.toHaveBeenCalled();
     });
 
-    it('Vector 26: Utility disposition explicitly disabled for all callers (HTTP 400 workflow disabled)', async () => {
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          'tx-pac-disp-adv',
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Chemical attempt by Utility lead',
-            revision: 4,
-          },
-          utilityOfficerUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
+    it('Vector 26: Utility disposition method is completely removed from service', () => {
+      expect((qcAnalysisService as any).submitUtilityDisposition).toBeUndefined();
     });
 
     it('Vector 27: Rapid Klen exact 35.0% alkalinity fails GT 35.0% operational spec', async () => {

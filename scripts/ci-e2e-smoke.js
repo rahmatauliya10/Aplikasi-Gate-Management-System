@@ -743,17 +743,17 @@ async function runE2ESmoke() {
   }
   log(`  Round 2 Out-of-Spec strictly produced QC_VEHICLE_REJECTED (Zero WAITING_UTILITY_DISPOSITION verified) [PASS]`, 'SUCCESS');
 
-  // Verify Legacy Utility Disposition Endpoint is explicitly disabled (HTTP 400)
-  log(`  Testing legacy Utility disposition endpoint mutation disabled (Must FAIL with HTTP 400)...`);
+  // Verify Utility Disposition Endpoint is completely removed from controller (HTTP 404)
+  log(`  Testing Utility disposition endpoint is completely removed (Must return HTTP 404)...`);
   const legacyDispAttempt = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: authHeader }, {
     dispositionAction: 'ACCEPT_WITH_DEVIATION',
-    dispositionReason: 'Attempt to invoke disabled legacy utility disposition',
+    dispositionReason: 'Attempt to invoke removed utility disposition endpoint',
     revision: coalTxRev,
   });
-  if (legacyDispAttempt.statusCode !== 400) {
-    throw new Error(`Legacy utility disposition did NOT fail with 400! Received: ${legacyDispAttempt.statusCode}`);
+  if (legacyDispAttempt.statusCode !== 404) {
+    throw new Error(`Utility disposition endpoint is NOT 404! Received: ${legacyDispAttempt.statusCode}`);
   }
-  log(`  Legacy Utility disposition endpoint explicitly disabled (HTTP 400) [PASS]`, 'SUCCESS');
+  log(`  Utility disposition endpoint verified removed (HTTP 404) [PASS]`, 'SUCCESS');
 
   // 8. Warehouse Start & Complete
   log(`  8. Unloading Batubara at Warehouse...`);

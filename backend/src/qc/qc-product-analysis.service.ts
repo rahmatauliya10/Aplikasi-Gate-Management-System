@@ -14,10 +14,6 @@ import {
   AnalysisDecision,
 } from './dto/submit-product-analysis.dto';
 import {
-  UtilityDispositionDto,
-  DispositionAction,
-} from './dto/utility-disposition.dto';
-import {
   QcResult,
   TransactionStatus,
   GspAnalysisProfile,
@@ -663,20 +659,6 @@ export class QcProductAnalysisService {
       approvalStatus: 'PENDING_SIGNOFF',
       documentSource: 'Unverified Product Specification',
     };
-  }
-
-  /**
-   * Legacy Utility disposition workflow - Explicitly disabled for current business scope.
-   * Historical transaction records and analysis logs remain readable via getAnalysisHistory.
-   */
-  async submitUtilityDisposition(
-    _transactionId: string,
-    _dto: UtilityDispositionDto,
-    _user: JwtPayloadUser,
-  ) {
-    throw new BadRequestException(
-      'Legacy Utility disposition workflow is disabled.',
-    );
   }
 
   /**

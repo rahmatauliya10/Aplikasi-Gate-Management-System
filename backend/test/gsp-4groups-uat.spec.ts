@@ -19,7 +19,6 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { ActivityLogsService } from '../src/activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../src/auth/authorization-scope.service';
 import { AnalysisDecision } from '../src/qc/dto/submit-product-analysis.dto';
-import { DispositionAction } from '../src/qc/dto/utility-disposition.dto';
 import { JwtPayloadUser } from '../src/common/decorators/current-user.decorator';
 import { isValidStatusTransition } from '../src/common/state-machine/workflow-state-machine';
 import { SpecificationProvider } from '../src/qc/providers/specification.provider';
@@ -874,40 +873,10 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         revision: 4,
       };
 
-      // Case 3a: Attempt by Round 2 analyst -> REJECTED (HTTP 400 - Legacy Utility workflow disabled)
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          coalTx.id,
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Self-approval attempt by Round 2 analyst',
-            revision: 4,
-          },
-          qcAnalystUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
+      // Case 3: Disposition mutation method is completely removed from service
+      expect((qcAnalysisService as any).submitUtilityDisposition).toBeUndefined();
 
-      // Case 3b: Attempt by any other role or user -> REJECTED (HTTP 400 - Legacy Utility workflow disabled)
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          coalTx.id,
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Disposition attempt by officer',
-            revision: 4,
-          },
-          utilityOfficerUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Legacy Utility disposition workflow is disabled.',
-        ),
-      );
-
+      
       // 4. Historical Records & GSP Warehouse: Transactions in QC_VEHICLE_PASSED proceed to unloading
       const coalPassed = {
         ...coalWaiting,

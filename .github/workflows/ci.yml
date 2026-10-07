@@ -748,6 +748,7 @@ jobs:
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
           E2E_API_URL: http://localhost:3001
           ENABLE_TEST_SPEC_FIXTURES: "true"
+          GMS_TEST_HARNESS: "true"
           SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           TESTED_MERGE_SHA: ${{ github.sha }}
         run: |
@@ -761,6 +762,8 @@ jobs:
           echo "BACKUP_SIGNATURE_SECRET=test-backup-signature-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "ENABLE_TEST_SPEC_FIXTURES=true" >> backend/.env
           echo "ENABLE_TEST_SPEC_FIXTURES=true" >> .env
+          echo "GMS_TEST_HARNESS=true" >> backend/.env
+          echo "GMS_TEST_HARNESS=true" >> .env
           docker compose -f docker-compose.yml up -d postgres
           sleep 5
           docker compose -f docker-compose.yml run --rm migrator npx prisma migrate deploy

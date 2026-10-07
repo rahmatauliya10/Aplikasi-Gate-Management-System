@@ -1,11 +1,11 @@
 /**
  * Reference Quality Specifications & Evaluation Rules for Boiler Coal (Batubara)
- * Status: Reference Benchmark / Purchase Contract Tiers (Pending Formal QA/Utility Department Signoff)
+ * Status: Reference Benchmark / Purchase Contract Tiers (Pending Formal QA Signoff)
  *
  * IMPORTANT AUDIT NOTE:
  * The calorie tiers (GAR 3800 - GAR 5500+) and Total Moisture thresholds (26.0% - 36.0%)
  * represent supplier contract benchmarks and testing fixtures. They must NOT be treated as
- * permanent company-wide SOP rules without formal signoff from QA and Utility Section Heads.
+ * permanent company-wide SOP rules without formal signoff from QA Section Head.
  * In production, thresholds must be validated against approved ProductCatalog / signed SOP.
  * Any specification that is NOT formally 'APPROVED' CANNOT produce an automated 'RELEASE'.
  */
@@ -25,7 +25,7 @@ export interface SpecificationMetadata {
 export const OPERATIONAL_COAL_SPEC_METADATA: SpecificationMetadata = {
   version: '1.0.0-provisional',
   documentSource:
-    'Purchase Contract Benchmark (Awaiting Formal QA/Utility Head Signoff)',
+    'Purchase Contract Benchmark (Awaiting Formal QA Signoff)',
   approvalStatus: 'PENDING_SIGNOFF',
   approvedBy: null,
   approvedAt: null,
@@ -49,7 +49,7 @@ export interface CoalCalorieTierSpec {
   name: string;
   nominalKcal: number;
   maxTotalMoisturePct: number; // Rejection/Retest threshold
-  standardTolerancePct: number; // Permissible variance before disposition
+  standardTolerancePct: number; // Contractual variance threshold
   standardMethod: string;
 }
 
@@ -183,7 +183,7 @@ export function evaluateCoalAnalysis(
     };
   }
 
-  // 4. Round 2 or Greater Exceeded -> Strict REJECT (NO Utility disposition)
+  // 4. Round 2 or Greater Exceeded -> Strict REJECT (Final rejection)
   return {
     result: 'REJECT',
     decision: 'REJECT',
