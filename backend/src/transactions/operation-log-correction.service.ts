@@ -1136,15 +1136,10 @@ export class OperationLogCorrectionService {
                 activePa.status === 'RELEASE' &&
                 (!activePa.result ||
                   ['PASS', 'PASSED'].includes(activePa.result));
-              const isUtilityAccepted =
-                activePa &&
-                (activePa.status === 'ACCEPT_WITH_DEVIATION' ||
-                  activePa.dispositionAction === 'ACCEPT_WITH_DEVIATION') &&
-                activePa.dispositionById != null;
               const hasValidRelease =
                 activePa &&
                 activePa.productCatalogId === tx.productCatalogId &&
-                (isDirectRelease || isUtilityAccepted);
+                isDirectRelease;
 
               if (!hasValidRelease) {
                 // If PA evidence is missing or invalid/superseded, downgrade to QC_VEHICLE_PENDING

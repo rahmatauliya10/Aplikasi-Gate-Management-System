@@ -39,6 +39,17 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
     isActive: true,
   } as any;
 
+  const originalEnv = { ...process.env };
+
+  beforeAll(() => {
+    process.env.ENABLE_TEST_SPEC_FIXTURES = 'true';
+    process.env.GMS_TEST_HARNESS = 'true';
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
   beforeEach(async () => {
     mockPrismaService = {
       transaction: {

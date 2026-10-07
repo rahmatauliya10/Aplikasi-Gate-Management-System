@@ -55,24 +55,6 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
     email: 'admin.ops@gms.local',
   } as any;
 
-  const utilityWithoutAuthorityUser: JwtPayloadUser = {
-    id: 'util-no-auth',
-    role: Role.ADMIN,
-    department: 'UTILITY',
-    area: 'NONE',
-    email: 'util.noauth@gms.local',
-  } as any;
-
-  const utilityOfficerUser: JwtPayloadUser = {
-    id: 'util-auth-officer',
-    role: Role.ADMIN,
-    department: 'UTILITY',
-    area: 'UTILITY_DISPOSITION_AUTHORITY',
-    isActive: true,
-    isDeleted: false,
-    email: 'util.head@gms.local',
-  } as any;
-
   beforeEach(async () => {
     mockPrismaService = {
       $transaction: jest.fn().mockImplementation(async (cb: any) => {
@@ -391,6 +373,31 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
 
       await expect(
         warehouseService.startWarehouse('tx-pending-disp', {}, warehouseUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('Vector 11b: Legacy ACCEPT_WITH_DEVIATION evidence rejects warehouse start (Zero Utility authorization)', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+        id: 'tx-legacy-disp',
+        processType: ProcessType.GSP,
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: activeGspCatalog,
+      });
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-legacy-disp',
+        transactionId: 'tx-legacy-disp',
+        productCatalogId: 'cat-coal-1',
+        status: 'ACCEPT_WITH_DEVIATION',
+        dispositionAction: 'ACCEPT_WITH_DEVIATION',
+        dispositionById: 'legacy-util-user',
+        isVoided: false,
+      });
+
+      await expect(
+        warehouseService.startWarehouse('tx-legacy-disp', {}, warehouseUser),
       ).rejects.toThrow(BadRequestException);
     });
   });

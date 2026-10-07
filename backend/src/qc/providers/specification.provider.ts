@@ -19,39 +19,36 @@ export interface ISpecificationProvider {
 @Injectable()
 export class SpecificationProvider implements ISpecificationProvider {
   private readonly logger = new Logger(SpecificationProvider.name);
-  private testFixtureMode = false;
+  private testFixtureMode = true;
 
   setTestFixtureMode(enabled: boolean): void {
     this.testFixtureMode = enabled;
   }
 
   isTestFixtureActive(): boolean {
-    // 1. In-memory programmatic test mode (activated strictly within test suites)
-    if (this.testFixtureMode) {
-      return true;
-    }
-
-    // 2. Environment flag check
     const fixturesRequested = process.env.ENABLE_TEST_SPEC_FIXTURES === 'true';
-    if (!fixturesRequested) {
-      return false;
-    }
-
     const isTestHarness = process.env.GMS_TEST_HARNESS === 'true';
-    if (!isTestHarness) {
-      if (process.env.NODE_ENV === 'production') {
-        this.logger.error(
-          '[SECURITY ALERT] CRITICAL: NODE_ENV=production with ENABLE_TEST_SPEC_FIXTURES=true without GMS_TEST_HARNESS=true! Test fixture activation BLOCKED; strictly defaulting to operational PENDING_SIGNOFF specification.',
-        );
-      } else {
-        this.logger.warn(
-          '[SECURITY] ENABLE_TEST_SPEC_FIXTURES is true, but GMS_TEST_HARNESS is false. Test fixture activation rejected; defaulting to operational PENDING_SIGNOFF specification.',
-        );
+
+    // Strict guard: test fixture may NEVER activate unless BOTH flags are explicitly true
+    if (!fixturesRequested || !isTestHarness) {
+      if (
+        (this.testFixtureMode || fixturesRequested) &&
+        (fixturesRequested || process.env.NODE_ENV === 'production')
+      ) {
+        if (process.env.NODE_ENV === 'production') {
+          this.logger.error(
+            '[SECURITY ALERT] CRITICAL: Test fixture requested or activated in production without full test harness verification! Test fixture activation BLOCKED; strictly defaulting to operational PENDING_SIGNOFF specification.',
+          );
+        } else {
+          this.logger.warn(
+            '[SECURITY] Test fixture requested, but ENABLE_TEST_SPEC_FIXTURES or GMS_TEST_HARNESS is not true. Test fixture activation rejected; defaulting to operational PENDING_SIGNOFF specification.',
+          );
+        }
       }
       return false;
     }
 
-    return true;
+    return this.testFixtureMode && fixturesRequested && isTestHarness;
   }
 
   getCoalSpec(): CoalSpecificationMetadata {

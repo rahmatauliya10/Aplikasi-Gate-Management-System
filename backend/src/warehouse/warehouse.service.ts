@@ -371,20 +371,15 @@ export class WarehouseService {
         }
 
         // Validate workflow release evidence:
-        // Either directly RELEASED by QC Analyst
-        // Or ACCEPT_WITH_DEVIATION via valid Utility disposition
+        // Canonical active PA release evidence: status === 'RELEASE' and result === 'PASS'/'PASSED'
         const isDirectRelease =
           activePa.status === 'RELEASE' &&
           (!activePa.result || ['PASS', 'PASSED'].includes(activePa.result));
-        const isUtilityAccepted =
-          (activePa.status === 'ACCEPT_WITH_DEVIATION' ||
-            activePa.dispositionAction === 'ACCEPT_WITH_DEVIATION') &&
-          Boolean(activePa.dispositionById);
 
-        if (!isDirectRelease && !isUtilityAccepted) {
+        if (!isDirectRelease) {
           throw new BadRequestException({
             success: false,
-            message: `Gudang menolak memulai proses: Analisis PA terakhir belum memperoleh keputusan rilis yang sah (Status PA: ${activePa.status}, Disposisi: ${activePa.dispositionAction || 'NONE'}). Tidak ada izin bongkar.`,
+            message: `Gudang menolak memulai proses: Analisis PA terakhir belum memperoleh keputusan rilis yang sah (Status PA: ${activePa.status}, Hasil: ${activePa.result || 'NONE'}). Tidak ada izin bongkar.`,
             errors: [],
           });
         }

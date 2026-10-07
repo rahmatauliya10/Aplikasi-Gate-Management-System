@@ -468,6 +468,107 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       );
     });
 
+    it('A: strictly blocks startWarehouse when PA has legacy ACCEPT_WITH_DEVIATION evidence (Zero Utility authorization)', async () => {
+      const coalTx = {
+        id: 'tx-coal-legacy-dev',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-coal-legacy',
+        transactionId: 'tx-coal-legacy-dev',
+        productCatalogId: 'cat-coal-1',
+        status: 'ACCEPT_WITH_DEVIATION',
+        dispositionAction: 'ACCEPT_WITH_DEVIATION',
+        dispositionById: 'legacy-util-user',
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-legacy-dev', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('C: strictly blocks startWarehouse when PA is in PENDING_DISPOSITION', async () => {
+      const coalTx = {
+        id: 'tx-coal-pending-disp',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-coal-pending-disp',
+        transactionId: 'tx-coal-pending-disp',
+        productCatalogId: 'cat-coal-1',
+        status: 'PENDING_DISPOSITION',
+        result: 'RETEST_REQUIRED',
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-pending-disp', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('D: strictly blocks startWarehouse when transaction status is QC_VEHICLE_REJECTED', async () => {
+      const coalRejectedTx = {
+        id: 'tx-coal-rejected',
+        status: TransactionStatus.QC_VEHICLE_REJECTED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 3,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalRejectedTx,
+      );
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-coal-rejected', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('strictly blocks startWarehouse when GSP Batubara is still QC_VEHICLE_PENDING', async () => {
       const coalTx = {
         id: 'tx-coal-1',

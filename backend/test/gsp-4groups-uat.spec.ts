@@ -54,11 +54,6 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
     role: Role.QC,
     email: 'analyst@gms.local',
   } as any;
-  const utilityOfficerUser: JwtPayloadUser = {
-    id: 'util-officer-1',
-    role: Role.ADMIN,
-    email: 'utility@gms.local',
-  } as any;
   const warehouseUser: JwtPayloadUser = {
     id: 'wh-1',
     role: Role.WAREHOUSE,
@@ -704,7 +699,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
   // Skenario 4: Batubara — Deviasi Kadar Air → Uji Ulang → Ditolak (Zero Utility)
   // QC_VEHICLE_PENDING → (Round 1 Fail) → QC_RETEST_REQUIRED → (Round 2 Fail) →
   // QC_VEHICLE_REJECTED (Zero WAITING_UTILITY_DISPOSITION)
-  // Legacy Utility endpoint explicitly disabled (HTTP 400)
+  // Utility disposition endpoint is completely removed (HTTP 404)
   // =========================================================================
   describe('Skenario 4: Batubara — Deviasi Kadar Air → Uji Ulang → Ditolak (Zero Utility)', () => {
     it('executes multi-round retest to rejection and verifies disabled utility disposition endpoint', async () => {
@@ -878,13 +873,31 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         (qcAnalysisService as any).submitUtilityDisposition,
       ).toBeUndefined();
 
-      // 4. Historical Records & GSP Warehouse: Transactions in QC_VEHICLE_PASSED proceed to unloading
+      // 4. Historical Records & GSP Warehouse: Legacy ACCEPT_WITH_DEVIATION is rejected, canonical RELEASE+PASS proceeds
       const coalPassed = {
         ...coalWaiting,
         status: TransactionStatus.QC_VEHICLE_PASSED,
         weighInAt: new Date(),
         revision: 5,
       };
+
+      // 4a. Legacy ACCEPT_WITH_DEVIATION evidence strictly REJECTED (Zero Utility authorization)
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalPassed,
+      );
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'analysis-coal-legacy-dev',
+        transactionId: coalTx.id,
+        productCatalogId: coalTx.productCatalog.id,
+        status: 'ACCEPT_WITH_DEVIATION',
+        dispositionById: 'legacy-util-user-id',
+        isVoided: false,
+      });
+      await expect(
+        warehouseService.startWarehouse(coalTx.id, {}, warehouseUser),
+      ).rejects.toThrow(BadRequestException);
+
+      // 4b. Canonical RELEASE + PASS evidence allows Warehouse Start
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
         coalPassed,
       );
@@ -892,8 +905,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         id: 'analysis-coal-2',
         transactionId: coalTx.id,
         productCatalogId: coalTx.productCatalog.id,
-        status: 'ACCEPT_WITH_DEVIATION',
-        dispositionById: utilityOfficerUser.id,
+        status: 'RELEASE',
+        result: 'PASS',
         isVoided: false,
       });
 
