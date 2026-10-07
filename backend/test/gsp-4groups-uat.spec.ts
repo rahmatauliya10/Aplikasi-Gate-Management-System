@@ -874,9 +874,10 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       };
 
       // Case 3: Disposition mutation method is completely removed from service
-      expect((qcAnalysisService as any).submitUtilityDisposition).toBeUndefined();
+      expect(
+        (qcAnalysisService as any).submitUtilityDisposition,
+      ).toBeUndefined();
 
-      
       // 4. Historical Records & GSP Warehouse: Transactions in QC_VEHICLE_PASSED proceed to unloading
       const coalPassed = {
         ...coalWaiting,

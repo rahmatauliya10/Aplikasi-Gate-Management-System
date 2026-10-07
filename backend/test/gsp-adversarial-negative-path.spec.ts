@@ -421,7 +421,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
     });
 
     it('Vector 13-16: Utility disposition method is completely removed from service (Zero Utility API surface)', () => {
-      expect((qcAnalysisService as any).submitUtilityDisposition).toBeUndefined();
+      expect(
+        (qcAnalysisService as any).submitUtilityDisposition,
+      ).toBeUndefined();
     });
   });
 
@@ -730,7 +732,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
     });
 
     it('Vector 26: Utility disposition method is completely removed from service', () => {
-      expect((qcAnalysisService as any).submitUtilityDisposition).toBeUndefined();
+      expect(
+        (qcAnalysisService as any).submitUtilityDisposition,
+      ).toBeUndefined();
     });
 
     it('Vector 27: Rapid Klen exact 35.0% alkalinity fails GT 35.0% operational spec', async () => {

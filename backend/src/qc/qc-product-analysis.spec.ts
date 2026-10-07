@@ -612,7 +612,6 @@ describe('QcProductAnalysisService (Task 5)', () => {
     });
   });
 
-
   describe('startProductAnalysis', () => {
     it('rejects start if transaction is not GSP', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce({

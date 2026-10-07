@@ -24,8 +24,7 @@ export interface SpecificationMetadata {
 
 export const OPERATIONAL_COAL_SPEC_METADATA: SpecificationMetadata = {
   version: '1.0.0-provisional',
-  documentSource:
-    'Purchase Contract Benchmark (Awaiting Formal QA Signoff)',
+  documentSource: 'Purchase Contract Benchmark (Awaiting Formal QA Signoff)',
   approvalStatus: 'PENDING_SIGNOFF',
   approvedBy: null,
   approvedAt: null,
