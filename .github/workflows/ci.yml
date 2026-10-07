@@ -747,6 +747,7 @@ jobs:
           DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
           E2E_API_URL: http://localhost:3001
+          ENABLE_TEST_SPEC_FIXTURES: "true"
           SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           TESTED_MERGE_SHA: ${{ github.sha }}
         run: |
@@ -759,6 +760,7 @@ jobs:
           echo "JWT_REFRESH_SECRET=test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "BACKUP_SIGNATURE_SECRET=test-backup-signature-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "ENABLE_TEST_SPEC_FIXTURES=true" >> backend/.env
+          echo "ENABLE_TEST_SPEC_FIXTURES=true" >> .env
           docker compose -f docker-compose.yml up -d postgres
           sleep 5
           docker compose -f docker-compose.yml run --rm migrator npx prisma migrate deploy
