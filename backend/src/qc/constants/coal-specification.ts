@@ -23,14 +23,14 @@ export interface SpecificationMetadata {
 }
 
 export const OPERATIONAL_COAL_SPEC_METADATA: SpecificationMetadata = {
-  version: '1.0.0',
+  version: '1.0.0-provisional',
   documentSource:
-    'Purchase Contract Benchmark & QA Operational Standard (SOP-GSP-COAL-2026.1)',
-  approvalStatus: 'APPROVED',
-  approvedBy: 'QA_SECTION_HEAD',
-  approvedAt: '2026-09-30T00:00:00.000Z',
+    'Purchase Contract Benchmark (Awaiting Formal QA/Utility Head Signoff)',
+  approvalStatus: 'PENDING_SIGNOFF',
+  approvedBy: null,
+  approvedAt: null,
   notes:
-    'Authoritative coal specification rules: Round 1 compliant -> RELEASE; Round 1 OOS -> RETEST_REQUIRED; Round 2 compliant -> RELEASE; Round 2 OOS -> REJECT (No Utility disposition).',
+    'Calorie tiers (GAR 3800 - 5500+) and moisture thresholds (26% - 36%) are provisional contract benchmarks. Automated RELEASE is prohibited until formal signoff.',
 };
 
 export const TEST_FIXTURE_COAL_SPEC_METADATA: SpecificationMetadata = {

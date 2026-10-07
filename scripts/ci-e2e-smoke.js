@@ -475,23 +475,22 @@ async function runE2ESmoke() {
   // Step 5B: FULL NON-SOLAR GSP BATUBARA WORKFLOW
   // (Check-in -> Weigh-In [QC_VEHICLE_PENDING] -> PA Start Round 1 [QC_VEHICLE_IN_PROGRESS]
   //  -> Submit Round 1 fail [QC_RETEST_REQUIRED] -> PA Start Round 2 [QC_VEHICLE_IN_PROGRESS]
-  //  -> Submit Round 2 fail [WAITING_UTILITY_DISPOSITION] -> Authorized Four-Eyes Utility Disposition [QC_VEHICLE_PASSED]
+  //  -> Submit Round 2 pass [QC_VEHICLE_PASSED] (NO Utility disposition)
   //  -> Warehouse Start -> Warehouse Complete -> Weigh-Out -> Gate-Out -> COMPLETED)
+  // Plus secondary delivery rejection gate:
+  // (Round 1 fail [QC_RETEST_REQUIRED] -> Round 2 fail [QC_VEHICLE_REJECTED])
   // Plus exhaustive negative assertions:
   // - Legacy /qc/start on GSP = 400
   // - Forged RELEASE without conforming parameters = 400
   // - Warehouse start without active PA = 400
   // - Scope violation on PA = 403
-  // - Four-Eyes violation: Analyst cannot give Utility disposition = 403
-  // - Non-Utility department user cannot give Utility disposition = 403
-  // - Chemical (non-Coal) utility disposition blocked by fail-closed governance = 403
+  // - Legacy Utility disposition endpoint disabled = 400
   // ==============================================================================
   log(`[WORKFLOW 2B] Executing Complete GSP Batubara Lifecycle to COMPLETED...`);
 
-  // Setup distinct actors for Separation of Duties & Four-Eyes Principle:
+  // Setup distinct actors for Separation of Duties:
   // Actor 1: QC Analyst (performs lab testing)
-  // Actor 2: Utility Section Head (performs Four-Eyes technical disposition)
-  // Actor 3: GBB-scoped QC User (for process scope violation assertion)
+  // Actor 2: GBB-scoped QC User (for process scope violation assertion)
   const qcAnalyst = await getOrCreateUser(authHeader, {
     username: 'qc_analyst_e2e',
     email: 'qc.analyst.e2e@gms.local',
@@ -744,6 +743,18 @@ async function runE2ESmoke() {
   }
   log(`  Round 2 Out-of-Spec strictly produced QC_VEHICLE_REJECTED (Zero WAITING_UTILITY_DISPOSITION verified) [PASS]`, 'SUCCESS');
 
+  // Verify Legacy Utility Disposition Endpoint is explicitly disabled (HTTP 400)
+  log(`  Testing legacy Utility disposition endpoint mutation disabled (Must FAIL with HTTP 400)...`);
+  const legacyDispAttempt = await request(`/api/qc/disposition/${coalTxId}`, { method: 'POST', headers: authHeader }, {
+    dispositionAction: 'ACCEPT_WITH_DEVIATION',
+    dispositionReason: 'Attempt to invoke disabled legacy utility disposition',
+    revision: coalTxRev,
+  });
+  if (legacyDispAttempt.statusCode !== 400) {
+    throw new Error(`Legacy utility disposition did NOT fail with 400! Received: ${legacyDispAttempt.statusCode}`);
+  }
+  log(`  Legacy Utility disposition endpoint explicitly disabled (HTTP 400) [PASS]`, 'SUCCESS');
+
   // 8. Warehouse Start & Complete
   log(`  8. Unloading Batubara at Warehouse...`);
   await stepOk(request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start unloading Batubara in coal yard' }), 'Batubara Warehouse Start');
@@ -785,9 +796,9 @@ async function runE2ESmoke() {
 
   // ==============================================================================
   // Step 5C: FAIL-CLOSED GOVERNANCE ON CHEMICAL GSP COMMODITIES (PAC / Rapid Klen)
-  // Non-Coal GSP commodities must be routed to WAITING_UTILITY_DISPOSITION because
-  // their operational specs are PENDING_SIGNOFF.
-  // Utility officer disposition on non-Coal MUST BE REJECTED with HTTP 403 Forbidden.
+  // Chemical GSP commodities fail closed with HTTP 400 because their operational
+  // specifications are PENDING_SIGNOFF.
+  // Must NOT route to WAITING_UTILITY_DISPOSITION or any Utility disposition.
   // ==============================================================================
   log(`[GOVERNANCE TEST] Testing Fail-Closed Governance on Chemical GSP (PAC)...`);
   const pacCheckIn = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {

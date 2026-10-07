@@ -188,12 +188,16 @@ describe('QCVerification & PA Forms — Complete Removal of Utility from Active 
       expect(wrapperRound2.text()).not.toContain('Disposisi Utility')
     })
 
-    it('ChemicalPacForm: No Utility disposition button or actions in UI', () => {
+    it('ChemicalPacForm: Displays governance banner for PENDING_SIGNOFF and no Utility actions', () => {
       const wrapper = mount(ChemicalPacForm, {
         props: {
           transaction: { id: 'tx-pac', cargoSubType: 'PAC 280 AC' },
         },
       })
+      const banner = wrapper.find('#banner-pac-governance')
+      expect(banner.exists()).toBe(true)
+      expect(banner.text()).toContain('Spesifikasi operasional belum disahkan')
+      expect(banner.text()).toContain('Proses rilis material ditahan')
       expect(wrapper.find('#btn-open-utility-disposition').exists()).toBe(false)
       expect(wrapper.find('#btn-utility-disposition').exists()).toBe(false)
       expect(wrapper.text()).not.toContain('Disposisi Utility')
@@ -201,12 +205,16 @@ describe('QCVerification & PA Forms — Complete Removal of Utility from Active 
       expect(wrapper.text()).not.toContain('Sahkan Keputusan Disposisi')
     })
 
-    it('ChemicalRapidKlenForm: No Utility disposition button or actions in UI', () => {
+    it('ChemicalRapidKlenForm: Displays governance banner for PENDING_SIGNOFF and no Utility actions', () => {
       const wrapper = mount(ChemicalRapidKlenForm, {
         props: {
           transaction: { id: 'tx-rk', cargoSubType: 'Rapid Klen' },
         },
       })
+      const banner = wrapper.find('#banner-rapid-governance')
+      expect(banner.exists()).toBe(true)
+      expect(banner.text()).toContain('Spesifikasi operasional belum disahkan')
+      expect(banner.text()).toContain('Proses rilis material ditahan')
       expect(wrapper.find('#btn-open-utility-disposition').exists()).toBe(false)
       expect(wrapper.find('#btn-utility-disposition').exists()).toBe(false)
       expect(wrapper.text()).not.toContain('Disposisi Utility')

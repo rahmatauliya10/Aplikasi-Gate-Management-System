@@ -44,6 +44,7 @@ services:
       - DEFAULT_ADMIN_EMAIL=admin@gms.local
       - LOCAL_BACKUP_DIR=${LOCAL_BACKUP_DIR:-/app/backups/local}
       - OFFSITE_BACKUP_DIR=${OFFSITE_BACKUP_DIR:-/app/backups/nas}
+      - ENABLE_TEST_SPEC_FIXTURES=${ENABLE_TEST_SPEC_FIXTURES:-false}
     depends_on:
       postgres:
         condition: service_healthy

@@ -421,40 +421,10 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('Vector 13: Four-Eyes Principle rejects Round 2 analyst self-approval', async () => {
-      const coalTxWaiting: any = {
-        id: 'tx-coal-waiting',
-        processType: ProcessType.GSP,
-        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
-        cargoType: 'Coal',
-        cargoSubType: 'Batubara',
-        revision: 2,
-      };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalTxWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'pa-r2',
-        transactionId: coalTxWaiting.id,
-        testRound: 2,
-        testedById: qcAnalystUser.id,
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce({
-        id: qcAnalystUser.id,
-        role: Role.ADMIN,
-        department: 'UTILITY',
-        isActive: true,
-        isDeleted: false,
-        area: 'UTILITY_DISPOSITION_AUTHORITY',
-      });
-      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'pa-r1', testRound: 1, testedById: 'other-user' },
-        { id: 'pa-r2', testRound: 2, testedById: qcAnalystUser.id },
-      ]);
-
+    it('Vector 13: Utility disposition endpoint rejects self-approval attempt (workflow disabled)', async () => {
       await expect(
         qcAnalysisService.submitUtilityDisposition(
-          coalTxWaiting.id,
+          'tx-coal-waiting',
           {
             dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
             dispositionReason: 'Self-approval attempt by Round 2 tester',
@@ -462,16 +432,14 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           },
           qcAnalystUser,
         ),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Legacy Utility disposition workflow is disabled.',
+        ),
+      );
     });
 
-    it('Vector 14: Four-Eyes Principle rejects Round 1 analyst approving Round 2 disposition', async () => {
-      const coalTxWaiting: any = {
-        id: 'tx-coal-waiting-2',
-        processType: ProcessType.GSP,
-        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
-        revision: 2,
-      };
+    it('Vector 14: Utility disposition endpoint rejects cross-analyst attempt (workflow disabled)', async () => {
       const round1User = {
         id: 'round1-user-id',
         role: Role.ADMIN,
@@ -481,24 +449,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         area: 'UTILITY_DISPOSITION_AUTHORITY',
       } as any;
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalTxWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'pa-r2',
-        transactionId: coalTxWaiting.id,
-        testRound: 2,
-        testedById: 'round2-user-id',
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(round1User);
-      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'pa-r1', testRound: 1, testedById: round1User.id },
-        { id: 'pa-r2', testRound: 2, testedById: 'round2-user-id' },
-      ]);
-
       await expect(
         qcAnalysisService.submitUtilityDisposition(
-          coalTxWaiting.id,
+          'tx-coal-waiting-2',
           {
             dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
             dispositionReason: 'Round 1 analyst approving Round 2',
@@ -506,32 +459,17 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           },
           round1User,
         ),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Legacy Utility disposition workflow is disabled.',
+        ),
+      );
     });
 
-    it('Vector 15: Admin user outside Utility department is rejected from Utility disposition', async () => {
-      const coalTxWaiting: any = {
-        id: 'tx-coal-waiting-3',
-        processType: ProcessType.GSP,
-        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
-        revision: 2,
-      };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalTxWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'pa-r2',
-        transactionId: coalTxWaiting.id,
-        testRound: 2,
-        testedById: 'analyst-x',
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(
-        adminNonUtilityUser,
-      );
-
+    it('Vector 15: Utility disposition endpoint rejects non-Utility admin attempt (workflow disabled)', async () => {
       await expect(
         qcAnalysisService.submitUtilityDisposition(
-          coalTxWaiting.id,
+          'tx-coal-waiting-3',
           {
             dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
             dispositionReason: 'Admin Ops attempt without Utility department',
@@ -539,32 +477,17 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           },
           adminNonUtilityUser,
         ),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Legacy Utility disposition workflow is disabled.',
+        ),
+      );
     });
 
-    it('Vector 16: User in Utility department without explicit disposition authority is rejected', async () => {
-      const coalTxWaiting: any = {
-        id: 'tx-coal-waiting-4',
-        processType: ProcessType.GSP,
-        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
-        revision: 2,
-      };
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalTxWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'pa-r2',
-        transactionId: coalTxWaiting.id,
-        testRound: 2,
-        testedById: 'analyst-x',
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(
-        utilityWithoutAuthorityUser,
-      );
-
+    it('Vector 16: Utility disposition endpoint rejects unauthorized utility user attempt (workflow disabled)', async () => {
       await expect(
         qcAnalysisService.submitUtilityDisposition(
-          coalTxWaiting.id,
+          'tx-coal-waiting-4',
           {
             dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
             dispositionReason: 'Utility user lacking explicit disposition area',
@@ -572,7 +495,11 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           },
           utilityWithoutAuthorityUser,
         ),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Legacy Utility disposition workflow is disabled.',
+        ),
+      );
     });
   });
 
@@ -880,30 +807,10 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
       expect(mockPrismaService.transaction.updateMany).not.toHaveBeenCalled();
     });
 
-    it('Vector 26: Utility disposition rejected on non-Coal cargo (PAC / Rapid Klen) with ForbiddenException', async () => {
-      const pacTxWaiting = {
-        id: 'tx-pac-disp-adv',
-        processType: ProcessType.GSP,
-        cargoType: 'Chemical',
-        cargoSubType: 'PAC Liquid',
-        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
-        revision: 4,
-      };
-
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        pacTxWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'pa-pac-adv',
-        transactionId: pacTxWaiting.id,
-        status: 'PENDING_DISPOSITION',
-        productName: 'PAC Liquid',
-        productCategory: 'Chemical',
-      });
-
+    it('Vector 26: Utility disposition explicitly disabled for all callers (HTTP 400 workflow disabled)', async () => {
       await expect(
         qcAnalysisService.submitUtilityDisposition(
-          pacTxWaiting.id,
+          'tx-pac-disp-adv',
           {
             dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
             dispositionReason: 'Chemical attempt by Utility lead',
@@ -911,7 +818,11 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           },
           utilityOfficerUser,
         ),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Legacy Utility disposition workflow is disabled.',
+        ),
+      );
     });
 
     it('Vector 27: Rapid Klen exact 35.0% alkalinity fails GT 35.0% operational spec', async () => {

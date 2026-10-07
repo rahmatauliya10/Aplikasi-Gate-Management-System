@@ -16,6 +16,17 @@
       </span>
     </div>
 
+    <!-- Governance Status Banner (PENDING_SIGNOFF) -->
+    <div class="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-3" id="banner-rapid-governance">
+      <span class="material-icons text-amber-600 text-xl mt-0.5">lock_clock</span>
+      <div class="space-y-0.5">
+        <h5 class="text-xs font-black text-amber-900 uppercase tracking-wide">Spesifikasi operasional belum disahkan</h5>
+        <p class="text-[11px] font-medium text-amber-700 leading-relaxed">
+          Status spesifikasi mutu untuk produk ini berstatus PENDING_SIGNOFF. Proses rilis material ditahan.
+        </p>
+      </div>
+    </div>
+
     <!-- 1. Sensory Evaluation -->
     <div class="space-y-3">
       <h5 class="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">

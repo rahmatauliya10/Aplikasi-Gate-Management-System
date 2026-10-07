@@ -696,13 +696,6 @@
       </div>
     </teleport>
 
-    <!-- Utility Disposition Modal -->
-    <UtilityDispositionModal
-      :show="showUtilityModal"
-      :is-submitting="isProcessing"
-      @close="showUtilityModal = false"
-      @submit="handleUtilityDispositionSubmit"
-    />
   </div>
 </template>
 
@@ -724,7 +717,6 @@ import Pagination from '../components/Pagination.vue'
 import CoalAnalysisForm from '../components/qc/CoalAnalysisForm.vue'
 import ChemicalPacForm from '../components/qc/ChemicalPacForm.vue'
 import ChemicalRapidKlenForm from '../components/qc/ChemicalRapidKlenForm.vue'
-import UtilityDispositionModal from '../components/qc/UtilityDispositionModal.vue'
 import api from '../services/api'
 import {
   GBJ_VEHICLE_CHECKLIST,
@@ -1067,7 +1059,6 @@ const triggerStartQc = async (truck) => {
 
 // GSP PA State and Handlers
 const showGspPaModal = ref(false);
-const showUtilityModal = ref(false);
 const gspTestRound = ref(1);
 
 const openGspPaModal = async (truck, round = 1) => {
@@ -1117,10 +1108,6 @@ const openGspPaModal = async (truck, round = 1) => {
   showGspPaModal.value = true;
 };
 
-const openUtilityDispositionModal = (truck) => {
-  showUtilityModal.value = true;
-};
-
 const handleGspPaSubmit = async (payload) => {
   if (!selectedTruck.value || isProcessing.value) return;
   isProcessing.value = true;
@@ -1137,27 +1124,6 @@ const handleGspPaSubmit = async (payload) => {
     showGspPaModal.value = false;
   } catch (err) {
     toast.error(err.response?.data?.message || 'Gagal menyimpan analisis PA');
-  } finally {
-    isProcessing.value = false;
-  }
-};
-
-const handleUtilityDispositionSubmit = async (payload) => {
-  if (!selectedTruck.value || isProcessing.value) return;
-  isProcessing.value = true;
-  try {
-    const res = await api.post(`/qc/disposition/${selectedTruck.value.id}`, {
-      ...payload,
-      revision: selectedTruck.value.revision,
-    });
-    const data = res.data;
-    toast.success(data.message || 'Disposisi Utility berhasil diproses');
-    await truckStore.fetchTrucks();
-    await qcStore.fetchQueue();
-    selectedTruck.value = null;
-    showUtilityModal.value = false;
-  } catch (err) {
-    toast.error(err.response?.data?.message || 'Gagal memproses disposisi Utility');
   } finally {
     isProcessing.value = false;
   }

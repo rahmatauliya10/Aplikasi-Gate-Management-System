@@ -24,7 +24,21 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 - No Utility 
     expect(getCoalMoistureLimit('9999')).toBe(33.0);
   });
 
-  it('evaluates PASS / RELEASE under operational specification when moisture within limit', () => {
+  it('enforces that OPERATIONAL_COAL_SPEC_METADATA is PENDING_SIGNOFF with null approver (Provenance Audit Gate)', () => {
+    expect(OPERATIONAL_COAL_SPEC_METADATA.approvalStatus).toBe(
+      'PENDING_SIGNOFF',
+    );
+    expect(OPERATIONAL_COAL_SPEC_METADATA.approvedBy).toBeNull();
+    expect(OPERATIONAL_COAL_SPEC_METADATA.approvedAt).toBeNull();
+    expect(OPERATIONAL_COAL_SPEC_METADATA.version).toBe('1.0.0-provisional');
+  });
+
+  it('keeps TEST_FIXTURE_COAL_SPEC_METADATA as simulated APPROVED isolated for automated test harnesses', () => {
+    expect(TEST_FIXTURE_COAL_SPEC_METADATA.approvalStatus).toBe('APPROVED');
+    expect(TEST_FIXTURE_COAL_SPEC_METADATA.approvedBy).toBe('QA_MOCK_LEAD');
+  });
+
+  it('evaluates PASS / RELEASE candidate under operational specification when moisture within limit', () => {
     const evalResult = evaluateCoalAnalysis({
       targetCalorie: '4200',
       totalMoisture: 31.5,
@@ -35,7 +49,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 - No Utility 
     expect(evalResult.result).toBe('PASS');
     expect(evalResult.decision).toBe('RELEASE');
     expect(evalResult.isWithinSpec).toBe(true);
-    expect(evalResult.specMetadata.approvalStatus).toBe('APPROVED');
+    expect(evalResult.specMetadata.approvalStatus).toBe('PENDING_SIGNOFF');
     expect(evalResult.notes).toContain('Lulus spesifikasi kadar air batubara');
   });
 

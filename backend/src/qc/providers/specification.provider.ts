@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   OPERATIONAL_COAL_SPEC_METADATA,
+  TEST_FIXTURE_COAL_SPEC_METADATA,
   SpecificationMetadata as CoalSpecificationMetadata,
 } from '../constants/coal-specification';
 import {
@@ -17,7 +18,22 @@ export interface ISpecificationProvider {
 
 @Injectable()
 export class SpecificationProvider implements ISpecificationProvider {
+  private testFixtureMode = false;
+
+  setTestFixtureMode(enabled: boolean): void {
+    this.testFixtureMode = enabled;
+  }
+
+  isTestFixtureActive(): boolean {
+    return (
+      this.testFixtureMode || process.env.ENABLE_TEST_SPEC_FIXTURES === 'true'
+    );
+  }
+
   getCoalSpec(): CoalSpecificationMetadata {
+    if (this.isTestFixtureActive()) {
+      return TEST_FIXTURE_COAL_SPEC_METADATA;
+    }
     return OPERATIONAL_COAL_SPEC_METADATA;
   }
 
