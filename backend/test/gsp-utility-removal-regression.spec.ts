@@ -95,6 +95,7 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
 
     service = module.get<QcProductAnalysisService>(QcProductAnalysisService);
     specProvider = module.get<SpecificationProvider>(SpecificationProvider);
+    specProvider.setTestFixtureMode(true);
   });
 
   describe('1. Pure Function Specification Evaluator — Zero WAITING_UTILITY_DISPOSITION', () => {
@@ -227,6 +228,50 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
           }),
         }),
       );
+    });
+
+    it('CASE A-FAIL-CLOSED: Coal Round 1 PASS fails closed when test fixture mode is disabled (PENDING_SIGNOFF)', async () => {
+      specProvider.setTestFixtureMode(false);
+      try {
+        const coalTx = {
+          id: 'tx-coal-r1-pass-pending',
+          status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+          processType: ProcessType.GSP,
+          cargoType: 'Coal',
+          cargoSubType: 'Batubara',
+          revision: 2,
+          qcStartAt: new Date(),
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
+
+        await expect(
+          service.submitProductAnalysis(
+            coalTx.id,
+            {
+              productCategory: 'Coal',
+              productName: 'Batubara',
+              testRound: 1,
+              parameters: {
+                sensory: {
+                  visual: true,
+                  odor: true,
+                  foreignMatter: true,
+                  sizeConsistency: true,
+                  moistureCondition: true,
+                },
+                targetCalorie: '4200',
+                totalMoisture: 31.5,
+              },
+              revision: 2,
+            },
+            mockQcAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      } finally {
+        specProvider.setTestFixtureMode(true);
+      }
     });
 
     it('CASE B: Coal Round 1 OOS transitions to QC_RETEST_REQUIRED', async () => {

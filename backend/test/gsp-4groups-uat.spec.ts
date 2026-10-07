@@ -702,12 +702,13 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
   });
 
   // =========================================================================
-  // Skenario 4: Batubara — Deviasi Kadar Air → Uji Ulang → Disposisi Utility (Four-Eyes)
+  // Skenario 4: Batubara — Deviasi Kadar Air → Uji Ulang → Ditolak (Zero Utility)
   // QC_VEHICLE_PENDING → (Round 1 Fail) → QC_RETEST_REQUIRED → (Round 2 Fail) →
-  // WAITING_UTILITY_DISPOSITION → Four-Eyes Approval → QC_VEHICLE_PASSED → GSP Bongkar
+  // QC_VEHICLE_REJECTED (Zero WAITING_UTILITY_DISPOSITION)
+  // Legacy Utility endpoint explicitly disabled (HTTP 400)
   // =========================================================================
-  describe('Skenario 4: Batubara — Deviasi Kadar Air → Uji Ulang → Disposisi Utility', () => {
-    it('executes multi-round retest and strictly enforces Four-Eyes disposition control', async () => {
+  describe('Skenario 4: Batubara — Deviasi Kadar Air → Uji Ulang → Ditolak (Zero Utility)', () => {
+    it('executes multi-round retest to rejection and verifies disabled utility disposition endpoint', async () => {
       const coalTx: any = {
         id: 'tx-coal-uat',
         transactionNumber: 'GMS-20260930-0004',
@@ -866,36 +867,14 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         warehouseService.startWarehouse(coalTx.id, {}, warehouseUser),
       ).rejects.toThrow(BadRequestException);
 
-      // 3. Legacy Compatibility & Four-Eyes Enforcement for Historical WAITING_UTILITY_DISPOSITION Records:
+      // 3. Historical WAITING_UTILITY_DISPOSITION Records: All disposition mutation attempts rejected
       const coalWaiting = {
         ...coalTx,
         status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
         revision: 4,
       };
-      // Case 3a: Round 2 analyst attempts self-approval -> MUST BE FORBIDDEN
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'analysis-coal-2',
-        transactionId: coalTx.id,
-        testRound: 2,
-        testedById: qcAnalystUser.id,
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce({
-        id: qcAnalystUser.id,
-        role: 'ADMIN',
-        department: 'UTILITY',
-      });
-      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        {
-          id: 'analysis-coal-1',
-          testRound: 1,
-          testedById: 'round1-analyst-id',
-        },
-        { id: 'analysis-coal-2', testRound: 2, testedById: qcAnalystUser.id },
-      ]);
 
+      // Case 3a: Attempt by Round 2 analyst -> REJECTED (HTTP 400 - Legacy Utility workflow disabled)
       await expect(
         qcAnalysisService.submitUtilityDisposition(
           coalTx.id,
@@ -904,138 +883,32 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             dispositionReason: 'Self-approval attempt by Round 2 analyst',
             revision: 4,
           },
-          qcAnalystUser, // Round 2 analyst!
+          qcAnalystUser,
         ),
-      ).rejects.toThrow(ForbiddenException);
-
-      // Case 3b: Round 1 analyst attempts approval of Round 2 disposition -> MUST BE FORBIDDEN
-      const round1Analyst = {
-        id: 'round1-analyst-id',
-        role: 'ADMIN',
-        department: 'UTILITY',
-      } as any;
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalWaiting,
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Legacy Utility disposition workflow is disabled.',
+        ),
       );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'analysis-coal-2',
-        transactionId: coalTx.id,
-        testRound: 2,
-        testedById: qcAnalystUser.id,
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce(round1Analyst);
-      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        {
-          id: 'analysis-coal-1',
-          testRound: 1,
-          testedById: 'round1-analyst-id',
-        },
-        { id: 'analysis-coal-2', testRound: 2, testedById: qcAnalystUser.id },
-      ]);
 
+      // Case 3b: Attempt by any other role or user -> REJECTED (HTTP 400 - Legacy Utility workflow disabled)
       await expect(
         qcAnalysisService.submitUtilityDisposition(
           coalTx.id,
           {
             dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Self-approval attempt by Round 1 analyst',
+            dispositionReason: 'Disposition attempt by officer',
             revision: 4,
           },
-          round1Analyst, // Round 1 analyst!
+          utilityOfficerUser,
         ),
-      ).rejects.toThrow(ForbiddenException);
-
-      // Case 3c: Account without Utility authority (e.g. Security) -> MUST BE FORBIDDEN
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'analysis-coal-2',
-        transactionId: coalTx.id,
-        testRound: 2,
-        testedById: qcAnalystUser.id,
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce({
-        id: 'sec-user',
-        role: 'SECURITY',
-        department: 'SECURITY',
-      });
-      await expect(
-        qcAnalysisService.submitUtilityDisposition(
-          coalTx.id,
-          {
-            dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-            dispositionReason: 'Unauthorized role attempt',
-            revision: 4,
-          },
-          { id: 'sec-user', role: 'SECURITY' } as any,
+      ).rejects.toThrow(
+        new BadRequestException(
+          'Legacy Utility disposition workflow is disabled.',
         ),
-      ).rejects.toThrow(ForbiddenException);
-
-      // 4. Authorized Utility Officer (Independent of all rounds) approves disposition -> SUCCEEDS
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
-        coalWaiting,
-      );
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
-        id: 'analysis-coal-2',
-        transactionId: coalTx.id,
-        testRound: 2,
-        testedById: qcAnalystUser.id, // Tested by analyst
-      });
-      mockPrismaService.user.findUnique.mockResolvedValueOnce({
-        id: utilityOfficerUser.id,
-        role: 'ADMIN',
-        department: 'UTILITY',
-        isActive: true,
-        isDeleted: false,
-        area: 'UTILITY_DISPOSITION_AUTHORITY',
-      });
-      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        {
-          id: 'analysis-coal-1',
-          testRound: 1,
-          testedById: 'round1-analyst-id',
-        },
-        { id: 'analysis-coal-2', testRound: 2, testedById: qcAnalystUser.id },
-      ]);
-
-      const mockTxClientDisp = {
-        transaction: {
-          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        },
-        qcProductAnalysis: {
-          update: jest.fn().mockResolvedValue({ id: 'analysis-coal-2' }),
-        },
-        transactionStatusHistory: {
-          create: jest.fn().mockResolvedValue({}),
-        },
-      };
-      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
-        cb(mockTxClientDisp),
       );
 
-      const dispRes = await qcAnalysisService.submitUtilityDisposition(
-        coalTx.id,
-        {
-          dispositionAction: DispositionAction.ACCEPT_WITH_DEVIATION,
-          dispositionReason:
-            'Disetujui bersyarat oleh Kepala Bagian Utility untuk pencampuran boiler silo #2',
-          revision: 4,
-        },
-        utilityOfficerUser, // Different user!
-      );
-      expect(dispRes.success).toBe(true);
-
-      // Transaction is now QC_VEHICLE_PASSED
-      expect(mockTxClientDisp.transaction.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: TransactionStatus.QC_VEHICLE_PASSED,
-          }),
-        }),
-      );
-
-      // 5. GSP Warehouse: Start Unloading NOW PERMITTED
+      // 4. Historical Records & GSP Warehouse: Transactions in QC_VEHICLE_PASSED proceed to unloading
       const coalPassed = {
         ...coalWaiting,
         status: TransactionStatus.QC_VEHICLE_PASSED,
