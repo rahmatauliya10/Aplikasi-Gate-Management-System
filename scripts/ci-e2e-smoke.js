@@ -42,6 +42,14 @@ const CANONICAL_PREUNLOAD_ITEMS = [
   { code: 'VEHICLE_NO_LEAK_GOOD', result: 'OK', notes: 'Kendaraan tidak bocor / kondisi baik' },
 ];
 
+const CANONICAL_COAL_VISUAL_PASS = {
+  kondisi: 'Kering (Tidak Basah)',
+  warna: 'Hitam',
+  levelRank: 'Medium Rank Coal',
+  kilap: 'Hitam Mengkilap',
+  bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+};
+
 function log(msg, level = 'INFO') {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [${level}] ${msg}`);
@@ -634,6 +642,27 @@ async function runE2ESmoke() {
   coalTxRev = coalAfterStartR1.body?.data?.revision;
   log(`  3. PA Start Round 1 SUCCESS (Status: QC_VEHICLE_IN_PROGRESS, qcStartAt recorded)`);
 
+  // Negative assertion: Unknown Calorie Band (e.g. 4200) MUST return HTTP 422 SPEC_NOT_CONFIGURED
+  log(`  Testing Unknown Calorie Band (Must FAIL with HTTP 422 SPEC_NOT_CONFIGURED)...`);
+  const unknownBandSubmit = await request(`/api/qc/product-analysis/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
+    productCategory: 'Coal',
+    productName: 'Batubara',
+    testRound: 1,
+    parameters: {
+      calorieBand: 'COAL_4200',
+      grossCalorie: 4200,
+      moisture: 25.0,
+      ...CANONICAL_COAL_VISUAL_PASS,
+    },
+    result: 'PASS',
+    decision: 'RELEASE',
+    revision: coalTxRev,
+  });
+  if (unknownBandSubmit.statusCode !== 422) {
+    throw new Error(`Unknown Calorie Band did NOT fail with 422! Received: ${unknownBandSubmit.statusCode}`);
+  }
+  log(`  Unknown Calorie Band rejected with HTTP 422 SPEC_NOT_CONFIGURED as expected [PASS]`, 'SUCCESS');
+
   // Negative assertion: Forged RELEASE (client sends PASS/RELEASE but moisture 36.5% exceeds limit) MUST FAIL (HTTP 400)
   log(`  Testing Forged RELEASE on PA Round 1 (Must FAIL with HTTP 400)...`);
   const forgedRelease = await request(`/api/qc/product-analysis/${coalTxId}`, { method: 'POST', headers: qcAuthHeader }, {
@@ -641,13 +670,10 @@ async function runE2ESmoke() {
     productName: 'Batubara',
     testRound: 1,
     parameters: {
-      kondisi: 'NORMAL',
-      warna: 'HITAM',
-      levelRank: 1,
-      kilap: 'KILAP',
-      bahanPengotor: 'BERSIH',
-      moisture: 36.5,
+      calorieBand: 'COAL_5600_6000',
       grossCalorie: 5800,
+      moisture: 36.5,
+      ...CANONICAL_COAL_VISUAL_PASS,
     },
     result: 'PASS',
     decision: 'RELEASE',
@@ -666,13 +692,10 @@ async function runE2ESmoke() {
     productName: 'Batubara',
     testRound: 1,
     parameters: {
-      kondisi: 'NORMAL',
-      warna: 'HITAM',
-      levelRank: 1,
-      kilap: 'KILAP',
-      bahanPengotor: 'BERSIH',
-      moisture: 36.5,
+      calorieBand: 'COAL_5600_6000',
       grossCalorie: 5800,
+      moisture: 36.5,
+      ...CANONICAL_COAL_VISUAL_PASS,
     },
     result: 'REJECT',
     decision: 'RETEST_REQUIRED',
@@ -695,13 +718,10 @@ async function runE2ESmoke() {
     productName: 'Batubara',
     testRound: 1,
     parameters: {
-      kondisi: 'NORMAL',
-      warna: 'HITAM',
-      levelRank: 1,
-      kilap: 'KILAP',
-      bahanPengotor: 'BERSIH',
-      moisture: 37.0,
+      calorieBand: 'COAL_5600_6000',
       grossCalorie: 5800,
+      moisture: 37.0,
+      ...CANONICAL_COAL_VISUAL_PASS,
     },
     result: 'REJECT',
     decision: 'RETEST_REQUIRED',
@@ -732,13 +752,10 @@ async function runE2ESmoke() {
     productName: 'Batubara',
     testRound: 2,
     parameters: {
-      kondisi: 'NORMAL',
-      warna: 'HITAM',
-      levelRank: 1,
-      kilap: 'KILAP',
-      bahanPengotor: 'BERSIH',
-      moisture: 31.0,
+      calorieBand: 'COAL_5600_6000',
       grossCalorie: 5800,
+      moisture: 31.0,
+      ...CANONICAL_COAL_VISUAL_PASS,
     },
     result: 'PASS',
     decision: 'RELEASE',
@@ -789,13 +806,10 @@ async function runE2ESmoke() {
   await stepOk(request(`/api/qc/product-analysis/${coalRejId}`, { method: 'POST', headers: qcAuthHeader }, {
     productCategory: 'Coal', productName: 'Batubara', testRound: 1,
     parameters: {
-      kondisi: 'NORMAL',
-      warna: 'HITAM',
-      levelRank: 1,
-      kilap: 'KILAP',
-      bahanPengotor: 'BERSIH',
-      moisture: 38.0,
+      calorieBand: 'COAL_5600_6000',
       grossCalorie: 5800,
+      moisture: 38.0,
+      ...CANONICAL_COAL_VISUAL_PASS,
     },
     result: 'REJECT',
     decision: 'RETEST_REQUIRED',
@@ -814,13 +828,10 @@ async function runE2ESmoke() {
   await stepOk(request(`/api/qc/product-analysis/${coalRejId}`, { method: 'POST', headers: qcAuthHeader }, {
     productCategory: 'Coal', productName: 'Batubara', testRound: 2,
     parameters: {
-      kondisi: 'NORMAL',
-      warna: 'HITAM',
-      levelRank: 1,
-      kilap: 'KILAP',
-      bahanPengotor: 'BERSIH',
-      moisture: 37.5,
+      calorieBand: 'COAL_5600_6000',
       grossCalorie: 5800,
+      moisture: 37.5,
+      ...CANONICAL_COAL_VISUAL_PASS,
     },
     result: 'REJECT',
     decision: 'REJECT',
