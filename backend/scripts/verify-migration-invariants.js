@@ -59,7 +59,7 @@ async function verifyMigrationInvariants() {
       SELECT id, "transactionNumber", "processType", status, "receiptUnit"
       FROM "Transaction"
       WHERE "processType" = 'GSP'
-        AND status IN ('WAREHOUSE_IN_PROGRESS', 'WAREHOUSE_DONE', 'WAITING_WEIGH_OUT', 'WEIGH_OUT_COMPLETED', 'GATE_OUT_COMPLETED', 'COMPLETED')
+        AND status IN ('WAREHOUSE_IN_PROGRESS', 'WAREHOUSE_DONE', 'WEIGH_OUT_DONE', 'COMPLETED')
         AND "receiptUnit" IS NULL;
     `);
 
