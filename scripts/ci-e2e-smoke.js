@@ -31,15 +31,15 @@ function getAdminPassword() {
 const ADMIN_PASSWORD = getAdminPassword();
 
 const CANONICAL_PREUNLOAD_ITEMS = [
-  { code: 'DOK_SJ', result: 'OK', notes: 'Surat jalan valid' },
-  { code: 'DOK_PO', result: 'OK', notes: 'Nomor PO valid' },
-  { code: 'SEGEL_SESUAI', result: 'OK', notes: 'Segel utuh dan cocok' },
-  { code: 'KONDISI_FISIK', result: 'OK', notes: 'Kondisi fisik baik' },
-  { code: 'LABEL_IDENTITAS', result: 'OK', notes: 'Label jelas' },
-  { code: 'KESELAMATAN_APD', result: 'OK', notes: 'Driver & operator APD lengkap' },
-  { code: 'AREA_BONGKAR', result: 'OK', notes: 'Area bongkar aman' },
-  { code: 'PERALATAN_TRANSFER', result: 'OK', notes: 'Peralatan siap' },
-  { code: 'TANGKI_TUJUAN', result: 'OK', notes: 'Tangki siap' },
+  { code: 'CLEAN_VEHICLE', result: 'OK', notes: 'Kendaraan bersih' },
+  { code: 'DOOR_SEAL_GOOD', result: 'OK', notes: 'Seal pintu kendaraan baik' },
+  { code: 'NO_EXPIRED_GAS_CYLINDER', result: 'OK', notes: 'Tidak ditemukan tabung gas yang sudah Exp date masa uji berlakunya' },
+  { code: 'ITEMS_NEATLY_ARRANGED', result: 'OK', notes: 'Barang tertata rapi' },
+  { code: 'NO_PEST_OR_ANIMAL_TRACE', result: 'OK', notes: 'Tidak ditemukan hama / binatang dan/atau jejak / bekas binatang' },
+  { code: 'GOOD_CLEAN_SEALED', result: 'OK', notes: 'Barang baik dan bersih serta tersegel' },
+  { code: 'COA_MATCHES_BATCH', result: 'OK', notes: 'CoA tersedia dan sesuai batchnya' },
+  { code: 'QTY_TYPE_MATCHES_SJ', result: 'OK', notes: 'Jumlah dan jenis barang sesuai SJ' },
+  { code: 'VEHICLE_NO_LEAK_GOOD', result: 'OK', notes: 'Kendaraan tidak bocor / kondisi baik' },
 ];
 
 function log(msg, level = 'INFO') {
@@ -467,7 +467,7 @@ async function runE2ESmoke() {
 
   // Negative assertion: GSP Warehouse start with failing checklist item MUST FAIL (HTTP 400 PREUNLOAD_CHECKLIST_NOT_PASSED)
   log(`  Testing GSP Warehouse start with failing checklist item (Must FAIL with HTTP 400)...`);
-  const failingChecklistItems = CANONICAL_PREUNLOAD_ITEMS.map(item => item.code === 'SEGEL_SESUAI' ? { ...item, result: 'NOT_OK', notes: 'Segel rusak' } : item);
+  const failingChecklistItems = CANONICAL_PREUNLOAD_ITEMS.map(item => item.code === 'DOOR_SEAL_GOOD' ? { ...item, result: 'NOT_OK', notes: 'Seal pintu rusak' } : item);
   const failingChecklistStart = await request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, {
     remarks: 'Attempt start with failed checklist',
     preUnloadChecklist: { items: failingChecklistItems },
