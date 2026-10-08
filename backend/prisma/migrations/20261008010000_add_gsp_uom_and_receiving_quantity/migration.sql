@@ -1,6 +1,3 @@
--- 1. Extend WarehouseUnit Enum directly
-ALTER TYPE "WarehouseUnit" ADD VALUE IF NOT EXISTS 'LITER';
-
 -- 2. Add columns to ProductCatalog, Transaction, WarehouseProcess
 ALTER TABLE "ProductCatalog" ADD COLUMN IF NOT EXISTS "receiptUnit" "WarehouseUnit";
 ALTER TABLE "Transaction" ADD COLUMN IF NOT EXISTS "receiptUnit" "WarehouseUnit";
