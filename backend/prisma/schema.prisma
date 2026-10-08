@@ -42,6 +42,7 @@ enum WeighbridgeType {
 
 enum WarehouseUnit {
   KG
+  LITER
   PCS
   BAG
   ROLL
@@ -236,6 +237,8 @@ model Transaction {
   actualWeight          Float?
   actualQuantity        Int?
   warehouseUnit         WarehouseUnit?
+  receiptUnit           WarehouseUnit?
+  receivedQuantity      Decimal?          @db.Decimal(12, 3)
   qcStartAt             DateTime?
   qcEndAt               DateTime?
   incomingQcStartAt     DateTime?
@@ -324,6 +327,8 @@ model WarehouseProcess {
   actualWeight   Float?
   actualQuantity Int?
   unit           WarehouseUnit?
+  receivedQuantity Decimal?          @db.Decimal(12, 3)
+  receivedUnit   WarehouseUnit?
   palletCount    Int?
   bagCount       Int?
   rollCount      Int?
@@ -622,6 +627,7 @@ model ProductCatalog {
   subCategory    String?               // Finer grouping if needed
   processType        ProcessType           // GSP, GBB, GBJ
   gspAnalysisProfile GspAnalysisProfile?
+  receiptUnit        WarehouseUnit?
   isPaRequired       Boolean     @default(true)
   policyVersion      String      @default("SOP-GSP-2026.1")
   isActive           Boolean     @default(true)
