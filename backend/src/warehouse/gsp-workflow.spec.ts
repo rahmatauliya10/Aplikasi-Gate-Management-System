@@ -11,6 +11,7 @@ import {
   WarehouseCondition,
   WarehouseUnit,
   QcResult,
+  Prisma,
 } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import {
@@ -1242,6 +1243,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         processType: ProcessType.GSP,
         cargoType: 'Fuel',
         cargoSubType: 'Solar',
+        receiptUnit: WarehouseUnit.LITER,
         warehouseStartAt: new Date(),
         warehouseStartById: mockUser.id,
         warehouseEndAt: null,
@@ -1275,9 +1277,8 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       const res = await warehouseService.completeWarehouse(
         'tx-gsp-wh',
         {
-          actualWeight: 25000,
-          actualQuantity: 1,
-          unit: WarehouseUnit.TRIP,
+          receivedQuantity: '25000.500',
+          receivedUnit: WarehouseUnit.LITER,
           condition: WarehouseCondition.GOOD,
         },
         mockUser,
@@ -1288,6 +1289,16 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             status: TransactionStatus.WAREHOUSE_DONE,
+            receivedQuantity: new Prisma.Decimal('25000.500'),
+            receiptUnit: WarehouseUnit.LITER,
+          }),
+        }),
+      );
+      expect(mockTxClient.warehouseProcess.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            receivedQuantity: new Prisma.Decimal('25000.500'),
+            receivedUnit: WarehouseUnit.LITER,
           }),
         }),
       );
@@ -1350,6 +1361,173 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           }),
         }),
       );
+    });
+
+    describe('GSP Receiving Decimal Contract & UOM Architecture (Task 12 & 13)', () => {
+      const baseGspInProgress = {
+        id: 'tx-gsp-receiving',
+        transactionNumber: 'TRX-GSP-REC-001',
+        status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemicals',
+        cargoSubType: 'PAC 280 AC',
+        receiptUnit: WarehouseUnit.LITER,
+        warehouseStartAt: new Date(),
+        warehouseStartById: mockUser.id,
+        warehouseEndAt: null,
+        revision: 3,
+      };
+
+      it('rejects GSP completion if receivedQuantity is missing', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+
+        await expect(
+          warehouseService.completeWarehouse(
+            'tx-gsp-receiving',
+            { receivedUnit: WarehouseUnit.LITER } as any,
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { errors: expect.arrayContaining(['MISSING_RECEIVED_QUANTITY']) },
+        });
+      });
+
+      it('rejects receivedQuantity with scientific notation or non-numeric characters', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+
+        await expect(
+          warehouseService.completeWarehouse(
+            'tx-gsp-receiving',
+            { receivedQuantity: '1e3', receivedUnit: WarehouseUnit.LITER },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { error: 'INVALID_RECEIVED_QUANTITY' },
+        });
+      });
+
+      it('rejects receivedQuantity with scale > 3 decimal places with INVALID_RECEIVED_QUANTITY_SCALE', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+
+        await expect(
+          warehouseService.completeWarehouse(
+            'tx-gsp-receiving',
+            { receivedQuantity: '8000.2507', receivedUnit: WarehouseUnit.LITER },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { error: 'INVALID_RECEIVED_QUANTITY_SCALE' },
+        });
+      });
+
+      it('rejects receivedQuantity with overflow > 9 integer digits', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+
+        await expect(
+          warehouseService.completeWarehouse(
+            'tx-gsp-receiving',
+            { receivedQuantity: '1234567890.123', receivedUnit: WarehouseUnit.LITER },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { error: 'RECEIVED_QUANTITY_OVERFLOW' },
+        });
+      });
+
+      it('rejects zero or negative receivedQuantity', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+
+        await expect(
+          warehouseService.completeWarehouse(
+            'tx-gsp-receiving',
+            { receivedQuantity: '0', receivedUnit: WarehouseUnit.LITER },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { error: 'INVALID_RECEIVED_QUANTITY' },
+        });
+      });
+
+      it('rejects receivedUnit mismatch with transaction receiptUnit with INVALID_RECEIPT_UNIT', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+
+        await expect(
+          warehouseService.completeWarehouse(
+            'tx-gsp-receiving',
+            { receivedQuantity: '8000.250', receivedUnit: WarehouseUnit.KG }, // tx is LITER!
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { errors: expect.arrayContaining(['INVALID_RECEIPT_UNIT']) },
+        });
+      });
+
+      it('rejects GSP completion if transaction lacks receiptUnit with MISSING_GSP_RECEIPT_UNIT', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...baseGspInProgress,
+          receiptUnit: null,
+        });
+
+        await expect(
+          warehouseService.completeWarehouse(
+            'tx-gsp-receiving',
+            { receivedQuantity: '8000.250' },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']) },
+        });
+      });
+
+      it('accepts valid decimal strings (e.g. "8000.250") and persists Prisma.Decimal atomically to Transaction and WarehouseProcess', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findUnique: jest.fn().mockResolvedValue({
+              ...baseGspInProgress,
+              status: TransactionStatus.WAREHOUSE_DONE,
+              receivedQuantity: new Prisma.Decimal('8000.250'),
+              receiptUnit: WarehouseUnit.LITER,
+            }),
+          },
+          warehouseProcess: {
+            findFirst: jest.fn().mockResolvedValue({ id: 'wp-rec-1', revision: 1 }),
+            update: jest.fn().mockResolvedValue({ id: 'wp-rec-1', revision: 2 }),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+
+        const res = await warehouseService.completeWarehouse(
+          'tx-gsp-receiving',
+          { receivedQuantity: '8000.250', receivedUnit: WarehouseUnit.LITER },
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.WAREHOUSE_DONE,
+              receivedQuantity: new Prisma.Decimal('8000.250'),
+              receiptUnit: WarehouseUnit.LITER,
+            }),
+          }),
+        );
+        expect(mockTxClient.warehouseProcess.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              receivedQuantity: new Prisma.Decimal('8000.250'),
+              receivedUnit: WarehouseUnit.LITER,
+            }),
+          }),
+        );
+      });
     });
   });
 });

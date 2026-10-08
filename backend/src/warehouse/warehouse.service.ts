@@ -9,7 +9,10 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { StartWarehouseDto } from './dto/start-warehouse.dto';
-import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
+import {
+  CompleteWarehouseDto,
+  validateReceivedQuantityString,
+} from './dto/complete-warehouse.dto';
 import { WarehouseQueryDto } from './dto/warehouse-query.dto';
 import {
   TransactionStatus,
@@ -667,14 +670,6 @@ export class WarehouseService {
       `Warehouse complete attempt for transaction ${transactionId} by ${user.email}`,
     );
 
-    if (dto.actualWeight == null && dto.actualQuantity == null) {
-      throw new BadRequestException({
-        success: false,
-        message: 'At least one of actualWeight or actualQuantity is required',
-        errors: [],
-      });
-    }
-
     const tx = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
       include: { warehouseProcesses: true },
@@ -686,6 +681,46 @@ export class WarehouseService {
         message: 'Transaction not found',
         errors: [],
       });
+    }
+
+    let decimalReceivedQty: Prisma.Decimal | undefined;
+    if (tx.processType === 'GSP') {
+      if (!dto.receivedQuantity) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Jumlah diterima (receivedQuantity) wajib diisi untuk transaksi GSP.',
+          errors: ['MISSING_RECEIVED_QUANTITY'],
+        });
+      }
+      decimalReceivedQty = validateReceivedQuantityString(
+        dto.receivedQuantity,
+      );
+
+      if (!tx.receiptUnit) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Satuan penerimaan (receiptUnit) transaksi GSP belum terkonfigurasi.',
+          errors: ['MISSING_GSP_RECEIPT_UNIT'],
+        });
+      }
+
+      if (dto.receivedUnit && dto.receivedUnit !== tx.receiptUnit) {
+        throw new BadRequestException({
+          success: false,
+          message: `Satuan diterima (${dto.receivedUnit}) tidak sesuai dengan satuan penerimaan transaksi (${tx.receiptUnit}).`,
+          errors: ['INVALID_RECEIPT_UNIT'],
+        });
+      }
+    } else {
+      if (dto.actualWeight == null && dto.actualQuantity == null) {
+        throw new BadRequestException({
+          success: false,
+          message: 'At least one of actualWeight or actualQuantity is required',
+          errors: [],
+        });
+      }
     }
 
     const allowedProcessTypes = await this.getWarehouseAccess(user);
@@ -802,10 +837,17 @@ export class WarehouseService {
           warehouseStartById: tx.warehouseStartById || user.id,
           warehouseEndAt: new Date(),
           warehouseEndById: user.id,
-          actualWeight: dto.actualWeight,
-          actualQuantity: dto.actualQuantity,
-          warehouseUnit: dto.unit,
           revision: { increment: 1 },
+          ...(tx.processType === 'GSP'
+            ? {
+                receivedQuantity: decimalReceivedQty,
+                receiptUnit: tx.receiptUnit,
+              }
+            : {
+                actualWeight: dto.actualWeight,
+                actualQuantity: dto.actualQuantity,
+                warehouseUnit: dto.unit,
+              }),
           ...(dto.suratJalanNumber && {
             suratJalanNumber: dto.suratJalanNumber,
           }),
@@ -836,9 +878,16 @@ export class WarehouseService {
           data: {
             endAt: new Date(),
             endById: user.id,
-            actualWeight: dto.actualWeight,
-            actualQuantity: dto.actualQuantity,
-            unit: dto.unit,
+            ...(tx.processType === 'GSP'
+              ? {
+                  receivedQuantity: decimalReceivedQty,
+                  receivedUnit: tx.receiptUnit,
+                }
+              : {
+                  actualWeight: dto.actualWeight,
+                  actualQuantity: dto.actualQuantity,
+                  unit: dto.unit,
+                }),
             palletCount: dto.palletCount,
             bagCount: dto.bagCount,
             rollCount: dto.rollCount,
@@ -865,9 +914,16 @@ export class WarehouseService {
             startById: tx.warehouseStartById || user.id,
             endAt: new Date(),
             endById: user.id,
-            actualWeight: dto.actualWeight,
-            actualQuantity: dto.actualQuantity,
-            unit: dto.unit,
+            ...(tx.processType === 'GSP'
+              ? {
+                  receivedQuantity: decimalReceivedQty,
+                  receivedUnit: tx.receiptUnit,
+                }
+              : {
+                  actualWeight: dto.actualWeight,
+                  actualQuantity: dto.actualQuantity,
+                  unit: dto.unit,
+                }),
             palletCount: dto.palletCount,
             bagCount: dto.bagCount,
             rollCount: dto.rollCount,
