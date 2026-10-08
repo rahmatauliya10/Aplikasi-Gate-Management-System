@@ -931,7 +931,7 @@ async function runE2ESmoke() {
       sensory: {
         visual: 'Kuning',
         foreignMatters: 'Tidak ada kontaminasi',
-        packaging: 'Kemasan & label tidak rusak',
+        packagingLabel: 'Kemasan & label tidak rusak',
       },
       ph: 4.2,
       density: 1.200,
