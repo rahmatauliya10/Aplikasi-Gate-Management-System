@@ -7,7 +7,12 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { ProcessType, GspAnalysisProfile, Role, WarehouseUnit } from '@prisma/client';
+import {
+  ProcessType,
+  GspAnalysisProfile,
+  Role,
+  WarehouseUnit,
+} from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 describe('ProductCatalogService', () => {
@@ -189,7 +194,9 @@ describe('ProductCatalogService', () => {
           mockAdminUser,
         ),
       ).rejects.toMatchObject({
-        response: { errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']) },
+        response: {
+          errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']),
+        },
       });
     });
 
@@ -209,7 +216,9 @@ describe('ProductCatalogService', () => {
           mockAdminUser,
         ),
       ).rejects.toMatchObject({
-        response: { errors: expect.arrayContaining(['GSP_RECEIPT_UNIT_MISMATCH']) },
+        response: {
+          errors: expect.arrayContaining(['GSP_RECEIPT_UNIT_MISMATCH']),
+        },
       });
     });
   });

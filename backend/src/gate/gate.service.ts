@@ -9,7 +9,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { CreateGateCheckInDto } from './dto/create-gate-check-in.dto';
 import { GateQueryDto } from './dto/gate-query.dto';
-import { TransactionStatus, Prisma, GspAnalysisProfile, WarehouseUnit } from '@prisma/client';
+import {
+  TransactionStatus,
+  Prisma,
+  GspAnalysisProfile,
+  WarehouseUnit,
+} from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
 

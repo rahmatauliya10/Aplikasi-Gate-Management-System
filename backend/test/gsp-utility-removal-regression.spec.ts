@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { QcProductAnalysisService } from '../src/qc/qc-product-analysis.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
@@ -23,6 +26,14 @@ import {
 import { SpecificationProvider } from '../src/qc/providers/specification.provider';
 import { ActivityLogsService } from '../src/activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../src/auth/authorization-scope.service';
+
+const validCoalVisual = {
+  kondisi: 'Kering (Tidak Basah)',
+  warna: 'Hitam',
+  levelRank: 'Medium Rank Coal',
+  kilap: 'Hitam Mengkilap',
+  bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+};
 
 describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
   let service: QcProductAnalysisService;
@@ -112,8 +123,8 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
   describe('1. Pure Function Specification Evaluator — Zero WAITING_UTILITY_DISPOSITION', () => {
     it('Coal Round 1 PASS -> result PASS, decision RELEASE', () => {
       const evalResult = evaluateCoalAnalysis({
-        sensoryPassed: true,
-        targetCalorie: 4200,
+        visual: validCoalVisual,
+        calorieBand: 'COAL_5600_6000',
         totalMoisture: 31.0, // Limit is 33.0%
         testRound: 1,
       });
@@ -126,8 +137,8 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
 
     it('Coal Round 1 OOS -> result REJECT, decision RETEST_REQUIRED', () => {
       const evalResult = evaluateCoalAnalysis({
-        sensoryPassed: true,
-        targetCalorie: 4200,
+        visual: validCoalVisual,
+        calorieBand: 'COAL_5600_6000',
         totalMoisture: 35.5, // Exceeds 33.0%
         testRound: 1,
       });
@@ -140,8 +151,8 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
 
     it('Coal Round 2 PASS -> result PASS, decision RELEASE', () => {
       const evalResult = evaluateCoalAnalysis({
-        sensoryPassed: true,
-        targetCalorie: 4200,
+        visual: validCoalVisual,
+        calorieBand: 'COAL_5600_6000',
         totalMoisture: 32.0, // Compliant on retest
         testRound: 2,
       });
@@ -154,8 +165,8 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
 
     it('Coal Round 2 OOS -> result REJECT, decision REJECT (NO Utility Disposition)', () => {
       const evalResult = evaluateCoalAnalysis({
-        sensoryPassed: true,
-        targetCalorie: 4200,
+        visual: validCoalVisual,
+        calorieBand: 'COAL_5600_6000',
         totalMoisture: 36.0, // Still exceeds 33.0% on Round 2
         testRound: 2,
       });
@@ -209,14 +220,8 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
           productName: 'Batubara',
           testRound: 1,
           parameters: {
-            sensory: {
-              visual: true,
-              odor: true,
-              foreignMatter: true,
-              sizeConsistency: true,
-              moistureCondition: true,
-            },
-            targetCalorie: '4200',
+            visual: validCoalVisual,
+            calorieBand: 'COAL_5600_6000',
             totalMoisture: 31.5,
           },
           revision: 2,
@@ -241,48 +246,37 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
       );
     });
 
-    it('CASE A-FAIL-CLOSED: Coal Round 1 PASS fails closed when test fixture mode is disabled (PENDING_SIGNOFF)', async () => {
-      specProvider.setTestFixtureMode(false);
-      try {
-        const coalTx = {
-          id: 'tx-coal-r1-pass-pending',
-          status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
-          processType: ProcessType.GSP,
-          cargoType: 'Coal',
-          cargoSubType: 'Batubara',
-          revision: 2,
-          qcStartAt: new Date(),
-        };
+    it('CASE A-FAIL-CLOSED: Coal with unconfigured calorie band fails closed with 422 SPEC_NOT_CONFIGURED', async () => {
+      const coalTx = {
+        id: 'tx-coal-r1-pass-pending',
+        status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 2,
+        qcStartAt: new Date(),
+      };
 
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
 
-        await expect(
-          service.submitProductAnalysis(
-            coalTx.id,
-            {
-              productCategory: 'Coal',
-              productName: 'Batubara',
-              testRound: 1,
-              parameters: {
-                sensory: {
-                  visual: true,
-                  odor: true,
-                  foreignMatter: true,
-                  sizeConsistency: true,
-                  moistureCondition: true,
-                },
-                targetCalorie: '4200',
-                totalMoisture: 31.5,
-              },
-              revision: 2,
+      await expect(
+        service.submitProductAnalysis(
+          coalTx.id,
+          {
+            productCategory: 'Coal',
+            productName: 'Batubara',
+            testRound: 1,
+            parameters: {
+              visual: validCoalVisual,
+              calorieBand: 'COAL_4200_UNCONFIGURED',
+              totalMoisture: 31.5,
             },
-            mockQcAnalystUser,
-          ),
-        ).rejects.toThrow(BadRequestException);
-      } finally {
-        specProvider.setTestFixtureMode(true);
-      }
+            revision: 2,
+          },
+          mockQcAnalystUser,
+        ),
+      ).rejects.toThrow(UnprocessableEntityException);
     });
 
     it('CASE B: Coal Round 1 OOS transitions to QC_RETEST_REQUIRED', async () => {
@@ -323,14 +317,8 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
           productName: 'Batubara',
           testRound: 1,
           parameters: {
-            sensory: {
-              visual: true,
-              odor: true,
-              foreignMatter: true,
-              sizeConsistency: true,
-              moistureCondition: true,
-            },
-            targetCalorie: '4200',
+            visual: validCoalVisual,
+            calorieBand: 'COAL_5600_6000',
             totalMoisture: 36.0, // Exceeds 33.0%
           },
           revision: 2,
@@ -396,14 +384,8 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
           productName: 'Batubara',
           testRound: 2,
           parameters: {
-            sensory: {
-              visual: true,
-              odor: true,
-              foreignMatter: true,
-              sizeConsistency: true,
-              moistureCondition: true,
-            },
-            targetCalorie: '4200',
+            visual: validCoalVisual,
+            calorieBand: 'COAL_5600_6000',
             totalMoisture: 35.8, // Still exceeds 33.0% on Round 2
           },
           revision: 3,
@@ -461,12 +443,12 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
   });
 
   describe('4. Chemical UTL (PAC_PA) & Chemical PROD (RAPID_KLEN_PA) — Zero Utility Disposition', () => {
-    it('PAC_PA never routes to WAITING_UTILITY_DISPOSITION and fails-closed if spec is PENDING_SIGNOFF', async () => {
+    it('PAC_PA operates under ACTIVE_CONFIGURED and never routes to WAITING_UTILITY_DISPOSITION', async () => {
       const pacTx = {
         id: 'tx-pac-1',
         status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
         processType: ProcessType.GSP,
-        cargoType: 'Chemical UTL',
+        cargoType: 'Chemicals',
         cargoSubType: 'PAC 280 AC',
         revision: 2,
         qcStartAt: new Date(),
@@ -475,33 +457,56 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacTx);
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
 
-      // PENDING_SIGNOFF metadata is preserved as governance blocker and must NOT route to Utility
-      await expect(
-        service.submitProductAnalysis(
-          pacTx.id,
-          {
-            productCategory: 'Chemical UTL',
-            productName: 'PAC 280 AC',
-            parameters: {
-              al2o3: 29.5,
-              basicity: 50.0,
-              density: 1.25,
-              pH: 4.0,
-              insoluble: 0.2,
+      const mockTxClient = {
+        transaction: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        qcProductAnalysis: {
+          create: jest.fn().mockImplementation(({ data }) => data),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitProductAnalysis(
+        pacTx.id,
+        {
+          productCategory: 'Chemicals',
+          productName: 'PAC 280 AC',
+          parameters: {
+            sensory: {
+              visual: 'Kuning',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
             },
-            revision: 2,
+            ph: 4.0,
+            density: 1.2,
           },
-          mockQcAnalystUser,
-        ),
-      ).rejects.toThrow(BadRequestException);
+          revision: 2,
+        },
+        mockQcAnalystUser,
+      );
+
+      expect(res.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_PASSED);
+      expect(res.data.newStatus).not.toBe(
+        TransactionStatus.WAITING_UTILITY_DISPOSITION,
+      );
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PASSED,
+          }),
+        }),
+      );
     });
 
-    it('RAPID_KLEN_PA never routes to WAITING_UTILITY_DISPOSITION and fails-closed if spec is PENDING_SIGNOFF', async () => {
+    it('RAPID_KLEN_PA operates under ACTIVE_CONFIGURED and routes directly to REJECT on OOS (never WAITING_UTILITY_DISPOSITION)', async () => {
       const rapidTx = {
         id: 'tx-rapid-1',
         status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
         processType: ProcessType.GSP,
-        cargoType: 'Chemical PROD',
+        cargoType: 'Chemicals',
         cargoSubType: 'Rapid Klen',
         revision: 2,
         qcStartAt: new Date(),
@@ -510,23 +515,50 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rapidTx);
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
 
-      // PENDING_SIGNOFF metadata is preserved as governance blocker and must NOT route to Utility
-      await expect(
-        service.submitProductAnalysis(
-          rapidTx.id,
-          {
-            productCategory: 'Chemical PROD',
-            productName: 'Rapid Klen',
-            parameters: {
-              activeIngredient: 31.0,
-              pH: 11.5,
-              density: 1.15,
+      const mockTxClient = {
+        transaction: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        qcProductAnalysis: {
+          create: jest.fn().mockImplementation(({ data }) => data),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: { create: jest.fn().mockResolvedValue({}) },
+      };
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitProductAnalysis(
+        rapidTx.id,
+        {
+          productCategory: 'Chemicals',
+          productName: 'Rapid Klen',
+          parameters: {
+            sensory: {
+              visual: 'Jernih',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
             },
-            revision: 2,
+            alkalinityNa2O: 30.0, // FAIL (< 35.00)
+            alkalinityNaOH: 40.0,
+            ph: 11.5,
+            density: 1.3,
           },
-          mockQcAnalystUser,
-        ),
-      ).rejects.toThrow(BadRequestException);
+          revision: 2,
+        },
+        mockQcAnalystUser,
+      );
+
+      expect(res.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_REJECTED);
+      expect(res.data.newStatus).not.toBe(
+        TransactionStatus.WAITING_UTILITY_DISPOSITION,
+      );
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_REJECTED,
+          }),
+        }),
+      );
     });
   });
 });

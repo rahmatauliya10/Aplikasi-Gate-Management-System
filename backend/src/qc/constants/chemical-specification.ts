@@ -22,7 +22,8 @@ export const OPERATIONAL_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
   approvedBy: null,
   approvedAt: null,
   minOperator: 'GTE',
-  notes: 'Authoritative operational rule for PAC chemical testing under Spec Rev 2.1.',
+  notes:
+    'Authoritative operational rule for PAC chemical testing under Spec Rev 2.1.',
 };
 
 export const RAPID_KLEN_DOC_STRICT_GT_METADATA: ChemicalSpecificationMetadata =
@@ -153,9 +154,7 @@ export function validatePacSensory(s?: PacSensoryParameters): {
   }
 
   const isVisualOk =
-    s.visual === true ||
-    s.visual === 'Kuning' ||
-    s.visual === 'Coklat Jernih';
+    s.visual === true || s.visual === 'Kuning' || s.visual === 'Coklat Jernih';
   if (!isVisualOk) {
     violations.push(
       'Pemeriksaan visual tidak sesuai standar (harus Kuning atau Coklat Jernih)',
@@ -169,9 +168,7 @@ export function validatePacSensory(s?: PacSensoryParameters): {
     s.odor === true ||
     (s.foreignMatters == null && s.odor == null);
   if (!isForeignOk) {
-    violations.push(
-      'Terdeteksi kontaminasi benda asing pada bahan baku PAC',
-    );
+    violations.push('Terdeteksi kontaminasi benda asing pada bahan baku PAC');
   }
 
   const isPackagingOk =

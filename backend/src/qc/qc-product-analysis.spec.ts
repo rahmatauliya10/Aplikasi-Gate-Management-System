@@ -694,7 +694,10 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           productCategory: 'Chemical',
           productName: 'Rapid Klen',
           parameters: {
-            sensory: { visual: 'Jernih', packaging: 'Kemasan & label tidak rusak' },
+            sensory: {
+              visual: 'Jernih',
+              packaging: 'Kemasan & label tidak rusak',
+            },
             alkalinityNa2O: 35.0, // Exactly at 35.0%, not > 35.0%
             ph: 13.0,
             density: 1.45,

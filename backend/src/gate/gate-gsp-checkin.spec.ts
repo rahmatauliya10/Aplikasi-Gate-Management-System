@@ -425,7 +425,9 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
         securityUser,
       ),
     ).rejects.toMatchObject({
-      response: { errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']) },
+      response: {
+        errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']),
+      },
     });
   });
 

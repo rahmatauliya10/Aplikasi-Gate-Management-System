@@ -456,12 +456,6 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         },
       };
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      jest
-        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
-        .mockReturnValue({
-          approvalStatus: 'APPROVED',
-          documentSource: 'SOP-GSP-2026.1',
-        });
 
       const mockTxClient = {
         transaction: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
@@ -487,6 +481,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
             analysisDate: new Date().toISOString(),
             testRound: 1,
             parameters: {
+              calorieBand: 'COAL_5600_6000',
               moisture: 36, // OUT OF SPEC (> 33%)
               caloriValue: 4200,
               ashContent: 8,

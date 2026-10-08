@@ -41,18 +41,14 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
 
   it('validates factual visual parameters correctly', () => {
     expect(validateCoalVisual(validVisual)).toBe(true);
-    expect(
-      validateCoalVisual({ ...validVisual, kondisi: 'Basah' }),
-    ).toBe(false);
-    expect(
-      validateCoalVisual({ ...validVisual, warna: 'Merah' }),
-    ).toBe(false);
+    expect(validateCoalVisual({ ...validVisual, kondisi: 'Basah' })).toBe(
+      false,
+    );
+    expect(validateCoalVisual({ ...validVisual, warna: 'Merah' })).toBe(false);
     expect(
       validateCoalVisual({ ...validVisual, levelRank: 'Unknown Rank' }),
     ).toBe(false);
-    expect(
-      validateCoalVisual({ ...validVisual, kilap: 'Pudar' }),
-    ).toBe(false);
+    expect(validateCoalVisual({ ...validVisual, kilap: 'Pudar' })).toBe(false);
     expect(
       validateCoalVisual({
         ...validVisual,
@@ -105,7 +101,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
         testRound: 1,
         visual: badVisual,
         visualPassed: true, // CLIENT ADVERSARIAL INJECTION
-      } as any,
+      },
       OPERATIONAL_COAL_SPEC_METADATA,
     );
     expect(res.result).toBe('REJECT');
@@ -121,7 +117,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
         testRound: 2,
         visual: badVisual,
         visualPassed: true, // CLIENT ADVERSARIAL INJECTION
-      } as any,
+      },
       OPERATIONAL_COAL_SPEC_METADATA,
     );
     expect(res.result).toBe('REJECT');

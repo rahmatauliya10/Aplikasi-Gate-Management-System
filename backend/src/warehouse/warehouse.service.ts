@@ -693,9 +693,7 @@ export class WarehouseService {
           errors: ['MISSING_RECEIVED_QUANTITY'],
         });
       }
-      decimalReceivedQty = validateReceivedQuantityString(
-        dto.receivedQuantity,
-      );
+      decimalReceivedQty = validateReceivedQuantityString(dto.receivedQuantity);
 
       if (!tx.receiptUnit) {
         throw new BadRequestException({

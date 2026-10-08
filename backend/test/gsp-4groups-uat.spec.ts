@@ -10,6 +10,7 @@ import {
   CorrectionAction,
   WeighbridgeType,
   GspAnalysisProfile,
+  Prisma,
 } from '@prisma/client';
 import { WeighbridgeService } from '../src/weighbridge/weighbridge.service';
 import { WarehouseService } from '../src/warehouse/warehouse.service';
@@ -27,6 +28,7 @@ import {
   TEST_FIXTURE_PAC_SPEC_METADATA,
   TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
 } from '../src/qc/constants/chemical-specification';
+import { GSP_PREUNLOAD_CANONICAL_ITEMS } from '../src/warehouse/constants/gsp-preunload-checklist';
 
 describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
   let weighbridgeService: WeighbridgeService;
@@ -37,6 +39,13 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
   let mockPrismaService: any;
   let mockActivityLogsService: any;
   let mockAuthScopeService: any;
+
+  const validPreUnloadChecklist = {
+    items: GSP_PREUNLOAD_CANONICAL_ITEMS.map((item) => ({
+      code: item.code,
+      result: 'OK' as const,
+    })),
+  };
 
   // Actors
   const securityUser: JwtPayloadUser = {
@@ -189,6 +198,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         grossWeight: null,
         tareWeight: null,
         netWeight: null,
+        suratJalanNumber: 'SJ-SOLAR-001',
+        poNumber: 'PO-SOLAR-001',
+        receiptUnit: WarehouseUnit.LITER,
         warehouseStartAt: null,
         warehouseEndAt: null,
         revision: 1,
@@ -199,6 +211,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           category: 'Fuel',
           subCategory: 'Solar',
           processType: ProcessType.GSP,
+          receiptUnit: WarehouseUnit.LITER,
           isPaRequired: false,
           policyVersion: 'SOP-GSP-2026.1',
           isActive: true,
@@ -306,7 +319,11 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
 
       const whStartRes = await warehouseService.startWarehouse(
         solarTx.id,
-        {},
+        {
+          suratJalanNumber: 'SJ-SOLAR-001',
+          poNumber: 'PO-SOLAR-001',
+          preUnloadChecklist: validPreUnloadChecklist,
+        },
         warehouseUser,
       );
       expect(whStartRes.success).toBe(true);
@@ -337,6 +354,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             status: TransactionStatus.WAREHOUSE_DONE,
             warehouseEndAt: new Date(),
             actualWeight: 25000,
+            receivedQuantity: '25000',
+            receivedUnit: WarehouseUnit.LITER,
             revision: 4,
           }),
         },
@@ -359,6 +378,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       const whCompleteRes = await warehouseService.completeWarehouse(
         solarTx.id,
         {
+          receivedQuantity: '25000',
+          receivedUnit: WarehouseUnit.LITER,
           actualWeight: 25000,
           actualQuantity: 1,
           unit: WarehouseUnit.TRIP,
@@ -368,14 +389,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
       expect(whCompleteRes.success).toBe(true);
 
-      // CRITICAL: verify GSP routes strictly to WAREHOUSE_DONE
+      // CRITICAL: verify GSP routes strictly to WAREHOUSE_DONE and records receivedQuantity & receiptUnit
       expect(
         mockTxClientWhComplete.transaction.updateMany,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             status: TransactionStatus.WAREHOUSE_DONE,
-            actualWeight: 25000,
+            receivedQuantity: new Prisma.Decimal('25000'),
+            receiptUnit: WarehouseUnit.LITER,
           }),
         }),
       );
@@ -411,6 +433,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         cargoSubType: 'PAC 280 AC',
         status: TransactionStatus.REGISTERED,
         grossWeight: null,
+        suratJalanNumber: 'SJ-PAC-001',
+        poNumber: 'PO-PAC-001',
+        receiptUnit: WarehouseUnit.LITER,
         revision: 1,
         productCatalogId: 'cat-pac-uat',
         productCatalog: {
@@ -418,6 +443,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           code: 'PAC-001',
           name: 'PAC 280 AC',
           processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+          receiptUnit: WarehouseUnit.LITER,
           isActive: true,
           isPaRequired: true,
         },
@@ -502,22 +529,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         cb(mockTxClientQc),
       );
 
-      jest
-        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
-        .mockReturnValueOnce({
-          approvalStatus: 'APPROVED',
-          documentSource: 'QA Approved PAC Specification SOP-GSP-2026.1',
-        });
-
       const qcRes = await qcAnalysisService.submitProductAnalysis(
         pacTx.id,
         {
           productCategory: 'Chemicals',
           productName: 'PAC 280 AC',
           parameters: {
-            visualAppearance: 'Cairan Kuning Jernih',
-            foreignMatters: 'NIL',
-            packagingCondition: 'Drum Segel Baik',
+            visualAppearance: 'Kuning',
+            foreignMatters: 'Tidak ada kontaminasi',
+            packagingCondition: 'Kemasan & label tidak rusak',
             ph: 4.25,
             density: 1.22,
             al2o3Content: 10.5,
@@ -580,7 +600,11 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
 
       const whStartRes = await warehouseService.startWarehouse(
         pacTx.id,
-        {},
+        {
+          suratJalanNumber: 'SJ-PAC-001',
+          poNumber: 'PO-PAC-001',
+          preUnloadChecklist: validPreUnloadChecklist,
+        },
         warehouseUser,
       );
       expect(whStartRes.success).toBe(true);
@@ -610,6 +634,17 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: TransactionStatus.QC_VEHICLE_PENDING,
         grossWeight: 20000,
         revision: 2,
+        receiptUnit: WarehouseUnit.LITER,
+        productCatalog: {
+          id: 'cat-rpd-uat',
+          code: 'RPD-001',
+          name: 'Rapid Klen',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+          receiptUnit: WarehouseUnit.LITER,
+          isActive: true,
+          isPaRequired: true,
+        },
       };
 
       // 1. QC Lab: Submit PA with out-of-spec Alkalinity -> Decision: REJECT
@@ -632,12 +667,6 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientQc),
       );
-      jest
-        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
-        .mockReturnValueOnce({
-          approvalStatus: 'APPROVED',
-          documentSource: 'QA Approved Rapid Klen Specification SOP-GSP-2026.1',
-        });
 
       const qcRes = await qcAnalysisService.submitProductAnalysis(
         rpdTx.id,
@@ -715,12 +744,16 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         weighInAt: new Date(),
         grossWeight: 30000,
         revision: 2,
+        receiptUnit: WarehouseUnit.KG,
         productCatalogId: 'cat-coal-uat',
         productCatalog: {
           id: 'cat-coal-uat',
           code: 'COAL-001',
           name: 'Batubara',
           processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+          receiptUnit: WarehouseUnit.KG,
+          calorieBand: 'COAL_5600_6000',
           isActive: true,
           isPaRequired: true,
         },
@@ -746,19 +779,23 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientRound1),
       );
-      jest
-        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
-        .mockReturnValue({
-          approvalStatus: 'APPROVED',
-          documentSource: 'QA Approved Coal Specification SOP-GSP-2026.1',
-        });
 
       const r1Res = await qcAnalysisService.submitProductAnalysis(
         coalTx.id,
         {
           productCategory: 'Coal',
           productName: 'Batubara',
-          parameters: { sensory: 'OK', moisture: 36.0 },
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: {
+              kondisi: 'Kering (Tidak Basah)',
+              warna: 'Hitam',
+              levelRank: 'Medium Rank Coal',
+              kilap: 'Hitam Mengkilap',
+              bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+            },
+            moisture: 36.0,
+          },
           result: QcResult.REJECTED,
           decision: AnalysisDecision.RETEST_REQUIRED,
           notes:
@@ -821,7 +858,17 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           productCategory: 'Coal',
           productName: 'Batubara',
           testRound: 2,
-          parameters: { sensory: 'OK', moisture: 35.5 },
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: {
+              kondisi: 'Kering (Tidak Basah)',
+              warna: 'Hitam',
+              levelRank: 'Medium Rank Coal',
+              kilap: 'Hitam Mengkilap',
+              bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+            },
+            moisture: 35.5,
+          },
           result: QcResult.REJECTED,
           decision: AnalysisDecision.REJECT,
           notes:
@@ -935,7 +982,11 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
 
       const whStartRes = await warehouseService.startWarehouse(
         coalTx.id,
-        {},
+        {
+          suratJalanNumber: 'SJ-COAL-001',
+          poNumber: 'PO-COAL-001',
+          preUnloadChecklist: validPreUnloadChecklist,
+        },
         warehouseUser,
       );
       expect(whStartRes.success).toBe(true);
@@ -959,6 +1010,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: TransactionStatus.PA_NOT_REQUIRED,
         warehouseStartAt: null,
         revision: 2,
+        receiptUnit: WarehouseUnit.LITER,
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
@@ -987,6 +1039,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         subCategory: 'Batubara',
         processType: ProcessType.GSP,
         gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        receiptUnit: WarehouseUnit.KG,
         isActive: true,
         isPaRequired: true,
         policyVersion: 'SOP-GSP-2026.1',
@@ -1122,6 +1175,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         tareWeight: null,
         netWeight: null,
         revision: 2,
+        receiptUnit: WarehouseUnit.LITER,
       };
 
       // 1. Submit out-of-spec chemical analysis -> REJECT
@@ -1144,12 +1198,6 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
         cb(mockTxClientReject),
       );
-      jest
-        .spyOn(qcAnalysisService, 'checkSpecificationApprovalStatus')
-        .mockReturnValueOnce({
-          approvalStatus: 'APPROVED',
-          documentSource: 'QA Approved Rapid Klen Specification SOP-GSP-2026.1',
-        });
 
       const rejectRes = await qcAnalysisService.submitProductAnalysis(
         chemRejectTx.id,
@@ -1157,7 +1205,11 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           productCategory: 'Chemicals',
           productName: 'Rapid Klen',
           parameters: {
-            sensory: { visual: false, packaging: true },
+            sensory: {
+              visual: 'Keruh',
+              foreignMatters: 'Ada kontaminasi partikel',
+              packaging: 'Kemasan & label tidak rusak',
+            },
             alkalinityNa2O: 31.5, // Below 35.0% min
             ph: 11.2, // Below 12.0 min
             density: 1.35, // Below 1.400 min
@@ -1302,6 +1354,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: TransactionStatus.QC_VEHICLE_PASSED,
         warehouseStartAt: null,
         revision: 3,
+        receiptUnit: WarehouseUnit.KG,
       };
 
       const pacCatalog = {
@@ -1312,6 +1365,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         subCategory: 'PAC 280 AC',
         processType: ProcessType.GSP,
         gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        receiptUnit: WarehouseUnit.LITER,
         isPaRequired: true,
         isActive: true,
       };

@@ -40,21 +40,21 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
       const resKuning = evaluatePacAnalysis({
         sensory: { ...validPacSensory, visual: 'Kuning' },
         ph: 4.0,
-        density: 1.20,
+        density: 1.2,
       });
       expect(resKuning.result).toBe('PASS');
 
       const resCoklat = evaluatePacAnalysis({
         sensory: { ...validPacSensory, visual: 'Coklat Jernih' },
         ph: 4.0,
-        density: 1.20,
+        density: 1.2,
       });
       expect(resCoklat.result).toBe('PASS');
 
       const resKeruh = evaluatePacAnalysis({
         sensory: { ...validPacSensory, visual: 'Keruh' },
         ph: 4.0,
-        density: 1.20,
+        density: 1.2,
       });
       expect(resKeruh.result).toBe('REJECT');
     });
@@ -67,8 +67,8 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
             foreignMatters: 'Tidak ada kontaminasi',
             packagingLabel: 'Kemasan & label tidak rusak',
           },
-          ph: 3.50, // exact lower limit
-          density: 1.170, // exact lower limit
+          ph: 3.5, // exact lower limit
+          density: 1.17, // exact lower limit
         },
         'PAC 280 AC',
         OPERATIONAL_PAC_SPEC_METADATA,
@@ -83,8 +83,8 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
             foreignMatters: 'Tidak ada kontaminasi',
             packagingLabel: 'Kemasan & label tidak rusak',
           },
-          ph: 5.00, // exact upper limit
-          density: 1.260, // exact upper limit
+          ph: 5.0, // exact upper limit
+          density: 1.26, // exact upper limit
         },
         'PAC 280 AC',
         OPERATIONAL_PAC_SPEC_METADATA,
@@ -95,7 +95,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
 
     it('should fail PAC when pH or density are outside inclusive boundaries', () => {
       const resLowPh = evaluatePacAnalysis(
-        { sensory: validPacSensory, ph: 3.49, density: 1.200 },
+        { sensory: validPacSensory, ph: 3.49, density: 1.2 },
         'PAC 280 AC',
         OPERATIONAL_PAC_SPEC_METADATA,
       );
@@ -103,21 +103,21 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
       expect(resLowPh.decision).toBe('REJECT');
 
       const resHighPh = evaluatePacAnalysis(
-        { sensory: validPacSensory, ph: 5.01, density: 1.200 },
+        { sensory: validPacSensory, ph: 5.01, density: 1.2 },
         'PAC 280 AC',
         OPERATIONAL_PAC_SPEC_METADATA,
       );
       expect(resHighPh.result).toBe('REJECT');
 
       const resLowDens = evaluatePacAnalysis(
-        { sensory: validPacSensory, ph: 4.00, density: 1.169 },
+        { sensory: validPacSensory, ph: 4.0, density: 1.169 },
         'PAC 280 AC',
         OPERATIONAL_PAC_SPEC_METADATA,
       );
       expect(resLowDens.result).toBe('REJECT');
 
       const resHighDens = evaluatePacAnalysis(
-        { sensory: validPacSensory, ph: 4.00, density: 1.261 },
+        { sensory: validPacSensory, ph: 4.0, density: 1.261 },
         'PAC 280 AC',
         OPERATIONAL_PAC_SPEC_METADATA,
       );
@@ -148,7 +148,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         evaluateRapidKlenAnalysis(
           {
             sensory: validRapidSensory,
-            alkalinityNa2O: 35.00,
+            alkalinityNa2O: 35.0,
             alkalinityNaOH: 45.17,
             ph: 12.001,
             density: 1.401,
@@ -180,7 +180,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
             sensory: validRapidSensory,
             alkalinityNa2O: 35.01,
             alkalinityNaOH: 45.17,
-            ph: 12.000,
+            ph: 12.0,
             density: 1.401,
           },
           'Rapid Klen',
@@ -196,7 +196,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
             alkalinityNa2O: 35.01,
             alkalinityNaOH: 45.17,
             ph: 12.001,
-            density: 1.400,
+            density: 1.4,
           },
           'Rapid Klen',
           OPERATIONAL_RAPID_KLEN_SPEC_METADATA,

@@ -900,9 +900,15 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       it('blocks startWarehouse if suratJalanNumber is missing with MISSING_SURAT_JALAN', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
-        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseCoalTx,
+        );
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+          mockPaRecord,
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
 
         await expect(
           warehouseService.startWarehouse(
@@ -916,14 +922,23 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('blocks startWarehouse if poNumber is missing with MISSING_PO_NUMBER', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
-        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseCoalTx,
+        );
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+          mockPaRecord,
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
 
         await expect(
           warehouseService.startWarehouse(
             'tx-coal-preunload-gate',
-            { suratJalanNumber: 'SJ-001', preUnloadChecklist: validGspChecklist },
+            {
+              suratJalanNumber: 'SJ-001',
+              preUnloadChecklist: validGspChecklist,
+            },
             mockUser,
           ),
         ).rejects.toMatchObject({
@@ -932,9 +947,15 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('blocks startWarehouse if preUnloadChecklist is missing with MISSING_PREUNLOAD_CHECKLIST and logs GSP_PREUNLOAD_CHECKLIST_INVALID', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
-        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseCoalTx,
+        );
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+          mockPaRecord,
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
 
         await expect(
           warehouseService.startWarehouse(
@@ -943,7 +964,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             mockUser,
           ),
         ).rejects.toMatchObject({
-          response: { errors: expect.arrayContaining(['MISSING_PREUNLOAD_CHECKLIST']) },
+          response: {
+            errors: expect.arrayContaining(['MISSING_PREUNLOAD_CHECKLIST']),
+          },
         });
 
         expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
@@ -955,9 +978,15 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('blocks startWarehouse on malformed checklist (unknown code, duplicates, missing codes) and logs GSP_PREUNLOAD_CHECKLIST_INVALID', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
-        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseCoalTx,
+        );
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+          mockPaRecord,
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
 
         const malformedChecklist = {
           items: [
@@ -969,11 +998,19 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         await expect(
           warehouseService.startWarehouse(
             'tx-coal-preunload-gate',
-            { suratJalanNumber: 'SJ-001', poNumber: 'PO-001', preUnloadChecklist: malformedChecklist },
+            {
+              suratJalanNumber: 'SJ-001',
+              poNumber: 'PO-001',
+              preUnloadChecklist: malformedChecklist,
+            },
             mockUser,
           ),
         ).rejects.toMatchObject({
-          response: { errors: expect.arrayContaining(['INVALID_PREUNLOAD_CHECKLIST_STRUCTURE']) },
+          response: {
+            errors: expect.arrayContaining([
+              'INVALID_PREUNLOAD_CHECKLIST_STRUCTURE',
+            ]),
+          },
         });
 
         expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
@@ -985,14 +1022,24 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('blocks startWarehouse if any checklist item is NOT_OK, logs GSP_PREUNLOAD_CHECKLIST_FAILED, leaves status unchanged, and creates no process', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
-        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseCoalTx,
+        );
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+          mockPaRecord,
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
 
         const failedChecklist = {
           items: validGspChecklist.items.map((item) =>
             item.code === 'DOOR_SEAL_GOOD'
-              ? { code: item.code, result: 'NOT_OK' as const, notes: 'Segel pintu rusak dan terputus' }
+              ? {
+                  code: item.code,
+                  result: 'NOT_OK' as const,
+                  notes: 'Segel pintu rusak dan terputus',
+                }
               : item,
           ),
         };
@@ -1000,10 +1047,16 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         await expect(
           warehouseService.startWarehouse(
             'tx-coal-preunload-gate',
-            { suratJalanNumber: 'SJ-001', poNumber: 'PO-001', preUnloadChecklist: failedChecklist },
+            {
+              suratJalanNumber: 'SJ-001',
+              poNumber: 'PO-001',
+              preUnloadChecklist: failedChecklist,
+            },
             mockUser,
           ),
-        ).rejects.toThrow('Pemeriksaan pra-bongkar belum memenuhi persyaratan.');
+        ).rejects.toThrow(
+          'Pemeriksaan pra-bongkar belum memenuhi persyaratan.',
+        );
 
         expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -1015,13 +1068,21 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
         // Verify no database mutation occurred
         expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
-        expect(mockPrismaService.warehouseProcess.create).not.toHaveBeenCalled();
+        expect(
+          mockPrismaService.warehouseProcess.create,
+        ).not.toHaveBeenCalled();
       });
 
       it('permits startWarehouse when all 9 items are OK, transitions to WAREHOUSE_IN_PROGRESS, and persists canonical labels and version', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
-        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseCoalTx,
+        );
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+          mockPaRecord,
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
 
         const mockTxClient = {
           transaction: {
@@ -1029,7 +1090,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             findUnique: jest.fn().mockResolvedValue({
               ...baseCoalTx,
               status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
-              warehouseStartBy: { id: mockUser.id, name: 'Admin', role: 'ADMIN' },
+              warehouseStartBy: {
+                id: mockUser.id,
+                name: 'Admin',
+                role: 'ADMIN',
+              },
             }),
           },
           warehouseProcess: {
@@ -1041,7 +1106,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           },
         };
 
-        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
 
         const res = await warehouseService.startWarehouse(
           'tx-coal-preunload-gate',
@@ -1379,7 +1446,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       it('rejects GSP completion if receivedQuantity is missing', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseGspInProgress,
+        );
 
         await expect(
           warehouseService.completeWarehouse(
@@ -1388,12 +1457,16 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             mockUser,
           ),
         ).rejects.toMatchObject({
-          response: { errors: expect.arrayContaining(['MISSING_RECEIVED_QUANTITY']) },
+          response: {
+            errors: expect.arrayContaining(['MISSING_RECEIVED_QUANTITY']),
+          },
         });
       });
 
       it('rejects receivedQuantity with scientific notation or non-numeric characters', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseGspInProgress,
+        );
 
         await expect(
           warehouseService.completeWarehouse(
@@ -1407,12 +1480,17 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('rejects receivedQuantity with scale > 3 decimal places with INVALID_RECEIVED_QUANTITY_SCALE', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseGspInProgress,
+        );
 
         await expect(
           warehouseService.completeWarehouse(
             'tx-gsp-receiving',
-            { receivedQuantity: '8000.2507', receivedUnit: WarehouseUnit.LITER },
+            {
+              receivedQuantity: '8000.2507',
+              receivedUnit: WarehouseUnit.LITER,
+            },
             mockUser,
           ),
         ).rejects.toMatchObject({
@@ -1421,12 +1499,17 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('rejects receivedQuantity with overflow > 9 integer digits', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseGspInProgress,
+        );
 
         await expect(
           warehouseService.completeWarehouse(
             'tx-gsp-receiving',
-            { receivedQuantity: '1234567890.123', receivedUnit: WarehouseUnit.LITER },
+            {
+              receivedQuantity: '1234567890.123',
+              receivedUnit: WarehouseUnit.LITER,
+            },
             mockUser,
           ),
         ).rejects.toMatchObject({
@@ -1435,7 +1518,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('rejects zero or negative receivedQuantity', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseGspInProgress,
+        );
 
         await expect(
           warehouseService.completeWarehouse(
@@ -1449,7 +1534,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('rejects receivedUnit mismatch with transaction receiptUnit with INVALID_RECEIPT_UNIT', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseGspInProgress,
+        );
 
         await expect(
           warehouseService.completeWarehouse(
@@ -1458,7 +1545,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             mockUser,
           ),
         ).rejects.toMatchObject({
-          response: { errors: expect.arrayContaining(['INVALID_RECEIPT_UNIT']) },
+          response: {
+            errors: expect.arrayContaining(['INVALID_RECEIPT_UNIT']),
+          },
         });
       });
 
@@ -1475,12 +1564,16 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             mockUser,
           ),
         ).rejects.toMatchObject({
-          response: { errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']) },
+          response: {
+            errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']),
+          },
         });
       });
 
       it('accepts valid decimal strings (e.g. "8000.250") and persists Prisma.Decimal atomically to Transaction and WarehouseProcess', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseGspInProgress);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          baseGspInProgress,
+        );
 
         const mockTxClient = {
           transaction: {
@@ -1493,15 +1586,21 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             }),
           },
           warehouseProcess: {
-            findFirst: jest.fn().mockResolvedValue({ id: 'wp-rec-1', revision: 1 }),
-            update: jest.fn().mockResolvedValue({ id: 'wp-rec-1', revision: 2 }),
+            findFirst: jest
+              .fn()
+              .mockResolvedValue({ id: 'wp-rec-1', revision: 1 }),
+            update: jest
+              .fn()
+              .mockResolvedValue({ id: 'wp-rec-1', revision: 2 }),
           },
           transactionStatusHistory: {
             create: jest.fn().mockResolvedValue({}),
           },
         };
 
-        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
 
         const res = await warehouseService.completeWarehouse(
           'tx-gsp-receiving',

@@ -194,9 +194,7 @@ export class ProductCatalogService {
         ? dto.gspAnalysisProfile
         : existing.gspAnalysisProfile;
     const targetReceiptUnit =
-      dto.receiptUnit !== undefined
-        ? dto.receiptUnit
-        : existing.receiptUnit;
+      dto.receiptUnit !== undefined ? dto.receiptUnit : existing.receiptUnit;
     const targetCode = dto.code ? dto.code.trim().toUpperCase() : existing.code;
 
     let targetIsPaRequired =

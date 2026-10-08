@@ -386,8 +386,12 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         isActive: true,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(initialCoalTx);
-      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(pacTargetCatalog);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        initialCoalTx,
+      );
+      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(
+        pacTargetCatalog,
+      );
 
       const mockTxClient = {
         transaction: {

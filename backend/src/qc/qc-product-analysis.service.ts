@@ -328,10 +328,7 @@ export class QcProductAnalysisService {
     let evalResult: {
       result?: 'PASS' | 'REJECT';
       decision?:
-        | 'RELEASE'
-        | 'RETEST_REQUIRED'
-        | 'PENDING_DISPOSITION'
-        | 'REJECT';
+        'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
       notes?: string;
       isConfigured?: boolean;
     };
@@ -427,8 +424,7 @@ export class QcProductAnalysisService {
               rawParams.visualAppearance ??
               rawParams.visual,
             foreignMatters:
-              rawParams.sensory?.foreignMatters ??
-              rawParams.foreignMatters,
+              rawParams.sensory?.foreignMatters ?? rawParams.foreignMatters,
             packagingLabel:
               rawParams.sensory?.packagingLabel ??
               rawParams.sensory?.packaging ??
@@ -463,8 +459,7 @@ export class QcProductAnalysisService {
               rawParams.visualAppearance ??
               rawParams.visual,
             foreignMatters:
-              rawParams.sensory?.foreignMatters ??
-              rawParams.foreignMatters,
+              rawParams.sensory?.foreignMatters ?? rawParams.foreignMatters,
             packagingLabel:
               rawParams.sensory?.packagingLabel ??
               rawParams.sensory?.packaging ??

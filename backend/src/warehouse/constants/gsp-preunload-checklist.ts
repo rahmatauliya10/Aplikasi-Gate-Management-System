@@ -16,8 +16,7 @@ export const GSP_PREUNLOAD_CANONICAL_ITEMS: CanonicalChecklistItem[] = [
   { code: 'DOOR_SEAL_GOOD', label: 'Seal pintu kendaraan baik' },
   {
     code: 'NO_EXPIRED_GAS_CYLINDER',
-    label:
-      'Tidak ditemukan tabung gas yang sudah Exp date masa uji berlakunya',
+    label: 'Tidak ditemukan tabung gas yang sudah Exp date masa uji berlakunya',
   },
   { code: 'ITEMS_NEATLY_ARRANGED', label: 'Barang tertata rapi' },
   {

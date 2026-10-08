@@ -20,7 +20,8 @@ export const OPERATIONAL_COAL_SPEC_METADATA: SpecificationMetadata = {
   ruleStatus: 'ACTIVE_CONFIGURED',
   approvedBy: null,
   approvedAt: null,
-  notes: 'Authoritative operational rule for boiler coal testing under Spec Rev 2.1.',
+  notes:
+    'Authoritative operational rule for boiler coal testing under Spec Rev 2.1.',
 };
 
 export const TEST_FIXTURE_COAL_SPEC_METADATA: SpecificationMetadata = {
@@ -72,9 +73,11 @@ export function validateCoalVisual(v?: CoalVisualParameters | null): boolean {
     'Medium Rank Coal',
     'Low Rank Coal',
   ].includes(v.levelRank);
-  const isKilapOk = ['Hitam Mengkilap', 'Hitam Kecoklatan', 'Mudah Lapuk'].includes(
-    v.kilap,
-  );
+  const isKilapOk = [
+    'Hitam Mengkilap',
+    'Hitam Kecoklatan',
+    'Mudah Lapuk',
+  ].includes(v.kilap);
   const isPengotorOk =
     v.bahanPengotor === 'Tidak ada kontaminasi batuan maupun tanah';
   return isKondisiOk && isWarnaOk && isRankOk && isKilapOk && isPengotorOk;
