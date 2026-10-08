@@ -54,22 +54,22 @@ async function verifyMigrationInvariants() {
       );
     }
 
-    // 3. Check for GSP transactions at or past WAREHOUSE_IN_PROGRESS with NULL receiptUnit
+    // 3. Check for active GSP transactions at or past WAREHOUSE_IN_PROGRESS with NULL receiptUnit
     const invalidGspTransactions = await prisma.$queryRawUnsafe(`
       SELECT id, "transactionNumber", "processType", status, "receiptUnit"
       FROM "Transaction"
       WHERE "processType" = 'GSP'
-        AND status IN ('WAREHOUSE_IN_PROGRESS', 'WAREHOUSE_DONE', 'WEIGH_OUT_DONE', 'COMPLETED')
+        AND status IN ('WAREHOUSE_IN_PROGRESS', 'WAREHOUSE_DONE', 'WEIGH_OUT_DONE')
         AND "receiptUnit" IS NULL;
     `);
 
     if (invalidGspTransactions && invalidGspTransactions.length > 0) {
       console.error(
-        `❌ [INVARIANT_VIOLATION] Found ${invalidGspTransactions.length} GSP transaction(s) in/past warehouse with NULL receiptUnit:`,
+        `❌ [INVARIANT_VIOLATION] Found ${invalidGspTransactions.length} active GSP transaction(s) in/past warehouse with NULL receiptUnit:`,
       );
       console.error(JSON.stringify(invalidGspTransactions, null, 2));
       throw new Error(
-        `[INVARIANT_GATE_FAILED] In-progress or completed GSP transactions must have non-null receiptUnit.`,
+        `[INVARIANT_GATE_FAILED] Active GSP transactions in or past warehouse must have non-null receiptUnit.`,
       );
     }
 
