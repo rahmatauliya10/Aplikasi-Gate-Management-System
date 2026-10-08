@@ -7,6 +7,8 @@ import {
 import {
   OPERATIONAL_PAC_SPEC_METADATA,
   OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+  TEST_FIXTURE_PAC_SPEC_METADATA,
+  TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
   ChemicalSpecificationMetadata,
 } from '../constants/chemical-specification';
 
@@ -37,11 +39,11 @@ export class SpecificationProvider implements ISpecificationProvider {
       ) {
         if (process.env.NODE_ENV === 'production') {
           this.logger.error(
-            '[SECURITY ALERT] CRITICAL: Test fixture requested or activated in production without full test harness verification! Test fixture activation BLOCKED; strictly defaulting to operational PENDING_SIGNOFF specification.',
+            '[SECURITY ALERT] CRITICAL: Test fixture requested or activated in production without full test harness verification! Test fixture activation BLOCKED; strictly defaulting to operational ACTIVE_CONFIGURED specification.',
           );
         } else {
           this.logger.warn(
-            '[SECURITY] Test fixture requested, but ENABLE_TEST_SPEC_FIXTURES or GMS_TEST_HARNESS is not true. Test fixture activation rejected; defaulting to operational PENDING_SIGNOFF specification.',
+            '[SECURITY] Test fixture requested, but ENABLE_TEST_SPEC_FIXTURES or GMS_TEST_HARNESS is not true. Test fixture activation rejected; defaulting to operational ACTIVE_CONFIGURED specification.',
           );
         }
       }
@@ -59,10 +61,16 @@ export class SpecificationProvider implements ISpecificationProvider {
   }
 
   getPacSpec(): ChemicalSpecificationMetadata {
+    if (this.isTestFixtureActive()) {
+      return TEST_FIXTURE_PAC_SPEC_METADATA;
+    }
     return OPERATIONAL_PAC_SPEC_METADATA;
   }
 
   getRapidKlenSpec(): ChemicalSpecificationMetadata {
+    if (this.isTestFixtureActive()) {
+      return TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA;
+    }
     return OPERATIONAL_RAPID_KLEN_SPEC_METADATA;
   }
 }

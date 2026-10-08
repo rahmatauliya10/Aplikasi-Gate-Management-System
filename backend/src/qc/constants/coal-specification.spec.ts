@@ -1,166 +1,197 @@
 import {
-  COAL_CALORIE_SPECIFICATIONS,
-  DEFAULT_COAL_CALORIE,
-  getCoalMoistureLimit,
+  CONFIGURED_COAL_CALORIE_BANDS,
+  validateCoalVisual,
   evaluateCoalAnalysis,
   TEST_FIXTURE_COAL_SPEC_METADATA,
   OPERATIONAL_COAL_SPEC_METADATA,
+  CoalVisualParameters,
 } from './coal-specification';
 
-describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 - No Utility Flow)', () => {
-  it('correctly maps all calorie tiers to their specified moisture thresholds', () => {
-    expect(COAL_CALORIE_SPECIFICATIONS['3800'].maxTotalMoisturePct).toBe(36.0);
-    expect(COAL_CALORIE_SPECIFICATIONS['4200'].maxTotalMoisturePct).toBe(33.0);
-    expect(COAL_CALORIE_SPECIFICATIONS['4800'].maxTotalMoisturePct).toBe(30.0);
-    expect(COAL_CALORIE_SPECIFICATIONS['5000'].maxTotalMoisturePct).toBe(28.0);
-    expect(COAL_CALORIE_SPECIFICATIONS['5500'].maxTotalMoisturePct).toBe(26.0);
-    expect(DEFAULT_COAL_CALORIE).toBe('4200');
+describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', () => {
+  const validVisual: CoalVisualParameters = {
+    kondisi: 'Kering (Tidak Basah)',
+    warna: 'Hitam',
+    levelRank: 'Medium Rank Coal',
+    kilap: 'Hitam Mengkilap',
+    bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+  };
+
+  it('correctly locks only the two configured calorie bands: COAL_5600_6000 (33%) and COAL_GT_6000 (25%)', () => {
+    expect(
+      CONFIGURED_COAL_CALORIE_BANDS['COAL_5600_6000'].maxTotalMoisturePct,
+    ).toBe(33.0);
+    expect(
+      CONFIGURED_COAL_CALORIE_BANDS['COAL_GT_6000'].maxTotalMoisturePct,
+    ).toBe(25.0);
+    expect(CONFIGURED_COAL_CALORIE_BANDS['4200']).toBeUndefined();
+    expect(CONFIGURED_COAL_CALORIE_BANDS['3800']).toBeUndefined();
   });
 
-  it('resolves moisture limits with fallback for unknown or missing calorie', () => {
-    expect(getCoalMoistureLimit('4200')).toBe(33.0);
-    expect(getCoalMoistureLimit('5500')).toBe(26.0);
-    expect(getCoalMoistureLimit(undefined)).toBe(33.0);
-    expect(getCoalMoistureLimit('9999')).toBe(33.0);
-  });
-
-  it('enforces that OPERATIONAL_COAL_SPEC_METADATA is PENDING_SIGNOFF with null approver (Provenance Audit Gate)', () => {
-    expect(OPERATIONAL_COAL_SPEC_METADATA.approvalStatus).toBe(
-      'PENDING_SIGNOFF',
-    );
+  it('enforces that OPERATIONAL_COAL_SPEC_METADATA is ACTIVE_CONFIGURED with null approver', () => {
+    expect(OPERATIONAL_COAL_SPEC_METADATA.ruleStatus).toBe('ACTIVE_CONFIGURED');
     expect(OPERATIONAL_COAL_SPEC_METADATA.approvedBy).toBeNull();
     expect(OPERATIONAL_COAL_SPEC_METADATA.approvedAt).toBeNull();
-    expect(OPERATIONAL_COAL_SPEC_METADATA.version).toBe('1.0.0-provisional');
+    expect(OPERATIONAL_COAL_SPEC_METADATA.version).toBe('2026.1-active');
   });
 
-  it('keeps TEST_FIXTURE_COAL_SPEC_METADATA as simulated APPROVED isolated for automated test harnesses', () => {
-    expect(TEST_FIXTURE_COAL_SPEC_METADATA.approvalStatus).toBe('APPROVED');
+  it('keeps TEST_FIXTURE_COAL_SPEC_METADATA as simulated TEST_FIXTURE for automated test harnesses', () => {
+    expect(TEST_FIXTURE_COAL_SPEC_METADATA.ruleStatus).toBe('TEST_FIXTURE');
     expect(TEST_FIXTURE_COAL_SPEC_METADATA.approvedBy).toBe('QA_MOCK_LEAD');
   });
 
-  it('evaluates PASS / RELEASE candidate under operational specification when moisture within limit', () => {
-    const evalResult = evaluateCoalAnalysis({
-      targetCalorie: '4200',
-      totalMoisture: 31.5,
-      testRound: 1,
-      sensoryPassed: true,
-    });
-
-    expect(evalResult.result).toBe('PASS');
-    expect(evalResult.decision).toBe('RELEASE');
-    expect(evalResult.isWithinSpec).toBe(true);
-    expect(evalResult.specMetadata.approvalStatus).toBe('PENDING_SIGNOFF');
-    expect(evalResult.notes).toContain('Lulus spesifikasi kadar air batubara');
+  it('validates factual visual parameters correctly', () => {
+    expect(validateCoalVisual(validVisual)).toBe(true);
+    expect(
+      validateCoalVisual({ ...validVisual, kondisi: 'Basah' }),
+    ).toBe(false);
+    expect(
+      validateCoalVisual({ ...validVisual, warna: 'Merah' }),
+    ).toBe(false);
+    expect(
+      validateCoalVisual({ ...validVisual, levelRank: 'Unknown Rank' }),
+    ).toBe(false);
+    expect(
+      validateCoalVisual({ ...validVisual, kilap: 'Pudar' }),
+    ).toBe(false);
+    expect(
+      validateCoalVisual({
+        ...validVisual,
+        bahanPengotor: 'Banyak batu dan tanah',
+      }),
+    ).toBe(false);
+    expect(validateCoalVisual(null)).toBe(false);
+    expect(validateCoalVisual(undefined)).toBe(false);
   });
 
-  it('evaluates PASS / RELEASE when within limit for standard GAR 4200 using approved fixture specification', () => {
-    const evalResult = evaluateCoalAnalysis(
+  it('should evaluate COAL_5600_6000 with TM <= 33.0% and valid factual visual as PASS / RELEASE under ACTIVE_CONFIGURED', () => {
+    const res = evaluateCoalAnalysis(
       {
-        targetCalorie: '4200',
-        totalMoisture: 31.5,
+        calorieBand: 'COAL_5600_6000',
+        totalMoisture: 32.5,
         testRound: 1,
-        sensoryPassed: true,
+        visual: validVisual,
       },
-      TEST_FIXTURE_COAL_SPEC_METADATA,
+      OPERATIONAL_COAL_SPEC_METADATA,
     );
-
-    expect(evalResult.result).toBe('PASS');
-    expect(evalResult.decision).toBe('RELEASE');
-    expect(evalResult.isWithinSpec).toBe(true);
-    expect(evalResult.maxAllowedMoisture).toBe(33.0);
+    expect(res.decision).toBe('RELEASE');
+    expect(res.result).toBe('PASS');
+    expect(res.isWithinSpec).toBe(true);
+    expect(res.maxAllowedMoisture).toBe(33.0);
+    expect(res.ruleStatus).toBe('ACTIVE_CONFIGURED');
   });
 
-  it('evaluates PASS / RELEASE for high-calorie GAR 5500 tier when <= 26% with approved fixture', () => {
-    const evalResult = evaluateCoalAnalysis(
+  it('should evaluate COAL_GT_6000 with TM <= 25.0% and valid factual visual as PASS / RELEASE under ACTIVE_CONFIGURED', () => {
+    const res = evaluateCoalAnalysis(
       {
-        targetCalorie: '5500',
-        totalMoisture: 25.4,
+        calorieBand: 'COAL_GT_6000',
+        totalMoisture: 24.8,
         testRound: 1,
-        sensoryPassed: true,
+        visual: validVisual,
       },
-      TEST_FIXTURE_COAL_SPEC_METADATA,
+      OPERATIONAL_COAL_SPEC_METADATA,
     );
-
-    expect(evalResult.result).toBe('PASS');
-    expect(evalResult.decision).toBe('RELEASE');
-    expect(evalResult.maxAllowedMoisture).toBe(26.0);
+    expect(res.decision).toBe('RELEASE');
+    expect(res.result).toBe('PASS');
+    expect(res.isWithinSpec).toBe(true);
+    expect(res.maxAllowedMoisture).toBe(25.0);
   });
 
-  it('triggers RETEST_REQUIRED in Round 1 and strict REJECT in Round 2 (NO Utility disposition)', () => {
-    const round1Result = evaluateCoalAnalysis({
-      targetCalorie: '5500',
-      totalMoisture: 28.5,
-      testRound: 1,
-      sensoryPassed: true,
-    });
-
-    expect(round1Result.result).toBe('REJECT');
-    expect(round1Result.decision).toBe('RETEST_REQUIRED');
-    expect(round1Result.maxAllowedMoisture).toBe(26.0);
-    expect(round1Result.notes).toContain('Diperlukan uji ulang (Round 2)');
-
-    const round2Result = evaluateCoalAnalysis({
-      targetCalorie: '5500',
-      totalMoisture: 28.5,
-      testRound: 2,
-      sensoryPassed: true,
-    });
-
-    expect(round2Result.result).toBe('REJECT');
-    expect(round2Result.decision).toBe('REJECT');
-    expect(round2Result.maxAllowedMoisture).toBe(26.0);
-    expect(round2Result.notes).toContain(
-      'Muatan ditolak (QC_VEHICLE_REJECTED)',
-    );
-    expect(round2Result.notes).not.toContain('Utility');
-  });
-
-  it('triggers RETEST_REQUIRED in Round 1 when moisture exceeds 26% on GAR 5500 under approved specification', () => {
-    const evalResult = evaluateCoalAnalysis(
+  it('ADVERSARIAL CASE A: Round 1 factual visual OOS with client visualPassed=true must RETEST_REQUIRED, not final reject', () => {
+    const badVisual = { ...validVisual, kondisi: 'Basah' };
+    const res = evaluateCoalAnalysis(
       {
-        targetCalorie: '5500',
-        totalMoisture: 28.5,
+        calorieBand: 'COAL_5600_6000',
+        totalMoisture: 28.0, // TM is compliant (<= 33.0%)
         testRound: 1,
-        sensoryPassed: true,
-      },
-      TEST_FIXTURE_COAL_SPEC_METADATA,
+        visual: badVisual,
+        visualPassed: true, // CLIENT ADVERSARIAL INJECTION
+      } as any,
+      OPERATIONAL_COAL_SPEC_METADATA,
     );
-
-    expect(evalResult.result).toBe('REJECT');
-    expect(evalResult.decision).toBe('RETEST_REQUIRED');
-    expect(evalResult.maxAllowedMoisture).toBe(26.0);
-    expect(evalResult.notes).toContain('Kadar air melebihi batas spesifikasi');
+    expect(res.result).toBe('REJECT');
+    expect(res.decision).toBe('RETEST_REQUIRED');
   });
 
-  it('triggers strict REJECT in Round 2 when moisture still exceeds limit (NO Utility disposition)', () => {
-    const evalResult = evaluateCoalAnalysis(
+  it('ADVERSARIAL CASE B: Round 2 factual visual OOS with client visualPassed=true must final REJECT', () => {
+    const badVisual = { ...validVisual, kondisi: 'Basah' };
+    const res = evaluateCoalAnalysis(
       {
-        targetCalorie: '5500',
-        totalMoisture: 27.2,
+        calorieBand: 'COAL_5600_6000',
+        totalMoisture: 28.0, // TM is compliant
         testRound: 2,
-        sensoryPassed: true,
-      },
-      TEST_FIXTURE_COAL_SPEC_METADATA,
+        visual: badVisual,
+        visualPassed: true, // CLIENT ADVERSARIAL INJECTION
+      } as any,
+      OPERATIONAL_COAL_SPEC_METADATA,
     );
-
-    expect(evalResult.result).toBe('REJECT');
-    expect(evalResult.decision).toBe('REJECT');
-    expect(evalResult.maxAllowedMoisture).toBe(26.0);
-    expect(evalResult.notes).toContain('Muatan ditolak (QC_VEHICLE_REJECTED)');
+    expect(res.result).toBe('REJECT');
+    expect(res.decision).toBe('REJECT');
   });
 
-  it('immediately rejects if sensory check fails on approved specification', () => {
-    const evalResult = evaluateCoalAnalysis(
+  it('should trigger RETEST_REQUIRED on Round 1 for moisture OOS and strict REJECT on Round 2', () => {
+    const r1 = evaluateCoalAnalysis(
       {
-        targetCalorie: '4200',
-        totalMoisture: 22.0,
+        calorieBand: 'COAL_5600_6000',
+        totalMoisture: 34.5,
         testRound: 1,
-        sensoryPassed: false,
+        visual: validVisual,
       },
-      TEST_FIXTURE_COAL_SPEC_METADATA,
+      OPERATIONAL_COAL_SPEC_METADATA,
     );
+    expect(r1.result).toBe('REJECT');
+    expect(r1.decision).toBe('RETEST_REQUIRED');
 
-    expect(evalResult.result).toBe('REJECT');
-    expect(evalResult.decision).toBe('REJECT');
+    const r2 = evaluateCoalAnalysis(
+      {
+        calorieBand: 'COAL_5600_6000',
+        totalMoisture: 34.0,
+        testRound: 2,
+        visual: validVisual,
+      },
+      OPERATIONAL_COAL_SPEC_METADATA,
+    );
+    expect(r2.result).toBe('REJECT');
+    expect(r2.decision).toBe('REJECT');
+  });
+
+  it('should trigger RETEST_REQUIRED on Round 1 for combined moisture & visual OOS and strict REJECT on Round 2', () => {
+    const badVisual = { ...validVisual, kondisi: 'Basah' };
+    const r1 = evaluateCoalAnalysis(
+      {
+        calorieBand: 'COAL_5600_6000',
+        totalMoisture: 35.0,
+        testRound: 1,
+        visual: badVisual,
+      },
+      OPERATIONAL_COAL_SPEC_METADATA,
+    );
+    expect(r1.result).toBe('REJECT');
+    expect(r1.decision).toBe('RETEST_REQUIRED');
+
+    const r2 = evaluateCoalAnalysis(
+      {
+        calorieBand: 'COAL_5600_6000',
+        totalMoisture: 35.0,
+        testRound: 2,
+        visual: badVisual,
+      },
+      OPERATIONAL_COAL_SPEC_METADATA,
+    );
+    expect(r2.result).toBe('REJECT');
+    expect(r2.decision).toBe('REJECT');
+  });
+
+  it('should return isConfigured=false and error=SPEC_NOT_CONFIGURED for unknown calorie band', () => {
+    const res = evaluateCoalAnalysis(
+      {
+        calorieBand: 'COAL_4200',
+        totalMoisture: 30.0,
+        testRound: 1,
+        visual: validVisual,
+      },
+      OPERATIONAL_COAL_SPEC_METADATA,
+    );
+    expect(res.isConfigured).toBe(false);
+    expect(res.error).toBe('SPEC_NOT_CONFIGURED');
   });
 });

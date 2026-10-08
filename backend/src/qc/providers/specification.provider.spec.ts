@@ -3,6 +3,12 @@ import {
   OPERATIONAL_COAL_SPEC_METADATA,
   TEST_FIXTURE_COAL_SPEC_METADATA,
 } from '../constants/coal-specification';
+import {
+  OPERATIONAL_PAC_SPEC_METADATA,
+  TEST_FIXTURE_PAC_SPEC_METADATA,
+  OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+  TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA,
+} from '../constants/chemical-specification';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -21,63 +27,79 @@ describe('SpecificationProvider - Strict Production Isolation & Guard Tests', ()
     process.env = originalEnv;
   });
 
-  it('A: setTestFixtureMode(true) + flags false -> returns operational PENDING_SIGNOFF (cannot bypass)', () => {
+  it('A: setTestFixtureMode(true) + flags false -> returns operational ACTIVE_CONFIGURED (cannot bypass)', () => {
     provider.setTestFixtureMode(true);
     process.env.ENABLE_TEST_SPEC_FIXTURES = 'false';
     process.env.GMS_TEST_HARNESS = 'false';
 
     const spec = provider.getCoalSpec();
-    expect(spec.approvalStatus).toBe('PENDING_SIGNOFF');
+    expect(spec.ruleStatus).toBe('ACTIVE_CONFIGURED');
     expect(spec).toEqual(OPERATIONAL_COAL_SPEC_METADATA);
     expect(provider.isTestFixtureActive()).toBe(false);
+
+    const pacSpec = provider.getPacSpec();
+    expect(pacSpec.ruleStatus).toBe('ACTIVE_CONFIGURED');
+    expect(pacSpec).toEqual(OPERATIONAL_PAC_SPEC_METADATA);
+
+    const rkSpec = provider.getRapidKlenSpec();
+    expect(rkSpec.ruleStatus).toBe('ACTIVE_CONFIGURED');
+    expect(rkSpec).toEqual(OPERATIONAL_RAPID_KLEN_SPEC_METADATA);
   });
 
-  it('B: setTestFixtureMode(true) + ENABLE_TEST_SPEC_FIXTURES=true + GMS_TEST_HARNESS=false -> PENDING_SIGNOFF', () => {
+  it('B: setTestFixtureMode(true) + ENABLE_TEST_SPEC_FIXTURES=true + GMS_TEST_HARNESS=false -> ACTIVE_CONFIGURED', () => {
     provider.setTestFixtureMode(true);
     process.env.ENABLE_TEST_SPEC_FIXTURES = 'true';
     process.env.GMS_TEST_HARNESS = 'false';
 
     const spec = provider.getCoalSpec();
-    expect(spec.approvalStatus).toBe('PENDING_SIGNOFF');
+    expect(spec.ruleStatus).toBe('ACTIVE_CONFIGURED');
     expect(spec).toEqual(OPERATIONAL_COAL_SPEC_METADATA);
     expect(provider.isTestFixtureActive()).toBe(false);
 
     // Also when GMS_TEST_HARNESS is omitted
     delete process.env.GMS_TEST_HARNESS;
     expect(provider.isTestFixtureActive()).toBe(false);
-    expect(provider.getCoalSpec().approvalStatus).toBe('PENDING_SIGNOFF');
+    expect(provider.getCoalSpec().ruleStatus).toBe('ACTIVE_CONFIGURED');
   });
 
-  it('C: setTestFixtureMode(true) + both flags true -> TEST_FIXTURE allowed (APPROVED)', () => {
+  it('C: setTestFixtureMode(true) + both flags true -> TEST_FIXTURE allowed', () => {
     provider.setTestFixtureMode(true);
     process.env.ENABLE_TEST_SPEC_FIXTURES = 'true';
     process.env.GMS_TEST_HARNESS = 'true';
 
     const spec = provider.getCoalSpec();
-    expect(spec.approvalStatus).toBe('APPROVED');
+    expect(spec.ruleStatus).toBe('TEST_FIXTURE');
     expect(spec).toEqual(TEST_FIXTURE_COAL_SPEC_METADATA);
     expect(provider.isTestFixtureActive()).toBe(true);
+
+    const pacSpec = provider.getPacSpec();
+    expect(pacSpec.ruleStatus).toBe('TEST_FIXTURE');
+    expect(pacSpec).toEqual(TEST_FIXTURE_PAC_SPEC_METADATA);
+
+    const rkSpec = provider.getRapidKlenSpec();
+    expect(rkSpec.ruleStatus).toBe('TEST_FIXTURE');
+    expect(rkSpec).toEqual(TEST_FIXTURE_RAPID_KLEN_SPEC_METADATA);
   });
 
-  it('D: setTestFixtureMode(false) + both flags true -> PENDING_SIGNOFF (honors programmatic disable)', () => {
+  it('D: setTestFixtureMode(false) + both flags true -> ACTIVE_CONFIGURED (honors programmatic disable)', () => {
     provider.setTestFixtureMode(false);
     process.env.ENABLE_TEST_SPEC_FIXTURES = 'true';
     process.env.GMS_TEST_HARNESS = 'true';
 
     const spec = provider.getCoalSpec();
-    expect(spec.approvalStatus).toBe('PENDING_SIGNOFF');
+    expect(spec.ruleStatus).toBe('ACTIVE_CONFIGURED');
     expect(spec).toEqual(OPERATIONAL_COAL_SPEC_METADATA);
     expect(provider.isTestFixtureActive()).toBe(false);
   });
 
-  it('E: production normal environment -> returns OPERATIONAL_COAL_SPEC_METADATA (PENDING_SIGNOFF)', () => {
+  it('E: production normal environment -> returns OPERATIONAL_COAL_SPEC_METADATA (ACTIVE_CONFIGURED)', () => {
     process.env.NODE_ENV = 'production';
     process.env.ENABLE_TEST_SPEC_FIXTURES = 'false';
     process.env.GMS_TEST_HARNESS = 'false';
 
     const spec = provider.getCoalSpec();
     expect(spec).toEqual(OPERATIONAL_COAL_SPEC_METADATA);
-    expect(spec.approvalStatus).toBe('PENDING_SIGNOFF');
+    expect(spec.ruleStatus).toBe('ACTIVE_CONFIGURED');
     expect(spec.approvedBy).toBeNull();
     expect(spec.approvedAt).toBeNull();
     expect(provider.isTestFixtureActive()).toBe(false);
@@ -89,7 +111,7 @@ describe('SpecificationProvider - Strict Production Isolation & Guard Tests', ()
     process.env.GMS_TEST_HARNESS = 'false';
 
     const spec = provider.getCoalSpec();
-    expect(spec.approvalStatus).toBe('PENDING_SIGNOFF');
+    expect(spec.ruleStatus).toBe('ACTIVE_CONFIGURED');
     expect(provider.isTestFixtureActive()).toBe(false);
   });
 
