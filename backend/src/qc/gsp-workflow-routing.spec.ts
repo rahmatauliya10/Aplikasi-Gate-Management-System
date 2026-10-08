@@ -348,6 +348,7 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
         isPaRequired: true,
         isActive: true,
         policyVersion: 'SOP-GSP-2026.1',
+        receiptUnit: 'LITER',
       });
 
       mockPrismaService.transaction.updateMany.mockResolvedValueOnce({

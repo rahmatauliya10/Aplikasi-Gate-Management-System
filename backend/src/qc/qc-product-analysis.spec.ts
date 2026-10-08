@@ -3,11 +3,17 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { QcProductAnalysisService } from './qc-product-analysis.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { TransactionStatus, ProcessType, QcResult } from '@prisma/client';
+import {
+  TransactionStatus,
+  ProcessType,
+  QcResult,
+  GspAnalysisProfile,
+} from '@prisma/client';
 import { AnalysisDecision } from './dto/submit-product-analysis.dto';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
@@ -17,14 +23,25 @@ import {
   TEST_FIXTURE_COAL_SPEC_METADATA,
   OPERATIONAL_COAL_SPEC_METADATA,
 } from './constants/coal-specification';
-import { TEST_FIXTURE_RAPID_KLEN_STRICT_GT } from './constants/chemical-specification';
+import {
+  TEST_FIXTURE_RAPID_KLEN_STRICT_GT,
+  OPERATIONAL_PAC_SPEC_METADATA,
+} from './constants/chemical-specification';
 
-describe('QcProductAnalysisService (Task 5)', () => {
+describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
   let service: QcProductAnalysisService;
   let specProvider: SpecificationProvider;
   let mockPrismaService: any;
   let mockActivityLogsService: any;
   let mockAuthScopeService: any;
+
+  const validCoalVisual = {
+    kondisi: 'Kering (Tidak Basah)',
+    warna: 'Hitam',
+    levelRank: 'Medium Rank Coal',
+    kilap: 'Hitam Mengkilap',
+    bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+  };
 
   const mockAnalystUser: JwtPayloadUser = {
     id: 'user-analyst-1',
@@ -91,7 +108,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 2,
       };
 
@@ -124,7 +142,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
         {
           productCategory: 'Coal',
           productName: 'Batubara',
-          parameters: { visual: 'OK', moisture: 30.5 },
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: validCoalVisual,
+            moisture: 30.5,
+          },
           result: QcResult.PASS,
           decision: AnalysisDecision.RELEASE,
           revision: 2,
@@ -152,13 +174,14 @@ describe('QcProductAnalysisService (Task 5)', () => {
       );
     });
 
-    it('transitions to QC_RETEST_REQUIRED if moisture deviation triggers retest', async () => {
+    it('transitions to QC_RETEST_REQUIRED if moisture deviation triggers retest on Round 1', async () => {
       const coalTx = {
         id: 'tx-coal-1',
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 2,
       };
 
@@ -191,7 +214,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
         {
           productCategory: 'Coal',
           productName: 'Batubara',
-          parameters: { visual: 'OK', moisture: 36.0 },
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: validCoalVisual,
+            moisture: 36.0,
+          },
           result: QcResult.REJECT,
           decision: AnalysisDecision.RETEST_REQUIRED,
           revision: 2,
@@ -209,13 +236,76 @@ describe('QcProductAnalysisService (Task 5)', () => {
       );
     });
 
-    it('transitions to QC_VEHICLE_REJECTED if retest (round 2) fails (NO Utility disposition)', async () => {
+    it('transitions to QC_RETEST_REQUIRED if factual visual OOS triggers retest on Round 1', async () => {
+      const coalTx = {
+        id: 'tx-coal-visual-oos',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(OPERATIONAL_COAL_SPEC_METADATA);
+
+      const res = await service.submitProductAnalysis(
+        'tx-coal-visual-oos',
+        {
+          productCategory: 'Coal',
+          productName: 'Batubara',
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: { ...validCoalVisual, kondisi: 'Basah Berlumpur' }, // Factual visual OOS
+            moisture: 30.0,
+          },
+          result: QcResult.REJECT,
+          decision: AnalysisDecision.RETEST_REQUIRED,
+          revision: 2,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_RETEST_REQUIRED,
+          }),
+        }),
+      );
+    });
+
+    it('transitions to QC_VEHICLE_REJECTED if retest (round 2) fails on factual visual OOS', async () => {
       const retestTx = {
-        id: 'tx-coal-retest',
+        id: 'tx-coal-retest-visual-oos',
         status: TransactionStatus.QC_RETEST_REQUIRED,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 3,
       };
 
@@ -242,12 +332,69 @@ describe('QcProductAnalysisService (Task 5)', () => {
       mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
         cb(mockTxClient),
       );
-      jest
-        .spyOn(service, 'checkSpecificationApprovalStatus')
-        .mockReturnValueOnce({
-          approvalStatus: 'APPROVED',
-          documentSource: 'Test Harness Fixture (Simulated Approved Spec)',
-        });
+
+      const res = await service.submitProductAnalysis(
+        'tx-coal-retest-visual-oos',
+        {
+          productCategory: 'Coal',
+          productName: 'Batubara',
+          testRound: 2,
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: { ...validCoalVisual, warna: 'Merah Bata' }, // Factual visual OOS
+            moisture: 30.0,
+          },
+          result: QcResult.REJECT,
+          decision: AnalysisDecision.REJECT,
+          revision: 3,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_REJECTED,
+          }),
+        }),
+      );
+    });
+
+    it('transitions to QC_VEHICLE_REJECTED if retest (round 2) fails on moisture OOS (NO Utility disposition)', async () => {
+      const retestTx = {
+        id: 'tx-coal-retest',
+        status: TransactionStatus.QC_RETEST_REQUIRED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        revision: 3,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(retestTx);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        { id: 'analysis-1', testRound: 1, isVoided: false },
+      ]);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-2', testRound: 2 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
 
       const res = await service.submitProductAnalysis(
         'tx-coal-retest',
@@ -255,7 +402,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
           productCategory: 'Coal',
           productName: 'Batubara',
           testRound: 2,
-          parameters: { visual: 'OK', moisture: 35.5 },
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: validCoalVisual,
+            moisture: 35.5,
+          },
           result: QcResult.REJECT,
           decision: AnalysisDecision.REJECT,
           revision: 3,
@@ -286,7 +437,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 4,
         qcStartAt: new Date(),
       };
@@ -325,7 +477,12 @@ describe('QcProductAnalysisService (Task 5)', () => {
         {
           productCategory: 'Coal',
           productName: 'Batubara',
-          parameters: { visual: 'OK', moisture: 30.5 },
+          testRound: 2,
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: validCoalVisual,
+            moisture: 30.5,
+          },
           result: QcResult.PASS,
           decision: AnalysisDecision.RELEASE,
           revision: 4,
@@ -358,7 +515,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 5,
         weighInAt: new Date(),
         grossWeight: 25000,
@@ -367,7 +525,6 @@ describe('QcProductAnalysisService (Task 5)', () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
         reopenedTx,
       );
-      // All previous PA records are voided (isVoided: true), so findMany({ where: { isVoided: false } }) returns []
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
 
       const mockTxClient = {
@@ -398,7 +555,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
           productCategory: 'Coal',
           productName: 'Batubara',
           testRound: 1,
-          parameters: { visual: 'OK', moisture: 30.5 },
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: validCoalVisual,
+            moisture: 30.5,
+          },
           result: QcResult.PASS,
           decision: AnalysisDecision.RELEASE,
           revision: 5,
@@ -436,6 +597,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           isPaRequired: false,
           policyVersion: 'SOP-GSP-2026.1',
           isActive: true,
+          receiptUnit: 'LITER',
         },
       };
 
@@ -457,37 +619,37 @@ describe('QcProductAnalysisService (Task 5)', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('rejects automated RELEASE if product specification is provisional/unapproved (PENDING_SIGNOFF)', async () => {
+    it('rejects unconfigured Coal calorie band with HTTP 422 SPEC_NOT_CONFIGURED', async () => {
       const coalTx = {
-        id: 'tx-coal-provisional',
+        id: 'tx-coal-unconfigured',
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 4200',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 2,
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      jest.spyOn(specProvider, 'getCoalSpec').mockReturnValueOnce({
-        ...OPERATIONAL_COAL_SPEC_METADATA,
-        approvalStatus: 'PENDING_SIGNOFF',
-        documentSource: 'Provisional Benchmark (Awaiting Formal QA Signoff)',
-      });
 
       await expect(
         service.submitProductAnalysis(
-          'tx-coal-provisional',
+          'tx-coal-unconfigured',
           {
             productCategory: 'Coal',
-            productName: 'Batubara GAR 4200',
-            parameters: { totalMoisture: 31.0, sensoryPassed: true },
+            productName: 'Batubara',
+            parameters: {
+              calorieBand: 'COAL_4200', // Unconfigured band
+              visual: validCoalVisual,
+              moisture: 30.0,
+            },
             result: QcResult.PASS,
-            decision: AnalysisDecision.RELEASE, // Attempting automated RELEASE on unapproved spec!
+            decision: AnalysisDecision.RELEASE,
             revision: 2,
           },
           mockAnalystUser,
         ),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(UnprocessableEntityException);
     });
 
     it('evaluates Rapid Klen exactly 35.0% alkalinity as failing GT 35.0% operational spec', async () => {
@@ -497,6 +659,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
         processType: ProcessType.GSP,
         cargoType: 'Chemical',
         cargoSubType: 'Rapid Klen',
+        gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
         revision: 2,
       };
 
@@ -531,7 +694,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
           productCategory: 'Chemical',
           productName: 'Rapid Klen',
           parameters: {
-            sensory: { visual: true, packaging: true },
+            sensory: { visual: 'Jernih', packaging: 'Kemasan & label tidak rusak' },
             alkalinityNa2O: 35.0, // Exactly at 35.0%, not > 35.0%
             ph: 13.0,
             density: 1.45,
@@ -568,40 +731,66 @@ describe('QcProductAnalysisService (Task 5)', () => {
       );
     });
 
-    it('fails closed when attempting RELEASE on Coal under unapproved operational metadata (PENDING_SIGNOFF)', async () => {
-      const coalTx = {
-        id: 'tx-coal-pending-signoff',
+    it('evaluates PAC PASS and transitions to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED', async () => {
+      const pacTx = {
+        id: 'tx-pac-1',
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
-        cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoType: 'Chemical',
+        cargoSubType: 'PAC 280 AC',
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
         revision: 2,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacTx);
 
-      // Force operational metadata (PENDING_SIGNOFF, approvedBy: null)
-      jest
-        .spyOn(specProvider, 'getCoalSpec')
-        .mockReturnValue(OPERATIONAL_COAL_SPEC_METADATA);
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-pac-1', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
 
-      await expect(
-        service.submitProductAnalysis(
-          'tx-coal-pending-signoff',
-          {
-            productCategory: 'Coal',
-            productName: 'Batubara',
-            parameters: { visual: 'OK', moisture: 30.5 },
-            result: QcResult.PASS,
-            decision: AnalysisDecision.RELEASE,
-            revision: 2,
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitProductAnalysis(
+        'tx-pac-1',
+        {
+          productCategory: 'Chemical',
+          productName: 'PAC 280 AC',
+          parameters: {
+            sensory: {
+              visual: 'Kuning',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packaging: 'Kemasan & label tidak rusak',
+            },
+            ph: 4.2,
+            density: 1.21,
           },
-          mockAnalystUser,
-        ),
-      ).rejects.toThrow(
-        new BadRequestException(
-          'Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk Batubara belum berstatus disahkan oleh QA (Status: PENDING_SIGNOFF).',
-        ),
+          result: QcResult.PASS,
+          decision: AnalysisDecision.RELEASE,
+          revision: 2,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PASSED,
+          }),
+        }),
       );
     });
   });
@@ -660,7 +849,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
         id: 'tx-coal-start-1',
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
         status: TransactionStatus.QC_VEHICLE_PENDING,
         grossWeight: 15000,
         weighInAt: new Date(),
@@ -697,7 +886,7 @@ describe('QcProductAnalysisService (Task 5)', () => {
       expect(res.data.id).toBe('tx-coal-start-1');
       expect(res.data.status).toBe(TransactionStatus.QC_VEHICLE_IN_PROGRESS);
       expect(res.data.revision).toBe(3);
-      expect(res.data.cargoSubType).toBe('Batubara');
+      expect(res.data.cargoSubType).toBe('Batubara 5600-6000');
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -742,7 +931,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 2,
       };
 
@@ -773,7 +963,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
         {
           productCategory: 'Coal',
           productName: 'Batubara',
-          parameters: { visual: 'OK', moisture: 30.5 },
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: validCoalVisual,
+            moisture: 30.5,
+          },
           // result and decision are intentionally omitted
           revision: 2,
         },
@@ -804,7 +998,8 @@ describe('QcProductAnalysisService (Task 5)', () => {
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 2,
       };
 
@@ -820,7 +1015,11 @@ describe('QcProductAnalysisService (Task 5)', () => {
             productCategory: 'Coal',
             productName: 'Batubara',
             // Moisture 38.0% exceeds threshold -> server computes REJECT / RETEST_REQUIRED
-            parameters: { visual: 'OK', moisture: 38.0 },
+            parameters: {
+              calorieBand: 'COAL_5600_6000',
+              visual: validCoalVisual,
+              moisture: 38.0,
+            },
             result: QcResult.PASS, // TAMPERED
             decision: AnalysisDecision.RETEST_REQUIRED,
             revision: 2,
@@ -830,22 +1029,21 @@ describe('QcProductAnalysisService (Task 5)', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('throws BadRequestException when client decision tampered (sent RELEASE on unapproved spec)', async () => {
+    it('throws BadRequestException when client decision tampered (sent RELEASE but server computes RETEST_REQUIRED)', async () => {
       const coalTx = {
         id: 'tx-coal-tamper-decision',
         status: TransactionStatus.QC_VEHICLE_PENDING,
         processType: ProcessType.GSP,
         cargoType: 'Coal',
-        cargoSubType: 'Batubara',
+        cargoSubType: 'Batubara 5600-6000',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
         revision: 2,
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      // Unapproved spec -> server withholds automated RELEASE
-      jest.spyOn(specProvider, 'getCoalSpec').mockReturnValue({
-        ...OPERATIONAL_COAL_SPEC_METADATA,
-        approvalStatus: 'PENDING_SIGNOFF',
-      });
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(OPERATIONAL_COAL_SPEC_METADATA);
 
       await expect(
         service.submitProductAnalysis(
@@ -853,9 +1051,13 @@ describe('QcProductAnalysisService (Task 5)', () => {
           {
             productCategory: 'Coal',
             productName: 'Batubara',
-            parameters: { visual: 'OK', moisture: 30.0 },
-            result: QcResult.PASS,
-            decision: AnalysisDecision.RELEASE, // TAMPERED: client attempts automated RELEASE on unapproved spec
+            parameters: {
+              calorieBand: 'COAL_5600_6000',
+              visual: validCoalVisual,
+              moisture: 38.0, // Exceeds 33.0% -> RETEST_REQUIRED
+            },
+            result: QcResult.REJECT,
+            decision: AnalysisDecision.RELEASE, // TAMPERED: client attempts RELEASE when retest required
             revision: 2,
           },
           mockAnalystUser,

@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -20,6 +21,8 @@ import {
 } from '@prisma/client';
 import {
   OPERATIONAL_COAL_SPEC_METADATA,
+  SpecificationRuleStatus,
+  CoalVisualParameters,
   evaluateCoalAnalysis,
 } from './constants/coal-specification';
 import {
@@ -317,16 +320,20 @@ export class QcProductAnalysisService {
     }
 
     // ─── 3. Server-Authoritative Result & Decision Evaluation ───
-    const specStatus = this.checkSpecificationApprovalStatus(
+    const specStatus = this.getSpecificationRuleStatus(
       authoritativeProductCategory,
       authoritativeProductName,
     );
 
     let evalResult: {
-      result: 'PASS' | 'REJECT';
-      decision:
-        'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
+      result?: 'PASS' | 'REJECT';
+      decision?:
+        | 'RELEASE'
+        | 'RETEST_REQUIRED'
+        | 'PENDING_DISPOSITION'
+        | 'REJECT';
       notes?: string;
+      isConfigured?: boolean;
     };
 
     // ─── 3. Determine Evaluator by Snapshot Profile (Section 23) ───
@@ -375,20 +382,37 @@ export class QcProductAnalysisService {
     if (targetProfile === GspAnalysisProfile.COAL_PA) {
       const coalSpecMeta = this.specProvider.getCoalSpec();
 
+      const visualInput: CoalVisualParameters | undefined =
+        typeof rawParams.visual === 'object' && rawParams.visual !== null
+          ? rawParams.visual
+          : rawParams.kondisi ||
+              rawParams.warna ||
+              rawParams.levelRank ||
+              rawParams.kilap ||
+              rawParams.bahanPengotor
+            ? {
+                kondisi: rawParams.kondisi,
+                warna: rawParams.warna,
+                levelRank: rawParams.levelRank,
+                kilap: rawParams.kilap,
+                bahanPengotor: rawParams.bahanPengotor,
+              }
+            : undefined;
+
       evalResult = evaluateCoalAnalysis(
         {
           targetCalorie:
-            tx.productCatalog?.code || tx.cargoSubType || undefined,
+            rawParams.calorieBand ||
+            tx.productCatalog?.code ||
+            tx.cargoSubType ||
+            undefined,
           totalMoisture: Number(
             rawParams.moisture ?? rawParams.totalMoisture ?? 0,
           ),
           testRound: authoritativeTestRound,
-          sensoryPassed:
-            rawParams.sensory === 'OK' ||
-            rawParams.sensory === true ||
-            rawParams.visual === 'OK' ||
-            rawParams.sensoryPassed === true ||
-            rawParams.sensory?.visual === true,
+          sensoryPassed: rawParams.sensoryPassed,
+          visualPassed: rawParams.visualPassed,
+          visual: visualInput,
         },
         coalSpecMeta,
       );
@@ -400,20 +424,21 @@ export class QcProductAnalysisService {
           sensory: {
             visual:
               rawParams.sensory?.visual ??
-              (rawParams.visualAppearance
-                ? !rawParams.visualAppearance.toLowerCase().includes('keruh')
-                : rawParams.visual === 'OK' || rawParams.visual === true),
-            odor:
-              rawParams.sensory?.odor ??
-              (rawParams.foreignMatters === 'NIL' ||
-                rawParams.odor === 'OK' ||
-                rawParams.odor === true ||
-                rawParams.odor == null),
+              rawParams.visualAppearance ??
+              rawParams.visual,
+            foreignMatters:
+              rawParams.sensory?.foreignMatters ??
+              rawParams.foreignMatters,
+            packagingLabel:
+              rawParams.sensory?.packagingLabel ??
+              rawParams.sensory?.packaging ??
+              rawParams.packagingCondition ??
+              rawParams.packaging,
             packaging:
               rawParams.sensory?.packaging ??
-              (rawParams.packagingCondition
-                ? !rawParams.packagingCondition.toLowerCase().includes('rusak')
-                : rawParams.packaging === 'OK' || rawParams.packaging === true),
+              rawParams.packagingCondition ??
+              rawParams.packaging,
+            odor: rawParams.sensory?.odor ?? rawParams.odor,
           },
           ph: Number(rawParams.ph),
           density: Number(rawParams.density),
@@ -435,14 +460,20 @@ export class QcProductAnalysisService {
           sensory: {
             visual:
               rawParams.sensory?.visual ??
-              (rawParams.visualAppearance
-                ? !rawParams.visualAppearance.toLowerCase().includes('keruh')
-                : rawParams.visual === 'OK' || rawParams.visual === true),
+              rawParams.visualAppearance ??
+              rawParams.visual,
+            foreignMatters:
+              rawParams.sensory?.foreignMatters ??
+              rawParams.foreignMatters,
+            packagingLabel:
+              rawParams.sensory?.packagingLabel ??
+              rawParams.sensory?.packaging ??
+              rawParams.packagingCondition ??
+              rawParams.packaging,
             packaging:
               rawParams.sensory?.packaging ??
-              (rawParams.packagingCondition
-                ? !rawParams.packagingCondition.toLowerCase().includes('rusak')
-                : rawParams.packaging === 'OK' || rawParams.packaging === true),
+              rawParams.packagingCondition ??
+              rawParams.packaging,
           },
           alkalinityNa2O: Number(
             rawParams.alkalinityNa2O ?? rawParams.alkalinity ?? 0,
@@ -464,6 +495,15 @@ export class QcProductAnalysisService {
         decision: 'PENDING_DISPOSITION',
         notes: `Produk ${authoritativeProductName} belum memiliki spesifikasi operasional teresahkan. Dialihkan ke PENDING_DISPOSITION.`,
       };
+    }
+
+    if (evalResult.isConfigured === false) {
+      throw new UnprocessableEntityException({
+        error: 'SPEC_NOT_CONFIGURED',
+        message:
+          evalResult.notes ||
+          `Spesifikasi mutu untuk produk '${authoritativeProductName}' belum dikonfigurasi.`,
+      });
     }
 
     const serverQcResult: QcResult =
@@ -499,11 +539,6 @@ export class QcProductAnalysisService {
     let nextStatus: TransactionStatus;
     switch (authoritativeDecision) {
       case AnalysisDecision.RELEASE:
-        if (specStatus.approvalStatus !== 'APPROVED') {
-          throw new BadRequestException(
-            `Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk ${authoritativeProductName} belum berstatus disahkan oleh QA (Status: ${specStatus.approvalStatus}).`,
-          );
-        }
         nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
         break;
       case AnalysisDecision.REJECT:
@@ -516,7 +551,7 @@ export class QcProductAnalysisService {
         // NEW canonical GSP transactions must NEVER enter WAITING_UTILITY_DISPOSITION
         // Fail-closed governance blocker without routing to Utility disposition
         throw new BadRequestException(
-          `Pengujian laboratorium untuk ${authoritativeProductName} tidak dapat diproses rilis: Spesifikasi operasional berstatus ${specStatus.approvalStatus} (${specStatus.documentSource}). Kebijakan mutu memblokir rilis muatan tanpa spesifikasi teresahkan.`,
+          `Pengujian laboratorium untuk ${authoritativeProductName} tidak dapat diproses rilis: Spesifikasi operasional berstatus ${specStatus.ruleStatus} (${specStatus.documentSource}). Kebijakan mutu memblokir rilis muatan tanpa spesifikasi teresahkan.`,
         );
       default:
         throw new BadRequestException(
@@ -617,14 +652,14 @@ export class QcProductAnalysisService {
   }
 
   /**
-   * Helper to check specification approval status.
-   * Products without formal QA/Utility approval status CANNOT be automatically RELEASED.
+   * Helper to get specification rule status.
+   * Authoritative operational rules operate under ACTIVE_CONFIGURED.
    */
-  checkSpecificationApprovalStatus(
+  getSpecificationRuleStatus(
     productCategory: string,
     productName?: string,
   ): {
-    approvalStatus: string;
+    ruleStatus: SpecificationRuleStatus;
     documentSource: string;
   } {
     const cat = (productCategory || '').toUpperCase();
@@ -637,26 +672,26 @@ export class QcProductAnalysisService {
     ) {
       const spec = this.specProvider.getCoalSpec();
       return {
-        approvalStatus: spec.approvalStatus,
+        ruleStatus: spec.ruleStatus,
         documentSource: spec.documentSource,
       };
     }
     if (name.includes('PAC')) {
       const spec = this.specProvider.getPacSpec();
       return {
-        approvalStatus: spec.approvalStatus,
+        ruleStatus: spec.ruleStatus,
         documentSource: spec.documentSource,
       };
     }
     if (name.includes('RAPID') || name.includes('KLEN')) {
       const spec = this.specProvider.getRapidKlenSpec();
       return {
-        approvalStatus: spec.approvalStatus,
+        ruleStatus: spec.ruleStatus,
         documentSource: spec.documentSource,
       };
     }
     return {
-      approvalStatus: 'PENDING_SIGNOFF',
+      ruleStatus: 'TEST_FIXTURE',
       documentSource: 'Unverified Product Specification',
     };
   }
