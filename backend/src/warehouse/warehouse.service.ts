@@ -20,6 +20,11 @@ import {
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
+import {
+  GSP_PREUNLOAD_VERSION,
+  GSP_PREUNLOAD_CODES,
+  GSP_PREUNLOAD_LABEL_MAP,
+} from './constants/gsp-preunload-checklist';
 
 @Injectable()
 export class WarehouseService {
@@ -388,6 +393,123 @@ export class WarehouseService {
           });
         }
       }
+
+      // ─── GSP Hard Gates: Surat Jalan & PO Number ───
+      const effectiveSj = dto.suratJalanNumber || tx.suratJalanNumber;
+      const effectivePo = dto.poNumber || tx.poNumber;
+
+      if (!effectiveSj || !effectiveSj.trim()) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Nomor Surat Jalan wajib diisi sebelum memulai proses bongkar muat GSP.',
+          errors: ['MISSING_SURAT_JALAN'],
+        });
+      }
+
+      if (!effectivePo || !effectivePo.trim()) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Nomor PO (Purchase Order) wajib diisi sebelum memulai proses bongkar muat GSP.',
+          errors: ['MISSING_PO_NUMBER'],
+        });
+      }
+
+      // ─── GSP Hard Gates: Pre-Unloading Verification Checklist ───
+      if (
+        !dto.preUnloadChecklist ||
+        !Array.isArray(dto.preUnloadChecklist.items)
+      ) {
+        await this.activityLogsService
+          .logAction({
+            userId: user.id,
+            action: 'GSP_PREUNLOAD_CHECKLIST_INVALID',
+            module: 'WAREHOUSE',
+            referenceId: transactionId,
+            description:
+              'Pre-unload checklist payload is missing or not an array.',
+            status: 'FAILED',
+          })
+          .catch(() => {});
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Pemeriksaan pra-bongkar (pre-unload checklist) wajib diisi untuk transaksi GSP.',
+          errors: ['MISSING_PREUNLOAD_CHECKLIST'],
+        });
+      }
+
+      const submittedItems = dto.preUnloadChecklist.items;
+      const submittedCodes = submittedItems.map((item) => item.code);
+      const uniqueCodes = new Set(submittedCodes);
+
+      const hasUnknownCodes = submittedCodes.some(
+        (code) => !GSP_PREUNLOAD_CODES.includes(code),
+      );
+      const hasDuplicates = uniqueCodes.size !== submittedCodes.length;
+      const isMissingCodes =
+        submittedCodes.length !== 9 ||
+        GSP_PREUNLOAD_CODES.some((c) => !uniqueCodes.has(c));
+
+      if (hasUnknownCodes || hasDuplicates || isMissingCodes) {
+        await this.activityLogsService
+          .logAction({
+            userId: user.id,
+            action: 'GSP_PREUNLOAD_CHECKLIST_INVALID',
+            module: 'WAREHOUSE',
+            referenceId: transactionId,
+            description: `Malformed pre-unload checklist: count=${submittedItems.length}, unique=${uniqueCodes.size}, hasUnknown=${hasUnknownCodes}, hasDuplicates=${hasDuplicates}, isMissing=${isMissingCodes}`,
+            status: 'FAILED',
+          })
+          .catch(() => {});
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Struktur pemeriksaan pra-bongkar tidak valid (wajib memuat tepat 9 item kanonikal unik).',
+          errors: ['INVALID_PREUNLOAD_CHECKLIST_STRUCTURE'],
+        });
+      }
+
+      const failedItems = submittedItems.filter(
+        (item) => item.result === 'NOT_OK',
+      );
+
+      if (failedItems.length > 0) {
+        const failedItemCodes = failedItems.map((item) => item.code);
+        const failedItemNotes: Record<string, string> = {};
+        failedItems.forEach((item) => {
+          if (item.notes) failedItemNotes[item.code] = item.notes;
+        });
+
+        await this.activityLogsService
+          .logAction({
+            userId: user.id,
+            action: 'GSP_PREUNLOAD_CHECKLIST_FAILED',
+            module: 'WAREHOUSE',
+            referenceId: transactionId,
+            description: JSON.stringify({
+              checklistVersion: GSP_PREUNLOAD_VERSION,
+              submittedItems: submittedItems.map((item) => ({
+                code: item.code,
+                result: item.result,
+              })),
+              failedItemCodes,
+              failedItemNotes,
+              operatorId: user.id,
+              timestamp: new Date().toISOString(),
+            }),
+            status: 'FAILED',
+          })
+          .catch(() => {});
+
+        throw new BadRequestException({
+          success: false,
+          message: 'Pemeriksaan pra-bongkar belum memenuhi persyaratan.',
+          errors: ['PREUNLOAD_CHECKLIST_ITEMS_NOT_OK'],
+          failedItemCodes,
+        });
+      }
     } else {
       // Non-GSP (GBB, GBJ)
       const isQcPassed = tx.status === TransactionStatus.QC_VEHICLE_PASSED;
@@ -412,6 +534,23 @@ export class WarehouseService {
 
     assertValidStatusTransition(tx.status, 'WAREHOUSE_IN_PROGRESS');
 
+    const effectiveSj = dto.suratJalanNumber || tx.suratJalanNumber;
+    const effectivePo = dto.poNumber || tx.poNumber;
+
+    const canonicalChecklistPayload =
+      tx.processType === 'GSP' && dto.preUnloadChecklist
+        ? {
+            version: GSP_PREUNLOAD_VERSION,
+            overallResult: 'OK',
+            items: dto.preUnloadChecklist.items.map((item) => ({
+              code: item.code,
+              label: GSP_PREUNLOAD_LABEL_MAP[item.code] || item.code,
+              result: 'OK',
+              notes: item.notes || null,
+            })),
+          }
+        : undefined;
+
     const updated = await this.prisma.$transaction(async (prismaTx) => {
       const maxRev = await prismaTx.warehouseProcess.aggregate({
         where: { transactionId },
@@ -430,10 +569,10 @@ export class WarehouseService {
           status: 'WAREHOUSE_IN_PROGRESS',
           warehouseStartAt: tx.warehouseStartAt || new Date(),
           warehouseStartById: user.id,
-          ...(dto.suratJalanNumber && {
-            suratJalanNumber: dto.suratJalanNumber,
+          ...(effectiveSj && {
+            suratJalanNumber: effectiveSj,
           }),
-          ...(dto.poNumber && { poNumber: dto.poNumber }),
+          ...(effectivePo && { poNumber: effectivePo }),
         },
       });
 
@@ -451,6 +590,7 @@ export class WarehouseService {
           startAt: new Date(),
           startById: user.id,
           remarks: dto.remarks || null,
+          checklistItems: canonicalChecklistPayload as any,
         },
       });
 

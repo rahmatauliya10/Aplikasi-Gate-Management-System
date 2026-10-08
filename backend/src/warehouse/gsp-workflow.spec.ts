@@ -13,6 +13,24 @@ import {
   QcResult,
 } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import {
+  GSP_PREUNLOAD_CANONICAL_ITEMS,
+  GSP_PREUNLOAD_VERSION,
+} from './constants/gsp-preunload-checklist';
+
+const validGspChecklist = {
+  items: GSP_PREUNLOAD_CANONICAL_ITEMS.map((item) => ({
+    code: item.code,
+    result: 'OK' as const,
+    notes: '',
+  })),
+};
+
+const validStartGspDto = {
+  suratJalanNumber: 'SJ-2026-001',
+  poNumber: 'PO-2026-001',
+  preUnloadChecklist: validGspChecklist,
+};
 
 describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
   let warehouseService: WarehouseService;
@@ -379,7 +397,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
       const res = await warehouseService.startWarehouse(
         'tx-solar-1',
-        {},
+        validStartGspDto,
         mockUser,
       );
 
@@ -455,7 +473,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
       const res = await warehouseService.startWarehouse(
         'tx-coal-1',
-        {},
+        validStartGspDto,
         mockUser,
       );
 
@@ -816,7 +834,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
       const res = await warehouseService.startWarehouse(
         'tx-coal-canonical-pass',
-        {},
+        validStartGspDto,
         mockUser,
       );
 
@@ -848,6 +866,222 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       await expect(
         warehouseService.startWarehouse('tx-coal-1', {}, mockUser),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    describe('GSP Pre-Unloading Verification Gates & Dual-Action Audit (Task 10 & 11)', () => {
+      const baseCoalTx = {
+        id: 'tx-coal-preunload-gate',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara 5600-6000',
+        weighInAt: new Date(),
+        grossWeight: 25000,
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          code: 'COAL-001',
+          name: 'Batubara 5600-6000',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      const mockPaRecord = {
+        id: 'pa-coal-pass',
+        transactionId: 'tx-coal-preunload-gate',
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: QcResult.PASS,
+        isVoided: false,
+      };
+
+      it('blocks startWarehouse if suratJalanNumber is missing with MISSING_SURAT_JALAN', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+
+        await expect(
+          warehouseService.startWarehouse(
+            'tx-coal-preunload-gate',
+            { poNumber: 'PO-001', preUnloadChecklist: validGspChecklist },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { errors: expect.arrayContaining(['MISSING_SURAT_JALAN']) },
+        });
+      });
+
+      it('blocks startWarehouse if poNumber is missing with MISSING_PO_NUMBER', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+
+        await expect(
+          warehouseService.startWarehouse(
+            'tx-coal-preunload-gate',
+            { suratJalanNumber: 'SJ-001', preUnloadChecklist: validGspChecklist },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { errors: expect.arrayContaining(['MISSING_PO_NUMBER']) },
+        });
+      });
+
+      it('blocks startWarehouse if preUnloadChecklist is missing with MISSING_PREUNLOAD_CHECKLIST and logs GSP_PREUNLOAD_CHECKLIST_INVALID', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+
+        await expect(
+          warehouseService.startWarehouse(
+            'tx-coal-preunload-gate',
+            { suratJalanNumber: 'SJ-001', poNumber: 'PO-001' },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { errors: expect.arrayContaining(['MISSING_PREUNLOAD_CHECKLIST']) },
+        });
+
+        expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'GSP_PREUNLOAD_CHECKLIST_INVALID',
+            referenceId: 'tx-coal-preunload-gate',
+          }),
+        );
+      });
+
+      it('blocks startWarehouse on malformed checklist (unknown code, duplicates, missing codes) and logs GSP_PREUNLOAD_CHECKLIST_INVALID', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+
+        const malformedChecklist = {
+          items: [
+            ...validGspChecklist.items.slice(0, 8),
+            { code: 'UNKNOWN_CODE', result: 'OK' as const, notes: '' },
+          ],
+        };
+
+        await expect(
+          warehouseService.startWarehouse(
+            'tx-coal-preunload-gate',
+            { suratJalanNumber: 'SJ-001', poNumber: 'PO-001', preUnloadChecklist: malformedChecklist },
+            mockUser,
+          ),
+        ).rejects.toMatchObject({
+          response: { errors: expect.arrayContaining(['INVALID_PREUNLOAD_CHECKLIST_STRUCTURE']) },
+        });
+
+        expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'GSP_PREUNLOAD_CHECKLIST_INVALID',
+            referenceId: 'tx-coal-preunload-gate',
+          }),
+        );
+      });
+
+      it('blocks startWarehouse if any checklist item is NOT_OK, logs GSP_PREUNLOAD_CHECKLIST_FAILED, leaves status unchanged, and creates no process', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+
+        const failedChecklist = {
+          items: validGspChecklist.items.map((item) =>
+            item.code === 'DOOR_SEAL_GOOD'
+              ? { code: item.code, result: 'NOT_OK' as const, notes: 'Segel pintu rusak dan terputus' }
+              : item,
+          ),
+        };
+
+        await expect(
+          warehouseService.startWarehouse(
+            'tx-coal-preunload-gate',
+            { suratJalanNumber: 'SJ-001', poNumber: 'PO-001', preUnloadChecklist: failedChecklist },
+            mockUser,
+          ),
+        ).rejects.toThrow('Pemeriksaan pra-bongkar belum memenuhi persyaratan.');
+
+        expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'GSP_PREUNLOAD_CHECKLIST_FAILED',
+            referenceId: 'tx-coal-preunload-gate',
+            description: expect.stringContaining('DOOR_SEAL_GOOD'),
+          }),
+        );
+
+        // Verify no database mutation occurred
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+        expect(mockPrismaService.warehouseProcess.create).not.toHaveBeenCalled();
+      });
+
+      it('permits startWarehouse when all 9 items are OK, transitions to WAREHOUSE_IN_PROGRESS, and persists canonical labels and version', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(baseCoalTx);
+        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(mockPaRecord);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([{ processType: ProcessType.GSP }]);
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findUnique: jest.fn().mockResolvedValue({
+              ...baseCoalTx,
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+              warehouseStartBy: { id: mockUser.id, name: 'Admin', role: 'ADMIN' },
+            }),
+          },
+          warehouseProcess: {
+            aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+            create: jest.fn().mockResolvedValue({ id: 'wp-preunload-ok' }),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+
+        const res = await warehouseService.startWarehouse(
+          'tx-coal-preunload-gate',
+          validStartGspDto,
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+              suratJalanNumber: 'SJ-2026-001',
+              poNumber: 'PO-2026-001',
+            }),
+          }),
+        );
+
+        expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              checklistItems: expect.objectContaining({
+                version: GSP_PREUNLOAD_VERSION,
+                overallResult: 'OK',
+                items: expect.arrayContaining([
+                  expect.objectContaining({
+                    code: 'CLEAN_VEHICLE',
+                    label: 'Kendaraan bersih',
+                    result: 'OK',
+                  }),
+                  expect.objectContaining({
+                    code: 'DOOR_SEAL_GOOD',
+                    label: 'Seal pintu kendaraan baik',
+                    result: 'OK',
+                  }),
+                ]),
+              }),
+            }),
+          }),
+        );
+      });
     });
 
     it('strictly blocks startWarehouse when status is QC_RETEST_REQUIRED or WAITING_UTILITY_DISPOSITION', async () => {
