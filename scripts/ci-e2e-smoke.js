@@ -30,6 +30,18 @@ function getAdminPassword() {
 
 const ADMIN_PASSWORD = getAdminPassword();
 
+const CANONICAL_PREUNLOAD_ITEMS = [
+  { code: 'DOK_SJ', result: 'OK', notes: 'Surat jalan valid' },
+  { code: 'DOK_PO', result: 'OK', notes: 'Nomor PO valid' },
+  { code: 'SEGEL_SESUAI', result: 'OK', notes: 'Segel utuh dan cocok' },
+  { code: 'KONDISI_FISIK', result: 'OK', notes: 'Kondisi fisik baik' },
+  { code: 'LABEL_IDENTITAS', result: 'OK', notes: 'Label jelas' },
+  { code: 'KESELAMATAN_APD', result: 'OK', notes: 'Driver & operator APD lengkap' },
+  { code: 'AREA_BONGKAR', result: 'OK', notes: 'Area bongkar aman' },
+  { code: 'PERALATAN_TRANSFER', result: 'OK', notes: 'Peralatan siap' },
+  { code: 'TANGKI_TUJUAN', result: 'OK', notes: 'Tangki siap' },
+];
+
 function log(msg, level = 'INFO') {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] [${level}] ${msg}`);
@@ -443,20 +455,32 @@ async function runE2ESmoke() {
   log(`  3a. PA Start on Solar GSP transaction blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
 
   // 5d. Pre-Unloading Checklist Verification (Canonical 9 items) & Warehouse Unloading
-  const canonicalPreUnloadItems = [
-    { code: 'DOK_SJ', result: 'OK', notes: 'Surat jalan valid' },
-    { code: 'DOK_PO', result: 'OK', notes: 'Nomor PO valid' },
-    { code: 'SEGEL_SESUAI', result: 'OK', notes: 'Segel utuh dan cocok' },
-    { code: 'KONDISI_FISIK', result: 'OK', notes: 'Kondisi fisik baik' },
-    { code: 'LABEL_IDENTITAS', result: 'OK', notes: 'Label jelas' },
-    { code: 'KESELAMATAN_APD', result: 'OK', notes: 'Driver & operator APD lengkap' },
-    { code: 'AREA_BONGKAR', result: 'OK', notes: 'Area bongkar aman' },
-    { code: 'PERALATAN_TRANSFER', result: 'OK', notes: 'Peralatan siap' },
-    { code: 'TANGKI_TUJUAN', result: 'OK', notes: 'Tangki siap' },
-  ];
-  await stepOk(request(`/api/warehouse/pre-unload-checklist/${gspTxId}`, { method: 'POST', headers: authHeader }, { items: canonicalPreUnloadItems }), 'GSP Solar Pre-Unload Checklist');
+  // Negative assertion: GSP Warehouse start without preUnloadChecklist MUST FAIL (HTTP 400 MISSING_PREUNLOAD_CHECKLIST)
+  log(`  Testing GSP Warehouse start without pre-unload checklist (Must FAIL with HTTP 400)...`);
+  const missingChecklistStart = await request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, {
+    remarks: 'Attempt start without checklist',
+  });
+  if (missingChecklistStart.statusCode !== 400) {
+    throw new Error(`GSP Warehouse start without pre-unload checklist did NOT fail with 400! Received: ${missingChecklistStart.statusCode}`);
+  }
+  log(`  GSP Warehouse start without pre-unload checklist blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
 
-  await stepOk(request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GSP unloading' }), 'GSP Warehouse Start');
+  // Negative assertion: GSP Warehouse start with failing checklist item MUST FAIL (HTTP 400 PREUNLOAD_CHECKLIST_NOT_PASSED)
+  log(`  Testing GSP Warehouse start with failing checklist item (Must FAIL with HTTP 400)...`);
+  const failingChecklistItems = CANONICAL_PREUNLOAD_ITEMS.map(item => item.code === 'SEGEL_SESUAI' ? { ...item, result: 'NOT_OK', notes: 'Segel rusak' } : item);
+  const failingChecklistStart = await request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, {
+    remarks: 'Attempt start with failed checklist',
+    preUnloadChecklist: { items: failingChecklistItems },
+  });
+  if (failingChecklistStart.statusCode !== 400) {
+    throw new Error(`GSP Warehouse start with failing checklist did NOT fail with 400! Received: ${failingChecklistStart.statusCode}`);
+  }
+  log(`  GSP Warehouse start with failing checklist blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
+
+  await stepOk(request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, {
+    remarks: 'Start GSP unloading',
+    preUnloadChecklist: { items: CANONICAL_PREUNLOAD_ITEMS },
+  }), 'GSP Warehouse Start with Canonical Pre-Unload Checklist');
   const gspWhComp = await request(`/api/warehouse/complete/${gspTxId}`, { method: 'POST', headers: authHeader }, {
     receivedQuantity: '8000.000',
     receivedUnit: 'LITER',
@@ -822,8 +846,10 @@ async function runE2ESmoke() {
 
   // 8. Warehouse Start & Complete
   log(`  8. Unloading Batubara at Warehouse...`);
-  await stepOk(request(`/api/warehouse/pre-unload-checklist/${coalTxId}`, { method: 'POST', headers: authHeader }, { items: canonicalPreUnloadItems }), 'GSP Coal Pre-Unload Checklist');
-  await stepOk(request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start unloading Batubara in coal yard' }), 'Batubara Warehouse Start');
+  await stepOk(request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader }, {
+    remarks: 'Start unloading Batubara in coal yard',
+    preUnloadChecklist: { items: CANONICAL_PREUNLOAD_ITEMS },
+  }), 'Batubara Warehouse Start with Pre-Unload Checklist');
   const coalWhComp = await request(`/api/warehouse/complete/${coalTxId}`, { method: 'POST', headers: authHeader }, {
     receivedQuantity: '20000.000',
     receivedUnit: 'KG',
@@ -1042,6 +1068,26 @@ async function runE2ESmoke() {
       vehicleOdor: true,
     };
 
+    const whStartPayload = processType === 'GSP'
+      ? {
+          remarks: 'Rerun WH start',
+          preUnloadChecklist: { items: CANONICAL_PREUNLOAD_ITEMS },
+        }
+      : { remarks: 'Rerun WH start' };
+
+    const whCompletePayload = processType === 'GSP'
+      ? {
+          receivedQuantity: '8000.000',
+          receivedUnit: 'LITER',
+          remarks: 'Rerun WH complete',
+        }
+      : {
+          actualWeight: 15000,
+          actualQuantity: 200,
+          unit: 'BAG',
+          remarks: 'Rerun WH complete',
+        };
+
     if (targetStatus === 'REGISTERED') {
       await stepOk(request(`/api/weighbridge/in/${txId}`, { method: 'POST', headers: authHeader }, {
         weight: processType === 'GBJ' ? 4000 : 15000,
@@ -1050,13 +1096,8 @@ async function runE2ESmoke() {
       if (processType !== 'GSP') {
         await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
       }
-      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
-      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
-        actualWeight: 15000,
-        actualQuantity: 200,
-        unit: 'BAG',
-        remarks: 'Rerun WH complete',
-      }), 'Warehouse Complete');
+      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, whStartPayload), 'Warehouse Start');
+      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, whCompletePayload), 'Warehouse Complete');
       if (processType === 'GBB') {
         await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
@@ -1073,13 +1114,8 @@ async function runE2ESmoke() {
       if (processType !== 'GSP') {
         await stepOk(request(`/api/qc/vehicle-result/${txId}`, { method: 'POST', headers: authHeader }, qcVehPayload), 'QC Vehicle Result');
       }
-      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
-      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
-        actualWeight: 15000,
-        actualQuantity: 200,
-        unit: 'BAG',
-        remarks: 'Rerun WH complete',
-      }), 'Warehouse Complete');
+      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, whStartPayload), 'Warehouse Start');
+      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, whCompletePayload), 'Warehouse Complete');
       if (processType === 'GBB') {
         await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
@@ -1093,13 +1129,8 @@ async function runE2ESmoke() {
       }), 'Weighbridge Out');
       await stepOk(request(`/api/gate/check-out/${txId}`, { method: 'POST', headers: authHeader }), 'Gate Check-Out');
     } else if (targetStatus === 'QC_VEHICLE_PASSED' || targetStatus === 'PA_NOT_REQUIRED') {
-      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, { remarks: 'Rerun WH start' }), 'Warehouse Start');
-      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, {
-        actualWeight: 15000,
-        actualQuantity: 200,
-        unit: 'BAG',
-        remarks: 'Rerun WH complete',
-      }), 'Warehouse Complete');
+      await stepOk(request(`/api/warehouse/start/${txId}`, { method: 'POST', headers: authHeader }, whStartPayload), 'Warehouse Start');
+      await stepOk(request(`/api/warehouse/complete/${txId}`, { method: 'POST', headers: authHeader }, whCompletePayload), 'Warehouse Complete');
       if (processType === 'GBB') {
         await stepOk(request(`/api/qc/incoming-result/${txId}`, { method: 'POST', headers: authHeader }, {
           result: 'PASS',
