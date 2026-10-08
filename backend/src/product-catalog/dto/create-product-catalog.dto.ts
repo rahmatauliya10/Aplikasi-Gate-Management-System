@@ -6,7 +6,7 @@ import {
   IsString,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProcessType, GspAnalysisProfile } from '@prisma/client';
+import { ProcessType, GspAnalysisProfile, WarehouseUnit } from '@prisma/client';
 
 export class CreateProductCatalogDto {
   @ApiProperty({ example: 'PAC-001', description: 'Unique product code' })
@@ -46,6 +46,15 @@ export class CreateProductCatalogDto {
   @IsOptional()
   @IsEnum(GspAnalysisProfile, { message: 'Invalid GSP analysis profile' })
   gspAnalysisProfile?: GspAnalysisProfile | null;
+
+  @ApiPropertyOptional({
+    enum: WarehouseUnit,
+    example: WarehouseUnit.LITER,
+    description: 'Unit of Measure for warehouse receiving',
+  })
+  @IsOptional()
+  @IsEnum(WarehouseUnit, { message: 'Invalid receipt unit' })
+  receiptUnit?: WarehouseUnit | null;
 
   @ApiPropertyOptional({
     example: true,

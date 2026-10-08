@@ -7,7 +7,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { ProcessType, GspAnalysisProfile, Role } from '@prisma/client';
+import { ProcessType, GspAnalysisProfile, Role, WarehouseUnit } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 describe('ProductCatalogService', () => {
@@ -139,6 +139,7 @@ describe('ProductCatalogService', () => {
           category: 'Chemical UTL',
           processType: ProcessType.GSP,
           gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+          receiptUnit: WarehouseUnit.LITER,
           isActive: true,
         },
         mockAdminUser,
@@ -146,6 +147,7 @@ describe('ProductCatalogService', () => {
 
       expect(res.isPaRequired).toBe(true);
       expect(res.gspAnalysisProfile).toBe(GspAnalysisProfile.PAC_PA);
+      expect(res.receiptUnit).toBe(WarehouseUnit.LITER);
       expect(prisma.productCatalog.create).toHaveBeenCalled();
     });
 
@@ -170,6 +172,45 @@ describe('ProductCatalogService', () => {
 
       expect(res.isActive).toBe(false);
       expect(res.gspAnalysisProfile).toBeNull();
+    });
+
+    it('should reject creating active GSP catalog without receiptUnit with MISSING_GSP_RECEIPT_UNIT', async () => {
+      prisma.productCatalog.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        service.create(
+          {
+            code: 'PAC-NEW',
+            name: 'PAC New Brand',
+            category: 'Chemical UTL',
+            processType: ProcessType.GSP,
+            gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+            isActive: true,
+          } as any,
+          mockAdminUser,
+        ),
+      ).rejects.toMatchObject({
+        response: { errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']) },
+      });
+    });
+
+    it('should reject saving canonical code with wrong UOM (e.g. COAL-001 with LITER) with GSP_RECEIPT_UNIT_MISMATCH', async () => {
+      prisma.productCatalog.findUnique.mockResolvedValueOnce(null);
+      await expect(
+        service.create(
+          {
+            code: 'COAL-001',
+            name: 'Batubara',
+            category: 'Coal',
+            processType: ProcessType.GSP,
+            gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+            receiptUnit: WarehouseUnit.LITER, // MISMATCH
+            isActive: true,
+          } as any,
+          mockAdminUser,
+        ),
+      ).rejects.toMatchObject({
+        response: { errors: expect.arrayContaining(['GSP_RECEIPT_UNIT_MISMATCH']) },
+      });
     });
   });
 
@@ -219,6 +260,7 @@ describe('ProductCatalogService', () => {
         processType: ProcessType.GSP,
         isActive: true,
         gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        receiptUnit: WarehouseUnit.LITER,
         isPaRequired: true,
       });
 

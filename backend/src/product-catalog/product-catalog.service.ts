@@ -13,6 +13,7 @@ import { QueryProductCatalogDto } from './dto/query-product-catalog.dto';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { ProcessType, GspAnalysisProfile, Prisma } from '@prisma/client';
 import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
+import { assertCanonicalGspUomMapping } from './constants/canonical-gsp-uom';
 
 @Injectable()
 export class ProductCatalogService {
@@ -99,6 +100,19 @@ export class ProductCatalogService {
         });
       }
 
+      if (isActive && !dto.receiptUnit) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Produk GSP berstatus aktif wajib menetapkan Receipt UOM (KG atau LITER).',
+          errors: ['MISSING_GSP_RECEIPT_UNIT'],
+        });
+      }
+
+      if (isActive && dto.receiptUnit) {
+        assertCanonicalGspUomMapping(dto.code, dto.receiptUnit);
+      }
+
       if (dto.gspAnalysisProfile) {
         const expectedPaRequired =
           dto.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT
@@ -125,6 +139,7 @@ export class ProductCatalogService {
         subCategory: dto.subCategory?.trim() || null,
         processType: dto.processType,
         gspAnalysisProfile: dto.gspAnalysisProfile || null,
+        receiptUnit: dto.receiptUnit || null,
         isPaRequired: isPaRequired ?? true,
         policyVersion: dto.policyVersion || 'SOP-GSP-2026.1',
         isActive,
@@ -178,6 +193,11 @@ export class ProductCatalogService {
       dto.gspAnalysisProfile !== undefined
         ? dto.gspAnalysisProfile
         : existing.gspAnalysisProfile;
+    const targetReceiptUnit =
+      dto.receiptUnit !== undefined
+        ? dto.receiptUnit
+        : existing.receiptUnit;
+    const targetCode = dto.code ? dto.code.trim().toUpperCase() : existing.code;
 
     let targetIsPaRequired =
       dto.isPaRequired !== undefined ? dto.isPaRequired : existing.isPaRequired;
@@ -191,6 +211,19 @@ export class ProductCatalogService {
             'Produk GSP berstatus aktif wajib menetapkan Analysis Profile. Tetapkan profil analisis sebelum mengaktifkan produk.',
           errors: ['MISSING_GSP_ANALYSIS_PROFILE'],
         });
+      }
+
+      if (targetIsActive && !targetReceiptUnit) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Produk GSP berstatus aktif wajib menetapkan Receipt UOM (KG atau LITER).',
+          errors: ['MISSING_GSP_RECEIPT_UNIT'],
+        });
+      }
+
+      if (targetIsActive && targetReceiptUnit) {
+        assertCanonicalGspUomMapping(targetCode, targetReceiptUnit);
       }
 
       if (targetProfile) {
@@ -226,6 +259,8 @@ export class ProductCatalogService {
           dto.gspAnalysisProfile !== undefined
             ? dto.gspAnalysisProfile
             : undefined,
+        receiptUnit:
+          dto.receiptUnit !== undefined ? dto.receiptUnit : undefined,
         isPaRequired: targetIsPaRequired,
         policyVersion: dto.policyVersion ?? undefined,
         isActive: dto.isActive !== undefined ? dto.isActive : undefined,

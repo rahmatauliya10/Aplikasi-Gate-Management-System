@@ -16,6 +16,7 @@ import {
   CorrectionAction,
   TransactionStatus,
   GspAnalysisProfile,
+  WarehouseUnit,
 } from '@prisma/client';
 import { isProductPaExempt } from '../qc/constants/pa-exemption-policy';
 import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
@@ -139,6 +140,7 @@ export class ActiveTransactionAmendmentService {
     let gspAnalysisProfile: GspAnalysisProfile | null = tx.gspAnalysisProfile;
     let paPolicyVersion = tx.paPolicyVersion;
     let paExemptionReason = tx.paExemptionReason;
+    let receiptUnit: WarehouseUnit | null = tx.receiptUnit;
     let newStatus: TransactionStatus = tx.status;
     let statusDowngraded = false;
 
@@ -168,6 +170,14 @@ export class ActiveTransactionAmendmentService {
         });
       }
 
+      if (!newCatalog.receiptUnit) {
+        throw new BadRequestException({
+          success: false,
+          message: `Katalog produk target '${newCatalog.name}' belum memiliki satuan penerimaan (receiptUnit).`,
+          errors: ['MISSING_GSP_RECEIPT_UNIT'],
+        });
+      }
+
       assertValidGspProfileInvariant(
         newCatalog.gspAnalysisProfile,
         newCatalog.isPaRequired,
@@ -177,6 +187,7 @@ export class ActiveTransactionAmendmentService {
       authoritativeCargoSubType = newCatalog.name;
       gspAnalysisProfile = newCatalog.gspAnalysisProfile;
       paPolicyVersion = newCatalog.policyVersion || 'SOP-GSP-2026.1';
+      receiptUnit = newCatalog.receiptUnit;
 
       if (newCatalog.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT) {
         paExemptionReason = `SOP Exemption Rule [${paPolicyVersion}]: Produk ${newCatalog.name} (${newCatalog.code}) terverifikasi dari katalog master resmi bebas analisis PA laboratorium.`;
@@ -257,6 +268,7 @@ export class ActiveTransactionAmendmentService {
           gspAnalysisProfile,
           paPolicyVersion,
           paExemptionReason,
+          receiptUnit,
           status: newStatus,
           revision: { increment: 1 },
         },
@@ -281,6 +293,7 @@ export class ActiveTransactionAmendmentService {
             cargoSubType: tx.cargoSubType,
             productCatalogId: tx.productCatalogId,
             gspAnalysisProfile: tx.gspAnalysisProfile,
+            receiptUnit: tx.receiptUnit,
             status: tx.status,
           },
           newValues: {
@@ -290,6 +303,7 @@ export class ActiveTransactionAmendmentService {
               ? newCatalog.id
               : dto.productCatalogId || null,
             gspAnalysisProfile,
+            receiptUnit,
             status: newStatus,
           },
           expectedRevision: dto.revision,

@@ -4,7 +4,7 @@ import { GateService } from './gate.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
-import { GspAnalysisProfile, ProcessType } from '@prisma/client';
+import { GspAnalysisProfile, ProcessType, WarehouseUnit } from '@prisma/client';
 
 describe('GateService — GSP Canonical Registration & Flow Lock', () => {
   let gateService: GateService;
@@ -184,6 +184,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       category: 'Chemical UTL',
       processType: 'GSP',
       gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+      receiptUnit: WarehouseUnit.LITER,
       isPaRequired: true,
       isActive: true,
     });
@@ -209,6 +210,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       category: 'Chemical UTL',
       processType: 'GSP',
       gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+      receiptUnit: WarehouseUnit.LITER,
       isPaRequired: true,
       isActive: true,
     });
@@ -234,6 +236,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       category: 'Coal',
       processType: 'GSP',
       gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+      receiptUnit: WarehouseUnit.KG,
       isPaRequired: true,
       policyVersion: 'SOP-GSP-2026.1',
       isActive: true,
@@ -264,6 +267,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
           cargoSubType: 'Batubara',
           productCatalogId: 'cat-coal-1',
           gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+          receiptUnit: WarehouseUnit.KG,
           paPolicyVersion: 'SOP-GSP-2026.1',
         }),
       }),
@@ -278,6 +282,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       category: 'Fuel',
       processType: 'GSP',
       gspAnalysisProfile: GspAnalysisProfile.PA_EXEMPT,
+      receiptUnit: WarehouseUnit.LITER,
       isPaRequired: false,
       policyVersion: 'SOP-GSP-2026.1',
       isActive: true,
@@ -308,6 +313,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
           cargoSubType: 'Solar',
           productCatalogId: 'cat-solar-1',
           gspAnalysisProfile: GspAnalysisProfile.PA_EXEMPT,
+          receiptUnit: WarehouseUnit.LITER,
           paPolicyVersion: 'SOP-GSP-2026.1',
           paExemptionReason: expect.stringContaining('SOP Exemption Rule'),
         }),
@@ -323,6 +329,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       category: 'Chemical UTL',
       processType: 'GSP',
       gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+      receiptUnit: WarehouseUnit.LITER,
       isPaRequired: true,
       policyVersion: 'SOP-GSP-2026.1',
       isActive: true,
@@ -347,6 +354,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+          receiptUnit: WarehouseUnit.LITER,
           productCatalogId: 'cat-pac-1',
         }),
       }),
@@ -361,6 +369,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       category: 'Chemical PROD',
       processType: 'GSP',
       gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+      receiptUnit: WarehouseUnit.LITER,
       isPaRequired: true,
       policyVersion: 'SOP-GSP-2026.1',
       isActive: true,
@@ -385,7 +394,74 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+          receiptUnit: WarehouseUnit.LITER,
           productCatalogId: 'cat-rpd-1',
+        }),
+      }),
+    );
+  });
+
+  it('12. should fail check-in if GSP catalog lacks receiptUnit with MISSING_GSP_RECEIPT_UNIT', async () => {
+    mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce({
+      id: 'cat-no-uom',
+      code: 'PAC-001',
+      name: 'PAC 280 AC',
+      category: 'Chemical UTL',
+      processType: 'GSP',
+      gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+      receiptUnit: null,
+      isPaRequired: true,
+      isActive: true,
+    });
+
+    await expect(
+      gateService.checkIn(
+        {
+          ...baseGspDto,
+          cargoType: 'Chemical UTL',
+          cargoSubType: 'PAC 280 AC',
+          productCatalogId: 'cat-no-uom',
+        } as any,
+        securityUser,
+      ),
+    ).rejects.toMatchObject({
+      response: { errors: expect.arrayContaining(['MISSING_GSP_RECEIPT_UNIT']) },
+    });
+  });
+
+  it('13. should snapshot receiptUnit from catalog to transaction on gate check-in', async () => {
+    mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce({
+      id: 'cat-pac-1',
+      code: 'PAC-001',
+      name: 'PAC 280 AC',
+      category: 'Chemical UTL',
+      processType: 'GSP',
+      gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+      receiptUnit: WarehouseUnit.LITER,
+      isPaRequired: true,
+      isActive: true,
+    });
+
+    mockPrismaService.transaction.create.mockImplementation((args: any) => ({
+      id: 'tx-pac-uom',
+      ...args.data,
+    }));
+
+    const result = await gateService.checkIn(
+      {
+        ...baseGspDto,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        productCatalogId: 'cat-pac-1',
+      } as any,
+      securityUser,
+    );
+
+    expect(result.data.receiptUnit).toBe(WarehouseUnit.LITER);
+    expect(mockPrismaService.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          receiptUnit: WarehouseUnit.LITER,
         }),
       }),
     );

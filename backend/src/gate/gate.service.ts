@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { CreateGateCheckInDto } from './dto/create-gate-check-in.dto';
 import { GateQueryDto } from './dto/gate-query.dto';
-import { TransactionStatus, Prisma, GspAnalysisProfile } from '@prisma/client';
+import { TransactionStatus, Prisma, GspAnalysisProfile, WarehouseUnit } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
 
@@ -105,6 +105,7 @@ export class GateService {
           let gspAnalysisProfile: GspAnalysisProfile | null = null;
           let paPolicyVersion: string | null = null;
           let paExemptionReason: string | null = null;
+          let receiptUnit: WarehouseUnit | null = null;
 
           if (dto.processType === 'GSP') {
             // Fail-closed enforcement for GSP check-in:
@@ -152,6 +153,16 @@ export class GateService {
                 errors: ['MISSING_ANALYSIS_PROFILE'],
               });
             }
+
+            if (!catalog.receiptUnit) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' belum memiliki satuan penerimaan (receiptUnit) terkonfigurasi.`,
+                errors: ['MISSING_GSP_RECEIPT_UNIT'],
+              });
+            }
+
+            receiptUnit = catalog.receiptUnit;
 
             // Invariant verification between profile and isPaRequired
             assertValidGspProfileInvariant(
@@ -227,6 +238,7 @@ export class GateService {
               gspAnalysisProfile,
               paPolicyVersion,
               paExemptionReason,
+              receiptUnit,
               cargoProcessType: dto.cargoProcessType,
               suratJalanNumber: dto.suratJalanNumber,
               poNumber: dto.poNumber,

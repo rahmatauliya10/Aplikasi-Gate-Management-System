@@ -12,6 +12,7 @@ import {
   ProcessType,
   CorrectionAction,
   GspAnalysisProfile,
+  WarehouseUnit,
 } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
@@ -40,6 +41,7 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
     subCategory: 'Solar',
     processType: ProcessType.GSP,
     gspAnalysisProfile: GspAnalysisProfile.PA_EXEMPT,
+    receiptUnit: WarehouseUnit.LITER,
     isPaRequired: false,
     exemptionReason:
       'SOP Exemption Rule v1.0: Komoditas Solar BBM tidak memerlukan uji laboratorium pra-bongkar.',
@@ -55,6 +57,7 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
     subCategory: 'Batubara',
     processType: ProcessType.GSP,
     gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+    receiptUnit: WarehouseUnit.KG,
     isPaRequired: true,
     isActive: true,
   };
@@ -147,6 +150,7 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         cargoType: 'Fuel',
         cargoSubType: 'Solar',
         productCatalogId: solarCatalog.id,
+        receiptUnit: WarehouseUnit.LITER,
         paExemptionReason: solarCatalog.exemptionReason,
         paPolicyVersion: solarCatalog.policyVersion,
         revision: 2,
@@ -201,6 +205,7 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
             cargoSubType: 'Batubara GAR 4200',
             productCatalogId: coalCatalog.id,
             gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+            receiptUnit: WarehouseUnit.KG,
             status: TransactionStatus.QC_VEHICLE_PENDING,
             paExemptionReason: null,
             paPolicyVersion: 'SOP-GSP-2026.1',
@@ -217,6 +222,7 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
             reasonCode: 'PRODUCT_AMENDMENT',
             newValues: expect.objectContaining({
               cargoSubType: 'Batubara GAR 4200',
+              receiptUnit: WarehouseUnit.KG,
               status: TransactionStatus.QC_VEHICLE_PENDING,
             }),
           }),
@@ -233,6 +239,7 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         cargoType: 'Coal',
         cargoSubType: 'Batubara',
         productCatalogId: coalCatalog.id,
+        receiptUnit: WarehouseUnit.KG,
         revision: 4,
       };
 
@@ -244,6 +251,7 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         subCategory: 'PAC 280 AC',
         processType: ProcessType.GSP,
         gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        receiptUnit: WarehouseUnit.LITER,
         isPaRequired: true,
         isActive: true,
       };
@@ -350,6 +358,88 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
           mockAdminUser,
         ),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('should atomically update transaction receiptUnit from KG to LITER when amending Coal to PAC', async () => {
+      const initialCoalTx = {
+        id: 'tx-coal-to-pac',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        warehouseStartAt: null,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalogId: coalCatalog.id,
+        receiptUnit: WarehouseUnit.KG,
+        revision: 1,
+      };
+
+      const pacTargetCatalog = {
+        id: 'cat-pac-uom',
+        code: 'PAC-001',
+        name: 'PAC 280 AC',
+        category: 'Chemical UTL',
+        subCategory: 'PAC 280 AC',
+        processType: ProcessType.GSP,
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        receiptUnit: WarehouseUnit.LITER,
+        isPaRequired: true,
+        isActive: true,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(initialCoalTx);
+      mockPrismaService.productCatalog.findUnique.mockResolvedValueOnce(pacTargetCatalog);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        transactionCorrection: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.amendActiveProduct(
+        'tx-coal-to-pac',
+        {
+          cargoType: 'Chemical UTL',
+          cargoSubType: 'PAC 280 AC',
+          productCatalogId: pacTargetCatalog.id,
+          reason: 'Salah pilih material di pos security',
+          revision: 1,
+        },
+        mockAdminUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            receiptUnit: WarehouseUnit.LITER,
+          }),
+        }),
+      );
+      expect(mockTxClient.transactionCorrection.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            oldValues: expect.objectContaining({
+              receiptUnit: WarehouseUnit.KG,
+            }),
+            newValues: expect.objectContaining({
+              receiptUnit: WarehouseUnit.LITER,
+            }),
+          }),
+        }),
+      );
     });
   });
 });
