@@ -76,6 +76,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-gms}?schema=public
       - NODE_ENV=production
+      - ENABLE_TEST_SPEC_FIXTURES=${ENABLE_TEST_SPEC_FIXTURES:-false}
+      - GMS_TEST_HARNESS=${GMS_TEST_HARNESS:-false}
     depends_on:
       postgres:
         condition: service_healthy
