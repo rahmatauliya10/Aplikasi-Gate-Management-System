@@ -19,12 +19,16 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(wrapper.text()).toContain('Digital Moisture Analyzer')
       expect(wrapper.text()).not.toContain('ASTM D3302')
 
-      // Assert only locked calorie bands exist
+      // Assert only locked calorie bands exist (filtering disabled prompt)
       const calorieSelect = wrapper.find('#select-coal-calorie')
       expect(calorieSelect.exists()).toBe(true)
       const options = calorieSelect.findAll('option')
-      const optionValues = options.map(o => o.element.value)
+      const optionValues = options.filter(o => !o.element.disabled).map(o => o.element.value)
       expect(optionValues).toEqual(['COAL_5600_6000', 'COAL_GT_6000'])
+
+      // Form is incomplete initially before operator selections (P1-04 UX)
+      const releaseBtn = wrapper.find('#btn-coal-release')
+      expect(releaseBtn.attributes('disabled')).toBeDefined()
 
       // Select COAL_5600_6000 (max TM: 33%)
       await calorieSelect.setValue('COAL_5600_6000')
@@ -33,15 +37,13 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       const moistureInput = wrapper.find('#input-coal-moisture')
       await moistureInput.setValue(30)
 
-      // Ensure visual selects are factual normal
+      // Ensure visual selects are explicitly confirmed by operator
       await wrapper.find('#select-coal-kondisi').setValue('Kering (Tidak Basah)')
       await wrapper.find('#select-coal-warna').setValue('Hitam')
       await wrapper.find('#select-coal-level-rank').setValue('High Rank Coal')
       await wrapper.find('#select-coal-kilap').setValue('Hitam Mengkilap')
       await wrapper.find('#select-coal-bahan-pengotor').setValue('Tidak ada kontaminasi batuan maupun tanah')
 
-      const releaseBtn = wrapper.find('#btn-coal-release')
-      expect(releaseBtn.exists()).toBe(true)
       expect(releaseBtn.attributes('disabled')).toBeUndefined()
       expect(releaseBtn.text()).toContain('Kirim Hasil Analisis PA')
 
@@ -71,6 +73,13 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
           testRound: 1,
         },
       })
+
+      await wrapper.find('#select-coal-calorie').setValue('COAL_5600_6000')
+      await wrapper.find('#select-coal-kondisi').setValue('Kering (Tidak Basah)')
+      await wrapper.find('#select-coal-warna').setValue('Hitam')
+      await wrapper.find('#select-coal-level-rank').setValue('High Rank Coal')
+      await wrapper.find('#select-coal-kilap').setValue('Hitam Mengkilap')
+      await wrapper.find('#select-coal-bahan-pengotor').setValue('Tidak ada kontaminasi batuan maupun tanah')
 
       const moistureInput = wrapper.find('#input-coal-moisture')
       await moistureInput.setValue(38) // 38% > 33%
@@ -120,11 +129,14 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
         },
       })
 
-      // Set compliant parameters via form UI
+      // Explicitly set compliant parameters via form UI
       await wrapper.find('#select-coal-calorie').setValue('COAL_5600_6000')
+      await wrapper.find('#select-coal-kondisi').setValue('Kering (Tidak Basah)')
+      await wrapper.find('#select-coal-warna').setValue('Hitam')
+      await wrapper.find('#select-coal-level-rank').setValue('High Rank Coal')
+      await wrapper.find('#select-coal-kilap').setValue('Hitam Mengkilap')
+      await wrapper.find('#select-coal-bahan-pengotor').setValue('Tidak ada kontaminasi batuan maupun tanah')
       await wrapper.find('#input-coal-moisture').setValue(31.5)
-      // Defaults are already canonical compliant:
-      // "Kering (Tidak Basah)", "Hitam", "High Rank Coal", "Hitam Mengkilap", "Tidak ada kontaminasi batuan maupun tanah"
 
       const releaseBtn = wrapper.find('#btn-coal-release')
       expect(releaseBtn.exists()).toBe(true)
@@ -156,6 +168,13 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
           testRound: 2,
         },
       })
+
+      await wrapper.find('#select-coal-calorie').setValue('COAL_5600_6000')
+      await wrapper.find('#select-coal-kondisi').setValue('Kering (Tidak Basah)')
+      await wrapper.find('#select-coal-warna').setValue('Hitam')
+      await wrapper.find('#select-coal-level-rank').setValue('High Rank Coal')
+      await wrapper.find('#select-coal-kilap').setValue('Hitam Mengkilap')
+      await wrapper.find('#select-coal-bahan-pengotor').setValue('Tidak ada kontaminasi batuan maupun tanah')
 
       const moistureInput = wrapper.find('#input-coal-moisture')
       await moistureInput.setValue(36.5) // still exceeds limit in Round 2

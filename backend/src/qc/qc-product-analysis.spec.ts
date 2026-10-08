@@ -775,7 +775,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
             sensory: {
               visual: 'Kuning',
               foreignMatters: 'Tidak ada kontaminasi',
-              packaging: 'Kemasan & label tidak rusak',
+              packagingLabel: 'Kemasan & label tidak rusak',
             },
             ph: 4.2,
             density: 1.21,

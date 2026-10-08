@@ -121,7 +121,7 @@ describe('GSPProcess.vue — Start Button & Security Data Conditions', () => {
     // Expect security completion form to be rendered
     const saveBtn = wrapper.find('#btn-save-security-gsp')
     expect(saveBtn.exists()).toBe(true)
-    expect(saveBtn.text()).toContain('Simpan Data & Lanjutkan Pemeriksaan')
+    expect(saveBtn.text()).toContain('Siapkan Data & Lanjutkan Pemeriksaan')
 
     // SJ input is visible because SJ is missing
     const sjInput = wrapper.find('#input-gsp-surat-jalan')

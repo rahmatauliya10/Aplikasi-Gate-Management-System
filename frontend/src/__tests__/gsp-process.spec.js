@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import GSPProcess from '../views/GSPProcess.vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useWarehouseStore } from '../stores/warehouseStore'
+import api from '../services/api'
 
 vi.mock('../components/PageHeader.vue', () => ({
   default: { template: '<div class="page-header"><slot /></div>' }
@@ -43,10 +44,29 @@ vi.mock('vue-router', () => ({
   })
 }))
 
+vi.mock('../services/api', () => ({
+  default: {
+    post: vi.fn(),
+    get: vi.fn(),
+  }
+}))
+
 describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specific Receiving', () => {
   let pinia
   let truckStore
   let warehouseStore
+
+  const canonicalCodes = [
+    'CLEAN_VEHICLE',
+    'DOOR_SEAL_GOOD',
+    'NO_EXPIRED_GAS_CYLINDER',
+    'ITEMS_NEATLY_ARRANGED',
+    'NO_PEST_OR_ANIMAL_TRACE',
+    'GOOD_CLEAN_SEALED',
+    'COA_MATCHES_BATCH',
+    'QTY_TYPE_MATCHES_SJ',
+    'VEHICLE_NO_LEAK_GOOD',
+  ]
 
   beforeEach(() => {
     pinia = createPinia()
@@ -57,18 +77,6 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
   })
 
   describe('Pre-Unloading Checklist (GSP-PREUNLOAD-2026.1)', () => {
-    const canonicalCodes = [
-      'PHYSICAL_CONTAINER_SEAL',
-      'DRIVER_PPE',
-      'SAFETY_EQUIPMENT_READY',
-      'HOSE_PIPE_CONDITION',
-      'RECEIVING_TANK_CAPACITY',
-      'VALVE_LINE_ALIGNMENT',
-      'WHEEL_CHOCK_PLACEMENT',
-      'SURAT_JALAN_PHYSICAL',
-      'PURCHASE_ORDER_PHYSICAL',
-    ]
-
     it('blocks bongkar and requires completing SJ/PO when missing', async () => {
       truckStore.trucks = [{
         id: 'tx-1',
@@ -87,7 +95,7 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       expect(wrapper.find('#btn-start-unload').exists()).toBe(false)
     })
 
-    it('renders exactly 9 checklist items when SJ and PO are complete', async () => {
+    it('renders exactly 9 canonical checklist items when SJ and PO are complete', async () => {
       truckStore.trucks = [{
         id: 'tx-2',
         plateNumber: 'B 2222 GSP',
@@ -107,7 +115,7 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       }
     })
 
-    it('enables [ MULAI BONGKAR ] when all 9 items are OK and submits checklist payload', async () => {
+    it('enables [ MULAI BONGKAR ] when all 9 items are OK and submits canonical preUnloadChecklist payload', async () => {
       truckStore.trucks = [{
         id: 'tx-3',
         plateNumber: 'B 3333 GSP',
@@ -140,15 +148,17 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       expect(startProcessSpy).toHaveBeenCalledWith('tx-3', {
         suratJalanNumber: 'SJ-001',
         poNumber: 'PO-001',
-        checklist: expect.arrayContaining([
-          expect.objectContaining({ code: 'PHYSICAL_CONTAINER_SEAL', result: 'OK' }),
-          expect.objectContaining({ code: 'PURCHASE_ORDER_PHYSICAL', result: 'OK' }),
-        ]),
+        preUnloadChecklist: {
+          items: expect.arrayContaining([
+            expect.objectContaining({ code: 'CLEAN_VEHICLE', result: 'OK' }),
+            expect.objectContaining({ code: 'VEHICLE_NO_LEAK_GOOD', result: 'OK' }),
+          ]),
+        },
       })
       expect(mockToast.success).toHaveBeenCalledWith(expect.stringContaining('9/9 OK'))
     })
 
-    it('enables [ SIMPAN HASIL PEMERIKSAAN ] when any item is NOT_OK, blocking bongkar', async () => {
+    it('enables [ SIMPAN HASIL PEMERIKSAAN ] when any item is NOT_OK, blocking bongkar and recording audit truthfully', async () => {
       truckStore.trucks = [{
         id: 'tx-4',
         plateNumber: 'B 4444 GSP',
@@ -159,7 +169,12 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       }]
 
       const startProcessSpy = vi.spyOn(warehouseStore, 'startProcess').mockRejectedValue({
-        response: { data: { message: 'GSP Pre-unloading checklist failed.' } }
+        response: {
+          data: {
+            message: 'GSP Pre-unloading checklist failed.',
+            errors: ['PREUNLOAD_CHECKLIST_ITEMS_NOT_OK'],
+          },
+        },
       })
 
       const wrapper = mount(GSPProcess, { global: { plugins: [pinia] } })
@@ -168,7 +183,7 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       // Mark 8 items OK, and 1 item NOT_OK
       for (let i = 0; i < canonicalCodes.length; i++) {
         const code = canonicalCodes[i]
-        if (code === 'HOSE_PIPE_CONDITION') {
+        if (code === 'DOOR_SEAL_GOOD') {
           await wrapper.find(`#btn-chk-${code}-notok`).trigger('click')
         } else {
           await wrapper.find(`#btn-chk-${code}-ok`).trigger('click')
@@ -188,11 +203,202 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       expect(startProcessSpy).toHaveBeenCalledWith('tx-4', {
         suratJalanNumber: 'SJ-001',
         poNumber: 'PO-001',
-        checklist: expect.arrayContaining([
-          expect.objectContaining({ code: 'HOSE_PIPE_CONDITION', result: 'NOT_OK' }),
-        ]),
+        preUnloadChecklist: {
+          items: expect.arrayContaining([
+            expect.objectContaining({ code: 'DOOR_SEAL_GOOD', result: 'NOT_OK' }),
+          ]),
+        },
       })
-      expect(mockToast.warning).toHaveBeenCalledWith(expect.stringContaining('NOT_OK tersimpan dan diaudit'))
+      expect(mockToast.warning).toHaveBeenCalledWith(expect.stringContaining('Hasil NOT_OK tercatat, bongkar ditahan'))
+    })
+
+    it('P0-02: does NOT claim NOT_OK is saved when API fails with server error or network failure', async () => {
+      truckStore.trucks = [{
+        id: 'tx-5-fail',
+        plateNumber: 'B 5555 GSP',
+        processType: 'GSP',
+        status: 'QC_VEHICLE_PASSED',
+        suratJalanNumber: 'SJ-001',
+        poNumber: 'PO-001',
+      }]
+
+      // API fails with generic 500 error (NOT PREUNLOAD_CHECKLIST_ITEMS_NOT_OK)
+      vi.spyOn(warehouseStore, 'startProcess').mockRejectedValue(new Error('Network Error: 500 Internal Server Error'))
+
+      const wrapper = mount(GSPProcess, { global: { plugins: [pinia] } })
+      await wrapper.find('.cursor-pointer').trigger('click')
+
+      // Mark 1 item NOT_OK
+      for (let i = 0; i < canonicalCodes.length; i++) {
+        const code = canonicalCodes[i]
+        if (code === 'NO_EXPIRED_GAS_CYLINDER') {
+          await wrapper.find(`#btn-chk-${code}-notok`).trigger('click')
+        } else {
+          await wrapper.find(`#btn-chk-${code}-ok`).trigger('click')
+        }
+      }
+
+      const saveFailBtn = wrapper.find('#btn-save-checklist-fail')
+      await saveFailBtn.trigger('click')
+
+      // Crucial: Must show error toast, NOT false success/warning claiming NOT_OK was recorded!
+      expect(mockToast.warning).not.toHaveBeenCalled()
+      expect(mockToast.error).toHaveBeenCalledWith(expect.stringContaining('Gagal mencatat audit checklist'))
+    })
+  })
+
+  describe('P1-02 Cross-Layer Contract: GSPProcess.vue -> warehouseStore -> warehouseService -> API', () => {
+    // Contract validator that simulates the exact backend StartWarehouseDto & WarehouseService verification
+    const setupContractApiMock = () => {
+      api.post.mockImplementation((url, payload) => {
+        if (url.startsWith('/warehouse/start/')) {
+          if (!payload.suratJalanNumber || !payload.poNumber) {
+            return Promise.reject({
+              response: { status: 400, data: { errors: ['MISSING_SURAT_JALAN_OR_PO'] } }
+            })
+          }
+          if (!payload.preUnloadChecklist || !Array.isArray(payload.preUnloadChecklist.items)) {
+            return Promise.reject({
+              response: { status: 400, data: { errors: ['MISSING_PREUNLOAD_CHECKLIST'] } }
+            })
+          }
+          const { items } = payload.preUnloadChecklist
+          if (items.length !== 9) {
+            return Promise.reject({
+              response: { status: 400, data: { errors: ['GSP_PREUNLOAD_CHECKLIST_INVALID_LENGTH'] } }
+            })
+          }
+          const codes = items.map(i => i.code)
+          const allCanonical = canonicalCodes.every(c => codes.includes(c))
+          if (!allCanonical || new Set(codes).size !== 9) {
+            return Promise.reject({
+              response: { status: 400, data: { errors: ['GSP_PREUNLOAD_CHECKLIST_INVALID_CODES'] } }
+            })
+          }
+          const hasNotOk = items.some(i => i.result === 'NOT_OK')
+          if (hasNotOk) {
+            return Promise.reject({
+              response: {
+                status: 400,
+                data: {
+                  message: 'Pre-unload checklist items marked NOT_OK',
+                  errors: ['PREUNLOAD_CHECKLIST_ITEMS_NOT_OK'],
+                }
+              }
+            })
+          }
+          return Promise.resolve({
+            data: {
+              success: true,
+              data: {
+                id: 'tx-verified',
+                status: 'WAREHOUSE_IN_PROGRESS',
+              }
+            }
+          })
+        }
+        return Promise.resolve({ data: {} })
+      })
+    }
+
+    it('Coal truck (QC_VEHICLE_PASSED + SJ/PO + 9/9 OK) starts warehouse successfully through real store & service layers', async () => {
+      setupContractApiMock()
+      truckStore.trucks = [{
+        id: 'tx-coal-contract',
+        plateNumber: 'B 1010 COAL',
+        processType: 'GSP',
+        cargoType: 'Batubara',
+        status: 'QC_VEHICLE_PASSED',
+        suratJalanNumber: 'SJ-COAL-1',
+        poNumber: 'PO-COAL-1',
+        receiptUnit: 'KG',
+      }]
+
+      const wrapper = mount(GSPProcess, { global: { plugins: [pinia] } })
+      await wrapper.find('.cursor-pointer').trigger('click')
+
+      for (const code of canonicalCodes) {
+        await wrapper.find(`#btn-chk-${code}-ok`).trigger('click')
+      }
+
+      const startBtn = wrapper.find('#btn-start-unload')
+      await startBtn.trigger('click')
+      await flushPromises()
+
+      expect(api.post).toHaveBeenCalledWith('/warehouse/start/tx-coal-contract', {
+        suratJalanNumber: 'SJ-COAL-1',
+        poNumber: 'PO-COAL-1',
+        preUnloadChecklist: {
+          items: expect.arrayContaining([
+            expect.objectContaining({ code: 'CLEAN_VEHICLE', result: 'OK' }),
+            expect.objectContaining({ code: 'QTY_TYPE_MATCHES_SJ', result: 'OK' }),
+          ])
+        }
+      })
+      expect(mockToast.success).toHaveBeenCalledWith(expect.stringContaining('9/9 OK'))
+    })
+
+    it('Solar truck (PA_NOT_REQUIRED + SJ/PO + 9/9 OK) starts warehouse successfully through real store & service layers', async () => {
+      setupContractApiMock()
+      truckStore.trucks = [{
+        id: 'tx-solar-contract',
+        plateNumber: 'B 2020 SOL',
+        processType: 'GSP',
+        cargoType: 'BBM',
+        cargoSubType: 'Solar BBM',
+        status: 'PA_NOT_REQUIRED',
+        suratJalanNumber: 'SJ-SOLAR-1',
+        poNumber: 'PO-SOLAR-1',
+        receiptUnit: 'LITER',
+      }]
+
+      const wrapper = mount(GSPProcess, { global: { plugins: [pinia] } })
+      await wrapper.find('.cursor-pointer').trigger('click')
+
+      for (const code of canonicalCodes) {
+        await wrapper.find(`#btn-chk-${code}-ok`).trigger('click')
+      }
+
+      const startBtn = wrapper.find('#btn-start-unload')
+      await startBtn.trigger('click')
+      await flushPromises()
+
+      expect(api.post).toHaveBeenCalledWith('/warehouse/start/tx-solar-contract', expect.objectContaining({
+        suratJalanNumber: 'SJ-SOLAR-1',
+        poNumber: 'PO-SOLAR-1',
+      }))
+      expect(mockToast.success).toHaveBeenCalledWith(expect.stringContaining('9/9 OK'))
+    })
+
+    it('PAC / Rapid chemical truck (QC_VEHICLE_PASSED + SJ/PO + 9/9 OK) starts warehouse successfully through real layers', async () => {
+      setupContractApiMock()
+      truckStore.trucks = [{
+        id: 'tx-pac-contract',
+        plateNumber: 'B 3030 PAC',
+        processType: 'GSP',
+        cargoType: 'PAC 280 AC',
+        status: 'QC_VEHICLE_PASSED',
+        suratJalanNumber: 'SJ-PAC-1',
+        poNumber: 'PO-PAC-1',
+        receiptUnit: 'LITER',
+      }]
+
+      const wrapper = mount(GSPProcess, { global: { plugins: [pinia] } })
+      await wrapper.find('.cursor-pointer').trigger('click')
+
+      for (const code of canonicalCodes) {
+        await wrapper.find(`#btn-chk-${code}-ok`).trigger('click')
+      }
+
+      const startBtn = wrapper.find('#btn-start-unload')
+      await startBtn.trigger('click')
+      await flushPromises()
+
+      expect(api.post).toHaveBeenCalledWith('/warehouse/start/tx-pac-contract', expect.objectContaining({
+        suratJalanNumber: 'SJ-PAC-1',
+        poNumber: 'PO-PAC-1',
+      }))
+      expect(mockToast.success).toHaveBeenCalledWith(expect.stringContaining('9/9 OK'))
     })
   })
 

@@ -35,8 +35,9 @@
             v-model="formData.visual.kondisi"
             id="select-coal-kondisi"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
-            :class="!COMPLIANT_VISUAL.kondisi.includes(formData.visual.kondisi) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+            :class="formData.visual.kondisi && !COMPLIANT_VISUAL.kondisi.includes(formData.visual.kondisi) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
           >
+            <option value="" disabled>-- Pilih Kondisi Batubara --</option>
             <option value="Kering (Tidak Basah)">Kering (Tidak Basah) [Normal]</option>
             <option value="Basah (Kandungan Air Berlebih)">Basah (Kandungan Air Berlebih) [OOS]</option>
           </select>
@@ -49,8 +50,9 @@
             v-model="formData.visual.warna"
             id="select-coal-warna"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
-            :class="!COMPLIANT_VISUAL.warna.includes(formData.visual.warna) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+            :class="formData.visual.warna && !COMPLIANT_VISUAL.warna.includes(formData.visual.warna) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
           >
+            <option value="" disabled>-- Pilih Warna Batubara --</option>
             <option value="Hitam">Hitam [Normal]</option>
             <option value="Hitam Kecoklatan">Hitam Kecoklatan [Normal]</option>
             <option value="Coklat">Coklat [Normal]</option>
@@ -65,8 +67,9 @@
             v-model="formData.visual.levelRank"
             id="select-coal-level-rank"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
-            :class="!COMPLIANT_VISUAL.levelRank.includes(formData.visual.levelRank) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+            :class="formData.visual.levelRank && !COMPLIANT_VISUAL.levelRank.includes(formData.visual.levelRank) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
           >
+            <option value="" disabled>-- Pilih Level / Rank Batubara --</option>
             <option value="High Rank Coal">High Rank Coal [Normal]</option>
             <option value="Medium Rank Coal">Medium Rank Coal [Normal]</option>
             <option value="Low Rank Coal">Low Rank Coal [Normal]</option>
@@ -81,8 +84,9 @@
             v-model="formData.visual.kilap"
             id="select-coal-kilap"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
-            :class="!COMPLIANT_VISUAL.kilap.includes(formData.visual.kilap) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+            :class="formData.visual.kilap && !COMPLIANT_VISUAL.kilap.includes(formData.visual.kilap) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
           >
+            <option value="" disabled>-- Pilih Kilap Batubara --</option>
             <option value="Hitam Mengkilap">Hitam Mengkilap [Normal]</option>
             <option value="Hitam Kecoklatan">Hitam Kecoklatan [Normal]</option>
             <option value="Mudah Lapuk">Mudah Lapuk [Normal]</option>
@@ -97,8 +101,9 @@
             v-model="formData.visual.bahanPengotor"
             id="select-coal-bahan-pengotor"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
-            :class="!COMPLIANT_VISUAL.bahanPengotor.includes(formData.visual.bahanPengotor) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+            :class="formData.visual.bahanPengotor && !COMPLIANT_VISUAL.bahanPengotor.includes(formData.visual.bahanPengotor) ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
           >
+            <option value="" disabled>-- Pilih Bahan Pengotor Batubara --</option>
             <option value="Tidak ada kontaminasi batuan maupun tanah">Tidak ada kontaminasi batuan maupun tanah [Normal]</option>
             <option value="Terkontaminasi batuan dan tanah">Terkontaminasi batuan dan tanah [OOS]</option>
           </select>
@@ -122,12 +127,13 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Target Kalori Batubara</label>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Target Kalori Batubara *</label>
           <select
             v-model="formData.targetCalorie"
             id="select-coal-calorie"
             class="w-full h-10 px-3 bg-white rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#4A8BDF]"
           >
+            <option value="" disabled>-- Pilih Target Kalori Batubara --</option>
             <option value="COAL_5600_6000">5600 - 6000 kcal/kg (Batas Max TM: 33%)</option>
             <option value="COAL_GT_6000">> 6000 kcal/kg (Batas Max TM: 25%)</option>
           </select>
@@ -231,13 +237,13 @@ const COMPLIANT_VISUAL = {
 
 const formData = reactive({
   visual: {
-    kondisi: 'Kering (Tidak Basah)',
-    warna: 'Hitam',
-    levelRank: 'High Rank Coal',
-    kilap: 'Hitam Mengkilap',
-    bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+    kondisi: '',
+    warna: '',
+    levelRank: '',
+    kilap: '',
+    bahanPengotor: '',
   },
-  targetCalorie: 'COAL_5600_6000',
+  targetCalorie: '',
   totalMoisture: null,
   notes: '',
 })
@@ -247,6 +253,7 @@ const maxAllowedMoisture = computed(() => {
     case 'COAL_GT_6000':
       return 25.0
     case 'COAL_5600_6000':
+      return 33.0
     default:
       return 33.0
   }
@@ -258,12 +265,13 @@ const isMoistureExceeded = computed(() => {
 })
 
 const isVisualOos = computed(() => {
+  const v = formData.visual
   return (
-    !COMPLIANT_VISUAL.kondisi.includes(formData.visual.kondisi) ||
-    !COMPLIANT_VISUAL.warna.includes(formData.visual.warna) ||
-    !COMPLIANT_VISUAL.levelRank.includes(formData.visual.levelRank) ||
-    !COMPLIANT_VISUAL.kilap.includes(formData.visual.kilap) ||
-    !COMPLIANT_VISUAL.bahanPengotor.includes(formData.visual.bahanPengotor)
+    (Boolean(v.kondisi) && !COMPLIANT_VISUAL.kondisi.includes(v.kondisi)) ||
+    (Boolean(v.warna) && !COMPLIANT_VISUAL.warna.includes(v.warna)) ||
+    (Boolean(v.levelRank) && !COMPLIANT_VISUAL.levelRank.includes(v.levelRank)) ||
+    (Boolean(v.kilap) && !COMPLIANT_VISUAL.kilap.includes(v.kilap)) ||
+    (Boolean(v.bahanPengotor) && !COMPLIANT_VISUAL.bahanPengotor.includes(v.bahanPengotor))
   )
 })
 
@@ -273,7 +281,12 @@ const isAnyOos = computed(() => {
 
 const isFormComplete = computed(() => {
   return (
-    formData.totalMoisture != null &&
+    Boolean(formData.targetCalorie) &&
+    formData.totalMoisture !== null &&
+    typeof formData.totalMoisture === 'number' &&
+    Number.isFinite(formData.totalMoisture) &&
+    formData.totalMoisture >= 0 &&
+    formData.totalMoisture <= 100 &&
     Boolean(formData.visual.kondisi) &&
     Boolean(formData.visual.warna) &&
     Boolean(formData.visual.levelRank) &&

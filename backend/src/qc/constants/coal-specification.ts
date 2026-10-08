@@ -142,7 +142,17 @@ export function evaluateCoalAnalysis(
 
   const maxAllowedMoisture = configuredBand.maxTotalMoisturePct;
   const visualPassed = validateCoalVisual(params.visual);
-  const moisturePassed = params.totalMoisture <= maxAllowedMoisture;
+
+  const rawMoisture = params.totalMoisture;
+  const isMoistureValidNumber =
+    typeof rawMoisture === 'number' &&
+    Number.isFinite(rawMoisture) &&
+    !Number.isNaN(rawMoisture) &&
+    rawMoisture >= 0 &&
+    rawMoisture <= 100;
+
+  const moisturePassed =
+    isMoistureValidNumber && rawMoisture <= maxAllowedMoisture;
   const isWithinSpec = visualPassed && moisturePassed;
 
   if (isWithinSpec) {
@@ -161,6 +171,10 @@ export function evaluateCoalAnalysis(
     };
   }
 
+  const moistureNotesPart = !isMoistureValidNumber
+    ? 'Kadar air tidak valid atau tidak diisi (wajib angka numerik 0-100%)'
+    : `Kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%)`;
+
   if (params.testRound === 1) {
     return {
       isConfigured: true,
@@ -175,10 +189,10 @@ export function evaluateCoalAnalysis(
       documentSource: specMetadata.documentSource,
       notes:
         !visualPassed && !moisturePassed
-          ? `Kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%) dan pemeriksaan visual tidak memenuhi spesifikasi. Diperlukan uji ulang (Round 2).`
+          ? `${moistureNotesPart} dan pemeriksaan visual tidak memenuhi spesifikasi. Diperlukan uji ulang (Round 2).`
           : !visualPassed
             ? 'Pemeriksaan visual/sensori batubara tidak memenuhi standar faktual. Diperlukan uji ulang (Round 2).'
-            : `Kadar air melebihi batas spesifikasi (${params.totalMoisture}% > ${maxAllowedMoisture}%). Diperlukan uji ulang (Round 2).`,
+            : `${moistureNotesPart} tidak memenuhi batas spesifikasi. Diperlukan uji ulang (Round 2).`,
     };
   }
 
@@ -195,9 +209,9 @@ export function evaluateCoalAnalysis(
     documentSource: specMetadata.documentSource,
     notes:
       !visualPassed && !moisturePassed
-        ? `Kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%) dan pemeriksaan visual pada uji ulang Round ${params.testRound} tetap tidak memenuhi spesifikasi. Muatan ditolak (QC_VEHICLE_REJECTED).`
+        ? `${moistureNotesPart} dan pemeriksaan visual pada uji ulang Round ${params.testRound} tetap tidak memenuhi spesifikasi. Muatan ditolak (QC_VEHICLE_REJECTED).`
         : !visualPassed
           ? `Pemeriksaan visual/sensori batubara pada uji ulang Round ${params.testRound} tetap tidak memenuhi standar. Muatan ditolak (QC_VEHICLE_REJECTED).`
-          : `Kadar air uji ulang Round ${params.testRound} tetap melebihi batas spesifikasi (${params.totalMoisture}% > ${maxAllowedMoisture}%). Muatan ditolak (QC_VEHICLE_REJECTED).`,
+          : `${moistureNotesPart} pada uji ulang Round ${params.testRound} tetap tidak memenuhi spesifikasi. Muatan ditolak (QC_VEHICLE_REJECTED).`,
   };
 }

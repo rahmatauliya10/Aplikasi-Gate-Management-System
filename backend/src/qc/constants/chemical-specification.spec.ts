@@ -335,5 +335,51 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
       expect(resNoPkg.result).toBe('REJECT');
       expect(resNoPkg.decision).toBe('REJECT');
     });
+
+    it('P0-04 ADVERSARIAL: Rapid Klen strictly rejects legacy packaging alias in place of packagingLabel', () => {
+      const resLegacyPkg = evaluateRapidKlenAnalysis({
+        sensory: {
+          visual: 'Jernih',
+          foreignMatters: 'Tidak ada kontaminasi',
+          packaging: 'Kemasan baik', // LEGACY ALIAS INJECTION
+        },
+        alkalinityNa2O: 36.0,
+        alkalinityNaOH: 46.0,
+        ph: 13.0,
+        density: 1.45,
+      });
+      expect(resLegacyPkg.result).toBe('REJECT');
+      expect(resLegacyPkg.decision).toBe('REJECT');
+    });
+  });
+
+  describe('P0-04 Strict PAC Sensory Field Enforcement (No Odor or Packaging Aliases)', () => {
+    it('rejects PAC when foreignMatters is omitted even if legacy odor alias is provided', () => {
+      const resOdor = evaluatePacAnalysis({
+        sensory: {
+          visual: 'Kuning',
+          odor: 'Khas PAC', // LEGACY ALIAS INJECTION
+          packagingLabel: 'Kemasan & label tidak rusak',
+        },
+        ph: 4.2,
+        density: 1.21,
+      });
+      expect(resOdor.result).toBe('REJECT');
+      expect(resOdor.decision).toBe('REJECT');
+    });
+
+    it('rejects PAC when packagingLabel is omitted even if legacy packaging alias is provided', () => {
+      const resPkg = evaluatePacAnalysis({
+        sensory: {
+          visual: 'Kuning',
+          foreignMatters: 'Tidak ada kontaminasi',
+          packaging: 'Kemasan baik', // LEGACY ALIAS INJECTION
+        },
+        ph: 4.2,
+        density: 1.21,
+      });
+      expect(resPkg.result).toBe('REJECT');
+      expect(resPkg.decision).toBe('REJECT');
+    });
   });
 });

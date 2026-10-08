@@ -292,7 +292,6 @@ const submitAnalysis = () => {
         visual: formData.sensory.visual,
         foreignMatters: formData.sensory.foreignMatters,
         packagingLabel: formData.sensory.packagingLabel,
-        packaging: formData.sensory.packagingLabel,
       },
       visual: formData.sensory.visual,
       foreignMatters: formData.sensory.foreignMatters,

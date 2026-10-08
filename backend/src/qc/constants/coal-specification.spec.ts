@@ -190,4 +190,90 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
     expect(res.isConfigured).toBe(false);
     expect(res.error).toBe('SPEC_NOT_CONFIGURED');
   });
+
+  describe('P0-03 Adversarial: Missing, negative, and invalid moisture must NEVER RELEASE even with 100% visual PASS', () => {
+    it('rejects when moisture is missing or undefined (Round 1 -> RETEST_REQUIRED, Round 2 -> REJECT)', () => {
+      const r1 = evaluateCoalAnalysis(
+        {
+          calorieBand: 'COAL_5600_6000',
+          totalMoisture: undefined as any,
+          testRound: 1,
+          visual: validVisual,
+        },
+        OPERATIONAL_COAL_SPEC_METADATA,
+      );
+      expect(r1.result).toBe('REJECT');
+      expect(r1.decision).toBe('RETEST_REQUIRED');
+      expect(r1.isWithinSpec).toBe(false);
+
+      const r2 = evaluateCoalAnalysis(
+        {
+          calorieBand: 'COAL_5600_6000',
+          totalMoisture: undefined as any,
+          testRound: 2,
+          visual: validVisual,
+        },
+        OPERATIONAL_COAL_SPEC_METADATA,
+      );
+      expect(r2.result).toBe('REJECT');
+      expect(r2.decision).toBe('REJECT');
+      expect(r2.isWithinSpec).toBe(false);
+    });
+
+    it('rejects when moisture is null or NaN (must not default to 0)', () => {
+      const resNull = evaluateCoalAnalysis(
+        {
+          calorieBand: 'COAL_5600_6000',
+          totalMoisture: null as any,
+          testRound: 1,
+          visual: validVisual,
+        },
+        OPERATIONAL_COAL_SPEC_METADATA,
+      );
+      expect(resNull.result).toBe('REJECT');
+      expect(resNull.decision).toBe('RETEST_REQUIRED');
+
+      const resNan = evaluateCoalAnalysis(
+        {
+          calorieBand: 'COAL_5600_6000',
+          totalMoisture: NaN,
+          testRound: 1,
+          visual: validVisual,
+        },
+        OPERATIONAL_COAL_SPEC_METADATA,
+      );
+      expect(resNan.result).toBe('REJECT');
+      expect(resNan.decision).toBe('RETEST_REQUIRED');
+    });
+
+    it('rejects when moisture is negative (e.g. -5.0%)', () => {
+      const resNeg = evaluateCoalAnalysis(
+        {
+          calorieBand: 'COAL_5600_6000',
+          totalMoisture: -5.0,
+          testRound: 1,
+          visual: validVisual,
+        },
+        OPERATIONAL_COAL_SPEC_METADATA,
+      );
+      expect(resNeg.result).toBe('REJECT');
+      expect(resNeg.decision).toBe('RETEST_REQUIRED');
+      expect(resNeg.isWithinSpec).toBe(false);
+    });
+
+    it('rejects when moisture exceeds 100% (e.g. 105.0%)', () => {
+      const resOver = evaluateCoalAnalysis(
+        {
+          calorieBand: 'COAL_5600_6000',
+          totalMoisture: 105.0,
+          testRound: 1,
+          visual: validVisual,
+        },
+        OPERATIONAL_COAL_SPEC_METADATA,
+      );
+      expect(resOver.result).toBe('REJECT');
+      expect(resOver.decision).toBe('RETEST_REQUIRED');
+      expect(resOver.isWithinSpec).toBe(false);
+    });
+  });
 });

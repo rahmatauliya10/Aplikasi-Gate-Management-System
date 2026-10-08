@@ -79,7 +79,7 @@
                 </div>
                 <button @click="saveSecurityInfo" :disabled="isProcessing" class="w-full btn-primary py-2.5 mt-2 flex justify-center items-center space-x-2" id="btn-save-security-gsp">
                   <span v-if="isProcessing" class="material-icons animate-spin">autorenew</span>
-                  <span>Simpan Data & Lanjutkan Pemeriksaan</span>
+                  <span>Siapkan Data & Lanjutkan Pemeriksaan</span>
                 </button>
               </div>
 
@@ -406,17 +406,32 @@ import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import Pagination from '../components/Pagination.vue'
 import { getStatusLabel } from '../utils/statusLabel'
 
-// Canonical GSP Pre-Unloading Checklist Items (SOP-GSP-2026.1)
+// Canonical GSP Pre-Unloading Checklist Items (SOP-GSP-2026.1 / GSP-PREUNLOAD-2026.1)
 const GSP_PREUNLOAD_ITEMS = [
-  { code: 'PHYSICAL_CONTAINER_SEAL', label: 'Kondisi fisik kontainer/tangki/kemasan dan segel utuh' },
-  { code: 'DRIVER_PPE', label: 'Kelengkapan APD driver (Safety Helmet, Vest, Shoes, Kacamata/Masker jika kimia)' },
-  { code: 'SAFETY_EQUIPMENT_READY', label: 'Kesiapan APAR, spill kit, dan grounding clamp di area bongkar' },
-  { code: 'HOSE_PIPE_CONDITION', label: 'Kondisi selang/pipa bongkar bersih, tidak bocor, dan tersambung sempurna' },
-  { code: 'RECEIVING_TANK_CAPACITY', label: 'Kapasitas tangki/silo/bunker penerima mencukupi volume kiriman' },
-  { code: 'VALVE_LINE_ALIGNMENT', label: 'Jalur valve dan manifold penerima telah diarahkan ke tangki/bunker yang benar' },
-  { code: 'WHEEL_CHOCK_PLACEMENT', label: 'Ganjal roda (wheel chock) terpasang dan rem tangan aktif' },
-  { code: 'SURAT_JALAN_PHYSICAL', label: 'Surat Jalan fisik ada dan cocok dengan data muatan' },
-  { code: 'PURCHASE_ORDER_PHYSICAL', label: 'Nomor PO fisik valid dan sesuai pesanan' },
+  { code: 'CLEAN_VEHICLE', label: 'Kendaraan bersih' },
+  { code: 'DOOR_SEAL_GOOD', label: 'Seal pintu kendaraan baik' },
+  {
+    code: 'NO_EXPIRED_GAS_CYLINDER',
+    label: 'Tidak ditemukan tabung gas yang sudah Exp date masa uji berlakunya',
+  },
+  { code: 'ITEMS_NEATLY_ARRANGED', label: 'Barang tertata rapi' },
+  {
+    code: 'NO_PEST_OR_ANIMAL_TRACE',
+    label: 'Tidak ditemukan hama / binatang dan/atau jejak / bekas binatang',
+  },
+  {
+    code: 'GOOD_CLEAN_SEALED',
+    label: 'Barang baik dan bersih serta tersegel',
+  },
+  { code: 'COA_MATCHES_BATCH', label: 'CoA tersedia dan sesuai batchnya' },
+  {
+    code: 'QTY_TYPE_MATCHES_SJ',
+    label: 'Jumlah dan jenis barang sesuai SJ',
+  },
+  {
+    code: 'VEHICLE_NO_LEAK_GOOD',
+    label: 'Kendaraan tidak bocor / kondisi baik',
+  },
 ]
 
 // Safety Helpers at the top
@@ -588,7 +603,7 @@ const saveSecurityInfo = async () => {
       selectedTruck.value.suratJalanNumber = sj
       selectedTruck.value.poNumber = po
     }
-    toast.success('Nomor Surat Jalan & PO tersimpan. Silakan lanjutkan verifikasi pra-bongkar.')
+    toast.info('Data Surat Jalan & PO telah disiapkan di form; akan disimpan permanen saat verifikasi pra-bongkar diajukan.')
   } catch (err) {
     toast.error('Gagal menyimpan data Surat Jalan & PO')
   } finally {
@@ -613,7 +628,9 @@ const handleStartUnload = async () => {
     const payload = {
       suratJalanNumber: sj,
       poNumber: po,
-      checklist: buildChecklistPayload(),
+      preUnloadChecklist: {
+        items: buildChecklistPayload(),
+      },
     }
 
     const response = await warehouseStore.startProcess(selectedTruck.value.id, payload)
@@ -639,13 +656,25 @@ const handleSaveFailedChecklist = async () => {
     const payload = {
       suratJalanNumber: sj,
       poNumber: po,
-      checklist: buildChecklistPayload(),
+      preUnloadChecklist: {
+        items: buildChecklistPayload(),
+      },
     }
 
     await warehouseStore.startProcess(selectedTruck.value.id, payload)
+    toast.warning('Hasil pemeriksaan tercatat. Proses bongkar DITAHAN.')
   } catch (err) {
-    // Expected fail-closed behavior from server
-    toast.warning('Hasil pemeriksaan NOT_OK tersimpan dan diaudit. Proses bongkar DITAHAN.')
+    const backendErrors = err?.response?.data?.errors || []
+    if (backendErrors.includes('PREUNLOAD_CHECKLIST_ITEMS_NOT_OK')) {
+      // Proved that backend validated 9 items, recorded ActivityLog GSP_PREUNLOAD_CHECKLIST_FAILED, and blocked start
+      toast.warning('Hasil NOT_OK tercatat, bongkar ditahan: temuan ketidaksesuaian tersimpan pada sistem.')
+    } else {
+      // Any other error (network failure, 500, invalid structure, etc.) - DO NOT fake audit success!
+      toast.error(
+        err?.response?.data?.message ||
+        'Gagal mencatat audit checklist: silakan periksa koneksi atau kelengkapan data.'
+      )
+    }
   } finally {
     isProcessing.value = false
   }

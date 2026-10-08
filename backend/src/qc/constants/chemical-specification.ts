@@ -160,16 +160,14 @@ export function validatePacSensory(s?: PacSensoryParameters | null): {
     );
   }
 
-  const foreignVal = s.foreignMatters ?? s.odor;
-  const isForeignOk = foreignVal === 'Tidak ada kontaminasi';
+  const isForeignOk = s.foreignMatters === 'Tidak ada kontaminasi';
   if (!isForeignOk) {
     violations.push(
       'Pemeriksaan foreign matters/benda asing wajib diisi faktual "Tidak ada kontaminasi"',
     );
   }
 
-  const packagingVal = s.packagingLabel ?? s.packaging;
-  const isPackagingOk = packagingVal === 'Kemasan & label tidak rusak';
+  const isPackagingOk = s.packagingLabel === 'Kemasan & label tidak rusak';
   if (!isPackagingOk) {
     violations.push(
       'Pemeriksaan kemasan & label wajib diisi faktual "Kemasan & label tidak rusak"',
@@ -278,8 +276,7 @@ export function validateRapidKlenSensory(
     );
   }
 
-  const packagingVal = s.packagingLabel ?? s.packaging;
-  const isPackagingOk = packagingVal === 'Kemasan & label tidak rusak';
+  const isPackagingOk = s.packagingLabel === 'Kemasan & label tidak rusak';
   if (!isPackagingOk) {
     violations.push(
       'Pemeriksaan kemasan & label wajib diisi faktual "Kemasan & label tidak rusak"',

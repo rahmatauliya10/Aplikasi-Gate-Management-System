@@ -535,9 +535,11 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           productCategory: 'Chemicals',
           productName: 'PAC 280 AC',
           parameters: {
-            visualAppearance: 'Kuning',
-            foreignMatters: 'Tidak ada kontaminasi',
-            packagingCondition: 'Kemasan & label tidak rusak',
+            sensory: {
+              visual: 'Kuning',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
+            },
             ph: 4.25,
             density: 1.22,
             al2o3Content: 10.5,

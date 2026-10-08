@@ -396,12 +396,18 @@ export class QcProductAnalysisService {
               }
             : undefined;
 
+      const rawMoistureVal = rawParams.moisture ?? rawParams.totalMoisture;
+      const parsedMoisture =
+        rawMoistureVal !== undefined &&
+        rawMoistureVal !== null &&
+        String(rawMoistureVal).trim() !== ''
+          ? Number(rawMoistureVal)
+          : NaN;
+
       evalResult = evaluateCoalAnalysis(
         {
           targetCalorie: rawParams.calorieBand || undefined,
-          totalMoisture: Number(
-            rawParams.moisture ?? rawParams.totalMoisture ?? 0,
-          ),
+          totalMoisture: parsedMoisture,
           testRound: authoritativeTestRound,
           sensoryPassed: rawParams.sensoryPassed,
           visualPassed: rawParams.visualPassed,
@@ -415,31 +421,16 @@ export class QcProductAnalysisService {
       evalResult = evaluatePacAnalysis(
         {
           sensory: {
-            visual:
-              rawParams.sensory?.visual ??
-              rawParams.visualAppearance ??
-              rawParams.visual,
-            foreignMatters:
-              rawParams.sensory?.foreignMatters ?? rawParams.foreignMatters,
-            packagingLabel:
-              rawParams.sensory?.packagingLabel ??
-              rawParams.sensory?.packaging ??
-              rawParams.packagingCondition ??
-              rawParams.packaging,
-            packaging:
-              rawParams.sensory?.packaging ??
-              rawParams.packagingCondition ??
-              rawParams.packaging,
-            odor: rawParams.sensory?.odor ?? rawParams.odor,
+            visual: rawParams.sensory?.visual,
+            foreignMatters: rawParams.sensory?.foreignMatters,
+            packagingLabel: rawParams.sensory?.packagingLabel,
           },
           ph: Number(rawParams.ph),
           density: Number(rawParams.density),
           aluminaContent:
             rawParams.aluminaContent != null
               ? Number(rawParams.aluminaContent)
-              : rawParams.al2o3Content != null
-                ? Number(rawParams.al2o3Content)
-                : undefined,
+              : undefined,
         },
         authoritativeProductName,
         pacSpecMeta,
@@ -450,28 +441,12 @@ export class QcProductAnalysisService {
       evalResult = evaluateRapidKlenAnalysis(
         {
           sensory: {
-            visual:
-              rawParams.sensory?.visual ??
-              rawParams.visualAppearance ??
-              rawParams.visual,
-            foreignMatters:
-              rawParams.sensory?.foreignMatters ?? rawParams.foreignMatters,
-            packagingLabel:
-              rawParams.sensory?.packagingLabel ??
-              rawParams.sensory?.packaging ??
-              rawParams.packagingCondition ??
-              rawParams.packaging,
-            packaging:
-              rawParams.sensory?.packaging ??
-              rawParams.packagingCondition ??
-              rawParams.packaging,
+            visual: rawParams.sensory?.visual,
+            foreignMatters: rawParams.sensory?.foreignMatters,
+            packagingLabel: rawParams.sensory?.packagingLabel,
           },
-          alkalinityNa2O: Number(
-            rawParams.alkalinityNa2O ?? rawParams.alkalinity ?? NaN,
-          ),
-          alkalinityNaOH: Number(
-            rawParams.alkalinityNaOH ?? rawParams.naoh ?? NaN,
-          ),
+          alkalinityNa2O: Number(rawParams.alkalinityNa2O ?? NaN),
+          alkalinityNaOH: Number(rawParams.alkalinityNaOH ?? NaN),
           ph: Number(rawParams.ph),
           density: Number(rawParams.density),
         },

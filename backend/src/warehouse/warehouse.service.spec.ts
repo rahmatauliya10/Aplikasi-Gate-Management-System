@@ -373,7 +373,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       );
 
       expect(res.success).toBe(true);
-      expect(res.data.receivedQuantity).toBe(8000.25);
+      expect(res.data.receivedQuantity).toBe('8000.250');
       expect(res.data.receiptUnit).toBe('LITER');
       expect(res.data.receivedUnit).toBe('LITER');
       expect(res.data.checklistItems).toBeDefined();
@@ -384,7 +384,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       expect(res.data.actualWeight).toBeNull();
     });
 
-    it('P1-02: getProcessDetail returns canonical receiving fields', async () => {
+    it('P1-02: getProcessDetail returns canonical receiving fields with string decimal precision', async () => {
       const gspTx = {
         id: 'tx-gsp-detail',
         transactionNumber: 'TX-GSP-DETAIL-01',
@@ -394,7 +394,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
         actualWeight: null,
         actualQuantity: null,
         warehouseUnit: null,
-        receivedQuantity: 5000.5,
+        receivedQuantity: 5000.125,
         receiptUnit: 'KG',
         suratJalanNumber: 'SJ-DET-01',
         poNumber: 'PO-DET-01',
@@ -405,7 +405,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
         },
         warehouseProcesses: [
           {
-            receivedQuantity: 5000.5,
+            receivedQuantity: 5000.125,
             receivedUnit: 'KG',
             checklistItems: { verified: true },
           },
@@ -423,13 +423,49 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       );
 
       expect(res.success).toBe(true);
-      expect(res.data.receivedQuantity).toBe(5000.5);
+      expect(res.data.receivedQuantity).toBe('5000.125');
       expect(res.data.receiptUnit).toBe('KG');
       expect(res.data.receivedUnit).toBe('KG');
       expect(res.data.checklistItems).toEqual({ verified: true });
       expect(res.data.suratJalanNumber).toBe('SJ-DET-01');
       expect(res.data.poNumber).toBe('PO-DET-01');
       expect(res.data.materialIdentity?.name).toBe('Batubara');
+    });
+
+    it('P1-01: formatGspReceivedQuantity preserves string precision for 8000.250 LITER, 5000.125 KG, and max Decimal(12,3)', async () => {
+      const gspTxNearMax = {
+        id: 'tx-gsp-max',
+        transactionNumber: 'TX-GSP-MAX-01',
+        plateNumber: 'B 9999 GSP',
+        status: 'WAREHOUSE_DONE',
+        processType: 'GSP',
+        receivedQuantity: '999999999.999',
+        receiptUnit: 'KG',
+        suratJalanNumber: 'SJ-MAX-01',
+        poNumber: 'PO-MAX-01',
+        warehouseProcesses: [
+          {
+            receivedQuantity: '999999999.999',
+            receivedUnit: 'KG',
+          },
+        ],
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        gspTxNearMax,
+      );
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: 'GSP' },
+      ]);
+
+      const res = await service.getProcessDetail(
+        'tx-gsp-max',
+        mockWarehouseUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.receivedQuantity).toBe('999999999.999');
+      expect(res.data.receiptUnit).toBe('KG');
     });
   });
 });

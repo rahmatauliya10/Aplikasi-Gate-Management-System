@@ -29,6 +29,20 @@ import {
   GSP_PREUNLOAD_LABEL_MAP,
 } from './constants/gsp-preunload-checklist';
 
+export function formatGspReceivedQuantity(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'object' && typeof val.toFixed === 'function') {
+    return val.toFixed(3);
+  }
+  const str = String(val).trim();
+  if (!str) return null;
+  if (str.includes('.')) {
+    const [intPart, decPart] = str.split('.');
+    return `${intPart}.${decPart.padEnd(3, '0').slice(0, 3)}`;
+  }
+  return `${str}.000`;
+}
+
 @Injectable()
 export class WarehouseService {
   private readonly logger = new Logger(WarehouseService.name);
@@ -1013,12 +1027,10 @@ export class WarehouseService {
         actualWeight: updated.actualWeight,
         actualQuantity: updated.actualQuantity,
         unit: updated.warehouseUnit,
-        receivedQuantity:
-          updated.receivedQuantity != null
-            ? Number(updated.receivedQuantity)
-            : updated.warehouseProcesses?.[0]?.receivedQuantity != null
-              ? Number(updated.warehouseProcesses[0].receivedQuantity)
-              : null,
+        receivedQuantity: formatGspReceivedQuantity(
+          updated.receivedQuantity ??
+            updated.warehouseProcesses?.[0]?.receivedQuantity,
+        ),
         receiptUnit: updated.receiptUnit || null,
         receivedUnit:
           updated.warehouseProcesses?.[0]?.receivedUnit ||
@@ -1270,12 +1282,9 @@ export class WarehouseService {
         actualWeight: tx.actualWeight,
         actualQuantity: tx.actualQuantity,
         unit: tx.warehouseUnit,
-        receivedQuantity:
-          tx.receivedQuantity != null
-            ? Number(tx.receivedQuantity)
-            : process?.receivedQuantity != null
-              ? Number(process.receivedQuantity)
-              : null,
+        receivedQuantity: formatGspReceivedQuantity(
+          tx.receivedQuantity ?? process?.receivedQuantity,
+        ),
         receiptUnit: tx.receiptUnit || null,
         receivedUnit: process?.receivedUnit || tx.receiptUnit || null,
         checklistItems: process?.checklistItems || null,
@@ -1394,10 +1403,32 @@ export class WarehouseService {
       })
       .catch(() => {});
 
+    const historyData = data.map((t) => {
+      const process = t.warehouseProcesses?.[0];
+      return {
+        ...t,
+        receivedQuantity: formatGspReceivedQuantity(
+          t.receivedQuantity ?? process?.receivedQuantity,
+        ),
+        receiptUnit: t.receiptUnit || null,
+        receivedUnit: process?.receivedUnit || t.receiptUnit || null,
+        checklistItems: process?.checklistItems || null,
+        suratJalanNumber: t.suratJalanNumber || null,
+        poNumber: t.poNumber || null,
+        materialIdentity: t.productCatalog
+          ? {
+              id: t.productCatalog.id,
+              code: t.productCatalog.code,
+              name: t.productCatalog.name,
+            }
+          : null,
+      };
+    });
+
     return {
       success: true,
       message: 'Warehouse history retrieved successfully',
-      data,
+      data: historyData,
       meta: {
         page,
         limit,
