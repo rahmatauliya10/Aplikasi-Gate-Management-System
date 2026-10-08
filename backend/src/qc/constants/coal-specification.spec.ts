@@ -192,7 +192,7 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
   });
 
   describe('P0-03 Adversarial: Missing, negative, and invalid moisture must NEVER RELEASE even with 100% visual PASS', () => {
-    it('rejects when moisture is missing or undefined (Round 1 -> RETEST_REQUIRED, Round 2 -> REJECT)', () => {
+    it('treats missing or undefined moisture as INVALID_MOISTURE_MEASUREMENT without making PASS/REJECT decisions', () => {
       const r1 = evaluateCoalAnalysis(
         {
           calorieBand: 'COAL_5600_6000',
@@ -202,8 +202,9 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
         },
         OPERATIONAL_COAL_SPEC_METADATA,
       );
-      expect(r1.result).toBe('REJECT');
-      expect(r1.decision).toBe('RETEST_REQUIRED');
+      expect(r1.error).toBe('INVALID_MOISTURE_MEASUREMENT');
+      expect(r1.result).toBeUndefined();
+      expect(r1.decision).toBeUndefined();
       expect(r1.isWithinSpec).toBe(false);
 
       const r2 = evaluateCoalAnalysis(
@@ -215,12 +216,13 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
         },
         OPERATIONAL_COAL_SPEC_METADATA,
       );
-      expect(r2.result).toBe('REJECT');
-      expect(r2.decision).toBe('REJECT');
+      expect(r2.error).toBe('INVALID_MOISTURE_MEASUREMENT');
+      expect(r2.result).toBeUndefined();
+      expect(r2.decision).toBeUndefined();
       expect(r2.isWithinSpec).toBe(false);
     });
 
-    it('rejects when moisture is null or NaN (must not default to 0)', () => {
+    it('treats moisture null or NaN as INVALID_MOISTURE_MEASUREMENT without making PASS/REJECT decisions', () => {
       const resNull = evaluateCoalAnalysis(
         {
           calorieBand: 'COAL_5600_6000',
@@ -230,8 +232,10 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
         },
         OPERATIONAL_COAL_SPEC_METADATA,
       );
-      expect(resNull.result).toBe('REJECT');
-      expect(resNull.decision).toBe('RETEST_REQUIRED');
+      expect(resNull.error).toBe('INVALID_MOISTURE_MEASUREMENT');
+      expect(resNull.result).toBeUndefined();
+      expect(resNull.decision).toBeUndefined();
+      expect(resNull.isWithinSpec).toBe(false);
 
       const resNan = evaluateCoalAnalysis(
         {
@@ -242,37 +246,38 @@ describe('Coal Specification and Evaluation Policy (SOP-GSP-2026.1 Rev 2.1)', ()
         },
         OPERATIONAL_COAL_SPEC_METADATA,
       );
-      expect(resNan.result).toBe('REJECT');
-      expect(resNan.decision).toBe('RETEST_REQUIRED');
+      expect(resNan.error).toBe('INVALID_MOISTURE_MEASUREMENT');
+      expect(resNan.result).toBeUndefined();
+      expect(resNan.decision).toBeUndefined();
     });
 
-    it('rejects when moisture is negative (e.g. -5.0%)', () => {
+    it('treats negative moisture (e.g. -5.0%) as INVALID_MOISTURE_MEASUREMENT without making PASS/REJECT decisions', () => {
       const resNeg = evaluateCoalAnalysis(
         {
           calorieBand: 'COAL_5600_6000',
           totalMoisture: -5.0,
-          testRound: 1,
-          visual: validVisual,
+          testRound: 2, // Even on Round 2, must NOT issue material REJECT
         },
         OPERATIONAL_COAL_SPEC_METADATA,
       );
-      expect(resNeg.result).toBe('REJECT');
-      expect(resNeg.decision).toBe('RETEST_REQUIRED');
+      expect(resNeg.error).toBe('INVALID_MOISTURE_MEASUREMENT');
+      expect(resNeg.result).toBeUndefined();
+      expect(resNeg.decision).toBeUndefined();
       expect(resNeg.isWithinSpec).toBe(false);
     });
 
-    it('rejects when moisture exceeds 100% (e.g. 105.0%)', () => {
+    it('treats moisture exceeding 100% (e.g. 105.0%) as INVALID_MOISTURE_MEASUREMENT without making PASS/REJECT decisions', () => {
       const resOver = evaluateCoalAnalysis(
         {
           calorieBand: 'COAL_5600_6000',
           totalMoisture: 105.0,
-          testRound: 1,
-          visual: validVisual,
+          testRound: 2, // Even on Round 2, must NOT issue material REJECT
         },
         OPERATIONAL_COAL_SPEC_METADATA,
       );
-      expect(resOver.result).toBe('REJECT');
-      expect(resOver.decision).toBe('RETEST_REQUIRED');
+      expect(resOver.error).toBe('INVALID_MOISTURE_MEASUREMENT');
+      expect(resOver.result).toBeUndefined();
+      expect(resOver.decision).toBeUndefined();
       expect(resOver.isWithinSpec).toBe(false);
     });
   });

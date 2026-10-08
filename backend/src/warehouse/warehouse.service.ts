@@ -519,8 +519,8 @@ export class WarehouseService {
           if (item.notes) failedItemNotes[item.code] = item.notes;
         });
 
-        await this.activityLogsService
-          .logAction({
+        try {
+          await this.activityLogsService.logAction({
             userId: user.id,
             action: 'GSP_PREUNLOAD_CHECKLIST_FAILED',
             module: 'WAREHOUSE',
@@ -537,8 +537,19 @@ export class WarehouseService {
               timestamp: new Date().toISOString(),
             }),
             status: 'FAILED',
-          })
-          .catch(() => {});
+          });
+        } catch (auditError: any) {
+          this.logger.error(
+            `Gagal mencatat ActivityLog audit untuk GSP_PREUNLOAD_CHECKLIST_FAILED: ${auditError?.message || auditError}`,
+          );
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gagal mencatat audit log pemeriksaan pra-bongkar ke sistem. Proses bongkar tetap diblokir.',
+            errors: ['PREUNLOAD_CHECKLIST_AUDIT_LOG_FAILED'],
+            failedItemCodes,
+          });
+        }
 
         throw new BadRequestException({
           success: false,

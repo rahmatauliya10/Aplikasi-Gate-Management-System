@@ -194,6 +194,8 @@ export function evaluatePacAnalysis(
   // 2. pH verification (3.50 - 5.00 inclusive)
   if (params.ph == null || isNaN(params.ph)) {
     violations.push('Parameter pH wajib diisi');
+  } else if (!Number.isFinite(params.ph)) {
+    violations.push('Parameter pH harus berupa angka finite valid');
   } else if (
     params.ph < PAC_SPECIFICATION.phMin ||
     params.ph > PAC_SPECIFICATION.phMax
@@ -206,6 +208,8 @@ export function evaluatePacAnalysis(
   // 3. Density verification (1.170 - 1.260 inclusive)
   if (params.density == null || isNaN(params.density)) {
     violations.push('Parameter Density wajib diisi');
+  } else if (!Number.isFinite(params.density)) {
+    violations.push('Parameter Density harus berupa angka finite valid');
   } else if (
     params.density < PAC_SPECIFICATION.densityMin ||
     params.density > PAC_SPECIFICATION.densityMax
@@ -303,6 +307,8 @@ export function evaluateRapidKlenAnalysis(
   // 2. Na2O Alkalinity: Strict greater-than (> 35.00)
   if (params.alkalinityNa2O == null || isNaN(params.alkalinityNa2O)) {
     violations.push('Kadar Alkalinitas Na2O wajib diisi');
+  } else if (!Number.isFinite(params.alkalinityNa2O)) {
+    violations.push('Kadar Alkalinitas Na2O harus berupa angka finite valid');
   } else if (params.alkalinityNa2O <= RAPID_KLEN_SPECIFICATION.na2oMin) {
     violations.push(
       `Alkalinitas Na2O (${params.alkalinityNa2O}%) tidak memenuhi batas spesifikasi (> ${RAPID_KLEN_SPECIFICATION.na2oMin}%)`,
@@ -312,6 +318,8 @@ export function evaluateRapidKlenAnalysis(
   // 3. NaOH Alkalinity: Strict greater-than (> 45.16) - MANDATORY
   if (params.alkalinityNaOH == null || isNaN(params.alkalinityNaOH)) {
     violations.push('Kadar Alkalinitas NaOH wajib diisi');
+  } else if (!Number.isFinite(params.alkalinityNaOH)) {
+    violations.push('Kadar Alkalinitas NaOH harus berupa angka finite valid');
   } else if (params.alkalinityNaOH <= RAPID_KLEN_SPECIFICATION.naohMin) {
     violations.push(
       `Alkalinitas NaOH (${params.alkalinityNaOH}%) tidak memenuhi batas spesifikasi (> ${RAPID_KLEN_SPECIFICATION.naohMin}%)`,
@@ -321,6 +329,8 @@ export function evaluateRapidKlenAnalysis(
   // 4. pH: Strict greater-than (> 12.000)
   if (params.ph == null || isNaN(params.ph)) {
     violations.push('Parameter pH wajib diisi');
+  } else if (!Number.isFinite(params.ph)) {
+    violations.push('Parameter pH harus berupa angka finite valid');
   } else if (params.ph <= RAPID_KLEN_SPECIFICATION.phMin) {
     violations.push(
       `pH (${params.ph}) tidak memenuhi batas spesifikasi (> ${RAPID_KLEN_SPECIFICATION.phMin})`,
@@ -330,6 +340,8 @@ export function evaluateRapidKlenAnalysis(
   // 5. Density: Strict greater-than (> 1.400 g/mL)
   if (params.density == null || isNaN(params.density)) {
     violations.push('Parameter Density wajib diisi');
+  } else if (!Number.isFinite(params.density)) {
+    violations.push('Parameter Density harus berupa angka finite valid');
   } else if (params.density <= RAPID_KLEN_SPECIFICATION.densityMin) {
     violations.push(
       `Density (${params.density} g/mL) tidak memenuhi batas spesifikasi (> ${RAPID_KLEN_SPECIFICATION.densityMin})`,

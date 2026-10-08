@@ -245,6 +245,47 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       expect(mockToast.warning).not.toHaveBeenCalled()
       expect(mockToast.error).toHaveBeenCalledWith(expect.stringContaining('Gagal mencatat audit checklist'))
     })
+
+    it('P1 Reliable Audit: does NOT claim NOT_OK is saved when API returns PREUNLOAD_CHECKLIST_AUDIT_LOG_FAILED', async () => {
+      truckStore.trucks = [{
+        id: 'tx-5-audit-fail',
+        plateNumber: 'B 5556 GSP',
+        processType: 'GSP',
+        status: 'QC_VEHICLE_PASSED',
+        suratJalanNumber: 'SJ-001',
+        poNumber: 'PO-001',
+      }]
+
+      // API returns 400 with PREUNLOAD_CHECKLIST_AUDIT_LOG_FAILED
+      vi.spyOn(warehouseStore, 'startProcess').mockRejectedValue({
+        response: {
+          data: {
+            message: 'Gagal mencatat audit log pemeriksaan pra-bongkar ke sistem. Proses bongkar tetap diblokir.',
+            errors: ['PREUNLOAD_CHECKLIST_AUDIT_LOG_FAILED'],
+          },
+        },
+      })
+
+      const wrapper = mount(GSPProcess, { global: { plugins: [pinia] } })
+      await wrapper.find('.cursor-pointer').trigger('click')
+
+      // Mark 1 item NOT_OK
+      for (let i = 0; i < canonicalCodes.length; i++) {
+        const code = canonicalCodes[i]
+        if (code === 'NO_EXPIRED_GAS_CYLINDER') {
+          await wrapper.find(`#btn-chk-${code}-notok`).trigger('click')
+        } else {
+          await wrapper.find(`#btn-chk-${code}-ok`).trigger('click')
+        }
+      }
+
+      const saveFailBtn = wrapper.find('#btn-save-checklist-fail')
+      await saveFailBtn.trigger('click')
+
+      // Crucial: Must show error toast, NOT false warning claiming NOT_OK was recorded!
+      expect(mockToast.warning).not.toHaveBeenCalled()
+      expect(mockToast.error).toHaveBeenCalledWith('Gagal mencatat audit log pemeriksaan pra-bongkar ke sistem. Proses bongkar tetap diblokir.')
+    })
   })
 
   describe('P1-02 Cross-Layer Contract: GSPProcess.vue -> warehouseStore -> warehouseService -> API', () => {

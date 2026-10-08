@@ -38,6 +38,45 @@ import { assertValidStatusTransition } from '../common/state-machine/workflow-st
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { SpecificationProvider } from './providers/specification.provider';
 
+/**
+ * Strictly parses and validates that an input parameter is a valid finite number.
+ * Rejects undefined, null, empty string, non-numeric strings, "Infinity", "-Infinity", "NaN",
+ * and values that overflow to Infinity in JavaScript.
+ */
+export function parseStrictFiniteNumber(
+  value: unknown,
+  fieldName: string,
+): number {
+  if (value === null || value === undefined) {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' wajib diisi dan harus berupa angka numerik finite valid.`,
+    );
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') {
+      throw new BadRequestException(
+        `Parameter '${fieldName}' tidak boleh kosong dan harus berupa angka numerik finite valid.`,
+      );
+    }
+    if (/^[+-]?infinity$/i.test(trimmed) || trimmed.toLowerCase() === 'nan') {
+      throw new BadRequestException(
+        `Parameter '${fieldName}' tidak valid (non-finite atau NaN). Nilai harus berupa angka finite.`,
+      );
+    }
+  }
+
+  const num = Number(value);
+  if (!Number.isFinite(num) || Number.isNaN(num)) {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' harus berupa angka numerik finite valid (tidak boleh non-finite, NaN, atau overflow).`,
+    );
+  }
+
+  return num;
+}
+
 @Injectable()
 export class QcProductAnalysisService {
   private readonly logger = new Logger(QcProductAnalysisService.name);
@@ -331,6 +370,7 @@ export class QcProductAnalysisService {
         'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
       notes?: string;
       isConfigured?: boolean;
+      error?: string;
     };
 
     // ─── 3. Determine Evaluator by Snapshot Profile (Section 23) ───
@@ -397,12 +437,44 @@ export class QcProductAnalysisService {
             : undefined;
 
       const rawMoistureVal = rawParams.moisture ?? rawParams.totalMoisture;
-      const parsedMoisture =
-        rawMoistureVal !== undefined &&
-        rawMoistureVal !== null &&
-        String(rawMoistureVal).trim() !== ''
-          ? Number(rawMoistureVal)
-          : NaN;
+      if (
+        rawMoistureVal === undefined ||
+        rawMoistureVal === null ||
+        String(rawMoistureVal).trim() === ''
+      ) {
+        throw new BadRequestException({
+          message:
+            'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
+          error: 'INVALID_MOISTURE_MEASUREMENT',
+        });
+      }
+
+      if (typeof rawMoistureVal === 'string') {
+        const trimmed = rawMoistureVal.trim();
+        if (
+          /^[+-]?infinity$/i.test(trimmed) ||
+          trimmed.toLowerCase() === 'nan'
+        ) {
+          throw new BadRequestException({
+            message:
+              'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
+            error: 'INVALID_MOISTURE_MEASUREMENT',
+          });
+        }
+      }
+
+      const parsedMoisture = Number(rawMoistureVal);
+      if (
+        !Number.isFinite(parsedMoisture) ||
+        Number.isNaN(parsedMoisture) ||
+        parsedMoisture < 0 ||
+        parsedMoisture > 100
+      ) {
+        throw new BadRequestException({
+          message: `Kadar air (total moisture) batubara (${rawMoistureVal}) tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.`,
+          error: 'INVALID_MOISTURE_MEASUREMENT',
+        });
+      }
 
       evalResult = evaluateCoalAnalysis(
         {
@@ -418,6 +490,13 @@ export class QcProductAnalysisService {
     } else if (targetProfile === GspAnalysisProfile.PAC_PA) {
       const pacSpecMeta = this.specProvider.getPacSpec();
 
+      const ph = parseStrictFiniteNumber(rawParams.ph, 'ph');
+      const density = parseStrictFiniteNumber(rawParams.density, 'density');
+      const aluminaContent =
+        rawParams.aluminaContent != null && rawParams.aluminaContent !== ''
+          ? parseStrictFiniteNumber(rawParams.aluminaContent, 'aluminaContent')
+          : undefined;
+
       evalResult = evaluatePacAnalysis(
         {
           sensory: {
@@ -425,18 +504,26 @@ export class QcProductAnalysisService {
             foreignMatters: rawParams.sensory?.foreignMatters,
             packagingLabel: rawParams.sensory?.packagingLabel,
           },
-          ph: Number(rawParams.ph),
-          density: Number(rawParams.density),
-          aluminaContent:
-            rawParams.aluminaContent != null
-              ? Number(rawParams.aluminaContent)
-              : undefined,
+          ph,
+          density,
+          aluminaContent,
         },
         authoritativeProductName,
         pacSpecMeta,
       );
     } else if (targetProfile === GspAnalysisProfile.RAPID_KLEN_PA) {
       const rkSpecMeta = this.specProvider.getRapidKlenSpec();
+
+      const alkalinityNa2O = parseStrictFiniteNumber(
+        rawParams.alkalinityNa2O ?? rawParams.alkalinityNa2o,
+        'alkalinityNa2O',
+      );
+      const alkalinityNaOH = parseStrictFiniteNumber(
+        rawParams.alkalinityNaOH ?? rawParams.alkalinityNaoh,
+        'alkalinityNaOH',
+      );
+      const ph = parseStrictFiniteNumber(rawParams.ph, 'ph');
+      const density = parseStrictFiniteNumber(rawParams.density, 'density');
 
       evalResult = evaluateRapidKlenAnalysis(
         {
@@ -445,10 +532,10 @@ export class QcProductAnalysisService {
             foreignMatters: rawParams.sensory?.foreignMatters,
             packagingLabel: rawParams.sensory?.packagingLabel,
           },
-          alkalinityNa2O: Number(rawParams.alkalinityNa2O ?? NaN),
-          alkalinityNaOH: Number(rawParams.alkalinityNaOH ?? NaN),
-          ph: Number(rawParams.ph),
-          density: Number(rawParams.density),
+          alkalinityNa2O,
+          alkalinityNaOH,
+          ph,
+          density,
         },
         authoritativeProductName,
         rkSpecMeta,
@@ -460,6 +547,15 @@ export class QcProductAnalysisService {
         decision: 'PENDING_DISPOSITION',
         notes: `Produk ${authoritativeProductName} belum memiliki spesifikasi operasional teresahkan. Dialihkan ke PENDING_DISPOSITION.`,
       };
+    }
+
+    if (evalResult.error === 'INVALID_MOISTURE_MEASUREMENT') {
+      throw new BadRequestException({
+        message:
+          evalResult.notes ||
+          'Pengukuran kadar air batubara tidak valid (wajib numerik finite 0-100%).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
     }
 
     if (evalResult.isConfigured === false) {

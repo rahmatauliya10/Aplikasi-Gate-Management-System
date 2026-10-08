@@ -676,8 +676,15 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           productCategory: 'Chemicals',
           productName: 'Rapid Klen',
           parameters: {
+            sensory: {
+              visual: 'Keruh',
+              foreignMatters: 'Ada kontaminasi partikel',
+              packagingLabel: 'Kemasan & label tidak rusak',
+            },
             alkalinityNa2o: 28.0, // Out of spec: < 35%
+            alkalinityNaOH: 46.0,
             ph: 11.2,
+            density: 1.45,
           },
           result: QcResult.REJECT,
           decision: AnalysisDecision.REJECT,
@@ -1210,9 +1217,10 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             sensory: {
               visual: 'Keruh',
               foreignMatters: 'Ada kontaminasi partikel',
-              packaging: 'Kemasan & label tidak rusak',
+              packagingLabel: 'Kemasan & label tidak rusak',
             },
             alkalinityNa2O: 31.5, // Below 35.0% min
+            alkalinityNaOH: 40.0,
             ph: 11.2, // Below 12.0 min
             density: 1.35, // Below 1.400 min
           },

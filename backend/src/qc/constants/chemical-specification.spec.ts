@@ -382,4 +382,68 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
       expect(resPkg.decision).toBe('REJECT');
     });
   });
+
+  describe('P0 Adversarial: Finite numeric enforcement (Infinity, -Infinity rejection in evaluators)', () => {
+    const validRapidSensory = {
+      visual: 'Jernih',
+      foreignMatters: 'Tidak ada kontaminasi',
+      packagingLabel: 'Kemasan & label tidak rusak',
+    };
+    const validPacSensory = {
+      visual: 'Kuning',
+      foreignMatters: 'Tidak ada kontaminasi',
+      packagingLabel: 'Kemasan & label tidak rusak',
+    };
+
+    it('rejects Rapid Klen with Infinity parameters (must NOT PASS / RELEASE)', () => {
+      const res = evaluateRapidKlenAnalysis({
+        sensory: validRapidSensory,
+        alkalinityNa2O: Infinity,
+        alkalinityNaOH: Infinity,
+        ph: Infinity,
+        density: Infinity,
+      });
+      expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
+      expect(res.isCompliant).toBe(false);
+      expect(res.violations).toEqual(
+        expect.arrayContaining([
+          'Kadar Alkalinitas Na2O harus berupa angka finite valid',
+          'Kadar Alkalinitas NaOH harus berupa angka finite valid',
+          'Parameter pH harus berupa angka finite valid',
+          'Parameter Density harus berupa angka finite valid',
+        ]),
+      );
+    });
+
+    it('rejects Rapid Klen with -Infinity parameters', () => {
+      const res = evaluateRapidKlenAnalysis({
+        sensory: validRapidSensory,
+        alkalinityNa2O: -Infinity,
+        alkalinityNaOH: -Infinity,
+        ph: -Infinity,
+        density: -Infinity,
+      });
+      expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
+      expect(res.isCompliant).toBe(false);
+    });
+
+    it('rejects PAC with Infinity ph or density (must NOT PASS / RELEASE)', () => {
+      const res = evaluatePacAnalysis({
+        sensory: validPacSensory,
+        ph: Infinity,
+        density: Infinity,
+      });
+      expect(res.result).toBe('REJECT');
+      expect(res.decision).toBe('REJECT');
+      expect(res.isCompliant).toBe(false);
+      expect(res.violations).toEqual(
+        expect.arrayContaining([
+          'Parameter pH harus berupa angka finite valid',
+          'Parameter Density harus berupa angka finite valid',
+        ]),
+      );
+    });
+  });
 });

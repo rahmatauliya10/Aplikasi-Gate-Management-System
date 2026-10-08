@@ -696,9 +696,11 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           parameters: {
             sensory: {
               visual: 'Jernih',
-              packaging: 'Kemasan & label tidak rusak',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
             },
             alkalinityNa2O: 35.0, // Exactly at 35.0%, not > 35.0%
+            alkalinityNaOH: 46.0,
             ph: 13.0,
             density: 1.45,
           },
@@ -1127,6 +1129,388 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       );
       expect(status.ruleStatus).toBe('UNCONFIGURED');
       expect(status.documentSource).toBe('Unverified Product Specification');
+    });
+  });
+
+  describe('P0 & P1 Adversarial: API-level Strict Finite and Invalid Measurement Enforcement', () => {
+    const validRapidSensory = {
+      visual: 'Jernih',
+      foreignMatters: 'Tidak ada kontaminasi',
+      packagingLabel: 'Kemasan & label tidak rusak',
+    };
+    const validPacSensory = {
+      visual: 'Kuning',
+      foreignMatters: 'Tidak ada kontaminasi',
+      packagingLabel: 'Kemasan & label tidak rusak',
+    };
+    const validCoalVisual = {
+      kondisi: 'Kering (Tidak Basah)',
+      warna: 'Hitam',
+      levelRank: 'Medium Rank Coal',
+      kilap: 'Hitam Mengkilap',
+      bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+    };
+
+    describe('P0 Rapid Klen: Rejects non-finite numbers ("Infinity", "-Infinity", "NaN", overflow)', () => {
+      const createRapidTx = () => ({
+        id: 'tx-rk-adv',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'Rapid Klen',
+        gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+        revision: 1,
+      });
+
+      it('rejects Rapid Klen with "Infinity" parameter with HTTP 400 BadRequestException', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createRapidTx(),
+        );
+
+        await expect(
+          service.submitProductAnalysis(
+            'tx-rk-adv',
+            {
+              productCategory: 'Chemical',
+              productName: 'Rapid Klen',
+              parameters: {
+                sensory: validRapidSensory,
+                alkalinityNa2O: 'Infinity',
+                alkalinityNaOH: 46.0,
+                ph: 13.0,
+                density: 1.45,
+              },
+              revision: 1,
+            },
+            mockAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('rejects Rapid Klen with exponent overflow ("1e309") with HTTP 400', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createRapidTx(),
+        );
+
+        await expect(
+          service.submitProductAnalysis(
+            'tx-rk-adv',
+            {
+              productCategory: 'Chemical',
+              productName: 'Rapid Klen',
+              parameters: {
+                sensory: validRapidSensory,
+                alkalinityNa2O: 36.0,
+                alkalinityNaOH: '1e309', // Overflows to Infinity
+                ph: 13.0,
+                density: 1.45,
+              },
+              revision: 1,
+            },
+            mockAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('rejects Rapid Klen with "-Infinity" or "NaN" with HTTP 400', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createRapidTx(),
+        );
+
+        await expect(
+          service.submitProductAnalysis(
+            'tx-rk-adv',
+            {
+              productCategory: 'Chemical',
+              productName: 'Rapid Klen',
+              parameters: {
+                sensory: validRapidSensory,
+                alkalinityNa2O: 36.0,
+                alkalinityNaOH: 46.0,
+                ph: '-Infinity',
+                density: 1.45,
+              },
+              revision: 1,
+            },
+            mockAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createRapidTx(),
+        );
+
+        await expect(
+          service.submitProductAnalysis(
+            'tx-rk-adv',
+            {
+              productCategory: 'Chemical',
+              productName: 'Rapid Klen',
+              parameters: {
+                sensory: validRapidSensory,
+                alkalinityNa2O: 36.0,
+                alkalinityNaOH: 46.0,
+                ph: 13.0,
+                density: 'NaN',
+              },
+              revision: 1,
+            },
+            mockAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('P0 PAC: Rejects non-finite numbers', () => {
+      const createPacTx = () => ({
+        id: 'tx-pac-adv',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'PAC',
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        revision: 1,
+      });
+
+      it('rejects PAC with "Infinity" pH with HTTP 400', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createPacTx(),
+        );
+
+        await expect(
+          service.submitProductAnalysis(
+            'tx-pac-adv',
+            {
+              productCategory: 'Chemical',
+              productName: 'PAC 280 AC',
+              parameters: {
+                sensory: validPacSensory,
+                ph: 'Infinity',
+                density: 1.2,
+              },
+              revision: 1,
+            },
+            mockAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('rejects PAC with "Infinity" density with HTTP 400', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createPacTx(),
+        );
+
+        await expect(
+          service.submitProductAnalysis(
+            'tx-pac-adv',
+            {
+              productCategory: 'Chemical',
+              productName: 'PAC 280 AC',
+              parameters: {
+                sensory: validPacSensory,
+                ph: 4.2,
+                density: 'Infinity',
+              },
+              revision: 1,
+            },
+            mockAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('P1 Coal: Separates invalid measurements from genuine OOS', () => {
+      const createCoalRound2Tx = () => ({
+        id: 'tx-coal-r2',
+        status: TransactionStatus.QC_RETEST_REQUIRED,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        revision: 3,
+      });
+
+      beforeEach(() => {
+        jest
+          .spyOn(specProvider, 'getCoalSpec')
+          .mockReturnValue(OPERATIONAL_COAL_SPEC_METADATA);
+      });
+
+      it('Round 2: rejects missing moisture with HTTP 400 INVALID_MOISTURE_MEASUREMENT without changing status or creating record', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createCoalRound2Tx(),
+        );
+        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+          { id: 'pa-r1', testRound: 1, isVoided: false },
+        ]);
+
+        try {
+          await service.submitProductAnalysis(
+            'tx-coal-r2',
+            {
+              productCategory: 'Coal',
+              productName: 'Batubara',
+              parameters: {
+                calorieBand: 'COAL_5600_6000',
+                visual: validCoalVisual,
+                // moisture is omitted
+              },
+              revision: 3,
+            },
+            mockAnalystUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          expect(err.getResponse()).toEqual(
+            expect.objectContaining({
+              error: 'INVALID_MOISTURE_MEASUREMENT',
+            }),
+          );
+        }
+
+        // Crucial: no $transaction executed -> status NOT changed to QC_VEHICLE_REJECTED!
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('Round 2: rejects negative moisture with HTTP 400 INVALID_MOISTURE_MEASUREMENT without changing status', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createCoalRound2Tx(),
+        );
+        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+          { id: 'pa-r1', testRound: 1, isVoided: false },
+        ]);
+
+        try {
+          await service.submitProductAnalysis(
+            'tx-coal-r2',
+            {
+              productCategory: 'Coal',
+              productName: 'Batubara',
+              parameters: {
+                calorieBand: 'COAL_5600_6000',
+                visual: validCoalVisual,
+                moisture: -5.0,
+              },
+              revision: 3,
+            },
+            mockAnalystUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          expect(err.getResponse()).toEqual(
+            expect.objectContaining({
+              error: 'INVALID_MOISTURE_MEASUREMENT',
+            }),
+          );
+        }
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('Round 2: rejects moisture > 100% with HTTP 400 INVALID_MOISTURE_MEASUREMENT without changing status', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createCoalRound2Tx(),
+        );
+        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+          { id: 'pa-r1', testRound: 1, isVoided: false },
+        ]);
+
+        try {
+          await service.submitProductAnalysis(
+            'tx-coal-r2',
+            {
+              productCategory: 'Coal',
+              productName: 'Batubara',
+              parameters: {
+                calorieBand: 'COAL_5600_6000',
+                visual: validCoalVisual,
+                moisture: 105.0,
+              },
+              revision: 3,
+            },
+            mockAnalystUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          expect(err.getResponse()).toEqual(
+            expect.objectContaining({
+              error: 'INVALID_MOISTURE_MEASUREMENT',
+            }),
+          );
+        }
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('Round 2: genuine OOS (moisture: 35.0% > 33.0%) creates PA record and updates status to QC_VEHICLE_REJECTED', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createCoalRound2Tx(),
+        );
+        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+          { id: 'pa-r1', testRound: 1, isVoided: false },
+        ]);
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          qcProductAnalysis: {
+            create: jest.fn().mockResolvedValue({ id: 'pa-r2', testRound: 2 }),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        const res = await service.submitProductAnalysis(
+          'tx-coal-r2',
+          {
+            productCategory: 'Coal',
+            productName: 'Batubara',
+            parameters: {
+              calorieBand: 'COAL_5600_6000',
+              visual: validCoalVisual,
+              moisture: 35.0, // Valid measurement, genuine OOS
+            },
+            result: QcResult.REJECT,
+            decision: AnalysisDecision.REJECT,
+            revision: 3,
+          },
+          mockAnalystUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.QC_VEHICLE_REJECTED,
+            }),
+          }),
+        );
+        expect(mockTxClient.qcProductAnalysis.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              result: QcResult.REJECT,
+              status: 'REJECT',
+              testRound: 2,
+            }),
+          }),
+        );
+      });
     });
   });
 });

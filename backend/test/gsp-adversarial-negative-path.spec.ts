@@ -764,8 +764,13 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           productCategory: 'Chemical',
           productName: 'Rapid Klen',
           parameters: {
-            sensory: { visual: true, packaging: true },
+            sensory: {
+              visual: 'Jernih',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
+            },
             alkalinityNa2O: 35.0, // Exactly 35.0%
+            alkalinityNaOH: 46.0,
             ph: 13.0,
             density: 1.45,
           },

@@ -7,6 +7,7 @@ import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 
 import { WarehouseCondition, WarehouseUnit } from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { GSP_PREUNLOAD_CODES } from './constants/gsp-preunload-checklist';
 
 describe('WarehouseService Revisioning (P1-01)', () => {
   let service: WarehouseService;
@@ -466,6 +467,110 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       expect(res.success).toBe(true);
       expect(res.data.receivedQuantity).toBe('999999999.999');
       expect(res.data.receiptUnit).toBe('KG');
+    });
+
+    describe('P1 Reliable Failed-Checklist Audit Acknowledgment', () => {
+      const canonicalChecklistWithNotOk = {
+        items: GSP_PREUNLOAD_CODES.map((code) => ({
+          code,
+          result: code === 'DOOR_SEAL_GOOD' ? 'NOT_OK' : 'OK',
+          notes: code === 'DOOR_SEAL_GOOD' ? 'Segel pintu putus' : undefined,
+        })),
+      };
+
+      const createValidGspSolarTx = () => ({
+        id: 'tx-gsp-chk-1',
+        processType: 'GSP',
+        cargoType: 'BBM',
+        cargoSubType: 'Solar BBM',
+        status: 'PA_NOT_REQUIRED',
+        weighInAt: new Date(),
+        grossWeight: 15000,
+        receiptUnit: 'LITER',
+        productCatalog: {
+          id: 'cat-solar',
+          processType: 'GSP',
+          isActive: true,
+          receiptUnit: 'LITER',
+        },
+      });
+
+      it('returns PREUNLOAD_CHECKLIST_ITEMS_NOT_OK only when ActivityLog is successfully recorded', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createValidGspSolarTx(),
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: 'GSP' },
+        ]);
+        mockActivityLogsService.logAction.mockResolvedValueOnce({});
+
+        try {
+          await service.startWarehouse(
+            'tx-gsp-chk-1',
+            {
+              suratJalanNumber: 'SJ-CHK-01',
+              poNumber: 'PO-CHK-01',
+              preUnloadChecklist: canonicalChecklistWithNotOk as any,
+            },
+            mockWarehouseUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          const response = err.getResponse();
+          expect(response.errors).toContain('PREUNLOAD_CHECKLIST_ITEMS_NOT_OK');
+          expect(response.failedItemCodes).toEqual(['DOOR_SEAL_GOOD']);
+        }
+
+        expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'GSP_PREUNLOAD_CHECKLIST_FAILED',
+            module: 'WAREHOUSE',
+            referenceId: 'tx-gsp-chk-1',
+            status: 'FAILED',
+          }),
+        );
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('returns PREUNLOAD_CHECKLIST_AUDIT_LOG_FAILED and blocks start when ActivityLog write fails', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createValidGspSolarTx(),
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: 'GSP' },
+        ]);
+        // Deliberately fail ActivityLogs write
+        mockActivityLogsService.logAction.mockRejectedValueOnce(
+          new Error('Simulated Database Audit Connection Drop'),
+        );
+
+        try {
+          await service.startWarehouse(
+            'tx-gsp-chk-1',
+            {
+              suratJalanNumber: 'SJ-CHK-01',
+              poNumber: 'PO-CHK-01',
+              preUnloadChecklist: canonicalChecklistWithNotOk as any,
+            },
+            mockWarehouseUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          const response = err.getResponse();
+          expect(response.errors).toContain(
+            'PREUNLOAD_CHECKLIST_AUDIT_LOG_FAILED',
+          );
+          expect(response.errors).not.toContain(
+            'PREUNLOAD_CHECKLIST_ITEMS_NOT_OK',
+          );
+          expect(response.failedItemCodes).toEqual(['DOOR_SEAL_GOOD']);
+        }
+
+        // Must still block start and execute no transaction
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
     });
   });
 });

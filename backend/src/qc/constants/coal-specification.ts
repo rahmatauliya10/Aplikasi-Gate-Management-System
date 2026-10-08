@@ -151,8 +151,23 @@ export function evaluateCoalAnalysis(
     rawMoisture >= 0 &&
     rawMoisture <= 100;
 
-  const moisturePassed =
-    isMoistureValidNumber && rawMoisture <= maxAllowedMoisture;
+  if (!isMoistureValidNumber) {
+    return {
+      isConfigured: true,
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+      maxAllowedMoisture,
+      isWithinSpec: false,
+      visualPassed,
+      moisturePassed: false,
+      specMetadata,
+      ruleStatus: specMetadata.ruleStatus,
+      documentSource: specMetadata.documentSource,
+      notes:
+        'Kadar air tidak valid atau tidak diisi (wajib berupa angka numerik finite antara 0% dan 100%). Pengukuran tidak valid.',
+    };
+  }
+
+  const moisturePassed = rawMoisture <= maxAllowedMoisture;
   const isWithinSpec = visualPassed && moisturePassed;
 
   if (isWithinSpec) {
@@ -171,9 +186,7 @@ export function evaluateCoalAnalysis(
     };
   }
 
-  const moistureNotesPart = !isMoistureValidNumber
-    ? 'Kadar air tidak valid atau tidak diisi (wajib angka numerik 0-100%)'
-    : `Kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%)`;
+  const moistureNotesPart = `Kadar air (${params.totalMoisture}% > ${maxAllowedMoisture}%)`;
 
   if (params.testRound === 1) {
     return {
