@@ -121,6 +121,20 @@
                           NO PROFILE (INACTIVE)
                         </span>
 
+                        <!-- Receipt Unit badge -->
+                        <span
+                          v-if="prod.receiptUnit"
+                          class="text-[9px] font-black uppercase px-2 py-0.5 rounded font-mono bg-blue-100 text-blue-800"
+                        >
+                          UOM: {{ prod.receiptUnit }}
+                        </span>
+                        <span
+                          v-else
+                          class="text-[9px] font-black uppercase px-2 py-0.5 rounded font-mono bg-red-100 text-red-700"
+                        >
+                          NO UOM
+                        </span>
+
                         <span class="text-[9px] text-slate-500 font-mono">
                           {{ prod.isPaRequired ? 'QC PA Wajib' : 'PA Exempt' }}
                         </span>
@@ -131,15 +145,15 @@
                     <div class="flex items-center space-x-2">
                       <button
                         @click="handleToggleActive(prod)"
-                        :disabled="!prod.gspAnalysisProfile && !prod.isActive"
+                        :disabled="(!prod.gspAnalysisProfile || !prod.receiptUnit) && !prod.isActive"
                         class="text-[10px] font-black px-2.5 py-1 rounded transition-colors"
                         :class="[
                           prod.isActive
                             ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                             : 'bg-slate-200 text-slate-600 hover:bg-slate-300',
-                          (!prod.gspAnalysisProfile && !prod.isActive) ? 'opacity-40 cursor-not-allowed' : ''
+                          ((!prod.gspAnalysisProfile || !prod.receiptUnit) && !prod.isActive) ? 'opacity-40 cursor-not-allowed' : ''
                         ]"
-                        :title="!prod.gspAnalysisProfile ? 'Wajib assign Analysis Profile sebelum aktivasi' : 'Ubah status aktif'"
+                        :title="(!prod.gspAnalysisProfile || !prod.receiptUnit) ? 'Wajib assign Analysis Profile & Receipt Unit sebelum aktivasi' : 'Ubah status aktif'"
                       >
                         {{ prod.isActive ? 'Active' : 'Inactive' }}
                       </button>
@@ -331,6 +345,17 @@
             </select>
           </div>
 
+          <!-- Receipt Unit (UOM) -->
+          <div>
+            <label class="block font-black text-slate-700 uppercase tracking-widest mb-1 text-[10px]">
+              Satuan Penerimaan / Receipt Unit * <span class="text-amber-600">(KG atau LITER)</span>
+            </label>
+            <select v-model="newGspForm.receiptUnit" id="select-gsp-receipt-unit" class="w-full h-10 px-3 rounded-lg border border-slate-200 font-bold text-slate-800 focus:border-emerald-500 outline-none">
+              <option value="KG">KG (Batubara)</option>
+              <option value="LITER">LITER (Solar, PAC, Rapid Klen, Chemical)</option>
+            </select>
+          </div>
+
           <!-- Policy Version -->
           <div>
             <label class="block font-black text-slate-700 uppercase tracking-widest mb-1 text-[10px]">Policy Version</label>
@@ -342,14 +367,14 @@
             <div>
               <span class="block font-black text-slate-800">Status Aktif Produk</span>
               <span class="text-[10px] text-slate-500">
-                {{ !newGspForm.gspAnalysisProfile ? 'Aktivasi dinonaktifkan sampai Analysis Profile dipilih.' : 'Produk siap digunakan untuk registrasi Security.' }}
+                {{ (!newGspForm.gspAnalysisProfile || !newGspForm.receiptUnit) ? 'Aktivasi dinonaktifkan sampai Analysis Profile dan Receipt Unit dipilih.' : 'Produk siap digunakan untuk registrasi Security.' }}
               </span>
             </div>
             <label class="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
                 v-model="newGspForm.isActive"
-                :disabled="!newGspForm.gspAnalysisProfile"
+                :disabled="!newGspForm.gspAnalysisProfile || !newGspForm.receiptUnit"
                 class="sr-only peer"
               />
               <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 peer-disabled:opacity-40"></div>
@@ -428,13 +453,15 @@ const newGspForm = reactive({
   category: 'Chemical UTL',
   processType: 'GSP',
   gspAnalysisProfile: null,
+  receiptUnit: 'LITER',
   policyVersion: 'SOP-GSP-2026.1',
   isActive: false
 })
 
 const canSubmitGsp = computed(() => {
   if (!newGspForm.code.trim() || !newGspForm.name.trim() || !newGspForm.category) return false
-  if (newGspForm.isActive && !newGspForm.gspAnalysisProfile) return false
+  if (!newGspForm.receiptUnit) return false
+  if (newGspForm.isActive && (!newGspForm.gspAnalysisProfile || !newGspForm.receiptUnit)) return false
   return true
 })
 
@@ -447,6 +474,7 @@ const submitAddGspProduct = async () => {
     subCategory: newGspForm.name.trim(),
     processType: 'GSP',
     gspAnalysisProfile: newGspForm.gspAnalysisProfile || null,
+    receiptUnit: newGspForm.receiptUnit,
     isPaRequired: newGspForm.gspAnalysisProfile === 'PA_EXEMPT' ? false : true,
     policyVersion: newGspForm.policyVersion || 'SOP-GSP-2026.1',
     isActive: !!newGspForm.isActive
@@ -460,6 +488,7 @@ const submitAddGspProduct = async () => {
     newGspForm.name = ''
     newGspForm.category = 'Chemical UTL'
     newGspForm.gspAnalysisProfile = null
+    newGspForm.receiptUnit = 'LITER'
     newGspForm.isActive = false
   }
 }

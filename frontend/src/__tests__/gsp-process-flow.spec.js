@@ -54,7 +54,7 @@ describe('GSPProcess.vue — Start Button & Security Data Conditions', () => {
     setActivePinia(pinia)
   })
 
-  it('CONDITION 1: Renders "Mulai Proses GSP" button when SJ and PO are already complete', async () => {
+  it('CONDITION 1: Renders Pre-Unloading Checklist when SJ and PO are already complete', async () => {
     const truckStore = useTruckStore()
     const truckComplete = {
       id: 'tx-gsp-001',
@@ -80,10 +80,9 @@ describe('GSPProcess.vue — Start Button & Security Data Conditions', () => {
     expect(truckCard.exists()).toBe(true)
     await truckCard.trigger('click')
 
-    // Expect Start GSP Process button to be visible
-    const startBtn = wrapper.find('#btn-start-gsp-process')
-    expect(startBtn.exists()).toBe(true)
-    expect(startBtn.text()).toContain('Mulai Proses GSP')
+    // Expect Pre-Unloading Checklist to be visible
+    const checklistCard = wrapper.find('#card-preunload-checklist')
+    expect(checklistCard.exists()).toBe(true)
 
     // Expect the missing security info form to NOT be displayed
     const securityForm = wrapper.find('#btn-save-security-gsp')
@@ -116,14 +115,13 @@ describe('GSPProcess.vue — Start Button & Security Data Conditions', () => {
     expect(truckCard.exists()).toBe(true)
     await truckCard.trigger('click')
 
-    // Expect Start GSP Process button to NOT be rendered
-    const startBtn = wrapper.find('#btn-start-gsp-process')
-    expect(startBtn.exists()).toBe(false)
+    // Expect Pre-Unloading checklist to NOT be rendered until SJ and PO are complete
+    expect(wrapper.find('#card-preunload-checklist').exists()).toBe(false)
 
     // Expect security completion form to be rendered
     const saveBtn = wrapper.find('#btn-save-security-gsp')
     expect(saveBtn.exists()).toBe(true)
-    expect(saveBtn.text()).toContain('Simpan Data & Mulai Proses GSP')
+    expect(saveBtn.text()).toContain('Simpan Data & Lanjutkan Pemeriksaan')
 
     // SJ input is visible because SJ is missing
     const sjInput = wrapper.find('#input-gsp-surat-jalan')
@@ -134,7 +132,7 @@ describe('GSPProcess.vue — Start Button & Security Data Conditions', () => {
     expect(poInput.exists()).toBe(false)
   })
 
-  it('CONDITION 3: Shows WeightInput when status is WAREHOUSE_IN_PROGRESS', async () => {
+  it('CONDITION 3: Shows GSP receiving card when status is WAREHOUSE_IN_PROGRESS', async () => {
     const truckStore = useTruckStore()
     const truckInProgress = {
       id: 'tx-gsp-003',
@@ -143,6 +141,7 @@ describe('GSPProcess.vue — Start Button & Security Data Conditions', () => {
       vendorName: 'PT Sparepart Indo',
       processType: 'GSP',
       status: 'WAREHOUSE_IN_PROGRESS',
+      receiptUnit: 'LITER',
       suratJalanNumber: 'SJ-OK-01',
       poNumber: 'PO-OK-01',
       createdAt: '2026-09-29T08:30:00.000Z'
@@ -158,10 +157,11 @@ describe('GSPProcess.vue — Start Button & Security Data Conditions', () => {
     const truckCard = wrapper.find('.cursor-pointer')
     await truckCard.trigger('click')
 
-    // Weight input must be rendered
-    const weightInput = wrapper.find('#weight-input')
-    expect(weightInput.exists()).toBe(true)
-    expect(weightInput.text()).toContain('Input Actual Weight GSP (KG)')
+    // GSP Material Receiving card must be rendered
+    const receivingCard = wrapper.find('#card-gsp-receiving')
+    expect(receivingCard.exists()).toBe(true)
+    expect(wrapper.find('#badge-receipt-unit').text()).toBe('LITER')
+    expect(wrapper.find('#input-gsp-received-quantity').exists()).toBe(true)
   })
 
   it('No undeclared modal checklist artifacts remain in template', () => {
