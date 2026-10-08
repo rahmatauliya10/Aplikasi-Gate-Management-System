@@ -404,6 +404,7 @@ async function runE2ESmoke() {
     cargoSubType: solarCatalog?.name || 'Solar',
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-GSP-${timestampSuffix}`,
+    poNumber: `PO-GSP-${timestampSuffix}`,
   });
   if (!isSuccessStatus(gspRes.statusCode) || !gspRes.body?.data?.id) {
     throw new Error(`GSP Check-In FAILED: Status ${gspRes.statusCode}, Body: ${JSON.stringify(gspRes.body)}`);
@@ -441,12 +442,24 @@ async function runE2ESmoke() {
   }
   log(`  3a. PA Start on Solar GSP transaction blocked with HTTP 400 as expected [PASS]`, 'SUCCESS');
 
-  // 5d. Warehouse Start & Complete (Unloading)
+  // 5d. Pre-Unloading Checklist Verification (Canonical 9 items) & Warehouse Unloading
+  const canonicalPreUnloadItems = [
+    { code: 'DOK_SJ', result: 'OK', notes: 'Surat jalan valid' },
+    { code: 'DOK_PO', result: 'OK', notes: 'Nomor PO valid' },
+    { code: 'SEGEL_SESUAI', result: 'OK', notes: 'Segel utuh dan cocok' },
+    { code: 'KONDISI_FISIK', result: 'OK', notes: 'Kondisi fisik baik' },
+    { code: 'LABEL_IDENTITAS', result: 'OK', notes: 'Label jelas' },
+    { code: 'KESELAMATAN_APD', result: 'OK', notes: 'Driver & operator APD lengkap' },
+    { code: 'AREA_BONGKAR', result: 'OK', notes: 'Area bongkar aman' },
+    { code: 'PERALATAN_TRANSFER', result: 'OK', notes: 'Peralatan siap' },
+    { code: 'TANGKI_TUJUAN', result: 'OK', notes: 'Tangki siap' },
+  ];
+  await stepOk(request(`/api/warehouse/pre-unload-checklist/${gspTxId}`, { method: 'POST', headers: authHeader }, { items: canonicalPreUnloadItems }), 'GSP Solar Pre-Unload Checklist');
+
   await stepOk(request(`/api/warehouse/start/${gspTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start GSP unloading' }), 'GSP Warehouse Start');
   const gspWhComp = await request(`/api/warehouse/complete/${gspTxId}`, { method: 'POST', headers: authHeader }, {
-    actualWeight: 12000,
-    actualQuantity: 40,
-    unit: 'PALLET',
+    receivedQuantity: '8000.000',
+    receivedUnit: 'LITER',
     remarks: 'GSP Unloading finished',
   });
   if (!isSuccessStatus(gspWhComp.statusCode)) {
@@ -603,7 +616,15 @@ async function runE2ESmoke() {
     productCategory: 'Coal',
     productName: 'Batubara',
     testRound: 1,
-    parameters: { visual: 'OK', moisture: 36.5, grossCalorie: 4200 },
+    parameters: {
+      kondisi: 'NORMAL',
+      warna: 'HITAM',
+      levelRank: 1,
+      kilap: 'KILAP',
+      bahanPengotor: 'BERSIH',
+      moisture: 36.5,
+      grossCalorie: 5800,
+    },
     result: 'PASS',
     decision: 'RELEASE',
     notes: 'Illegal attempt to forge RELEASE with out-of-spec moisture',
@@ -620,10 +641,18 @@ async function runE2ESmoke() {
     productCategory: 'Coal',
     productName: 'Batubara',
     testRound: 1,
-    parameters: { visual: 'OK', moisture: 36.5, grossCalorie: 4200 },
+    parameters: {
+      kondisi: 'NORMAL',
+      warna: 'HITAM',
+      levelRank: 1,
+      kilap: 'KILAP',
+      bahanPengotor: 'BERSIH',
+      moisture: 36.5,
+      grossCalorie: 5800,
+    },
     result: 'REJECT',
     decision: 'RETEST_REQUIRED',
-    notes: 'Round 1 Moisture 36.5% exceeds 34.0% threshold. Retest triggered.',
+    notes: 'Round 1 Moisture 36.5% exceeds threshold. Retest triggered.',
     revision: coalTxRev,
   });
   if (!isSuccessStatus(paSubmitR1.statusCode)) {
@@ -641,9 +670,17 @@ async function runE2ESmoke() {
     productCategory: 'Coal',
     productName: 'Batubara',
     testRound: 1,
-    parameters: { visual: 'OK', moisture: 37.0, grossCalorie: 4200 },
+    parameters: {
+      kondisi: 'NORMAL',
+      warna: 'HITAM',
+      levelRank: 1,
+      kilap: 'KILAP',
+      bahanPengotor: 'BERSIH',
+      moisture: 37.0,
+      grossCalorie: 5800,
+    },
     result: 'REJECT',
-    decision: 'PENDING_DISPOSITION',
+    decision: 'RETEST_REQUIRED',
     revision: coalTxRev,
   });
   if (wrongRoundSubmit.statusCode !== 400) {
@@ -670,7 +707,15 @@ async function runE2ESmoke() {
     productCategory: 'Coal',
     productName: 'Batubara',
     testRound: 2,
-    parameters: { visual: 'OK', moisture: 31.0, grossCalorie: 4200 },
+    parameters: {
+      kondisi: 'NORMAL',
+      warna: 'HITAM',
+      levelRank: 1,
+      kilap: 'KILAP',
+      bahanPengotor: 'BERSIH',
+      moisture: 31.0,
+      grossCalorie: 5800,
+    },
     result: 'PASS',
     decision: 'RELEASE',
     notes: 'Round 2 Retest moisture 31.0% compliant with standard. Authoritative QC result -> QC_VEHICLE_PASSED.',
@@ -719,7 +764,17 @@ async function runE2ESmoke() {
   // Round 1 OOS -> QC_RETEST_REQUIRED
   await stepOk(request(`/api/qc/product-analysis/${coalRejId}`, { method: 'POST', headers: qcAuthHeader }, {
     productCategory: 'Coal', productName: 'Batubara', testRound: 1,
-    parameters: { visual: 'OK', moisture: 38.0, grossCalorie: 4200 },
+    parameters: {
+      kondisi: 'NORMAL',
+      warna: 'HITAM',
+      levelRank: 1,
+      kilap: 'KILAP',
+      bahanPengotor: 'BERSIH',
+      moisture: 38.0,
+      grossCalorie: 5800,
+    },
+    result: 'REJECT',
+    decision: 'RETEST_REQUIRED',
     revision: rejRev,
   }), 'Submit R1 OOS Coal Rej');
   const rejAfterR1 = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
@@ -734,7 +789,17 @@ async function runE2ESmoke() {
   // Round 2 OOS -> QC_VEHICLE_REJECTED (Must NOT be WAITING_UTILITY_DISPOSITION)
   await stepOk(request(`/api/qc/product-analysis/${coalRejId}`, { method: 'POST', headers: qcAuthHeader }, {
     productCategory: 'Coal', productName: 'Batubara', testRound: 2,
-    parameters: { visual: 'OK', moisture: 37.5, grossCalorie: 4200 },
+    parameters: {
+      kondisi: 'NORMAL',
+      warna: 'HITAM',
+      levelRank: 1,
+      kilap: 'KILAP',
+      bahanPengotor: 'BERSIH',
+      moisture: 37.5,
+      grossCalorie: 5800,
+    },
+    result: 'REJECT',
+    decision: 'REJECT',
     revision: rejRev,
   }), 'Submit R2 OOS Coal Rej');
   const rejAfterR2 = await request(`/api/transactions/${coalRejId}`, { headers: authHeader });
@@ -757,11 +822,11 @@ async function runE2ESmoke() {
 
   // 8. Warehouse Start & Complete
   log(`  8. Unloading Batubara at Warehouse...`);
+  await stepOk(request(`/api/warehouse/pre-unload-checklist/${coalTxId}`, { method: 'POST', headers: authHeader }, { items: canonicalPreUnloadItems }), 'GSP Coal Pre-Unload Checklist');
   await stepOk(request(`/api/warehouse/start/${coalTxId}`, { method: 'POST', headers: authHeader }, { remarks: 'Start unloading Batubara in coal yard' }), 'Batubara Warehouse Start');
   const coalWhComp = await request(`/api/warehouse/complete/${coalTxId}`, { method: 'POST', headers: authHeader }, {
-    actualWeight: 28500,
-    actualQuantity: 28500,
-    unit: 'KG',
+    receivedQuantity: '20000.000',
+    receivedUnit: 'KG',
     remarks: 'Batubara unloading complete at Coal Bunker A',
   });
   if (!isSuccessStatus(coalWhComp.statusCode)) {
@@ -795,12 +860,10 @@ async function runE2ESmoke() {
   log(`  10. Batubara Gate Check-Out SUCCESS (Final Status: COMPLETED)`, 'SUCCESS');
 
   // ==============================================================================
-  // Step 5C: FAIL-CLOSED GOVERNANCE ON CHEMICAL GSP COMMODITIES (PAC / Rapid Klen)
-  // Chemical GSP commodities fail closed with HTTP 400 because their operational
-  // specifications are PENDING_SIGNOFF.
-  // Must NOT route to WAITING_UTILITY_DISPOSITION or any Utility disposition.
+  // Step 5C: ACTIVE_CONFIGURED GOVERNANCE ON CHEMICAL GSP (PAC)
+  // PAC operates under ACTIVE_CONFIGURED and releases with PASS when specs are met.
   // ==============================================================================
-  log(`[GOVERNANCE TEST] Testing Fail-Closed Governance on Chemical GSP (PAC)...`);
+  log(`[GOVERNANCE TEST] Testing ACTIVE_CONFIGURED Release on Chemical GSP (PAC)...`);
   const pacCheckIn = await request('/api/gate/check-in', { method: 'POST', headers: authHeader }, {
     plateNumber: `B99${timestampSuffix}PC`,
     driverName: 'E2E Driver PAC',
@@ -813,6 +876,7 @@ async function runE2ESmoke() {
     cargoSubType: pacCatalog?.name || 'PAC 280 AC',
     cargoProcessType: 'INBOUND',
     suratJalanNumber: `SJ-PAC-${timestampSuffix}`,
+    poNumber: `PO-PAC-${timestampSuffix}`,
   });
   const pacTxId = pacCheckIn.body?.data?.id;
   await request(`/api/weighbridge/in/${pacTxId}`, { method: 'POST', headers: authHeader }, {
@@ -827,24 +891,27 @@ async function runE2ESmoke() {
     productName: pacCatalog?.name || 'PAC 280 AC',
     testRound: 1,
     parameters: {
-      sensory: { visual: true, odor: true, packaging: true },
+      sensory: {
+        visual: 'Kuning',
+        foreignMatters: 'Tidak ada kontaminasi',
+        packaging: 'Kemasan & label tidak rusak',
+      },
       ph: 4.2,
-      density: 1.20,
-      aluminaContent: 10.2,
+      density: 1.200,
     },
     result: 'PASS',
-    notes: 'Provisional PAC analysis compliant with draft spec but awaiting formal QA signoff',
+    decision: 'RELEASE',
+    notes: 'PAC analysis compliant with authoritative ACTIVE_CONFIGURED specification',
     revision: pacDetail.body?.data?.revision,
   });
-  // Since operational spec is PENDING_SIGNOFF, system blocks release with HTTP 400 (fail-closed governance blocker)
-  if (pacSubmitRes.statusCode !== 400) {
-    throw new Error(`Expected PAC submit to fail-closed with 400 due to PENDING_SIGNOFF, got: ${pacSubmitRes.statusCode}`);
+  if (!isSuccessStatus(pacSubmitRes.statusCode)) {
+    throw new Error(`Expected PAC submit to succeed under ACTIVE_CONFIGURED, got: ${pacSubmitRes.statusCode}, body: ${JSON.stringify(pacSubmitRes.body)}`);
   }
   const pacAfterSubmit = await request(`/api/transactions/${pacTxId}`, { headers: authHeader });
-  if (pacAfterSubmit.body?.data?.status === 'WAITING_UTILITY_DISPOSITION') {
-    throw new Error(`PAC transaction erroneously entered WAITING_UTILITY_DISPOSITION!`);
+  if (pacAfterSubmit.body?.data?.status !== 'QC_VEHICLE_PASSED') {
+    throw new Error(`Expected PAC status QC_VEHICLE_PASSED, got: ${pacAfterSubmit.body?.data?.status}`);
   }
-  log(`  PAC fail-closed governance blocker verified (HTTP 400, never routes to WAITING_UTILITY_DISPOSITION) [PASS]`, 'SUCCESS');
+  log(`  PAC compliant analysis under ACTIVE_CONFIGURED produced QC_VEHICLE_PASSED [PASS]`, 'SUCCESS');
 
   // ==============================================================================
   // Step 5D: REOPEN PRE-PA INACTIVATION E2E TEST
