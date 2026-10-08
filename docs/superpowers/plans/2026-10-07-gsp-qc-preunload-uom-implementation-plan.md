@@ -1,17 +1,17 @@
-# GSP QC/PA Form Alignment, Pre-Unloading Checklist & Material-Specific Receiving UOM Implementation Plan (Rev 2)
+# GSP QC/PA Form Alignment, Pre-Unloading Checklist & Material-Specific Receiving UOM Implementation Plan (Rev 2.1)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Align GSP QC/PA forms strictly with authoritative laboratory analysis sheets under `ACTIVE_CONFIGURED` governance, implement a server-authoritative 9-point Pre-Unloading verification gate with complete fail-closed audit trails, decouple physical weighbridge weight (KG) from commercial received quantity (Batubara = KG, Solar/PAC/Rapid Klen = LITER), enforce a string-based decimal-safe receiving contract (`Decimal(12, 3)`) with strict scale <= 3 rejection and zero silent rounding, synchronize receiving UOM during active transaction amendment, and secure fresh and upgraded database environments with idempotent migrations and seed updates.
+**Goal:** Align GSP QC/PA forms strictly with authoritative laboratory analysis sheets under `ACTIVE_CONFIGURED` governance, implement a server-authoritative 9-point Pre-Unloading verification gate with complete fail-closed audit trails, decouple physical weighbridge weight (KG) from commercial received quantity (Batubara = KG, Solar/PAC/Rapid Klen = LITER), enforce a string-based decimal-safe receiving contract (`Decimal(12, 3)`) with strict scale <= 3 rejection and zero silent rounding, synchronize receiving UOM during active transaction amendment, wire resilient raw-SQL migration and canonical seed invariant verifiers into real CI workflows and production Docker migrator paths, and secure fresh and upgraded database environments with idempotent migrations and seed updates.
 
 **Architecture:**
 1. **Schema, Migration & Seed:** Add `LITER` to `WarehouseUnit` enum using PostgreSQL 15 idempotent DDL (`ALTER TYPE "WarehouseUnit" ADD VALUE IF NOT EXISTS 'LITER';`). Add `receiptUnit` to `ProductCatalog` and `Transaction`, and add `receivedQuantity Decimal(12,3)` and `receivedUnit` to `WarehouseProcess` and `Transaction`. Update `backend/prisma/seed.ts` (both `create` and `update` blocks) to seed canonical codes with exact UOMs (`COAL-001`=KG, `SOLAR-001`=LITER, `PAC-001..003`=LITER, `RPD-001..002`=LITER). Enforce canonical UOM mapping in `ProductCatalogService` (`GSP_RECEIPT_UNIT_MISMATCH` on mismatch).
-2. **QC / PA Governance & Evaluators:** Transition `SpecificationProvider` and evaluators to neutral operational status `ACTIVE_CONFIGURED`, eliminating artificial `PENDING_SIGNOFF` blockers while preserving strict dual-flag test fixture isolation (`ENABLE_TEST_SPEC_FIXTURES` and `GMS_TEST_HARNESS`). Remove hardcoded `PENDING_SIGNOFF` banners from frontend forms (`ChemicalPacForm.vue`, `ChemicalRapidKlenForm.vue`). Align Coal evaluator to factual visual parameters (`kondisi`, `warna`, `levelRank`, `kilap`, `bahanPengotor`) evaluated entirely on the backend, prohibiting client-supplied `visualPassed` overrides. Align Coal calorie bands to `COAL_5600_6000` (max TM 33%) and `COAL_GT_6000` (max TM 25%) via `parameters.calorieBand`, returning deterministic HTTP 422 `SPEC_NOT_CONFIGURED` on unknown bands without mutating state or creating fake reject records. Align PAC (pH 3.5–5.0, Density 1.170–1.260 inclusive, Al2O3 removed) and Rapid Klen (strict greater-than `>` limits for Na2O, NaOH, pH, Density).
+2. **QC / PA Governance & Evaluators:** Migrate specification governance metadata model from legacy `approvalStatus` (`APPROVED | PENDING_SIGNOFF | TEST_FIXTURE`) to neutral `ruleStatus: 'ACTIVE_CONFIGURED' | 'TEST_FIXTURE'` across `coal-specification.ts`, `chemical-specification.ts`, and `specification.provider.ts`. Operational Coal, PAC, and Rapid Klen use `ACTIVE_CONFIGURED` without artificial `PENDING_SIGNOFF` blockers while preserving strict dual-flag test fixture isolation (`ENABLE_TEST_SPEC_FIXTURES === 'true'` AND `GMS_TEST_HARNESS === 'true'`). In `qc-product-analysis.service.ts`, remove the legacy `approvalStatus !== 'APPROVED'` blocker, replace `checkSpecificationApprovalStatus` with `getSpecificationRuleStatus`, and allow compliant evaluations under `ACTIVE_CONFIGURED` to transition directly to `QC_VEHICLE_PASSED`. Remove hardcoded `PENDING_SIGNOFF` banners from frontend forms (`ChemicalPacForm.vue`, `ChemicalRapidKlenForm.vue`). Align Coal evaluator to factual visual parameters (`kondisi`, `warna`, `levelRank`, `kilap`, `bahanPengotor`) evaluated entirely on the backend, prohibiting client-supplied `visualPassed` overrides. Align Coal calorie bands to `COAL_5600_6000` (max TM 33%) and `COAL_GT_6000` (max TM 25%) via `parameters.calorieBand`, returning deterministic HTTP 422 `SPEC_NOT_CONFIGURED` on unknown bands without mutating state or creating fake reject records. Align PAC (pH 3.5–5.0, Density 1.170–1.260 inclusive, Al2O3 removed) and Rapid Klen (strict greater-than `>` limits for Na2O, NaOH, pH, Density).
 3. **Pre-Unloading Gate & Audit Trail:** Introduce canonical constant `GSP-PREUNLOAD-2026.1` with 9 inspection items validated with `@IsIn(['OK', 'NOT_OK'])` and `@ArrayMinSize(9)` / `@ArrayMaxSize(9)`. Hard gate requires SJ and PO. Reconcile UX and backend audit: if all 9 are OK -> button "MULAI BONGKAR" transitions status to `WAREHOUSE_IN_PROGRESS` and persists canonical labels; if any item is NOT_OK -> button "SIMPAN HASIL PEMERIKSAAN" submits the inspection, backend logs `GSP_PREUNLOAD_CHECKLIST_FAILED` with failed codes/notes outside the transaction, blocks unloading, and preserves transaction status.
 4. **Decoupled Receiving Contract:** Standardize receiving payload on decimal strings (e.g. `"8000.250"`) validated against positive decimal regex (max 9 integer digits, max 3 decimal digits, no exponents, no commas), converted to `new Prisma.Decimal(dto.receivedQuantity)` without silent rounding. Frontend renders read-only UOM badge without KG fallback (fails closed if missing). Wire calls to existing `warehouseStore.startProcess` and `warehouseStore.completeProcess`.
-5. **Release Gates & Migration Rehearsal:** Separate migration-only invariant check (verifies enum `LITER` and 0 active GSP products with null profile/UOM; safe on unseeded historical DBs) from canonical seed verification (verifies exact canonical codes and UOMs). Integrate invariant verification into `db:prepare:prod` and `db:prepare:local`.
+5. **Real Production Migrator & CI Release Gate Wiring:** Wire Gate A (`verify-migration-invariants.js`) directly into the production `migrator` container CMD in `backend/Dockerfile` (`npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js`) and into real GitHub Actions workflows (`.github/workflows/ci.yml`). In local prepare tooling, enforce deterministic ordering: `prisma:preflight` -> `prisma migrate deploy` -> `prisma generate` -> `verify-migration-invariants` -> `enforce-audit-immutability`. Implement Gate A with resilient raw SQL queries so it cannot fail due to stale generated client caches. Enforce Gate B (`verify-canonical-seed.js`) after seed execution in full-stack staging. Incorporate an explicit negative rehearsal proving an invariant violation fails the migrator and blocks backend startup.
 
-**Tech Stack:** NestJS, TypeScript, Jest, PostgreSQL 15, Prisma ORM, Vue 3, Vite, Vitest, Pinia, Tailwind CSS.
+**Tech Stack:** NestJS, TypeScript, Jest, PostgreSQL 15, Prisma ORM, Vue 3, Vite, Vitest, Pinia, Tailwind CSS, Docker, GitHub Actions.
 
 ## Global Constraints
 - Target Branch: Work strictly on dedicated branch `fix/gsp-process-audit-improvements` (PR #27). PR #27 remains **OPEN** (`merged = false`).
@@ -62,31 +62,77 @@
   ```
 
 ### 2. Separation of Verification Gates
-- **Gate A: Migration Invariant Check (`backend/scripts/verify-migration-invariants.ts`):**
-  - Run immediately after `prisma migrate deploy` in `db:prepare:local` and `db:prepare:prod`.
-  - Asserts:
-    1. Enum value `LITER` exists in `"WarehouseUnit"`.
+- **Gate A: Migration Invariant Check (`backend/scripts/verify-migration-invariants.js`):**
+  - Run immediately after `prisma migrate deploy` in:
+    1. Local prepare scripts (`db:prepare:local`)
+    2. Production prepare scripts (`db:prepare:prod`)
+    3. Production Docker migrator CMD (`backend/Dockerfile`)
+    4. Real CI workflow jobs (`backend-verification`, `historical-migration-rehearsal-gate`, `production-compose-quality-gate`)
+  - **Raw SQL Resilience:** Implemented using raw SQL (`prisma.$queryRawUnsafe` or `pg`) to eliminate dependency on a freshly regenerated Prisma Client:
+    1. Enum value `LITER` exists in `"WarehouseUnit"`:
+       ```sql
+       SELECT enumlabel FROM pg_enum WHERE enumtypid = 'WarehouseUnit'::regtype;
+       ```
     2. Zero active GSP catalogs have missing profile or missing `receiptUnit`:
        ```sql
-       SELECT count(*) FROM "ProductCatalog"
+       SELECT count(*) AS count FROM "ProductCatalog"
        WHERE "processType" = 'GSP'
          AND "isActive" = true
          AND ("gspAnalysisProfile" IS NULL OR "receiptUnit" IS NULL);
        ```
-    3. Safe on historical/test databases that predate canonical seed records (returns 0 if no active GSP products exist).
-- **Gate B: Canonical Seed Verification (`backend/scripts/verify-canonical-seed.ts`):**
-  - Run immediately after `prisma db seed` in fresh setups and seeded staging.
+    3. Safe on historical/test databases that predate canonical seed records (returns 0 unresolved records if no active GSP products exist).
+- **Gate B: Canonical Seed Verification (`backend/scripts/verify-canonical-seed.js`):**
+  - Run immediately after `prisma db seed` / `seed.js` in fresh setups and seeded staging.
   - Asserts exact canonical codes exist and match exact UOMs:
     - `COAL-001` = `KG`
     - `SOLAR-001` = `LITER`
     - `PAC-001..003` = `LITER`
     - `RPD-001..002` = `LITER`
 
-### 3. Pipeline Integration
-In `backend/package.json`:
-- `db:prepare:local`: `npm run prisma:preflight && npx prisma migrate deploy && npx ts-node scripts/verify-migration-invariants.ts && node scripts/enforce-audit-immutability.js && npx prisma generate`
-- `db:prepare:prod`: `npm run db:verify:checksums && npm run db:backup:pre-deploy && npm run prisma:preflight && npx prisma migrate deploy && npx ts-node scripts/verify-migration-invariants.ts && node scripts/enforce-audit-immutability.js`
-- `seed:verify`: `npx ts-node scripts/verify-canonical-seed.ts`
+### 3. Real Release Gate Pipeline & Container Wiring
+1. **Local & Production Prepare Scripts (`backend/package.json`):**
+   - Corrected Deterministic Ordering:
+     ```json
+     "db:prepare:local": "npm run prisma:preflight && npx prisma migrate deploy && npx prisma generate && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js",
+     "db:prepare:prod": "npm run db:verify:checksums && npm run db:backup:pre-deploy && npm run prisma:preflight && npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js",
+     "verify:migration-invariants": "node scripts/verify-migration-invariants.js",
+     "seed:verify": "node scripts/verify-canonical-seed.js"
+     ```
+   - *Note on `prisma generate`:* In local tooling, `npx prisma generate` is run immediately after `prisma migrate deploy` and before any typed ORM access, while Gate A also uses raw SQL for absolute runtime safety.
+
+2. **Production Migrator Image (`backend/Dockerfile`):**
+   - In Stage 2 (`migrator`), update the default container CMD:
+     ```dockerfile
+     CMD ["sh", "-c", "npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js"]
+     ```
+   - The migrator image already carries full builder `node_modules` (including Prisma CLI and client runtime). If migration invariants fail, the migrator exits non-zero, preventing the production backend container (`depends_on: migrator: condition: service_completed_successfully`) from booting.
+
+3. **Real CI Workflows (`.github/workflows/ci.yml`):**
+   - **`backend-verification` (Fresh & Upgraded Matrix):**
+     Immediately after `npx prisma migrate deploy`:
+     ```bash
+     node scripts/verify-migration-invariants.js
+     ```
+     This check is blocking.
+   - **`historical-migration-rehearsal-gate`:**
+     Immediately after rehearsal DB migration deploy (Step 4):
+     ```bash
+     DATABASE_URL="postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public" node scripts/verify-migration-invariants.js
+     ```
+     Validates schema invariants on the upgraded historical database without requiring canonical seed records.
+   - **`production-compose-quality-gate` (Step 4E):**
+     Rehearses the exact production migrator container path:
+     ```bash
+     docker compose -f docker-compose.prod.yml run --rm migrator node scripts/verify-migration-invariants.js
+     ```
+     Executed between `npx prisma migrate deploy` and `node scripts/enforce-audit-immutability.js`.
+   - **`fullstack-staging-gate`:**
+     Immediately after seeding (`backend node dist/prisma/seed.js`):
+     ```bash
+     docker compose -f docker-compose.yml exec -T backend node scripts/verify-canonical-seed.js
+     ```
+     Asserts all 7 canonical products exist with exact UOM mapping.
+   - All existing checksum gates, drift gates, backup gates, restore DR drills, rollback drills, compose gates, SBOM, and Trivy security gates remain strictly preserved.
 
 ---
 
@@ -105,12 +151,12 @@ In `backend/package.json`:
 - `backend/src/gate/gate-gsp-checkin.spec.ts`
 - `backend/src/transactions/active-transaction-amendment.service.ts`
 - `backend/src/transactions/active-transaction-amendment.spec.ts`
-- `backend/src/qc/providers/specification.provider.ts`
-- `backend/src/qc/providers/specification.provider.spec.ts`
 - `backend/src/qc/constants/coal-specification.ts`
 - `backend/src/qc/constants/coal-specification.spec.ts`
 - `backend/src/qc/constants/chemical-specification.ts`
 - `backend/src/qc/constants/chemical-specification.spec.ts`
+- `backend/src/qc/providers/specification.provider.ts`
+- `backend/src/qc/providers/specification.provider.spec.ts`
 - `backend/src/qc/dto/submit-product-analysis.dto.ts`
 - `backend/src/qc/qc-product-analysis.service.ts`
 - `backend/src/qc/qc-product-analysis.spec.ts`
@@ -120,8 +166,14 @@ In `backend/package.json`:
 - `backend/src/warehouse/warehouse.service.ts`
 - `backend/src/warehouse/gsp-workflow.spec.ts`
 - `backend/src/warehouse/warehouse.service.spec.ts`
-- `backend/scripts/verify-migration-invariants.ts` (new)
-- `backend/scripts/verify-canonical-seed.ts` (new)
+- `backend/scripts/verify-migration-invariants.js` (new)
+- `backend/scripts/verify-canonical-seed.js` (new)
+- `backend/scripts/verify-baseline-master-upgrade-drill.ts`
+- `backend/Dockerfile`
+- `backend/package.json`
+
+### Operations / CI
+- `.github/workflows/ci.yml`
 
 ### Frontend
 - `frontend/src/components/qc/CoalAnalysisForm.vue`
@@ -199,17 +251,17 @@ git commit -m "feat(schema): add LITER to WarehouseUnit and decimal receiving fi
 #### Task 2: GSP Seed Update with Exact Canonical UOM Mapping (`seed.ts`)
 **Files:**
 - Modify: `backend/prisma/seed.ts:300-395`
-- Test: `backend/scripts/verify-canonical-seed.ts` (executed via npm)
+- Test: `backend/scripts/verify-canonical-seed.js` (executed via npm)
 
 **Interfaces:**
 - Consumes: PrismaClient, seed runner.
 - Produces: Idempotent seeding where both `create` AND `update` blocks persist exact `receiptUnit` for all 7 canonical GSP products (`COAL-001`=KG, `SOLAR-001`=LITER, `PAC-001..003`=LITER, `RPD-001..002`=LITER).
 
-- [ ] **Step 1: Write failing test / check in `backend/scripts/verify-canonical-seed.ts`**
-```typescript
-import { PrismaClient } from '@prisma/client';
+- [ ] **Step 1: Write failing test / check in `backend/scripts/verify-canonical-seed.js`**
+```javascript
+const { PrismaClient } = require('@prisma/client');
 
-export async function verifyCanonicalSeed() {
+async function verifyCanonicalSeed() {
   const prisma = new PrismaClient();
   const canonicals = [
     { code: 'COAL-001', expectedUom: 'KG' },
@@ -230,6 +282,20 @@ export async function verifyCanonicalSeed() {
   }
   await prisma.$disconnect();
 }
+
+if (require.main === module) {
+  verifyCanonicalSeed()
+    .then(() => {
+      console.log('✓ Canonical seed verified');
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+}
+
+module.exports = { verifyCanonicalSeed };
 ```
 
 - [ ] **Step 2: Update `backend/prisma/seed.ts`**
@@ -474,17 +540,22 @@ git commit -m "feat(transactions): snapshot receiptUnit at gate registration and
 
 ### Phase 2: QC / PA Evaluators & Governance
 
-#### Task 5: SpecificationProvider Neutral Governance Migration (`ACTIVE_CONFIGURED`)
+#### Task 5: QC Governance Metadata Model Migration to ACTIVE_CONFIGURED
 **Files:**
+- Modify: `backend/src/qc/constants/coal-specification.ts`
+- Modify: `backend/src/qc/constants/coal-specification.spec.ts`
+- Modify: `backend/src/qc/constants/chemical-specification.ts`
+- Modify: `backend/src/qc/constants/chemical-specification.spec.ts`
 - Modify: `backend/src/qc/providers/specification.provider.ts`
 - Modify: `backend/src/qc/providers/specification.provider.spec.ts`
 
 **Interfaces:**
 - Consumes: Environment variables `ENABLE_TEST_SPEC_FIXTURES`, `GMS_TEST_HARNESS`.
-- Produces: `ISpecificationProvider` returning `ruleStatus: 'ACTIVE_CONFIGURED'` in normal operation; strict dual-flag isolation for `TEST_FIXTURE`.
+- Produces: Neutral governance metadata model where legacy `approvalStatus` (`APPROVED | PENDING_SIGNOFF | TEST_FIXTURE`) is replaced with `ruleStatus: 'ACTIVE_CONFIGURED' | 'TEST_FIXTURE'`. Operational Coal, PAC, and Rapid Klen specifications use `ACTIVE_CONFIGURED`, eliminating artificial `PENDING_SIGNOFF` blockers while preserving strict dual-flag isolation for `TEST_FIXTURE`.
 
-- [ ] **Step 1: Write failing test in `specification.provider.spec.ts`**
+- [ ] **Step 1: Write failing unit tests in `specification.provider.spec.ts`, `coal-specification.spec.ts`, and `chemical-specification.spec.ts`**
 ```typescript
+// specification.provider.spec.ts
 it('returns operational ACTIVE_CONFIGURED when test fixture flags are false', () => {
   provider.setTestFixtureMode(true);
   process.env.ENABLE_TEST_SPEC_FIXTURES = 'false';
@@ -495,6 +566,12 @@ it('returns operational ACTIVE_CONFIGURED when test fixture flags are false', ()
   expect(coalSpec.approvedBy).toBeNull();
   expect(coalSpec.approvedAt).toBeNull();
   expect(provider.isTestFixtureActive()).toBe(false);
+
+  const pacSpec = provider.getPacSpec();
+  expect(pacSpec.ruleStatus).toBe('ACTIVE_CONFIGURED');
+
+  const rkSpec = provider.getRapidKlenSpec();
+  expect(rkSpec.ruleStatus).toBe('ACTIVE_CONFIGURED');
 });
 
 it('requires BOTH ENABLE_TEST_SPEC_FIXTURES and GMS_TEST_HARNESS to activate TEST_FIXTURE', () => {
@@ -508,34 +585,96 @@ it('requires BOTH ENABLE_TEST_SPEC_FIXTURES and GMS_TEST_HARNESS to activate TES
 });
 ```
 
-- [ ] **Step 2: Update `specification.provider.ts`**
-Replace `approvalStatus` with `ruleStatus: 'ACTIVE_CONFIGURED'` for operational metadata:
+- [ ] **Step 2: Migrate metadata interfaces & constants in `coal-specification.ts` and `chemical-specification.ts`**
+In `backend/src/qc/constants/coal-specification.ts`:
 ```typescript
-export const OPERATIONAL_COAL_SPEC_METADATA = {
+export type SpecificationRuleStatus = 'ACTIVE_CONFIGURED' | 'TEST_FIXTURE';
+
+export interface SpecificationMetadata {
+  version: string;
+  documentSource: string;
+  ruleStatus: SpecificationRuleStatus;
+  approvedBy: string | null; // Nullable historical field; strictly never controls release
+  approvedAt: string | null;
+  notes: string;
+}
+
+export const OPERATIONAL_COAL_SPEC_METADATA: SpecificationMetadata = {
   version: '2026.1-active',
   documentSource: 'Operational Lab Benchmark (Rev 2.1)',
-  ruleStatus: 'ACTIVE_CONFIGURED' as const,
+  ruleStatus: 'ACTIVE_CONFIGURED',
   approvedBy: null,
   approvedAt: null,
-  notes: 'Authoritative operational rule for boiler coal testing under Rev 2.1.',
+  notes: 'Authoritative operational rule for boiler coal testing under Spec Rev 2.1.',
+};
+
+export const TEST_FIXTURE_COAL_SPEC_METADATA: SpecificationMetadata = {
+  version: 'test-fixture-1.0',
+  documentSource: 'Test Harness Fixture (Simulated Rule for Automated Test Execution)',
+  ruleStatus: 'TEST_FIXTURE',
+  approvedBy: 'QA_MOCK_LEAD',
+  approvedAt: '2026-09-30T00:00:00.000Z',
+  notes: 'Test fixture for deterministic unit test validation.',
 };
 ```
-Maintain strict guard:
+
+In `backend/src/qc/constants/chemical-specification.ts`:
 ```typescript
-if (!fixturesRequested || !isTestHarness) {
-  return false;
+export interface ChemicalSpecificationMetadata {
+  version: string;
+  documentSource: string;
+  ruleStatus: SpecificationRuleStatus;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  minOperator: 'GT' | 'GTE';
+  notes: string;
 }
-return this.testFixtureMode && fixturesRequested && isTestHarness;
+
+export const OPERATIONAL_PAC_SPEC_METADATA: ChemicalSpecificationMetadata = {
+  version: '2026.1-active',
+  documentSource: 'Operational Lab Benchmark (Rev 2.1)',
+  ruleStatus: 'ACTIVE_CONFIGURED',
+  approvedBy: null,
+  approvedAt: null,
+  minOperator: 'GTE',
+  notes: 'Authoritative operational rule for PAC chemical testing under Spec Rev 2.1.',
+};
+
+export const OPERATIONAL_RAPID_KLEN_SPEC_METADATA: ChemicalSpecificationMetadata = {
+  version: '2026.1-active',
+  documentSource: 'Operational Lab Benchmark (Rev 2.1 - Strict GT)',
+  ruleStatus: 'ACTIVE_CONFIGURED',
+  approvedBy: null,
+  approvedAt: null,
+  minOperator: 'GT',
+  notes: 'Authoritative operational rule for Rapid Klen alkaline CIP under Spec Rev 2.1.',
+};
+```
+Remove operational wording referring to "Awaiting Formal QA Signoff", "PENDING_SIGNOFF", "approved specification", and "teresahkan".
+
+- [ ] **Step 3: Update `specification.provider.ts`**
+Update provider to wire `OPERATIONAL_COAL_SPEC_METADATA`, `OPERATIONAL_PAC_SPEC_METADATA`, and `OPERATIONAL_RAPID_KLEN_SPEC_METADATA` under `ruleStatus: 'ACTIVE_CONFIGURED'`.
+Maintain strict dual-flag isolation for test fixtures:
+```typescript
+isTestFixtureActive(): boolean {
+  const fixturesRequested = process.env.ENABLE_TEST_SPEC_FIXTURES === 'true';
+  const isTestHarness = process.env.GMS_TEST_HARNESS === 'true';
+
+  if (!fixturesRequested || !isTestHarness) {
+    return false;
+  }
+  return this.testFixtureMode && fixturesRequested && isTestHarness;
+}
 ```
 
-- [ ] **Step 3: Run test to verify it passes**
+- [ ] **Step 4: Run provider tests to verify they pass**
 Run: `npm --prefix backend test -- src/qc/providers/specification.provider.spec.ts`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 ```bash
-git add backend/src/qc/providers/specification.provider.*
-git commit -m "feat(qc): transition SpecificationProvider to ACTIVE_CONFIGURED while preserving strict test fixture isolation"
+git add backend/src/qc/constants/coal-specification.ts backend/src/qc/constants/chemical-specification.ts backend/src/qc/providers/
+git commit -m "feat(qc): migrate governance metadata model to ACTIVE_CONFIGURED while preserving dual-flag fixture isolation"
 ```
 
 ---
@@ -547,7 +686,7 @@ git commit -m "feat(qc): transition SpecificationProvider to ACTIVE_CONFIGURED w
 
 **Interfaces:**
 - Consumes: `{ calorieBand: string, totalMoisture: number, testRound: number, visual: CoalVisualParameters }`.
-- Produces: Evaluation result where visual compliance is calculated exclusively by the backend from factual fields; client `visualPassed=true` is ignored and rejected if factual fields fail.
+- Produces: Evaluation result where visual compliance is calculated exclusively by the backend from factual fields; client `visualPassed=true` is ignored and rejected if factual fields fail. Under `ruleStatus: 'ACTIVE_CONFIGURED'`, compliant analysis produces `decision: 'RELEASE'`.
 
 - [ ] **Step 1: Write failing unit tests in `coal-specification.spec.ts`**
 ```typescript
@@ -559,14 +698,14 @@ const validVisual = {
   bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
 };
 
-it('should evaluate COAL_5600_6000 with TM <= 33.0% and valid factual visual as PASS / RELEASE', () => {
-  const res = evaluateCoalAnalysis({ calorieBand: 'COAL_5600_6000', totalMoisture: 32.5, testRound: 1, visual: validVisual });
+it('should evaluate COAL_5600_6000 with TM <= 33.0% and valid factual visual as PASS / RELEASE under ACTIVE_CONFIGURED', () => {
+  const res = evaluateCoalAnalysis({ calorieBand: 'COAL_5600_6000', totalMoisture: 32.5, testRound: 1, visual: validVisual }, OPERATIONAL_COAL_SPEC_METADATA);
   expect(res.decision).toBe('RELEASE');
   expect(res.result).toBe('PASS');
 });
 
-it('should evaluate COAL_GT_6000 with TM <= 25.0% and valid factual visual as PASS / RELEASE', () => {
-  const res = evaluateCoalAnalysis({ calorieBand: 'COAL_GT_6000', totalMoisture: 24.8, testRound: 1, visual: validVisual });
+it('should evaluate COAL_GT_6000 with TM <= 25.0% and valid factual visual as PASS / RELEASE under ACTIVE_CONFIGURED', () => {
+  const res = evaluateCoalAnalysis({ calorieBand: 'COAL_GT_6000', totalMoisture: 24.8, testRound: 1, visual: validVisual }, OPERATIONAL_COAL_SPEC_METADATA);
   expect(res.decision).toBe('RELEASE');
   expect(res.result).toBe('PASS');
 });
@@ -579,13 +718,13 @@ it('ADVERSARIAL: should REJECT if client passes visualPassed=true but factual vi
     testRound: 1,
     visual: badVisual,
     visualPassed: true, // CLIENT ADVERSARIAL INJECTION
-  } as any);
+  } as any, OPERATIONAL_COAL_SPEC_METADATA);
   expect(res.result).toBe('REJECT');
   expect(res.decision).toBe('REJECT');
 });
 
 it('should return isConfigured=false and error=SPEC_NOT_CONFIGURED for unknown calorie band', () => {
-  const res = evaluateCoalAnalysis({ calorieBand: 'COAL_4200', totalMoisture: 30.0, testRound: 1, visual: validVisual });
+  const res = evaluateCoalAnalysis({ calorieBand: 'COAL_4200', totalMoisture: 30.0, testRound: 1, visual: validVisual }, OPERATIONAL_COAL_SPEC_METADATA);
   expect(res.isConfigured).toBe(false);
   expect(res.error).toBe('SPEC_NOT_CONFIGURED');
 });
@@ -641,12 +780,12 @@ git commit -m "feat(qc): implement factual visual evaluation and calorie band co
 
 - [ ] **Step 1: Write failing unit tests in `chemical-specification.spec.ts`**
 ```typescript
-it('should evaluate PAC boundaries inclusively without requiring Al2O3', () => {
+it('should evaluate PAC boundaries inclusively without requiring Al2O3 under ACTIVE_CONFIGURED', () => {
   const res1 = evaluatePacAnalysis({
     sensory: { visual: 'Kuning', foreignMatters: 'Tidak ada kontaminasi', packagingLabel: 'Kemasan & label tidak rusak' },
     ph: 3.50,
     density: 1.170,
-  });
+  }, 'PAC 280 AC', OPERATIONAL_PAC_SPEC_METADATA);
   expect(res1.decision).toBe('RELEASE');
   expect(res1.result).toBe('PASS');
 
@@ -654,15 +793,15 @@ it('should evaluate PAC boundaries inclusively without requiring Al2O3', () => {
     sensory: { visual: 'Coklat Jernih', foreignMatters: 'Tidak ada kontaminasi', packagingLabel: 'Kemasan & label tidak rusak' },
     ph: 5.00,
     density: 1.260,
-  });
+  }, 'PAC 280 AC', OPERATIONAL_PAC_SPEC_METADATA);
   expect(res2.decision).toBe('RELEASE');
   expect(res2.result).toBe('PASS');
 });
 
 it('should fail PAC when pH or density are outside inclusive boundaries', () => {
-  const resLowPh = evaluatePacAnalysis({ sensory: validSensory, ph: 3.49, density: 1.200 });
+  const resLowPh = evaluatePacAnalysis({ sensory: validSensory, ph: 3.49, density: 1.200 }, 'PAC 280 AC', OPERATIONAL_PAC_SPEC_METADATA);
   expect(resLowPh.result).toBe('REJECT');
-  const resHighDens = evaluatePacAnalysis({ sensory: validSensory, ph: 4.00, density: 1.261 });
+  const resHighDens = evaluatePacAnalysis({ sensory: validSensory, ph: 4.00, density: 1.261 }, 'PAC 280 AC', OPERATIONAL_PAC_SPEC_METADATA);
   expect(resHighDens.result).toBe('REJECT');
 });
 ```
@@ -676,7 +815,7 @@ Chemical parameters:
 - `3.5 <= ph && ph <= 5.0`
 - `1.170 <= density && density <= 1.260`
 Remove mandatory Al2O3 validation.
-Remove `PENDING_SIGNOFF` blocker; return `decision: 'RELEASE'` on compliant runs under `ACTIVE_CONFIGURED`.
+Remove `PENDING_SIGNOFF` blocker; return `decision: 'RELEASE'` on compliant runs under `ruleStatus: 'ACTIVE_CONFIGURED'`.
 
 - [ ] **Step 3: Run test to verify it passes**
 Run: `npm --prefix backend test -- src/qc/constants/chemical-specification.spec.ts`
@@ -702,12 +841,12 @@ git commit -m "feat(qc): align PAC evaluator to operational sensory options and 
 - [ ] **Step 1: Write failing unit tests in `chemical-specification.spec.ts`**
 ```typescript
 it('should enforce strict greater-than limits for Rapid Klen (exact boundary fails)', () => {
-  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.00, alkalinityNaOH: 45.17, ph: 12.001, density: 1.401 }).result).toBe('REJECT');
-  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.16, ph: 12.001, density: 1.401 }).result).toBe('REJECT');
-  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.17, ph: 12.000, density: 1.401 }).result).toBe('REJECT');
-  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.17, ph: 12.001, density: 1.400 }).result).toBe('REJECT');
+  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.00, alkalinityNaOH: 45.17, ph: 12.001, density: 1.401 }, 'Rapid Klen', OPERATIONAL_RAPID_KLEN_SPEC_METADATA).result).toBe('REJECT');
+  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.16, ph: 12.001, density: 1.401 }, 'Rapid Klen', OPERATIONAL_RAPID_KLEN_SPEC_METADATA).result).toBe('REJECT');
+  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.17, ph: 12.000, density: 1.401 }, 'Rapid Klen', OPERATIONAL_RAPID_KLEN_SPEC_METADATA).result).toBe('REJECT');
+  expect(evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.17, ph: 12.001, density: 1.400 }, 'Rapid Klen', OPERATIONAL_RAPID_KLEN_SPEC_METADATA).result).toBe('REJECT');
 
-  const passRes = evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.17, ph: 12.001, density: 1.401 });
+  const passRes = evaluateRapidKlenAnalysis({ sensory: validSensory, alkalinityNa2O: 35.01, alkalinityNaOH: 45.17, ph: 12.001, density: 1.401 }, 'Rapid Klen', OPERATIONAL_RAPID_KLEN_SPEC_METADATA);
   expect(passRes.decision).toBe('RELEASE');
   expect(passRes.result).toBe('PASS');
 });
@@ -723,7 +862,7 @@ Chemical (Strict `>`):
 - `alkalinityNaOH <= 45.16` -> FAIL
 - `ph <= 12.000` -> FAIL
 - `density <= 1.400` -> FAIL
-Remove `PENDING_SIGNOFF` blocker; return `decision: 'RELEASE'` on compliant runs under `ACTIVE_CONFIGURED`.
+Remove `PENDING_SIGNOFF` blocker; return `decision: 'RELEASE'` on compliant runs under `ruleStatus: 'ACTIVE_CONFIGURED'`.
 
 - [ ] **Step 3: Run test to verify it passes**
 Run: `npm --prefix backend test -- src/qc/constants/chemical-specification.spec.ts`
@@ -737,22 +876,78 @@ git commit -m "feat(qc): enforce strict greater-than limits for Rapid Klen under
 
 ---
 
-#### Task 9: QC Product Analysis Service Integration & Unconfigured Calorie Band HTTP 422
+#### Task 9: QC Product Analysis Service Integration & Removal of Legacy Approval Blocker
 **Files:**
-- Modify: `backend/src/qc/qc-product-analysis.service.ts:320-420`
+- Modify: `backend/src/qc/qc-product-analysis.service.ts:320-530, 630-665`
 - Test: `backend/src/qc/qc-product-analysis.spec.ts`
 
 **Interfaces:**
 - Consumes: Generic `SubmitProductAnalysisDto` with `dto.parameters.calorieBand`.
-- Produces: Deterministic HTTP 422 `SPEC_NOT_CONFIGURED` on unknown calorie band; state preserved, `ActivityLog` recorded, automated `RELEASE` on compliant runs.
+- Produces: Replaces legacy `checkSpecificationApprovalStatus` with `getSpecificationRuleStatus`. Under `ruleStatus: 'ACTIVE_CONFIGURED'`, compliant analysis produces `decision: 'RELEASE'` transitioning directly to `QC_VEHICLE_PASSED`. Removes `specStatus.approvalStatus !== 'APPROVED'` blocker and eliminates `PENDING_DISPOSITION` from canonical flows. Unknown calorie bands return deterministic HTTP 422 `SPEC_NOT_CONFIGURED`.
 
-- [ ] **Step 1: Write failing test in `qc-product-analysis.spec.ts`**
+- [ ] **Step 1: Write failing unit tests in `qc-product-analysis.spec.ts`**
 ```typescript
+it('should release canonical Coal to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED with test fixtures disabled', async () => {
+  process.env.ENABLE_TEST_SPEC_FIXTURES = 'false';
+  process.env.GMS_TEST_HARNESS = 'false';
+  const dto = {
+    testRound: 1,
+    parameters: {
+      calorieBand: 'COAL_5600_6000',
+      totalMoisture: 31.5,
+      visual: {
+        kondisi: 'Kering (Tidak Basah)',
+        warna: 'Hitam',
+        levelRank: 'Medium Rank Coal',
+        kilap: 'Hitam Mengkilap',
+        bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+      },
+    },
+  };
+  const result = await service.submitProductAnalysis(coalTx.id, dto as any, mockUser);
+  expect(result.data.status).toBe(TransactionStatus.QC_VEHICLE_PASSED);
+  expect(mockPrisma.transaction.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+    data: expect.objectContaining({ status: TransactionStatus.QC_VEHICLE_PASSED }),
+  }));
+});
+
+it('should release canonical PAC to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED with test fixtures disabled', async () => {
+  process.env.ENABLE_TEST_SPEC_FIXTURES = 'false';
+  process.env.GMS_TEST_HARNESS = 'false';
+  const dto = {
+    testRound: 1,
+    parameters: {
+      sensory: { visual: 'Kuning', foreignMatters: 'Tidak ada kontaminasi', packagingLabel: 'Kemasan & label tidak rusak' },
+      ph: 4.10,
+      density: 1.215,
+    },
+  };
+  const result = await service.submitProductAnalysis(pacTx.id, dto as any, mockUser);
+  expect(result.data.status).toBe(TransactionStatus.QC_VEHICLE_PASSED);
+});
+
+it('should release canonical Rapid Klen to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED with test fixtures disabled', async () => {
+  process.env.ENABLE_TEST_SPEC_FIXTURES = 'false';
+  process.env.GMS_TEST_HARNESS = 'false';
+  const dto = {
+    testRound: 1,
+    parameters: {
+      sensory: { visual: 'Jernih', foreignMatters: 'Tidak ada kontaminasi', packagingLabel: 'Kemasan & label tidak rusak' },
+      alkalinityNa2O: 35.50,
+      alkalinityNaOH: 46.00,
+      ph: 12.500,
+      density: 1.420,
+    },
+  };
+  const result = await service.submitProductAnalysis(rapidTx.id, dto as any, mockUser);
+  expect(result.data.status).toBe(TransactionStatus.QC_VEHICLE_PASSED);
+});
+
 it('should throw HTTP 422 SPEC_NOT_CONFIGURED without changing status or creating reject record on unknown coal calorie band', async () => {
   const dto = {
     testRound: 1,
     parameters: {
-      calorieBand: 'COAL_UNKNOWN_4200', // SENT IN dto.parameters
+      calorieBand: 'COAL_UNKNOWN_4200',
       totalMoisture: 28.0,
       visual: { kondisi: 'Kering (Tidak Basah)', warna: 'Hitam', levelRank: 'Medium Rank Coal', kilap: 'Hitam Mengkilap', bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah' },
     },
@@ -774,14 +969,79 @@ it('should throw HTTP 422 SPEC_NOT_CONFIGURED without changing status or creatin
 ```
 
 - [ ] **Step 2: Update `qc-product-analysis.service.ts`**
-In `submitProductAnalysis`:
-Extract `calorieBand` from `rawParams.calorieBand` (single canonical contract).
-Pass factual `visual` object to `evaluateCoalAnalysis`.
-If `evalResult.isConfigured === false`:
-- Log `COAL_SPEC_NOT_CONFIGURED` to `ActivityLogsService`.
-- Do NOT create `QcProductAnalysis` record.
-- Do NOT update `Transaction.status`.
-- Throw `new HttpException({ statusCode: 422, error: 'SPEC_NOT_CONFIGURED', message: 'Spesifikasi acuan kalori batubara belum dikonfigurasi. Evaluasi diblokir tanpa keputusan rilis/tolak otomatis.' }, 422)`.
+In `qc-product-analysis.service.ts`:
+1. Replace `checkSpecificationApprovalStatus` helper:
+```typescript
+getSpecificationRuleStatus(
+  productCategory: string,
+  productName: string,
+): {
+  ruleStatus: 'ACTIVE_CONFIGURED' | 'TEST_FIXTURE' | 'UNCONFIGURED';
+  documentSource: string;
+} {
+  const cat = (productCategory || '').toUpperCase();
+  const name = (productName || '').toUpperCase();
+
+  if (cat === 'COAL' || cat.includes('BATUBARA') || name.includes('BATUBARA')) {
+    const spec = this.specProvider.getCoalSpec();
+    return { ruleStatus: spec.ruleStatus, documentSource: spec.documentSource };
+  }
+  if (name.includes('PAC')) {
+    const spec = this.specProvider.getPacSpec();
+    return { ruleStatus: spec.ruleStatus, documentSource: spec.documentSource };
+  }
+  if (name.includes('RAPID') || name.includes('KLEN')) {
+    const spec = this.specProvider.getRapidKlenSpec();
+    return { ruleStatus: spec.ruleStatus, documentSource: spec.documentSource };
+  }
+  return {
+    ruleStatus: 'UNCONFIGURED',
+    documentSource: 'Unconfigured Product Specification',
+  };
+}
+```
+2. Remove legacy `if (specStatus.approvalStatus !== 'APPROVED')` release blocker:
+```typescript
+const ruleMeta = this.getSpecificationRuleStatus(
+  authoritativeProductCategory,
+  authoritativeProductName,
+);
+
+// Under AnalysisDecision.RELEASE:
+case AnalysisDecision.RELEASE:
+  if (ruleMeta.ruleStatus !== 'ACTIVE_CONFIGURED' && ruleMeta.ruleStatus !== 'TEST_FIXTURE') {
+    throw new BadRequestException(
+      `Keputusan RELEASE otomatis ditolak: Spesifikasi operasional untuk ${authoritativeProductName} belum aktif terkonfigurasi (Status: ${ruleMeta.ruleStatus}).`,
+    );
+  }
+  nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
+  break;
+```
+3. Eliminate `PENDING_DISPOSITION` from canonical flows:
+```typescript
+case AnalysisDecision.PENDING_DISPOSITION:
+  throw new BadRequestException(
+    `Pengujian laboratorium untuk ${authoritativeProductName} tidak dapat diproses rilis: Spesifikasi operasional berstatus ${ruleMeta.ruleStatus} (${ruleMeta.documentSource}).`,
+  );
+```
+4. On unconfigured calorie band:
+```typescript
+if (evalResult.isConfigured === false) {
+  await this.activityLogsService.logAction({
+    userId: user.sub,
+    action: 'COAL_SPEC_NOT_CONFIGURED',
+    details: { transactionId, calorieBand: rawParams.calorieBand },
+  });
+  throw new HttpException(
+    {
+      statusCode: 422,
+      error: 'SPEC_NOT_CONFIGURED',
+      message: 'Spesifikasi acuan kalori batubara belum dikonfigurasi. Evaluasi diblokir tanpa keputusan rilis/tolak otomatis.',
+    },
+    422,
+  );
+}
+```
 
 - [ ] **Step 3: Run test to verify it passes**
 Run: `npm --prefix backend test -- src/qc/qc-product-analysis.spec.ts`
@@ -790,7 +1050,7 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 ```bash
 git add backend/src/qc/qc-product-analysis.service.ts backend/src/qc/qc-product-analysis.spec.ts
-git commit -m "feat(qc): wire generic parameters.calorieBand with deterministic HTTP 422 and ActivityLog audit"
+git commit -m "feat(qc): wire ACTIVE_CONFIGURED release flow in service and remove legacy approval blockers"
 ```
 
 ---
@@ -1366,13 +1626,16 @@ git commit -m "feat(frontend): add Receipt UOM field to GSP Master Data settings
 | Client `visualPassed=true` cannot bypass factual checks | `coal-specification.spec.ts` | `ADVERSARIAL: should reject if visualPassed=true but factual checks fail` |
 | Unknown Coal Band -> HTTP 422 | `qc-product-analysis.spec.ts` | `should throw HTTP 422 SPEC_NOT_CONFIGURED on unconfigured calorie band` |
 | Assert zero fallback to 4200 | `coal-specification.spec.ts` | `should assert no fallback exists for arbitrary calorie string` |
+| Coal PASS under `ACTIVE_CONFIGURED` -> `QC_VEHICLE_PASSED` | `qc-product-analysis.spec.ts` | `should release canonical Coal to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED with test fixtures disabled` |
 | PAC: pH 3.5 & 5.0 PASS, 3.4 & 5.1 FAIL | `chemical-specification.spec.ts` | `should enforce PAC pH inclusive boundary (3.50-5.00)` |
 | PAC: Density 1.170 & 1.260 PASS | `chemical-specification.spec.ts` | `should enforce PAC density inclusive boundary (1.170-1.260)` |
 | PAC: Omission of Al2O3 does not block PASS | `chemical-specification.spec.ts` | `should release PAC without Al2O3 parameter` |
+| PAC PASS under `ACTIVE_CONFIGURED` -> `QC_VEHICLE_PASSED` | `qc-product-analysis.spec.ts` | `should release canonical PAC to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED with test fixtures disabled` |
 | Rapid Klen: Na2O 35.00 FAIL, 35.01 PASS | `chemical-specification.spec.ts` | `should enforce strict greater-than for Rapid Klen Na2O` |
 | Rapid Klen: NaOH 45.16 FAIL, 45.17 PASS | `chemical-specification.spec.ts` | `should enforce strict greater-than for Rapid Klen NaOH` |
 | Rapid Klen: pH 12.000 FAIL, 12.001 PASS | `chemical-specification.spec.ts` | `should enforce strict greater-than for Rapid Klen pH` |
 | Rapid Klen: Density 1.400 FAIL, 1.401 PASS | `chemical-specification.spec.ts` | `should enforce strict greater-than for Rapid Klen density` |
+| Rapid Klen PASS under `ACTIVE_CONFIGURED` -> `QC_VEHICLE_PASSED` | `qc-product-analysis.spec.ts` | `should release canonical Rapid Klen to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED with test fixtures disabled` |
 
 - [ ] **Step 1: Implement full test matrix across specified test files**
 - [ ] **Step 2: Run all QC tests**
@@ -1381,7 +1644,7 @@ Expected: PASS with 100% test scenario success.
 - [ ] **Step 3: Commit**
 ```bash
 git add backend/src/qc/
-git commit -m "test(qc): implement comprehensive automated test matrix for Coal, PAC, and Rapid Klen evaluators"
+git commit -m "test(qc): implement comprehensive automated test matrix for Coal, PAC, and Rapid Klen evaluators under ACTIVE_CONFIGURED"
 ```
 
 ---
@@ -1456,54 +1719,80 @@ git commit -m "test(transactions): implement test matrix for gate snapshotting, 
 
 #### Task 22: Migration Invariant Release Gate & Canonical Seed Verification Scripts
 **Files:**
-- Create: `backend/scripts/verify-migration-invariants.ts`
-- Create: `backend/scripts/verify-canonical-seed.ts`
+- Create: `backend/scripts/verify-migration-invariants.js`
+- Create: `backend/scripts/verify-canonical-seed.js`
 - Modify: `backend/package.json`
 
 **Interfaces:**
-- Consumes: PostgreSQL connection.
-- Produces: Two distinct, decoupled verification gates:
-  1. `verify-migration-invariants.ts`: Checks enum `LITER` and asserts 0 active GSP products with missing profile/UOM. Safe on unseeded historical databases.
-  2. `verify-canonical-seed.ts`: Checks exact canonical codes and exact UOM mappings. Run after seed execution.
+- Consumes: PostgreSQL connection string `DATABASE_URL`.
+- Produces: Two decoupled verification scripts executable via Node directly:
+  1. `verify-migration-invariants.js` (Gate A): Uses raw SQL to verify enum `LITER` and assert zero active GSP products have null profile or null `receiptUnit`. Safe against unseeded historical databases and immune to stale generated Prisma client caches.
+  2. `verify-canonical-seed.js` (Gate B): Verifies all 7 canonical products exist and match exact UOM mappings. Executed after seeding in fresh/staging pipelines.
 
-- [ ] **Step 1: Create `backend/scripts/verify-migration-invariants.ts`**
-```typescript
-import { PrismaClient } from '@prisma/client';
+- [ ] **Step 1: Create `backend/scripts/verify-migration-invariants.js`**
+```javascript
+/**
+ * Migration Invariant Release Gate (Gate A)
+ *
+ * Verifies PostgreSQL 15 schema invariants immediately after migration deployment.
+ * Uses raw SQL queries to ensure deterministic execution regardless of whether
+ * Prisma Client has been regenerated yet on the host/container.
+ */
+const { PrismaClient } = require('@prisma/client');
 
 async function main() {
   const prisma = new PrismaClient();
-  console.log('--- [Gate A] Verifying Migration Invariants ---');
+  console.log('--- [Gate A] Verifying GSP Migration Invariants ---');
 
-  const enums: any = await prisma.$queryRaw`SELECT enumlabel FROM pg_enum WHERE enumtypid = 'WarehouseUnit'::regtype;`;
-  const enumLabels = enums.map((e: any) => e.enumlabel);
-  if (!enumLabels.includes('LITER')) {
-    throw new Error('FAILED: WarehouseUnit enum does not contain LITER');
-  }
-  console.log('✓ WarehouseUnit enum contains LITER');
+  try {
+    // 1. Verify Enum LITER in WarehouseUnit
+    const enums = await prisma.$queryRawUnsafe(
+      `SELECT enumlabel FROM pg_enum WHERE enumtypid = 'WarehouseUnit'::regtype;`
+    );
+    const enumLabels = (enums || []).map((e) => e.enumlabel);
+    if (!enumLabels.includes('LITER')) {
+      throw new Error("FAILED: 'WarehouseUnit' enum does not contain 'LITER'!");
+    }
+    console.log("  ✓ WarehouseUnit enum contains 'LITER'");
 
-  const unresolved = await prisma.productCatalog.count({
-    where: {
-      processType: 'GSP',
-      isActive: true,
-      OR: [{ gspAnalysisProfile: null }, { receiptUnit: null }],
-    },
-  });
-  if (unresolved > 0) {
-    throw new Error(`FAILED: Found ${unresolved} active GSP product catalogs with missing profile or receiptUnit`);
+    // 2. Verify Zero unresolved active GSP product catalogs via raw SQL
+    const unresolvedRows = await prisma.$queryRawUnsafe(
+      `SELECT count(*)::int AS count FROM "ProductCatalog"
+       WHERE "processType" = 'GSP'
+         AND "isActive" = true
+         AND ("gspAnalysisProfile" IS NULL OR "receiptUnit" IS NULL);`
+    );
+    const unresolvedCount = unresolvedRows[0] ? unresolvedRows[0].count : 0;
+    if (unresolvedCount > 0) {
+      throw new Error(
+        `FAILED: Found ${unresolvedCount} active GSP product catalogs with missing profile or receiptUnit!`
+      );
+    }
+    console.log('  ✓ Zero unresolved active GSP product catalogs');
+    console.log('--- [Gate A] GSP Migration Invariants PASSED [100% OK] ---');
+  } finally {
+    await prisma.$disconnect();
   }
-  console.log('✓ Zero unresolved active GSP product catalogs');
-  await prisma.$disconnect();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+module.exports = { main };
 ```
 
-- [ ] **Step 2: Create `backend/scripts/verify-canonical-seed.ts`**
-```typescript
-import { PrismaClient } from '@prisma/client';
+- [ ] **Step 2: Create `backend/scripts/verify-canonical-seed.js`**
+```javascript
+/**
+ * Canonical Seed Verification Gate (Gate B)
+ *
+ * Asserts all 7 canonical GSP product catalogs exist with exact configured UOMs.
+ */
+const { PrismaClient } = require('@prisma/client');
 
 async function main() {
   const prisma = new PrismaClient();
@@ -1519,56 +1808,145 @@ async function main() {
     { code: 'RPD-002', expectedUom: 'LITER' },
   ];
 
-  for (const c of canonicals) {
-    const prod = await prisma.productCatalog.findUnique({ where: { code: c.code } });
-    if (!prod) throw new Error(`Missing canonical seed product: ${c.code}`);
-    if (prod.receiptUnit !== c.expectedUom) {
-      throw new Error(`Invalid receiptUnit for ${c.code}: expected ${c.expectedUom}, got ${prod.receiptUnit}`);
+  try {
+    for (const c of canonicals) {
+      const prod = await prisma.productCatalog.findUnique({ where: { code: c.code } });
+      if (!prod) {
+        throw new Error(`FAILED: Missing canonical seed product: ${c.code}`);
+      }
+      if (prod.receiptUnit !== c.expectedUom) {
+        throw new Error(
+          `FAILED: Invalid receiptUnit for ${c.code}: expected '${c.expectedUom}', got '${prod.receiptUnit}'`
+        );
+      }
+      console.log(`  ✓ Canonical product ${c.code} verified with receiptUnit '${c.expectedUom}'`);
     }
+    console.log('--- [Gate B] Canonical Seed Verification PASSED [100% OK] ---');
+  } finally {
+    await prisma.$disconnect();
   }
-  console.log('✓ All 7 canonical GSP seed products verified with exact receiptUnit');
-  await prisma.$disconnect();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+module.exports = { main };
 ```
 
 - [ ] **Step 3: Update `backend/package.json` scripts**
-Integrate `verify-migration-invariants.ts` into `db:prepare:local` and `db:prepare:prod`.
-Add `seed:verify: "npx ts-node scripts/verify-canonical-seed.ts"`.
+In `backend/package.json`:
+- Ensure deterministic prepare order in `db:prepare:local`:
+  `"db:prepare:local": "npm run prisma:preflight && npx prisma migrate deploy && npx prisma generate && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js"`
+- Ensure deterministic production prepare order in `db:prepare:prod`:
+  `"db:prepare:prod": "npm run db:verify:checksums && npm run db:backup:pre-deploy && npm run prisma:preflight && npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js"`
+- Add script aliases:
+  `"verify:migration-invariants": "node scripts/verify-migration-invariants.js"`
+  `"seed:verify": "node scripts/verify-canonical-seed.js"`
 
 - [ ] **Step 4: Commit**
 ```bash
-git add backend/scripts/verify-migration-invariants.ts backend/scripts/verify-canonical-seed.ts backend/package.json
-git commit -m "chore(ops): implement decoupled migration invariant release gate and canonical seed verification scripts"
+git add backend/scripts/verify-migration-invariants.js backend/scripts/verify-canonical-seed.js backend/package.json
+git commit -m "chore(ops): implement raw-SQL migration invariant gate and canonical seed verifiers in package scripts"
 ```
 
 ---
 
-#### Task 23: CI / Production Prepare Gate Integration & Full Rehearsal Drills
+#### Task 23: Production Migrator (Dockerfile), Real CI Workflows Integration & Release-Gate Rehearsals
 **Files:**
+- Modify: `backend/Dockerfile:51-53`
+- Modify: `.github/workflows/ci.yml:68-75, 312-325, 691-696, 772-776`
 - Modify: `backend/scripts/verify-baseline-master-upgrade-drill.ts`
-- Documentation: Migration rehearsal runbook.
 
-**Rehearsal Scope:**
-1. **Fresh DB Rehearsal:**
-   Run: `npm run prisma:preflight && npx prisma migrate deploy && npx ts-node scripts/verify-migration-invariants.ts && npm run seed && npm run seed:verify`
-   Expected: All migrations apply, invariant check passes, seed completes, canonical mapping passes.
-2. **Upgraded DB Rehearsal:**
-   Run `verify-baseline-master-upgrade-drill.ts` applying migrations 1..20 (baseline master) then deploying branch migrations through `20261008000000_add_gsp_uom_and_receiving_quantity`.
-   Expected: Zero schema drift, migration invariant check passes.
-3. **Rollback Drill:**
-   Simulate pre-deploy backup, trigger failure, execute `verify-restore-drill.ts`.
-   Expected: Database successfully restored to pre-migration state.
+**Interfaces:**
+- Consumes: Production Docker migrator build, GitHub Actions workflows.
+- Produces: Hardened release gates wired directly into the production container CMD and 4 GitHub Actions workflow jobs; explicit negative test proving invalid master data fails the migrator and blocks backend startup.
 
-- [ ] **Step 1: Execute rehearsals in local environment**
-- [ ] **Step 2: Commit any drill script refinements**
+- [ ] **Step 1: Update production Dockerfile migrator container CMD**
+In `backend/Dockerfile` (Stage 2 `migrator`):
+```dockerfile
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js"]
+```
+Because `migrator` carries full builder `node_modules` and `scripts`, `node scripts/verify-migration-invariants.js` executes reliably without `ts-node` or rebuild overhead.
+
+- [ ] **Step 2: Update real CI workflows in `.github/workflows/ci.yml`**
+1. **`backend-verification` Job (Matrix: Fresh & Upgraded):**
+   Immediately after `npx prisma migrate deploy`:
+   ```yaml
+   - name: Generate Prisma Client & Validate Migrations
+     working-directory: ./backend
+     env:
+       DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+     run: |
+       npx prisma generate
+       npm run prisma:preflight -- --report-only --fail-on-duplicates
+       if [ "${{ matrix.db_state }}" = "upgraded" ]; then
+         echo "Executing baseline upgrade simulation..."
+         npx prisma db execute --file prisma/migrations/20260714030729_init/migration.sql --schema prisma/schema.prisma
+         npx prisma migrate resolve --applied 20260714030729_init || true
+       fi
+       npx prisma migrate deploy
+       node scripts/verify-migration-invariants.js
+   ```
+2. **`historical-migration-rehearsal-gate` Job:**
+   Immediately after rehearsal migration deployment (Step 4):
+   ```yaml
+   echo "Step 4: Executing Prisma migration deployment on rehearsal DB..."
+   npx prisma migrate deploy
+   cd ..
+   echo "Step 4.6: Verifying GSP migration invariants on rehearsal DB..."
+   DATABASE_URL="postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public" node backend/scripts/verify-migration-invariants.js
+   ```
+3. **`production-compose-quality-gate` Job (Step 4E):**
+   Rehearses the exact production migrator container path:
+   ```yaml
+   echo "4E: Deploying Forward Migrations via Migrator Container..."
+   docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate deploy
+   docker compose -f docker-compose.prod.yml run --rm migrator node scripts/verify-migration-invariants.js
+   docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate status
+   docker compose -f docker-compose.prod.yml run --rm migrator node scripts/enforce-audit-immutability.js
+   ```
+4. **`fullstack-staging-gate` Job:**
+   Immediately after seeding in Step 4:
+   ```yaml
+   docker compose -f docker-compose.yml exec -T -e NODE_ENV=test -e SEED_ALL_USERS=true -e DEFAULT_ADMIN_PASSWORD=test-admin-password-12345 -e DEFAULT_QC_PASSWORD=test-qc-password-12345 -e DEFAULT_WAREHOUSE_PASSWORD=test-wh-password-12345 -e DEFAULT_SECURITY_PASSWORD=test-sec-password-12345 backend node dist/prisma/seed.js
+   echo "Verifying Canonical Seed Invariants in Staging..."
+   docker compose -f docker-compose.yml exec -T backend node scripts/verify-canonical-seed.js
+   ```
+Preserve all existing checksum gates, drift gates, backup gates, restore DR drills, rollback drills, compose gates, SBOM, and Trivy security gates.
+
+- [ ] **Step 3: Execute Release-Gate Negative Test Rehearsal**
+Rehearse the blocking nature of the migrator release gate:
+1. Connect to PostgreSQL and inject an active GSP catalog with missing `receiptUnit`:
+   ```sql
+   INSERT INTO "ProductCatalog" ("id", "code", "name", "category", "processType", "gspAnalysisProfile", "receiptUnit", "isActive", "createdAt", "updatedAt")
+   VALUES ('test-negative-gsp', 'NEG-001', 'Negative Test GSP', 'Chemical', 'GSP', 'PAC_PA', NULL, true, NOW(), NOW());
+   ```
+2. Execute migrator gate:
+   `node backend/scripts/verify-migration-invariants.js`
+   Expected: Exits with non-zero code (`FAILED: Found 1 active GSP product catalogs with missing profile or receiptUnit!`).
+3. In Docker Compose rehearsal:
+   `docker compose -f docker-compose.prod.yml run --rm migrator node scripts/verify-migration-invariants.js`
+   Expected: Container exits code 1. Backend container cannot start because migrator service failed.
+4. Clean up negative test fixture:
+   ```sql
+   DELETE FROM "ProductCatalog" WHERE "id" = 'test-negative-gsp';
+   ```
+5. Re-run verification:
+   `node backend/scripts/verify-migration-invariants.js`
+   Expected: Exits 0 (`Zero unresolved active GSP product catalogs`). Migrator succeeds, backend starts and becomes healthy.
+
+- [ ] **Step 4: Update `verify-baseline-master-upgrade-drill.ts`**
+In `backend/scripts/verify-baseline-master-upgrade-drill.ts`, add Gate A verification call immediately after the branch migration deploys.
+
+- [ ] **Step 5: Commit**
 ```bash
-git add backend/scripts/verify-baseline-master-upgrade-drill.ts
-git commit -m "chore(ops): integrate GSP UOM migration into automated master baseline upgrade drill"
+git add backend/Dockerfile .github/workflows/ci.yml backend/scripts/verify-baseline-master-upgrade-drill.ts
+git commit -m "chore(ops): wire GSP migration invariant gates into Dockerfile migrator CMD and real GitHub Actions workflows"
 ```
 
 ---
@@ -1615,7 +1993,7 @@ The implementation will be delivered in 9 small, reviewable commits:
 | 6 | `warehouse/receiving` | `feat(warehouse): decouple GSP receiving with decimal string contract and exact 3-decimal scale policy` |
 | 7 | `frontend/qc` | `feat(frontend): remove PENDING_SIGNOFF banners and align Coal, PAC, and Rapid Klen forms` |
 | 8 | `frontend/warehouse` | `feat(frontend): implement pre-unloading checklist dual-action UX and decimal-safe receiving screen` |
-| 9 | `ops/test-hardening` | `test(e2e): harden migration release gates, upgrade rehearsal drills, and Rancher Desktop UAT instruments` |
+| 9 | `ops/release-gates-ci` | `chore(ops): wire migration release gates into Dockerfile migrator, real CI workflows, and upgrade drills` |
 
 ---
 
