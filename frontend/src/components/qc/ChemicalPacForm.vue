@@ -16,47 +16,56 @@
       </span>
     </div>
 
-    <!-- Governance Status Banner (PENDING_SIGNOFF) -->
-    <div class="p-4 bg-amber-50 rounded-2xl border border-amber-200 flex items-start gap-3" id="banner-pac-governance">
-      <span class="material-icons text-amber-600 text-xl mt-0.5">lock_clock</span>
-      <div class="space-y-0.5">
-        <h5 class="text-xs font-black text-amber-900 uppercase tracking-wide">Spesifikasi operasional belum disahkan</h5>
-        <p class="text-[11px] font-medium text-amber-700 leading-relaxed">
-          Status spesifikasi mutu untuk produk ini berstatus PENDING_SIGNOFF. Proses rilis material ditahan.
-        </p>
-      </div>
-    </div>
-
     <!-- 1. Sensory Evaluation -->
     <div class="space-y-3">
       <h5 class="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-sky-600"></span>
-        1. Pemeriksaan Visual & Sensori
+        1. Pemeriksaan Visual & Sensori (Authoritative Laboratory Sheet)
       </h5>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <label class="flex items-start space-x-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-300 cursor-pointer transition-all">
-          <input type="checkbox" v-model="formData.sensory.visual" class="mt-0.5 rounded text-[#4A8BDF] focus:ring-0 w-4 h-4 cursor-pointer" />
-          <div class="text-xs">
-            <span class="font-bold text-slate-800 block">Kondisi Visual</span>
-            <span class="text-slate-500 text-[11px]">Cairan jernih kekuningan / homogen</span>
-          </div>
-        </label>
+        <!-- Visual -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Kondisi Visual *</label>
+          <select
+            v-model="formData.sensory.visual"
+            id="select-pac-visual"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="isVisualValid ? 'border-slate-200 focus:border-[#4A8BDF]' : 'border-red-400 bg-red-50/50'"
+          >
+            <option value="Kuning">Kuning (Sesuai)</option>
+            <option value="Coklat Jernih">Coklat Jernih (Sesuai)</option>
+            <option value="Keruh">Keruh (OOS)</option>
+            <option value="Hitam Pekat">Hitam Pekat (OOS)</option>
+          </select>
+        </div>
 
-        <label class="flex items-start space-x-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-300 cursor-pointer transition-all">
-          <input type="checkbox" v-model="formData.sensory.odor" class="mt-0.5 rounded text-[#4A8BDF] focus:ring-0 w-4 h-4 cursor-pointer" />
-          <div class="text-xs">
-            <span class="font-bold text-slate-800 block">Uji Bau</span>
-            <span class="text-slate-500 text-[11px]">Khas PAC, bebas kontaminasi asing</span>
-          </div>
-        </label>
+        <!-- Foreign Matters -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Foreign Matters *</label>
+          <select
+            v-model="formData.sensory.foreignMatters"
+            id="select-pac-foreign-matters"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="isForeignMattersValid ? 'border-slate-200 focus:border-[#4A8BDF]' : 'border-red-400 bg-red-50/50'"
+          >
+            <option value="Tidak ada kontaminasi">Tidak ada kontaminasi (Sesuai)</option>
+            <option value="Ada kontaminasi">Ada kontaminasi (OOS)</option>
+          </select>
+        </div>
 
-        <label class="flex items-start space-x-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-300 cursor-pointer transition-all">
-          <input type="checkbox" v-model="formData.sensory.packaging" class="mt-0.5 rounded text-[#4A8BDF] focus:ring-0 w-4 h-4 cursor-pointer" />
-          <div class="text-xs">
-            <span class="font-bold text-slate-800 block">Kemasan & Segel</span>
-            <span class="text-slate-500 text-[11px]">Tangki / drum utuh, segel terpasang</span>
-          </div>
-        </label>
+        <!-- Kemasan -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Integritas Kemasan *</label>
+          <select
+            v-model="formData.sensory.packagingLabel"
+            id="select-pac-packaging"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="isPackagingValid ? 'border-slate-200 focus:border-[#4A8BDF]' : 'border-red-400 bg-red-50/50'"
+          >
+            <option value="Kemasan & label tidak rusak">Kemasan & label tidak rusak (Sesuai)</option>
+            <option value="Kemasan rusak / Segel terbuka">Kemasan rusak / Segel terbuka (OOS)</option>
+          </select>
+        </div>
       </div>
     </div>
 
@@ -70,11 +79,11 @@
         <span class="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">Metode Uji Standar</span>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <!-- pH -->
         <div>
           <div class="flex justify-between items-center mb-1">
-            <label class="text-[11px] font-black text-slate-600 uppercase">pH (25°C) *</label>
+            <label class="text-[11px] font-black text-slate-600 uppercase">pH (1% Solusi, 25°C) *</label>
             <span class="text-[10px] font-bold text-slate-400">Std: 3.50 - 5.00</span>
           </div>
           <input
@@ -88,10 +97,10 @@
           />
         </div>
 
-        <!-- Specific Gravity / Density -->
+        <!-- Density -->
         <div>
           <div class="flex justify-between items-center mb-1">
-            <label class="text-[11px] font-black text-slate-600 uppercase">Density (g/mL) *</label>
+            <label class="text-[11px] font-black text-slate-600 uppercase">Density (g/mL, 25°C) *</label>
             <span class="text-[10px] font-bold text-slate-400">Std: 1.170 - 1.260</span>
           </div>
           <input
@@ -102,21 +111,6 @@
             id="input-pac-density"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
             :class="isDensityValid ? 'border-slate-200 focus:border-[#4A8BDF]' : 'border-red-400 bg-red-50/50'"
-          />
-        </div>
-
-        <!-- Alumina Content -->
-        <div>
-          <div class="flex justify-between items-center mb-1">
-            <label class="text-[11px] font-black text-slate-600 uppercase">Al2O3 (%)</label>
-            <span class="text-[10px] font-bold text-slate-400">Std: Min 9.0%</span>
-          </div>
-          <input
-            type="number"
-            step="0.1"
-            v-model.number="formData.aluminaContent"
-            placeholder="Contoh: 10.5"
-            class="w-full h-10 px-3 bg-white rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#4A8BDF]"
           />
         </div>
       </div>
@@ -149,7 +143,7 @@
       <button
         type="button"
         @click="submitAnalysis"
-        :disabled="isSubmitting"
+        :disabled="isSubmitting || !isFormComplete"
         class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all flex items-center justify-center gap-2"
         id="btn-pac-reject"
       >
@@ -172,14 +166,25 @@ const emit = defineEmits(['submit'])
 
 const formData = reactive({
   sensory: {
-    visual: false,
-    odor: false,
-    packaging: false,
+    visual: 'Kuning',
+    foreignMatters: 'Tidak ada kontaminasi',
+    packagingLabel: 'Kemasan & label tidak rusak',
   },
   ph: null,
   density: null,
-  aluminaContent: null,
   notes: '',
+})
+
+const isVisualValid = computed(() => {
+  return formData.sensory.visual === 'Kuning' || formData.sensory.visual === 'Coklat Jernih'
+})
+
+const isForeignMattersValid = computed(() => {
+  return formData.sensory.foreignMatters === 'Tidak ada kontaminasi'
+})
+
+const isPackagingValid = computed(() => {
+  return formData.sensory.packagingLabel === 'Kemasan & label tidak rusak'
 })
 
 const isPhValid = computed(() => {
@@ -193,16 +198,22 @@ const isDensityValid = computed(() => {
 })
 
 const isSensoryComplete = computed(() => {
-  return formData.sensory.visual && formData.sensory.odor && formData.sensory.packaging
+  return isVisualValid.value && isForeignMattersValid.value && isPackagingValid.value
 })
 
 const isFormComplete = computed(() => {
-  return isSensoryComplete.value && formData.ph != null && formData.density != null
+  return (
+    Boolean(formData.sensory.visual) &&
+    Boolean(formData.sensory.foreignMatters) &&
+    Boolean(formData.sensory.packagingLabel) &&
+    formData.ph != null &&
+    formData.density != null
+  )
 })
 
 const isAllInSpec = computed(() => {
   if (!isFormComplete.value) return false
-  return isPhValid.value && isDensityValid.value
+  return isSensoryComplete.value && isPhValid.value && isDensityValid.value
 })
 
 const submitAnalysis = () => {
@@ -211,10 +222,17 @@ const submitAnalysis = () => {
     productName: props.transaction.cargoSubType || 'PAC 280 AC',
     testRound: 1,
     parameters: {
-      sensory: formData.sensory,
+      sensory: {
+        visual: formData.sensory.visual,
+        foreignMatters: formData.sensory.foreignMatters,
+        packagingLabel: formData.sensory.packagingLabel,
+        packaging: formData.sensory.packagingLabel,
+      },
+      visual: formData.sensory.visual,
+      foreignMatters: formData.sensory.foreignMatters,
+      packagingCondition: formData.sensory.packagingLabel,
       ph: formData.ph,
       density: formData.density,
-      aluminaContent: formData.aluminaContent,
     },
     notes: formData.notes,
   })

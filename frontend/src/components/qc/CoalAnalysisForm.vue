@@ -21,21 +21,92 @@
       </div>
     </div>
 
-    <!-- 1. Sensory Checklist -->
+    <!-- 1. Factual Visual & Sensory Examination -->
     <div class="space-y-3">
       <h5 class="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-slate-700"></span>
-        1. Pemeriksaan Visual & Sensori (Sensory Evaluation)
+        1. Pemeriksaan Faktual Visual Batubara (Authoritative Sensory)
       </h5>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <label v-for="(item, key) in sensoryItems" :key="key" class="flex items-start space-x-3 p-3 bg-white rounded-xl border border-slate-200 hover:border-slate-300 cursor-pointer transition-all">
-          <input type="checkbox" v-model="formData.sensory[key]" class="mt-0.5 rounded text-[#4A8BDF] focus:ring-0 w-4 h-4 cursor-pointer" />
-          <div class="text-xs">
-            <span class="font-bold text-slate-800 block">{{ item.title }}</span>
-            <span class="text-slate-500 text-[11px]">{{ item.desc }}</span>
-          </div>
-        </label>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4 bg-slate-50/60 rounded-2xl border border-slate-200">
+        <!-- Kondisi -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Kondisi *</label>
+          <select
+            v-model="formData.visual.kondisi"
+            id="select-coal-kondisi"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="formData.visual.kondisi === 'BASAH' ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+          >
+            <option value="KERING">KERING (Normal)</option>
+            <option value="LEMBAB">LEMBAB (Normal)</option>
+            <option value="BASAH">BASAH (OOS)</option>
+          </select>
+        </div>
+
+        <!-- Warna -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Warna *</label>
+          <select
+            v-model="formData.visual.warna"
+            id="select-coal-warna"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="formData.visual.warna === 'COKLAT_KEHITAMAN' ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+          >
+            <option value="HITAM_MENGKILAP">HITAM MENGKILAP (Normal)</option>
+            <option value="HITAM_KUSAM">HITAM KUSAM (Normal)</option>
+            <option value="COKLAT_KEHITAMAN">COKLAT KEHITAMAN (OOS)</option>
+          </select>
+        </div>
+
+        <!-- Level / Rank -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Level / Rank *</label>
+          <select
+            v-model="formData.visual.levelRank"
+            id="select-coal-level-rank"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="formData.visual.levelRank === 'LOW_GRADE' ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+          >
+            <option value="HIGH_GRADE">HIGH GRADE (Normal)</option>
+            <option value="MEDIUM_GRADE">MEDIUM GRADE (Normal)</option>
+            <option value="LOW_GRADE">LOW GRADE (OOS)</option>
+          </select>
+        </div>
+
+        <!-- Kilap -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Kilap *</label>
+          <select
+            v-model="formData.visual.kilap"
+            id="select-coal-kilap"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="formData.visual.kilap === 'KUSAM' ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+          >
+            <option value="MENGKILAP">MENGKILAP (Normal)</option>
+            <option value="AGAK_MENGKILAP">AGAK MENGKILAP (Normal)</option>
+            <option value="KUSAM">KUSAM (OOS)</option>
+          </select>
+        </div>
+
+        <!-- Bahan Pengotor -->
+        <div>
+          <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Bahan Pengotor *</label>
+          <select
+            v-model="formData.visual.bahanPengotor"
+            id="select-coal-bahan-pengotor"
+            class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
+            :class="formData.visual.bahanPengotor === 'ADA_BANYAK' ? 'border-orange-400 bg-orange-50/50' : 'border-slate-200 focus:border-[#4A8BDF]'"
+          >
+            <option value="TIDAK_ADA">TIDAK ADA (Normal)</option>
+            <option value="ADA_SEDIKIT">ADA SEDIKIT (Normal)</option>
+            <option value="ADA_BANYAK">ADA BANYAK (OOS)</option>
+          </select>
+        </div>
       </div>
+      <p v-if="isVisualOos" class="text-[11px] font-bold text-orange-600 flex items-center gap-1">
+        <span class="material-icons text-sm">warning</span>
+        Pemeriksaan visual OOS (di luar spesifikasi normal). Round 1: Wajib Retest. Round 2: REJECT.
+      </p>
     </div>
 
     <!-- 2. Moisture Analysis -->
@@ -51,12 +122,13 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label class="block text-[11px] font-black text-slate-600 uppercase mb-1">Target Kalori Batubara</label>
-          <select v-model="formData.targetCalorie" class="w-full h-10 px-3 bg-white rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#4A8BDF]">
-            <option value="3800">3800 kcal/kg (Batas Max TM: 36%)</option>
-            <option value="4200">4200 kcal/kg (Batas Max TM: 33%)</option>
-            <option value="4800">4800 kcal/kg (Batas Max TM: 30%)</option>
-            <option value="5000">5000 kcal/kg (Batas Max TM: 28%)</option>
-            <option value="5500">5500+ kcal/kg (Batas Max TM: 26% — High Calorie)</option>
+          <select
+            v-model="formData.targetCalorie"
+            id="select-coal-calorie"
+            class="w-full h-10 px-3 bg-white rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:outline-none focus:border-[#4A8BDF]"
+          >
+            <option value="COAL_5600_6000">5600 - 6000 kcal/kg (Batas Max TM: 33%)</option>
+            <option value="COAL_GT_6000">> 6000 kcal/kg (Batas Max TM: 25%)</option>
           </select>
         </div>
 
@@ -76,7 +148,7 @@
           </div>
           <p v-if="isMoistureExceeded" class="text-[11px] font-bold text-orange-600 mt-1 flex items-center gap-1">
             <span class="material-icons text-sm">warning</span>
-            Melebihi batas spesifikasi max ({{ maxAllowedMoisture }}%). Round 1: Wajib Uji Ulang. Round 2: Muatan Ditolak (REJECT).
+            Total Moisture melebihi batas max ({{ maxAllowedMoisture }}%). Round 1: Wajib Uji Ulang. Round 2: Muatan Ditolak (REJECT).
           </p>
         </div>
       </div>
@@ -97,10 +169,10 @@
     <div class="pt-4 border-t border-slate-100 flex flex-col md:flex-row gap-3">
       <!-- Normal Submission (within spec preview) -->
       <button
-        v-if="!isMoistureExceeded"
+        v-if="!isAnyOos"
         type="button"
         @click="submitAnalysis"
-        :disabled="isSubmitting || !isSensoryComplete || formData.totalMoisture == null"
+        :disabled="isSubmitting || !isFormComplete"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-coal-release"
       >
@@ -110,10 +182,10 @@
 
       <!-- Retest Required Indication (Round 1 exceeded) -->
       <button
-        v-if="isMoistureExceeded && testRound === 1"
+        v-if="isAnyOos && testRound === 1"
         type="button"
         @click="submitAnalysis"
-        :disabled="isSubmitting"
+        :disabled="isSubmitting || !isFormComplete"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-orange-500 hover:bg-orange-600 disabled:opacity-50 shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-coal-retest"
       >
@@ -123,10 +195,10 @@
 
       <!-- Rejection Indication (Round 2 exceeded) -->
       <button
-        v-if="isMoistureExceeded && testRound > 1"
+        v-if="isAnyOos && testRound > 1"
         type="button"
         @click="submitAnalysis"
-        :disabled="isSubmitting"
+        :disabled="isSubmitting || !isFormComplete"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-coal-reject"
       >
@@ -148,35 +220,26 @@ const props = defineProps({
 
 const emit = defineEmits(['submit'])
 
-const sensoryItems = {
-  visual: { title: 'Warna & Homogenitas', desc: 'Hitam pekat, tidak bercampur tanah atau lumpur' },
-  odor: { title: 'Bau Normal', desc: 'Tidak ada bau terbakar atau bahan kimia asing' },
-  foreignMatter: { title: 'Bebas Benda Asing', desc: 'Bebas dari batu besar, kayu, plastik, logam' },
-  sizeConsistency: { title: 'Keseragaman Ukuran', desc: 'Sesuai fraksi pesanan, tidak dominan debu' },
-  moistureCondition: { title: 'Kondisi Permukaan', desc: 'Tidak ada genangan air bebas (free-standing water)' },
-}
-
 const formData = reactive({
-  sensory: {
-    visual: false,
-    odor: false,
-    foreignMatter: false,
-    sizeConsistency: false,
-    moistureCondition: false,
+  visual: {
+    kondisi: 'KERING',
+    warna: 'HITAM_MENGKILAP',
+    levelRank: 'HIGH_GRADE',
+    kilap: 'MENGKILAP',
+    bahanPengotor: 'TIDAK_ADA',
   },
-  targetCalorie: '4200',
+  targetCalorie: 'COAL_5600_6000',
   totalMoisture: null,
   notes: '',
 })
 
 const maxAllowedMoisture = computed(() => {
   switch (formData.targetCalorie) {
-    case '3800': return 36.0
-    case '4200': return 33.0
-    case '4800': return 30.0
-    case '5000': return 28.0
-    case '5500': return 26.0
-    default: return 33.0
+    case 'COAL_GT_6000':
+      return 25.0
+    case 'COAL_5600_6000':
+    default:
+      return 33.0
   }
 })
 
@@ -185,8 +248,29 @@ const isMoistureExceeded = computed(() => {
   return formData.totalMoisture > maxAllowedMoisture.value
 })
 
-const isSensoryComplete = computed(() => {
-  return Object.values(formData.sensory).every(v => v === true)
+const isVisualOos = computed(() => {
+  return (
+    formData.visual.kondisi === 'BASAH' ||
+    formData.visual.warna === 'COKLAT_KEHITAMAN' ||
+    formData.visual.levelRank === 'LOW_GRADE' ||
+    formData.visual.kilap === 'KUSAM' ||
+    formData.visual.bahanPengotor === 'ADA_BANYAK'
+  )
+})
+
+const isAnyOos = computed(() => {
+  return isMoistureExceeded.value || isVisualOos.value
+})
+
+const isFormComplete = computed(() => {
+  return (
+    formData.totalMoisture != null &&
+    Boolean(formData.visual.kondisi) &&
+    Boolean(formData.visual.warna) &&
+    Boolean(formData.visual.levelRank) &&
+    Boolean(formData.visual.kilap) &&
+    Boolean(formData.visual.bahanPengotor)
+  )
 })
 
 const submitAnalysis = () => {
@@ -195,10 +279,22 @@ const submitAnalysis = () => {
     productName: 'Batubara',
     testRound: props.testRound,
     parameters: {
-      sensory: formData.sensory,
+      calorieBand: formData.targetCalorie,
       targetCalorie: formData.targetCalorie,
       totalMoisture: formData.totalMoisture,
       maxAllowedMoisture: maxAllowedMoisture.value,
+      visual: {
+        kondisi: formData.visual.kondisi,
+        warna: formData.visual.warna,
+        levelRank: formData.visual.levelRank,
+        kilap: formData.visual.kilap,
+        bahanPengotor: formData.visual.bahanPengotor,
+      },
+      kondisi: formData.visual.kondisi,
+      warna: formData.visual.warna,
+      levelRank: formData.visual.levelRank,
+      kilap: formData.visual.kilap,
+      bahanPengotor: formData.visual.bahanPengotor,
     },
     notes: formData.notes,
   })

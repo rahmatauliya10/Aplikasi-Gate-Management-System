@@ -6,7 +6,7 @@ import ChemicalRapidKlenForm from '../components/qc/ChemicalRapidKlenForm.vue'
 
 describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
   describe('CoalAnalysisForm', () => {
-    it('renders Batubara form and emits factual measurements WITHOUT client result or decision when within moisture spec', async () => {
+    it('renders Batubara form with locked calorie bands and emits factual measurements WITHOUT client result or decision when within spec', async () => {
       const wrapper = mount(CoalAnalysisForm, {
         props: {
           transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
@@ -17,15 +17,26 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(wrapper.text()).toContain('Analisis PA — Batubara')
       expect(wrapper.text()).toContain('ASTM D3302')
 
+      // Assert only locked calorie bands exist
+      const calorieSelect = wrapper.find('#select-coal-calorie')
+      expect(calorieSelect.exists()).toBe(true)
+      const options = calorieSelect.findAll('option')
+      const optionValues = options.map(o => o.element.value)
+      expect(optionValues).toEqual(['COAL_5600_6000', 'COAL_GT_6000'])
+
+      // Select COAL_5600_6000 (max TM: 33%)
+      await calorieSelect.setValue('COAL_5600_6000')
+
       // Set moisture within limit (30% <= 33%)
       const moistureInput = wrapper.find('#input-coal-moisture')
       await moistureInput.setValue(30)
 
-      // Check all sensory boxes
-      const checkboxes = wrapper.findAll('input[type="checkbox"]')
-      for (const cb of checkboxes) {
-        await cb.setValue(true)
-      }
+      // Ensure visual selects are factual normal
+      await wrapper.find('#select-coal-kondisi').setValue('KERING')
+      await wrapper.find('#select-coal-warna').setValue('HITAM_MENGKILAP')
+      await wrapper.find('#select-coal-level-rank').setValue('HIGH_GRADE')
+      await wrapper.find('#select-coal-kilap').setValue('MENGKILAP')
+      await wrapper.find('#select-coal-bahan-pengotor').setValue('TIDAK_ADA')
 
       const releaseBtn = wrapper.find('#btn-coal-release')
       expect(releaseBtn.exists()).toBe(true)
@@ -42,14 +53,16 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(emittedPayload.productName).toBe('Batubara')
       expect(emittedPayload.testRound).toBe(1)
       expect(emittedPayload.parameters.totalMoisture).toBe(30)
-      expect(emittedPayload.parameters.sensory.visual).toBe(true)
+      expect(emittedPayload.parameters.visual.kondisi).toBe('KERING')
+      expect(emittedPayload.parameters.kondisi).toBe('KERING')
+      expect(emittedPayload.parameters.calorieBand).toBe('COAL_5600_6000')
 
       // CRITICAL ARCHITECTURAL CONTRACT: No client result or decision
       expect(emittedPayload.result).toBeUndefined()
       expect(emittedPayload.decision).toBeUndefined()
     })
 
-    it('displays Retest indication in Round 1 when moisture exceeds limit and emits WITHOUT client result or decision', async () => {
+    it('displays Retest indication in Round 1 when moisture exceeds limit (or visual OOS) and emits WITHOUT client result or decision', async () => {
       const wrapper = mount(CoalAnalysisForm, {
         props: {
           transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
@@ -79,7 +92,25 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(emittedPayload.decision).toBeUndefined()
     })
 
-    it('displays Reject indication in Round 2 when moisture exceeds limit and emits WITHOUT client result or decision (NO Utility Disposition)', async () => {
+    it('displays Retest indication in Round 1 when factual visual is OOS even if moisture is OK', async () => {
+      const wrapper = mount(CoalAnalysisForm, {
+        props: {
+          transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
+          testRound: 1,
+        },
+      })
+
+      // Moisture OK
+      await wrapper.find('#input-coal-moisture').setValue(28)
+      // Visual OOS (BASAH)
+      await wrapper.find('#select-coal-kondisi').setValue('BASAH')
+
+      const retestBtn = wrapper.find('#btn-coal-retest')
+      expect(retestBtn.exists()).toBe(true)
+      expect(wrapper.find('#btn-coal-release').exists()).toBe(false)
+    })
+
+    it('displays Reject indication in Round 2 when moisture or visual exceeds limit and emits WITHOUT client result or decision (NO Utility Disposition)', async () => {
       const wrapper = mount(CoalAnalysisForm, {
         props: {
           transaction: { id: 'tx-coal', cargoSubType: 'Batubara' },
@@ -115,7 +146,7 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
   })
 
   describe('ChemicalPacForm', () => {
-    it('disables submit button when parameters out-of-spec, and on submit emits factual parameters WITHOUT client result or decision', async () => {
+    it('does NOT render PENDING_SIGNOFF governance banner or Al2O3 field, validates spec, and emits factual parameters WITHOUT client result/decision', async () => {
       const wrapper = mount(ChemicalPacForm, {
         props: {
           transaction: { id: 'tx-pac', cargoSubType: 'PAC 280 AC' },
@@ -124,11 +155,16 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
 
       expect(wrapper.text()).toContain('PAC 280 AC')
 
-      // Check sensory
-      const checkboxes = wrapper.findAll('input[type="checkbox"]')
-      for (const cb of checkboxes) {
-        await cb.setValue(true)
-      }
+      // Assert governance banner does NOT exist
+      expect(wrapper.find('#banner-pac-governance').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('PENDING_SIGNOFF')
+
+      // Assert Al2O3 is NOT present
+      expect(wrapper.text()).not.toContain('Al2O3')
+
+      // Sensory is valid by default
+      expect(wrapper.find('#select-pac-visual').element.value).toBe('Kuning')
+      expect(wrapper.find('#select-pac-foreign-matters').element.value).toBe('Tidak ada kontaminasi')
 
       // Enter invalid pH (2.0 < 3.50)
       await wrapper.find('#input-pac-ph').setValue(2.0)
@@ -152,6 +188,7 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(emittedPayload.testRound).toBe(1)
       expect(emittedPayload.parameters.ph).toBe(4.25)
       expect(emittedPayload.parameters.density).toBe(1.20)
+      expect(emittedPayload.parameters.sensory.visual).toBe('Kuning')
 
       // Server-authoritative contract: No client result or decision
       expect(emittedPayload.result).toBeUndefined()
@@ -160,7 +197,7 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
   })
 
   describe('ChemicalRapidKlenForm', () => {
-    it('validates thresholds before permitting submission, and emits factual parameters WITHOUT client result or decision', async () => {
+    it('does NOT render PENDING_SIGNOFF banner, enforces strict greater-than thresholds, and emits factual parameters WITHOUT client result/decision', async () => {
       const wrapper = mount(ChemicalRapidKlenForm, {
         props: {
           transaction: { id: 'tx-rapid', cargoSubType: 'Rapid Klen' },
@@ -169,18 +206,25 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
 
       expect(wrapper.text()).toContain('Rapid Klen')
 
-      // Check sensory
-      const checkboxes = wrapper.findAll('input[type="checkbox"]')
-      for (const cb of checkboxes) {
-        await cb.setValue(true)
-      }
+      // Assert governance banner does NOT exist
+      expect(wrapper.find('#banner-rapid-governance').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('PENDING_SIGNOFF')
 
-      // Set valid values
-      await wrapper.find('#input-rapid-na2o').setValue(36.5)
-      await wrapper.find('#input-rapid-ph').setValue(13.2)
-      await wrapper.find('#input-rapid-density').setValue(1.42)
+      // Exact boundary values must FAIL (Na2O = 35.00, NaOH = 45.16, pH = 12.000, Density = 1.400)
+      await wrapper.find('#input-rapid-na2o').setValue(35.00)
+      await wrapper.find('#input-rapid-naoh').setValue(45.16)
+      await wrapper.find('#input-rapid-ph').setValue(12.000)
+      await wrapper.find('#input-rapid-density').setValue(1.400)
 
       const releaseBtn = wrapper.find('#btn-rapid-release')
+      expect(releaseBtn.attributes('disabled')).toBeDefined()
+
+      // Set values strictly greater than boundaries
+      await wrapper.find('#input-rapid-na2o').setValue(35.01)
+      await wrapper.find('#input-rapid-naoh').setValue(45.17)
+      await wrapper.find('#input-rapid-ph').setValue(12.001)
+      await wrapper.find('#input-rapid-density').setValue(1.401)
+
       expect(releaseBtn.attributes('disabled')).toBeUndefined()
       expect(releaseBtn.text()).toContain('Kirim Hasil Analisis PA')
 
@@ -192,9 +236,10 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(emittedPayload.productCategory).toBe('Chemicals')
       expect(emittedPayload.productName).toBe('Rapid Klen')
       expect(emittedPayload.testRound).toBe(1)
-      expect(emittedPayload.parameters.alkalinityNa2O).toBe(36.5)
-      expect(emittedPayload.parameters.ph).toBe(13.2)
-      expect(emittedPayload.parameters.density).toBe(1.42)
+      expect(emittedPayload.parameters.alkalinityNa2O).toBe(35.01)
+      expect(emittedPayload.parameters.alkalinityNaOH).toBe(45.17)
+      expect(emittedPayload.parameters.ph).toBe(12.001)
+      expect(emittedPayload.parameters.density).toBe(1.401)
 
       // Server-authoritative contract: No client result or decision
       expect(emittedPayload.result).toBeUndefined()
