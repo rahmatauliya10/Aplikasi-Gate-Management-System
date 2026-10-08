@@ -710,12 +710,25 @@ it('should evaluate COAL_GT_6000 with TM <= 25.0% and valid factual visual as PA
   expect(res.result).toBe('PASS');
 });
 
-it('ADVERSARIAL: should REJECT if client passes visualPassed=true but factual visual parameter is non-compliant', () => {
+it('ADVERSARIAL CASE A: Round 1 factual visual OOS with client visualPassed=true must RETEST_REQUIRED, not final reject', () => {
   const badVisual = { ...validVisual, kondisi: 'Basah' };
   const res = evaluateCoalAnalysis({
     calorieBand: 'COAL_5600_6000',
-    totalMoisture: 28.0,
+    totalMoisture: 28.0, // TM is compliant (<= 33.0%)
     testRound: 1,
+    visual: badVisual,
+    visualPassed: true, // CLIENT ADVERSARIAL INJECTION
+  } as any, OPERATIONAL_COAL_SPEC_METADATA);
+  expect(res.result).toBe('REJECT');
+  expect(res.decision).toBe('RETEST_REQUIRED');
+});
+
+it('ADVERSARIAL CASE B: Round 2 factual visual OOS with client visualPassed=true must final REJECT', () => {
+  const badVisual = { ...validVisual, kondisi: 'Basah' };
+  const res = evaluateCoalAnalysis({
+    calorieBand: 'COAL_5600_6000',
+    totalMoisture: 28.0, // TM is compliant
+    testRound: 2,
     visual: badVisual,
     visualPassed: true, // CLIENT ADVERSARIAL INJECTION
   } as any, OPERATIONAL_COAL_SPEC_METADATA);
@@ -755,7 +768,35 @@ export function validateCoalVisual(v: CoalVisualParameters): boolean {
 In `evaluateCoalAnalysis`:
 Calculate `visualPassed = validateCoalVisual(params.visual)`. Client-supplied `params.visualPassed` is strictly ignored.
 Check `CONFIGURED_COAL_CALORIE_BANDS[params.calorieBand]`. If missing, return `{ isConfigured: false, error: 'SPEC_NOT_CONFIGURED' }`.
-Under `ruleStatus: 'ACTIVE_CONFIGURED'`, compliant analysis produces `decision: 'RELEASE'`.
+Check moisture compliance: `moisturePassed = params.totalMoisture <= configuredBand.maxTotalMoisturePct`.
+Canonical two-round governance applies to ANY OOS condition (moisture OOS, visual parameter OOS, or both):
+```typescript
+const isWithinSpec = visualPassed && moisturePassed;
+
+if (isWithinSpec) {
+  return {
+    result: 'PASS',
+    decision: 'RELEASE',
+    ruleStatus: specMeta.ruleStatus,
+    documentSource: specMeta.documentSource,
+  };
+} else if (params.testRound === 1) {
+  return {
+    result: 'REJECT',
+    decision: 'RETEST_REQUIRED',
+    ruleStatus: specMeta.ruleStatus,
+    documentSource: specMeta.documentSource,
+  };
+} else {
+  return {
+    result: 'REJECT',
+    decision: 'REJECT',
+    ruleStatus: specMeta.ruleStatus,
+    documentSource: specMeta.documentSource,
+  };
+}
+```
+Visual OOS must NEVER immediately trigger a final REJECT on Round 1. It must follow the exact same two-round retest path (`RETEST_REQUIRED` -> `QC_RETEST_REQUIRED`) as moisture OOS. Under `ruleStatus: 'ACTIVE_CONFIGURED'`, compliant analysis produces `decision: 'RELEASE'`.
 
 - [ ] **Step 3: Run test to verify it passes**
 Run: `npm --prefix backend test -- src/qc/constants/coal-specification.spec.ts`
@@ -1623,7 +1664,9 @@ git commit -m "feat(frontend): add Receipt UOM field to GSP Master Data settings
 | `COAL_GT_6000` TM 25.5% REJECT Round 2 | `coal-specification.spec.ts` | `should reject COAL_GT_6000 with TM 25.5% on Round 2` |
 | `COAL_5600_6000` TM <= 33.0% PASS | `coal-specification.spec.ts` | `should pass COAL_5600_6000 with TM 32.0%` |
 | `COAL_5600_6000` TM 34.0% RETEST Round 1 | `coal-specification.spec.ts` | `should require retest for COAL_5600_6000 with TM 34.0% on Round 1` |
-| Client `visualPassed=true` cannot bypass factual checks | `coal-specification.spec.ts` | `ADVERSARIAL: should reject if visualPassed=true but factual checks fail` |
+| Coal factual visual OOS Round 1 -> RETEST_REQUIRED | `coal-specification.spec.ts` | `ADVERSARIAL CASE A: should require retest when factual visual is OOS on Round 1 regardless of client visualPassed` |
+| Coal factual visual OOS Round 2 -> REJECT | `coal-specification.spec.ts` | `ADVERSARIAL CASE B: should reject when factual visual is OOS on Round 2 regardless of client visualPassed` |
+| Client `visualPassed=true` cannot bypass visual OOS | `coal-specification.spec.ts` | `ADVERSARIAL: should ignore client visualPassed=true when factual visual is non-compliant` |
 | Unknown Coal Band -> HTTP 422 | `qc-product-analysis.spec.ts` | `should throw HTTP 422 SPEC_NOT_CONFIGURED on unconfigured calorie band` |
 | Assert zero fallback to 4200 | `coal-specification.spec.ts` | `should assert no fallback exists for arbitrary calorie string` |
 | Coal PASS under `ACTIVE_CONFIGURED` -> `QC_VEHICLE_PASSED` | `qc-product-analysis.spec.ts` | `should release canonical Coal to QC_VEHICLE_PASSED under ACTIVE_CONFIGURED with test fixtures disabled` |
@@ -1919,26 +1962,72 @@ Because `migrator` carries full builder `node_modules` and `scripts`, `node scri
    ```
 Preserve all existing checksum gates, drift gates, backup gates, restore DR drills, rollback drills, compose gates, SBOM, and Trivy security gates.
 
-- [ ] **Step 3: Execute Release-Gate Negative Test Rehearsal**
-Rehearse the blocking nature of the migrator release gate:
-1. Connect to PostgreSQL and inject an active GSP catalog with missing `receiptUnit`:
+- [ ] **Step 3: Execute Release-Gate Negative Test Rehearsal (Real Compose Dependency Proof)**
+Rehearse the blocking nature of the migrator release gate and prove the actual `depends_on: migrator: condition: service_completed_successfully` constraint in production Docker Compose:
+
+1. **Start Production PostgreSQL Test Container:**
+   ```bash
+   docker compose -f docker-compose.prod.yml up -d postgres
+   ```
+2. **Inject Invalid Active GSP ProductCatalog Fixture:**
+   Inject an active GSP catalog with `receiptUnit = NULL` via PostgreSQL:
    ```sql
    INSERT INTO "ProductCatalog" ("id", "code", "name", "category", "processType", "gspAnalysisProfile", "receiptUnit", "isActive", "createdAt", "updatedAt")
    VALUES ('test-negative-gsp', 'NEG-001', 'Negative Test GSP', 'Chemical', 'GSP', 'PAC_PA', NULL, true, NOW(), NOW());
    ```
-2. Execute migrator gate:
-   `node backend/scripts/verify-migration-invariants.js`
-   Expected: Exits with non-zero code (`FAILED: Found 1 active GSP product catalogs with missing profile or receiptUnit!`).
-3. In Docker Compose rehearsal:
-   `docker compose -f docker-compose.prod.yml run --rm migrator node scripts/verify-migration-invariants.js`
-   Expected: Container exits code 1. Backend container cannot start because migrator service failed.
-4. Clean up negative test fixture:
+3. **Purge Stale Container State:**
+   Remove any previous migrator and backend service containers so stale successful state cannot affect the rehearsal:
+   ```bash
+   docker compose -f docker-compose.prod.yml rm -f -s -v migrator backend
+   ```
+4. **Execute Production Compose Startup with Default Migrator CMD:**
+   Run the actual Compose service dependency flow using the migrator default CMD:
+   ```bash
+   docker compose -f docker-compose.prod.yml up migrator
+   ```
+   Expected Behavior:
+   - Container `gate-system-migrator` executes its default CMD (`npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js`).
+   - `node scripts/verify-migration-invariants.js` detects `test-negative-gsp` with `receiptUnit = NULL` and exits with code 1 (`FAILED: Found 1 active GSP product catalogs with missing profile or receiptUnit!`).
+   - `gate-system-migrator` terminates with exit code 1.
+5. **Assert Real Compose Dependency Failure:**
+   - Assert migrator exit code != 0:
+     ```bash
+     MIGRATOR_EXIT=$(docker inspect -f '{{.State.ExitCode}}' gate-system-migrator)
+     test "$MIGRATOR_EXIT" != "0"
+     ```
+   - Assert backend container did NOT start / is not healthy:
+     Attempting to boot backend proves `condition: service_completed_successfully` was not met:
+     ```bash
+     docker compose -f docker-compose.prod.yml up -d --no-build backend || true
+     BACKEND_STATUS=$(docker inspect -f '{{.State.Status}}' gate-system-backend 2>/dev/null || echo "not_created")
+     test "$BACKEND_STATUS" != "running"
+     ```
+     Evidence confirmed: Backend never starts against invalid GSP master data.
+6. **Repair / Clean Up Invalid ProductCatalog Fixture:**
    ```sql
    DELETE FROM "ProductCatalog" WHERE "id" = 'test-negative-gsp';
    ```
-5. Re-run verification:
-   `node backend/scripts/verify-migration-invariants.js`
-   Expected: Exits 0 (`Zero unresolved active GSP product catalogs`). Migrator succeeds, backend starts and becomes healthy.
+7. **Re-run Production Compose Service Flow:**
+   Purge previous failed container and start the production stack:
+   ```bash
+   docker compose -f docker-compose.prod.yml rm -f -s -v migrator backend
+   docker compose -f docker-compose.prod.yml up -d --no-build migrator backend
+   ```
+   Expected:
+   - `gate-system-migrator` runs default CMD, exits with code 0 (`service_completed_successfully` satisfied).
+   - `gate-system-backend` boots automatically.
+   - Wait for backend healthcheck:
+     ```bash
+     timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} gate-system-backend 2>/dev/null)" = "healthy" ]; do sleep 2; done'
+     ```
+   - Healthcheck reports `healthy` (HTTP 200 on `/api/health`).
+
+**Release Gate Negative & Positive Acceptance Coverage:**
+| Scenario | Rehearsal Action | Expected Result |
+|---|---|---|
+| Invalid GSP Master (`receiptUnit = NULL`) | `docker compose -f docker-compose.prod.yml up migrator` | Migrator exits code 1, error logged, `service_completed_successfully` fails |
+| Compose Dependency Block | `docker compose -f docker-compose.prod.yml up -d backend` | Backend does not start / never reaches healthy |
+| Repaired GSP Master | `docker compose -f docker-compose.prod.yml up -d migrator backend` | Migrator exits code 0, backend boots, healthcheck probe succeeds (`healthy`) |
 
 - [ ] **Step 4: Update `verify-baseline-master-upgrade-drill.ts`**
 In `backend/scripts/verify-baseline-master-upgrade-drill.ts`, add Gate A verification call immediately after the branch migration deploys.
