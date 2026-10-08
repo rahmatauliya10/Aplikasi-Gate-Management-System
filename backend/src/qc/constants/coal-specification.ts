@@ -3,7 +3,8 @@
  * Status: ACTIVE_CONFIGURED (Spec Rev 2.1)
  */
 
-export type SpecificationRuleStatus = 'ACTIVE_CONFIGURED' | 'TEST_FIXTURE';
+export type SpecificationRuleStatus =
+  'ACTIVE_CONFIGURED' | 'TEST_FIXTURE' | 'UNCONFIGURED';
 
 export interface SpecificationMetadata {
   version: string;

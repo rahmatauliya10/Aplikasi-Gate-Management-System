@@ -398,11 +398,7 @@ export class QcProductAnalysisService {
 
       evalResult = evaluateCoalAnalysis(
         {
-          targetCalorie:
-            rawParams.calorieBand ||
-            tx.productCatalog?.code ||
-            tx.cargoSubType ||
-            undefined,
+          targetCalorie: rawParams.calorieBand || undefined,
           totalMoisture: Number(
             rawParams.moisture ?? rawParams.totalMoisture ?? 0,
           ),
@@ -471,12 +467,11 @@ export class QcProductAnalysisService {
               rawParams.packaging,
           },
           alkalinityNa2O: Number(
-            rawParams.alkalinityNa2O ?? rawParams.alkalinity ?? 0,
+            rawParams.alkalinityNa2O ?? rawParams.alkalinity ?? NaN,
           ),
-          alkalinityNaOH:
-            rawParams.alkalinityNaOH != null
-              ? Number(rawParams.alkalinityNaOH)
-              : undefined,
+          alkalinityNaOH: Number(
+            rawParams.alkalinityNaOH ?? rawParams.naoh ?? NaN,
+          ),
           ph: Number(rawParams.ph),
           density: Number(rawParams.density),
         },
@@ -493,6 +488,18 @@ export class QcProductAnalysisService {
     }
 
     if (evalResult.isConfigured === false) {
+      if (targetProfile === GspAnalysisProfile.COAL_PA) {
+        await this.activityLogsService
+          .logAction({
+            userId: user.id,
+            action: 'COAL_SPEC_NOT_CONFIGURED',
+            module: 'QC',
+            referenceId: transactionId,
+            description: `Spesifikasi Coal tidak terkonfigurasi untuk calorieBand: '${rawParams.calorieBand || 'MISSING'}'. Operator: ${user.email}`,
+            status: 'FAILED',
+          })
+          .catch(() => {});
+      }
       throw new UnprocessableEntityException({
         error: 'SPEC_NOT_CONFIGURED',
         message:
@@ -686,7 +693,7 @@ export class QcProductAnalysisService {
       };
     }
     return {
-      ruleStatus: 'TEST_FIXTURE',
+      ruleStatus: 'UNCONFIGURED',
       documentSource: 'Unverified Product Specification',
     };
   }

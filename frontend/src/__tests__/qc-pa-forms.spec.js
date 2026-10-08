@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import CoalAnalysisForm from '../components/qc/CoalAnalysisForm.vue'
 import ChemicalPacForm from '../components/qc/ChemicalPacForm.vue'
 import ChemicalRapidKlenForm from '../components/qc/ChemicalRapidKlenForm.vue'
+import { evaluateCoalAnalysis } from '../../../backend/src/qc/constants/coal-specification'
 
 describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
   describe('CoalAnalysisForm', () => {
@@ -15,7 +16,8 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       })
 
       expect(wrapper.text()).toContain('Analisis PA — Batubara')
-      expect(wrapper.text()).toContain('ASTM D3302')
+      expect(wrapper.text()).toContain('Digital Moisture Analyzer')
+      expect(wrapper.text()).not.toContain('ASTM D3302')
 
       // Assert only locked calorie bands exist
       const calorieSelect = wrapper.find('#select-coal-calorie')
@@ -32,11 +34,11 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       await moistureInput.setValue(30)
 
       // Ensure visual selects are factual normal
-      await wrapper.find('#select-coal-kondisi').setValue('KERING')
-      await wrapper.find('#select-coal-warna').setValue('HITAM_MENGKILAP')
-      await wrapper.find('#select-coal-level-rank').setValue('HIGH_GRADE')
-      await wrapper.find('#select-coal-kilap').setValue('MENGKILAP')
-      await wrapper.find('#select-coal-bahan-pengotor').setValue('TIDAK_ADA')
+      await wrapper.find('#select-coal-kondisi').setValue('Kering (Tidak Basah)')
+      await wrapper.find('#select-coal-warna').setValue('Hitam')
+      await wrapper.find('#select-coal-level-rank').setValue('High Rank Coal')
+      await wrapper.find('#select-coal-kilap').setValue('Hitam Mengkilap')
+      await wrapper.find('#select-coal-bahan-pengotor').setValue('Tidak ada kontaminasi batuan maupun tanah')
 
       const releaseBtn = wrapper.find('#btn-coal-release')
       expect(releaseBtn.exists()).toBe(true)
@@ -53,8 +55,8 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(emittedPayload.productName).toBe('Batubara')
       expect(emittedPayload.testRound).toBe(1)
       expect(emittedPayload.parameters.totalMoisture).toBe(30)
-      expect(emittedPayload.parameters.visual.kondisi).toBe('KERING')
-      expect(emittedPayload.parameters.kondisi).toBe('KERING')
+      expect(emittedPayload.parameters.visual.kondisi).toBe('Kering (Tidak Basah)')
+      expect(emittedPayload.parameters.kondisi).toBe('Kering (Tidak Basah)')
       expect(emittedPayload.parameters.calorieBand).toBe('COAL_5600_6000')
 
       // CRITICAL ARCHITECTURAL CONTRACT: No client result or decision
@@ -102,12 +104,49 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
 
       // Moisture OK
       await wrapper.find('#input-coal-moisture').setValue(28)
-      // Visual OOS (BASAH)
-      await wrapper.find('#select-coal-kondisi').setValue('BASAH')
+      // Visual OOS (Basah (Kandungan Air Berlebih))
+      await wrapper.find('#select-coal-kondisi').setValue('Basah (Kandungan Air Berlebih)')
 
       const retestBtn = wrapper.find('#btn-coal-retest')
       expect(retestBtn.exists()).toBe(true)
       expect(wrapper.find('#btn-coal-release').exists()).toBe(false)
+    })
+
+    it('INTEGRATION: exact payload emitted by CoalAnalysisForm is accepted by evaluateCoalAnalysis server evaluator without fixture translation', async () => {
+      const wrapper = mount(CoalAnalysisForm, {
+        props: {
+          transaction: { id: 'tx-coal-e2e', cargoSubType: 'Batubara' },
+          testRound: 1,
+        },
+      })
+
+      // Set compliant parameters via form UI
+      await wrapper.find('#select-coal-calorie').setValue('COAL_5600_6000')
+      await wrapper.find('#input-coal-moisture').setValue(31.5)
+      // Defaults are already canonical compliant:
+      // "Kering (Tidak Basah)", "Hitam", "High Rank Coal", "Hitam Mengkilap", "Tidak ada kontaminasi batuan maupun tanah"
+
+      const releaseBtn = wrapper.find('#btn-coal-release')
+      expect(releaseBtn.exists()).toBe(true)
+      await releaseBtn.trigger('click')
+
+      expect(wrapper.emitted('submit')).toBeTruthy()
+      const emittedPayload = wrapper.emitted('submit')[0][0]
+
+      // DIRECT EVALUATION: Pass the EXACT form parameters into backend evaluateCoalAnalysis
+      const evalResult = evaluateCoalAnalysis({
+        calorieBand: emittedPayload.parameters.calorieBand,
+        targetCalorie: emittedPayload.parameters.calorieBand,
+        totalMoisture: emittedPayload.parameters.totalMoisture,
+        testRound: emittedPayload.testRound,
+        visual: emittedPayload.parameters.visual,
+      })
+
+      expect(evalResult.isConfigured).toBe(true)
+      expect(evalResult.visualPassed).toBe(true)
+      expect(evalResult.moisturePassed).toBe(true)
+      expect(evalResult.result).toBe('PASS')
+      expect(evalResult.decision).toBe('RELEASE')
     })
 
     it('displays Reject indication in Round 2 when moisture or visual exceeds limit and emits WITHOUT client result or decision (NO Utility Disposition)', async () => {

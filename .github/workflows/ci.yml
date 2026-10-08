@@ -698,6 +698,61 @@ jobs:
           docker compose -f docker-compose.prod.yml run --rm migrator node scripts/verify-migration-invariants.js
           docker compose -f docker-compose.prod.yml run --rm migrator node scripts/enforce-audit-immutability.js
 
+          echo "4F: Executing Deterministic Negative Production Compose Dependency Proof (P1-06 / NEG-001)..."
+          echo "Injecting invalid ACTIVE GSP catalog with NULL profile and receiptUnit into live database..."
+          docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+            INSERT INTO \"ProductCatalog\" (\"id\", \"code\", \"name\", \"category\", \"subCategory\", \"processType\", \"isActive\", \"gspAnalysisProfile\", \"receiptUnit\", \"policyVersion\", \"createdAt\", \"updatedAt\")
+            VALUES ('neg-cat-invalid-001', 'NEG-INVALID-GSP', 'Invalid Active GSP Master Proof', 'Chemical', 'PAC', 'GSP', true, NULL, NULL, 'SOP-GSP-2026.1', now(), now());
+          "
+
+          echo "Attempting to boot stack via docker compose (migrator default CMD must fail and block backend)..."
+          docker compose -f docker-compose.prod.yml rm -fs migrator backend 2>/dev/null || true
+          
+          set +e
+          docker compose -f docker-compose.prod.yml up --no-build migrator backend
+          COMPOSE_NEG_EXIT=$?
+          set -e
+
+          echo "Compose exited with code: $COMPOSE_NEG_EXIT (non-zero expected)"
+          if [ "$COMPOSE_NEG_EXIT" -eq 0 ]; then
+            echo "FATAL: Docker compose should have failed due to migrator invariant violation, but exited 0!"
+            exit 1
+          fi
+
+          MIGRATOR_STATE=$(docker inspect -f '{{.State.ExitCode}}' gate-system-migrator 2>/dev/null || echo "unknown")
+          BACKEND_RUNNING=$(docker inspect -f '{{.State.Running}}' gate-system-backend 2>/dev/null || echo "false")
+
+          echo "gate-system-migrator exit code: $MIGRATOR_STATE"
+          echo "gate-system-backend running state: $BACKEND_RUNNING"
+
+          if [ "$MIGRATOR_STATE" != "1" ]; then
+            echo "FATAL: Expected migrator to exit with code 1, got $MIGRATOR_STATE"
+            exit 1
+          fi
+
+          if [ "$BACKEND_RUNNING" = "true" ]; then
+            echo "FATAL: gate-system-backend started despite migrator failure! service_completed_successfully dependency was bypassed!"
+            exit 1
+          fi
+
+          echo "Negative dependency proof verified: migrator exited 1, backend blocked from starting [PASS]."
+
+          echo "Repairing database state: removing invalid catalog..."
+          docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+            DELETE FROM \"ProductCatalog\" WHERE \"id\" = 'neg-cat-invalid-001';
+          "
+
+          echo "Verifying repair: running migrator default CMD..."
+          docker compose -f docker-compose.prod.yml rm -fs migrator backend 2>/dev/null || true
+          docker compose -f docker-compose.prod.yml up --no-build migrator
+          REPAIR_MIGRATOR_EXIT=$(docker inspect -f '{{.State.ExitCode}}' gate-system-migrator 2>/dev/null || echo "unknown")
+          if [ "$REPAIR_MIGRATOR_EXIT" != "0" ]; then
+            echo "FATAL: Migrator failed after repair with exit code $REPAIR_MIGRATOR_EXIT"
+            docker logs gate-system-migrator
+            exit 1
+          fi
+          echo "Repaired migrator completed successfully with exit code 0 [PASS]."
+
           echo "Step 5: Booting Full Application Stack (--no-build)..."
           docker compose -f docker-compose.prod.yml up -d --no-build
 

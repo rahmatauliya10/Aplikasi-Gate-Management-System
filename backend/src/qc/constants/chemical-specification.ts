@@ -113,7 +113,7 @@ export interface RapidKlenSensoryParameters {
 export interface RapidKlenAnalysisParameters {
   sensory: RapidKlenSensoryParameters;
   alkalinityNa2O: number;
-  alkalinityNaOH?: number | null;
+  alkalinityNaOH: number;
   ph: number;
   density: number;
 }
@@ -132,7 +132,7 @@ export interface ChemicalEvaluationResult {
  * PAC Specification Thresholds (SOP-GSP-2026.1):
  * - pH: 3.50 - 5.00 (inclusive)
  * - Density: 1.170 - 1.260 g/mL (inclusive)
- * - Al2O3: Not mandatory
+ * - Al2O3: Informational only (not participating in compliance)
  * - Sensory: Visual Kuning/Coklat Jernih, Foreign Matters Tidak ada kontaminasi, Kemasan & label tidak rusak
  */
 export const PAC_SPECIFICATION = {
@@ -140,10 +140,10 @@ export const PAC_SPECIFICATION = {
   phMax: 5.0,
   densityMin: 1.17,
   densityMax: 1.26,
-  aluminaMin: 9.0,
+  aluminaMin: 9.0, // Retained for informational/historical display
 };
 
-export function validatePacSensory(s?: PacSensoryParameters): {
+export function validatePacSensory(s?: PacSensoryParameters | null): {
   isValid: boolean;
   violations: string[];
 } {
@@ -153,32 +153,27 @@ export function validatePacSensory(s?: PacSensoryParameters): {
     return { isValid: false, violations };
   }
 
-  const isVisualOk =
-    s.visual === true || s.visual === 'Kuning' || s.visual === 'Coklat Jernih';
+  const isVisualOk = s.visual === 'Kuning' || s.visual === 'Coklat Jernih';
   if (!isVisualOk) {
     violations.push(
-      'Pemeriksaan visual tidak sesuai standar (harus Kuning atau Coklat Jernih)',
+      'Pemeriksaan visual tidak sesuai standar (harus faktual "Kuning" atau "Coklat Jernih")',
     );
   }
 
-  const isForeignOk =
-    s.foreignMatters === 'Tidak ada kontaminasi' ||
-    s.foreignMatters === true ||
-    s.odor === 'Tidak ada kontaminasi' ||
-    s.odor === true ||
-    (s.foreignMatters == null && s.odor == null);
+  const foreignVal = s.foreignMatters ?? s.odor;
+  const isForeignOk = foreignVal === 'Tidak ada kontaminasi';
   if (!isForeignOk) {
-    violations.push('Terdeteksi kontaminasi benda asing pada bahan baku PAC');
+    violations.push(
+      'Pemeriksaan foreign matters/benda asing wajib diisi faktual "Tidak ada kontaminasi"',
+    );
   }
 
-  const isPackagingOk =
-    s.packagingLabel === 'Kemasan & label tidak rusak' ||
-    s.packagingLabel === true ||
-    s.packaging === 'Kemasan & label tidak rusak' ||
-    s.packaging === true ||
-    (s.packagingLabel == null && s.packaging == null);
+  const packagingVal = s.packagingLabel ?? s.packaging;
+  const isPackagingOk = packagingVal === 'Kemasan & label tidak rusak';
   if (!isPackagingOk) {
-    violations.push('Kondisi kemasan atau label PAC rusak');
+    violations.push(
+      'Pemeriksaan kemasan & label wajib diisi faktual "Kemasan & label tidak rusak"',
+    );
   }
 
   return {
@@ -194,7 +189,7 @@ export function evaluatePacAnalysis(
 ): ChemicalEvaluationResult {
   const violations: string[] = [];
 
-  // 1. Sensory checks
+  // 1. Mandatory Sensory checks (Visual, Foreign Matters, Kemasan & Label)
   const sensoryCheck = validatePacSensory(params.sensory);
   violations.push(...sensoryCheck.violations);
 
@@ -222,14 +217,8 @@ export function evaluatePacAnalysis(
     );
   }
 
-  // 4. Optional Alumina Al2O3 check (not mandatory)
-  if (params.aluminaContent != null && !isNaN(params.aluminaContent)) {
-    if (params.aluminaContent < PAC_SPECIFICATION.aluminaMin) {
-      violations.push(
-        `Kadar Al2O3 (${params.aluminaContent}%) di bawah batas minimal (${PAC_SPECIFICATION.aluminaMin}%)`,
-      );
-    }
-  }
+  // Note: Al2O3 (aluminaContent) is purely informational / historical per authoritative operational sheet.
+  // It does NOT participate in compliance or cause violations.
 
   const isCompliant = violations.length === 0;
   const decision = isCompliant ? 'RELEASE' : 'REJECT';
@@ -251,7 +240,7 @@ export function evaluatePacAnalysis(
 /**
  * Rapid Klen CIP Specification Thresholds (SOP-GSP-2026.1):
  * - Alkalinity Na2O: > 35.00% (Strict greater than)
- * - Alkalinity NaOH: > 45.16% (Strict greater than if provided)
+ * - Alkalinity NaOH: > 45.16% (Strict greater than, mandatory)
  * - pH: > 12.000 (Strict greater than)
  * - Density: > 1.400 g/mL (Strict greater than)
  * - Sensory: Visual Jernih, Foreign Matters Tidak ada kontaminasi, Kemasan & label tidak rusak
@@ -263,7 +252,9 @@ export const RAPID_KLEN_SPECIFICATION = {
   densityMin: 1.4,
 };
 
-export function validateRapidKlenSensory(s?: RapidKlenSensoryParameters): {
+export function validateRapidKlenSensory(
+  s?: RapidKlenSensoryParameters | null,
+): {
   isValid: boolean;
   violations: string[];
 } {
@@ -273,27 +264,26 @@ export function validateRapidKlenSensory(s?: RapidKlenSensoryParameters): {
     return { isValid: false, violations };
   }
 
-  const isVisualOk = s.visual === true || s.visual === 'Jernih';
+  const isVisualOk = s.visual === 'Jernih';
   if (!isVisualOk) {
-    violations.push('Pemeriksaan visual tidak sesuai standar (harus Jernih)');
+    violations.push(
+      'Pemeriksaan visual tidak sesuai standar (harus faktual "Jernih")',
+    );
   }
 
-  const isForeignOk =
-    s.foreignMatters === 'Tidak ada kontaminasi' ||
-    s.foreignMatters === true ||
-    s.foreignMatters == null;
+  const isForeignOk = s.foreignMatters === 'Tidak ada kontaminasi';
   if (!isForeignOk) {
-    violations.push('Terdeteksi kontaminasi pada bahan baku Rapid Klen');
+    violations.push(
+      'Pemeriksaan foreign matters wajib diisi faktual "Tidak ada kontaminasi"',
+    );
   }
 
-  const isPackagingOk =
-    s.packagingLabel === 'Kemasan & label tidak rusak' ||
-    s.packagingLabel === true ||
-    s.packaging === 'Kemasan & label tidak rusak' ||
-    s.packaging === true ||
-    (s.packagingLabel == null && s.packaging == null);
+  const packagingVal = s.packagingLabel ?? s.packaging;
+  const isPackagingOk = packagingVal === 'Kemasan & label tidak rusak';
   if (!isPackagingOk) {
-    violations.push('Kemasan atau label Rapid Klen rusak');
+    violations.push(
+      'Pemeriksaan kemasan & label wajib diisi faktual "Kemasan & label tidak rusak"',
+    );
   }
 
   return {
@@ -309,7 +299,7 @@ export function evaluateRapidKlenAnalysis(
 ): ChemicalEvaluationResult {
   const violations: string[] = [];
 
-  // 1. Sensory & packaging checks
+  // 1. Mandatory Sensory & packaging checks
   const sensoryCheck = validateRapidKlenSensory(params.sensory);
   violations.push(...sensoryCheck.violations);
 
@@ -322,13 +312,13 @@ export function evaluateRapidKlenAnalysis(
     );
   }
 
-  // 3. NaOH Alkalinity: Strict greater-than (> 45.16) if provided
-  if (params.alkalinityNaOH != null && !isNaN(params.alkalinityNaOH)) {
-    if (params.alkalinityNaOH <= RAPID_KLEN_SPECIFICATION.naohMin) {
-      violations.push(
-        `Alkalinitas NaOH (${params.alkalinityNaOH}%) tidak memenuhi batas spesifikasi (> ${RAPID_KLEN_SPECIFICATION.naohMin}%)`,
-      );
-    }
+  // 3. NaOH Alkalinity: Strict greater-than (> 45.16) - MANDATORY
+  if (params.alkalinityNaOH == null || isNaN(params.alkalinityNaOH)) {
+    violations.push('Kadar Alkalinitas NaOH wajib diisi');
+  } else if (params.alkalinityNaOH <= RAPID_KLEN_SPECIFICATION.naohMin) {
+    violations.push(
+      `Alkalinitas NaOH (${params.alkalinityNaOH}%) tidak memenuhi batas spesifikasi (> ${RAPID_KLEN_SPECIFICATION.naohMin}%)`,
+    );
   }
 
   // 4. pH: Strict greater-than (> 12.000)
@@ -352,7 +342,7 @@ export function evaluateRapidKlenAnalysis(
   const isCompliant = violations.length === 0;
   const decision = isCompliant ? 'RELEASE' : 'REJECT';
   const summary = isCompliant
-    ? `Rapid Klen memenuhi seluruh parameter (Na2O: ${params.alkalinityNa2O}%, pH: ${params.ph}, Density: ${params.density}, Kemasan OK). Disetujui RELEASE berdasarkan spesifikasi ${specMetadata.version}.`
+    ? `Rapid Klen memenuhi seluruh parameter (Na2O: ${params.alkalinityNa2O}%, NaOH: ${params.alkalinityNaOH}%, pH: ${params.ph}, Density: ${params.density}, Kemasan OK). Disetujui RELEASE berdasarkan spesifikasi ${specMetadata.version}.`
     : `Rapid Klen ditolak karena melanggar spesifikasi: ${violations.join('; ')}`;
 
   return {

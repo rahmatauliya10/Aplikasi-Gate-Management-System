@@ -245,6 +245,26 @@ export class WarehouseService {
 
     // ─── Guard: GSP vs Non-GSP Verification (Defense-in-Depth Proof-of-PA Gate) ───
     if (tx.processType === 'GSP') {
+      // P1-01: Hard Gate - Snapshot receiptUnit is mandatory before starting GSP unloading
+      if (!tx.receiptUnit || !tx.receiptUnit.trim()) {
+        await this.activityLogsService
+          .logAction({
+            userId: user.id,
+            action: 'GSP_START_WAREHOUSE_BLOCKED_MISSING_UOM',
+            module: 'WAREHOUSE',
+            referenceId: transactionId,
+            description: `GSP start warehouse blocked: Transaction ${transactionId} is missing canonical receiptUnit / UoM snapshot.`,
+            status: 'FAILED',
+          })
+          .catch(() => {});
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Gudang menolak memulai proses GSP: Satuan penerimaan (receiptUnit) tidak ditemukan pada transaksi. Unit penerimaan wajib ada sebelum bongkar dimulai.',
+          errors: ['MISSING_GSP_RECEIPT_UNIT'],
+        });
+      }
+
       const exemptionEval = evaluatePaExemption(tx.productCatalog, {
         processType: tx.processType,
         cargoType: tx.cargoType,
@@ -944,7 +964,14 @@ export class WarehouseService {
       return prismaTx.transaction.findUnique({
         where: { id: transactionId },
         include: {
+          warehouseStartBy: { select: { id: true, name: true, role: true } },
           warehouseEndBy: { select: { id: true, name: true, role: true } },
+          productCatalog: true,
+          warehouseProcesses: {
+            where: { isCurrent: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
       });
     });
@@ -986,7 +1013,36 @@ export class WarehouseService {
         actualWeight: updated.actualWeight,
         actualQuantity: updated.actualQuantity,
         unit: updated.warehouseUnit,
+        receivedQuantity:
+          updated.receivedQuantity != null
+            ? Number(updated.receivedQuantity)
+            : updated.warehouseProcesses?.[0]?.receivedQuantity != null
+              ? Number(updated.warehouseProcesses[0].receivedQuantity)
+              : null,
+        receiptUnit: updated.receiptUnit || null,
+        receivedUnit:
+          updated.warehouseProcesses?.[0]?.receivedUnit ||
+          updated.receiptUnit ||
+          null,
+        checklistItems: updated.warehouseProcesses?.[0]?.checklistItems || null,
+        suratJalanNumber: updated.suratJalanNumber || null,
+        poNumber: updated.poNumber || null,
+        materialIdentity: updated.productCatalog
+          ? {
+              id: updated.productCatalog.id,
+              code: updated.productCatalog.code,
+              name: updated.productCatalog.name,
+            }
+          : null,
+        productCatalog: updated.productCatalog || null,
         warehouseStartAt: updated.warehouseStartAt,
+        warehouseStartBy: updated.warehouseStartBy
+          ? {
+              id: updated.warehouseStartBy.id,
+              name: updated.warehouseStartBy.name,
+              role: updated.warehouseStartBy.role,
+            }
+          : null,
         warehouseEndAt: updated.warehouseEndAt,
         warehouseEndBy: updated.warehouseEndBy
           ? {
@@ -1163,6 +1219,7 @@ export class WarehouseService {
       include: {
         warehouseStartBy: { select: { id: true, name: true } },
         warehouseEndBy: { select: { id: true, name: true } },
+        productCatalog: true,
         warehouseProcesses: {
           where: { isCurrent: true },
           orderBy: { createdAt: 'desc' },
@@ -1213,6 +1270,25 @@ export class WarehouseService {
         actualWeight: tx.actualWeight,
         actualQuantity: tx.actualQuantity,
         unit: tx.warehouseUnit,
+        receivedQuantity:
+          tx.receivedQuantity != null
+            ? Number(tx.receivedQuantity)
+            : process?.receivedQuantity != null
+              ? Number(process.receivedQuantity)
+              : null,
+        receiptUnit: tx.receiptUnit || null,
+        receivedUnit: process?.receivedUnit || tx.receiptUnit || null,
+        checklistItems: process?.checklistItems || null,
+        suratJalanNumber: tx.suratJalanNumber || null,
+        poNumber: tx.poNumber || null,
+        materialIdentity: tx.productCatalog
+          ? {
+              id: tx.productCatalog.id,
+              code: tx.productCatalog.code,
+              name: tx.productCatalog.name,
+            }
+          : null,
+        productCatalog: tx.productCatalog || null,
         palletCount: process?.palletCount || null,
         bagCount: process?.bagCount || null,
         rollCount: process?.rollCount || null,
@@ -1298,6 +1374,12 @@ export class WarehouseService {
         include: {
           warehouseStartBy: { select: { id: true, name: true } },
           warehouseEndBy: { select: { id: true, name: true } },
+          productCatalog: true,
+          warehouseProcesses: {
+            where: { isCurrent: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
       }),
     ]);

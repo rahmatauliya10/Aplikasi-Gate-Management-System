@@ -1067,5 +1067,66 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         ),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('P1-03 & P1-04: throws 422 SPEC_NOT_CONFIGURED and logs ActivityLog COAL_SPEC_NOT_CONFIGURED when calorieBand is missing or unknown (NO fallback to catalog code/cargoSubType)', async () => {
+      const coalTxWithLegacyCode = {
+        id: 'tx-coal-no-band',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalog: { code: 'COAL_5600_6000', name: 'Batubara' }, // catalog code that should NOT be used as fallback
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        revision: 1,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        coalTxWithLegacyCode,
+      );
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(OPERATIONAL_COAL_SPEC_METADATA);
+
+      // Submit WITHOUT parameters.calorieBand
+      await expect(
+        service.submitProductAnalysis(
+          'tx-coal-no-band',
+          {
+            productCategory: 'Coal',
+            productName: 'Batubara',
+            parameters: {
+              // calorieBand omitted
+              visual: validCoalVisual,
+              moisture: 30.0,
+            },
+            revision: 1,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(UnprocessableEntityException);
+
+      // Verify ActivityLog was recorded with COAL_SPEC_NOT_CONFIGURED
+      expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: mockAnalystUser.id,
+          action: 'COAL_SPEC_NOT_CONFIGURED',
+          module: 'QC',
+          referenceId: 'tx-coal-no-band',
+          status: 'FAILED',
+        }),
+      );
+
+      // Verify no QC analysis record was created and no transaction status update
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('P1-05: getSpecificationRuleStatus returns UNCONFIGURED for unknown/unverified product', () => {
+      const status = service.getSpecificationRuleStatus(
+        'UNKNOWN_CAT',
+        'Unknown Product X',
+      );
+      expect(status.ruleStatus).toBe('UNCONFIGURED');
+      expect(status.documentSource).toBe('Unverified Product Specification');
+    });
   });
 });

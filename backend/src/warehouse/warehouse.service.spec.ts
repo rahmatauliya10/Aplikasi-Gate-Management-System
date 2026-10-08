@@ -206,4 +206,230 @@ describe('WarehouseService Revisioning (P1-01)', () => {
       expect(err.message).toContain('GBB/GSP');
     }
   });
+
+  describe('GSP Receipt Unit & Canonical Receiving Data (P1-01 & P1-02)', () => {
+    const mockWarehouseUser = {
+      id: 'usr-wh-1',
+      role: 'WAREHOUSE',
+      email: 'wh@gms.local',
+    } as unknown as JwtPayloadUser;
+
+    it('P1-01: blocks startWarehouse on PA-required GSP transaction when receiptUnit is missing', async () => {
+      const gspTxNoUom = {
+        id: 'tx-gsp-no-uom',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        status: 'QC_VEHICLE_PASSED',
+        weighInAt: new Date(),
+        grossWeight: 20000,
+        receiptUnit: null, // MISSING UOM!
+        productCatalog: {
+          id: 'cat-coal',
+          processType: 'GSP',
+          isActive: true,
+          receiptUnit: 'KG',
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        gspTxNoUom,
+      );
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: 'GSP' },
+      ]);
+
+      await expect(
+        service.startWarehouse(
+          'tx-gsp-no-uom',
+          {
+            suratJalanNumber: 'SJ-123',
+            poNumber: 'PO-123',
+            preUnloadChecklist: { items: [] } as any,
+          },
+          mockWarehouseUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'GSP_START_WAREHOUSE_BLOCKED_MISSING_UOM',
+          referenceId: 'tx-gsp-no-uom',
+          status: 'FAILED',
+        }),
+      );
+      // Status unchanged and no transaction update executed
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('P1-01: blocks startWarehouse on Solar PA_NOT_REQUIRED GSP transaction when receiptUnit is missing', async () => {
+      const solarTxNoUom = {
+        id: 'tx-solar-no-uom',
+        processType: 'GSP',
+        cargoType: 'BBM',
+        cargoSubType: 'Solar BBM',
+        status: 'PA_NOT_REQUIRED',
+        weighInAt: new Date(),
+        grossWeight: 15000,
+        receiptUnit: null, // MISSING UOM!
+        productCatalog: {
+          id: 'cat-solar',
+          processType: 'GSP',
+          isActive: true,
+          receiptUnit: 'LITER',
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        solarTxNoUom,
+      );
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: 'GSP' },
+      ]);
+
+      await expect(
+        service.startWarehouse(
+          'tx-solar-no-uom',
+          {
+            suratJalanNumber: 'SJ-SOLAR-1',
+            poNumber: 'PO-SOLAR-1',
+            preUnloadChecklist: { items: [] } as any,
+          },
+          mockWarehouseUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'GSP_START_WAREHOUSE_BLOCKED_MISSING_UOM',
+          referenceId: 'tx-solar-no-uom',
+          status: 'FAILED',
+        }),
+      );
+    });
+
+    it('P1-02: completeWarehouse returns canonical receiving fields without mapping receivedQuantity into actualWeight', async () => {
+      const gspTx = {
+        id: 'tx-gsp-complete',
+        transactionNumber: 'TX-GSP-202610-001',
+        plateNumber: 'B 1234 GSP',
+        status: 'WAREHOUSE_IN_PROGRESS',
+        processType: 'GSP',
+        receiptUnit: 'LITER',
+        suratJalanNumber: 'SJ-CANON-01',
+        poNumber: 'PO-CANON-01',
+        productCatalog: {
+          id: 'cat-rk',
+          code: 'RK-01',
+          name: 'Rapid Klen',
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(gspTx);
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: 'GSP' },
+      ]);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue({
+            ...gspTx,
+            status: 'WAREHOUSE_DONE',
+            actualWeight: null, // NOT mapped!
+            actualQuantity: null,
+            warehouseUnit: null,
+            receivedQuantity: 8000.25,
+            receiptUnit: 'LITER',
+            warehouseProcesses: [
+              {
+                receivedQuantity: 8000.25,
+                receivedUnit: 'LITER',
+                checklistItems: { items: [{ code: 'CHK-1', result: 'OK' }] },
+              },
+            ],
+          }),
+        },
+        warehouseProcess: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'wp-1' }),
+          update: jest.fn().mockResolvedValue({ id: 'wp-1' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      jest
+        .spyOn(mockPrismaService, '$transaction')
+        .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+      const res = await service.completeWarehouse(
+        'tx-gsp-complete',
+        {
+          receivedQuantity: '8000.25',
+          receiptUnit: 'LITER',
+        },
+        mockWarehouseUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.receivedQuantity).toBe(8000.25);
+      expect(res.data.receiptUnit).toBe('LITER');
+      expect(res.data.receivedUnit).toBe('LITER');
+      expect(res.data.checklistItems).toBeDefined();
+      expect(res.data.suratJalanNumber).toBe('SJ-CANON-01');
+      expect(res.data.poNumber).toBe('PO-CANON-01');
+      expect(res.data.materialIdentity?.code).toBe('RK-01');
+      // Crucial: actualWeight must NOT be overwritten with GSP receivedQuantity
+      expect(res.data.actualWeight).toBeNull();
+    });
+
+    it('P1-02: getProcessDetail returns canonical receiving fields', async () => {
+      const gspTx = {
+        id: 'tx-gsp-detail',
+        transactionNumber: 'TX-GSP-DETAIL-01',
+        plateNumber: 'B 5678 GSP',
+        status: 'WAREHOUSE_DONE',
+        processType: 'GSP',
+        actualWeight: null,
+        actualQuantity: null,
+        warehouseUnit: null,
+        receivedQuantity: 5000.5,
+        receiptUnit: 'KG',
+        suratJalanNumber: 'SJ-DET-01',
+        poNumber: 'PO-DET-01',
+        productCatalog: {
+          id: 'cat-coal',
+          code: 'COAL-01',
+          name: 'Batubara',
+        },
+        warehouseProcesses: [
+          {
+            receivedQuantity: 5000.5,
+            receivedUnit: 'KG',
+            checklistItems: { verified: true },
+          },
+        ],
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(gspTx);
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: 'GSP' },
+      ]);
+
+      const res = await service.getProcessDetail(
+        'tx-gsp-detail',
+        mockWarehouseUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.receivedQuantity).toBe(5000.5);
+      expect(res.data.receiptUnit).toBe('KG');
+      expect(res.data.receivedUnit).toBe('KG');
+      expect(res.data.checklistItems).toEqual({ verified: true });
+      expect(res.data.suratJalanNumber).toBe('SJ-DET-01');
+      expect(res.data.poNumber).toBe('PO-DET-01');
+      expect(res.data.materialIdentity?.name).toBe('Batubara');
+    });
+  });
 });
