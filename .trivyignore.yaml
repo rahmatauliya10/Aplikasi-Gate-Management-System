@@ -118,15 +118,3 @@ vulnerabilities:
     statement: "Pacote tarball fetching vulnerability in build tooling. Non-exploitable in GMS container runtime as migrator runs exclusively trusted static schema files and is never exposed to untrusted external tarball fetches. Runtime container is built with pruned production dependencies and does not contain this package."
     expired_at: 2026-11-30
 
-  - id: CVE-2026-106445
-    purls:
-      - pkg:npm/handlebars@4.7.9
-    statement: "Handlebars template injection / prototype pollution in dev tooling (transitive dependency of ts-jest). Non-exploitable in GMS as migrator runs exclusively trusted static schema files during migration deployment, is isolated on db-net, and is never exposed to untrusted external input. Production runtime container is built with pruned production dependencies and does not contain ts-jest or handlebars."
-    expired_at: 2026-11-30
-
-  - id: CVE-2026-106446
-    purls:
-      - pkg:npm/handlebars@4.7.9
-    statement: "Handlebars AST/parser denial of service in dev tooling (transitive dependency of ts-jest). Non-exploitable in GMS as migrator runs exclusively trusted static schema files during migration deployment, is isolated on db-net, and is never exposed to untrusted external input. Production runtime container is built with pruned production dependencies and does not contain ts-jest or handlebars."
-    expired_at: 2026-11-30
-
