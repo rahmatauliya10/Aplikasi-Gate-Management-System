@@ -1041,8 +1041,22 @@ jobs:
             --exit-code 0 \
             --ignore-unfixed \
             --show-suppressed \
+            --format json \
+            --output /workspace/trivy-migrator.json \
             --ignorefile /workspace/.trivyignore.yaml \
-            gms-backend-migrator:ci | tee -a $GITHUB_STEP_SUMMARY
+            gms-backend-migrator:ci
+
+          node -e '
+            const fs = require("fs");
+            if (fs.existsSync("trivy-migrator.json")) {
+              const data = JSON.parse(fs.readFileSync("trivy-migrator.json", "utf8"));
+              for (const target of data.Results || []) {
+                for (const vuln of target.Vulnerabilities || []) {
+                  console.log(`::error file=.trivyignore.yaml,title=${vuln.VulnerabilityID} in ${vuln.PkgName}@${vuln.InstalledVersion}::Trivy Security Failure: ${vuln.VulnerabilityID} (${vuln.Severity}) in target ${target.Target} package ${vuln.PkgName}@${vuln.InstalledVersion} - ${vuln.Title}`);
+                }
+              }
+            }
+          '
 
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
