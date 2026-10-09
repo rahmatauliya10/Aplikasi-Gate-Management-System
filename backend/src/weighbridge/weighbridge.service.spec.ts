@@ -215,4 +215,144 @@ describe('WeighbridgeService Fraud Calculation', () => {
       }),
     );
   });
+
+  it('preserves physical scale delta in netWeight (30 kg) and sets actualWeight = 0 for QC_VEHICLE_REJECTED', async () => {
+    const mockTx = {
+      id: 'tx-qc-rej-1',
+      status: 'QC_VEHICLE_REJECTED',
+      processType: 'GSP',
+      grossWeight: 22000,
+      tareWeight: null,
+      actualWeight: null,
+      revision: 1,
+    };
+
+    const txClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue({
+          ...mockTx,
+          status: 'WEIGH_OUT_DONE',
+          tareWeight: 21970,
+          netWeight: 30,
+          actualWeight: 0,
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      weighbridgeRecord: {
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+      },
+      transactionStatusHistory: { create: jest.fn() },
+      fraudCheck: { create: jest.fn() },
+    };
+
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(txClient));
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    jest
+      .spyOn(prismaService.weighbridgeRecord, 'findFirst')
+      .mockResolvedValue(null);
+
+    await service.submitWeighOut('tx-qc-rej-1', { weight: 21970 }, {
+      id: 'user-1',
+    } as any);
+
+    // Verify netWeight stores physical load cell delta (30 kg) and accepted inventory actualWeight = 0
+    expect(txClient.transaction.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'WEIGH_OUT_DONE',
+          grossWeight: 22000,
+          tareWeight: 21970,
+          netWeight: 30, // Physical scale reading preserved
+          actualWeight: 0, // No cargo unloaded; accepted inventory = 0
+        }),
+      }),
+    );
+
+    // Verify status history notes clarify the distinction
+    expect(txClient.transactionStatusHistory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          notes: expect.stringContaining('Penerimaan persediaan diakui: 0 kg'),
+        }),
+      }),
+    );
+  });
+
+  it('handles INCOMING_CHECK_REJECTED after physical unloading: preserves scale delta and flags quarantine', async () => {
+    const mockTx = {
+      id: 'tx-inc-rej-1',
+      status: 'INCOMING_CHECK_REJECTED',
+      processType: 'GBB',
+      grossWeight: 25000,
+      tareWeight: null,
+      actualWeight: null,
+      revision: 2,
+    };
+
+    const txClient = {
+      transaction: {
+        findUnique: jest.fn().mockResolvedValue({
+          ...mockTx,
+          status: 'WEIGH_OUT_DONE',
+          tareWeight: 10000,
+          netWeight: 15000,
+          actualWeight: 15000,
+        }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      weighbridgeRecord: {
+        create: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+      },
+      transactionStatusHistory: { create: jest.fn() },
+      fraudCheck: { create: jest.fn() },
+    };
+
+    jest
+      .spyOn(prismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(txClient));
+
+    jest
+      .spyOn(prismaService.transaction, 'findUnique')
+      .mockResolvedValue(mockTx as any);
+
+    jest
+      .spyOn(prismaService.weighbridgeRecord, 'findFirst')
+      .mockResolvedValue(null);
+
+    await service.submitWeighOut('tx-inc-rej-1', { weight: 10000 }, {
+      id: 'user-1',
+    } as any);
+
+    // Verify netWeight stores physical load cell delta (15,000 kg unloaded)
+    expect(txClient.transaction.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'WEIGH_OUT_DONE',
+          grossWeight: 25000,
+          tareWeight: 10000,
+          netWeight: 15000,
+          actualWeight: 15000, // Material physically entered facility
+        }),
+      }),
+    );
+
+    // Verify quarantine / incident status is documented
+    expect(txClient.weighbridgeRecord.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          remarks: expect.stringContaining('DIKARANTINA / INSIDEN OPERASIONAL'),
+        }),
+      }),
+    );
+  });
 });

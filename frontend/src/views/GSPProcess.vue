@@ -61,48 +61,226 @@
             <div class="mt-6 pt-5" style="border-top:1px solid #F1F5F9"><StepTimeline :current-step="selectedTruck.status" :process-type="selectedTruck.processType" /></div>
             
             <div class="mt-6 space-y-4">
-              <!-- Missing Security Info -->
-              <div v-if="selectedTruck.status === 'QC_VEHICLE_PASSED' && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
+              <!-- Missing Security Info (SJ / PO Hard Gate) -->
+              <div v-if="(selectedTruck.status === 'QC_VEHICLE_PASSED' || selectedTruck.status === 'PA_NOT_REQUIRED') && (!selectedTruck.suratJalanNumber || !selectedTruck.poNumber)" class="space-y-4 p-5 rounded-2xl" style="background:linear-gradient(135deg,#FFFBEB,#FFF7ED);border:1px solid #FDE68A">
                 <div class="flex items-center space-x-2 text-[#800057] mb-2">
                   <span class="material-icons text-lg">warning_amber</span>
-                  <span class="text-[11px] font-black uppercase tracking-wider">Complete Security Data</span>
+                  <span class="text-[11px] font-black uppercase tracking-wider">Lengkapi Data Surat Jalan & PO</span>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div class="space-y-1.5" v-if="!selectedTruck.suratJalanNumber">
-                    <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">Delivery Note No. *</label>
-                    <input v-model="suratJalanInput" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="SJ-XXXXX">
+                    <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">Delivery Note / Surat Jalan *</label>
+                    <input v-model="suratJalanInput" id="input-gsp-surat-jalan" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="SJ-XXXXX">
                   </div>
                   <div class="space-y-1.5" v-if="!selectedTruck.poNumber">
                     <label class="text-[10px] font-black text-amber-800 uppercase tracking-wider">No PO *</label>
-                    <input v-model="poNumberInput" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="PO-XXXXX">
+                    <input v-model="poNumberInput" id="input-gsp-po-number" type="text" class="w-full h-11 px-3 bg-white rounded-xl text-sm font-bold text-slate-800 outline-none transition-all uppercase placeholder:font-normal" style="border:1px solid #FDE68A" placeholder="PO-XXXXX">
                   </div>
                 </div>
-                <button @click="saveSecurityInfo" :disabled="isProcessing" class="w-full btn-primary py-2.5 mt-2 flex justify-center items-center space-x-2">
+                <button @click="saveSecurityInfo" :disabled="isProcessing" class="w-full btn-primary py-2.5 mt-2 flex justify-center items-center space-x-2" id="btn-save-security-gsp">
                   <span v-if="isProcessing" class="material-icons animate-spin">autorenew</span>
-                  <span>Save Security Data & Start Processing</span>
+                  <span>Siapkan Data & Lanjutkan Pemeriksaan</span>
                 </button>
               </div>
 
-              <!-- Weight Input (processing) -->
-              <div v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS'">
-                <WeightInput label="Input Actual Weight GSP (KG)" :is-submitting="isProcessing" @save="handleWeightSave" />
-              </div>
+              <!-- Canonical 9-Point Pre-Unloading Checklist Panel -->
+              <div
+                v-if="(selectedTruck.status === 'QC_VEHICLE_PASSED' || selectedTruck.status === 'PA_NOT_REQUIRED') && selectedTruck.suratJalanNumber && selectedTruck.poNumber"
+                class="space-y-4 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm"
+                id="card-preunload-checklist"
+              >
+                <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-emerald-600 text-xl">fact_check</span>
+                    <div>
+                      <h4 class="text-xs font-black text-slate-800 uppercase tracking-wider">Pemeriksaan Pra-Bongkar (Pre-Unloading)</h4>
+                      <p class="text-[10px] text-slate-500 font-medium">Versi Standar: GSP-PREUNLOAD-2026.1 (9 Poin Wajib)</p>
+                    </div>
+                  </div>
+                  <span class="text-[10px] font-bold px-2 py-0.5 rounded-full" :class="isChecklistComplete ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'">
+                    {{ answeredCount }}/9 Terjawab
+                  </span>
+                </div>
 
-              <!-- Incoming Material Check (Read Only for Warehouse) -->
-              <div v-if="selectedTruck.status === 'INCOMING_CHECK_PENDING' || selectedTruck.status === 'INCOMING_CHECK_IN_PROGRESS'" class="mt-6 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2)">
-                <span class="material-icons text-blue-500 text-2xl animate-spin">sync</span>
-                <div>
-                  <p class="text-sm font-black text-blue-700">Pemeriksaan Incoming QC Berlangsung</p>
-                  <p class="text-[11px] text-blue-600">Menunggu pemeriksaan Incoming QC oleh QC Team.</p>
+                <!-- 9 Items List -->
+                <div class="space-y-3">
+                  <div
+                    v-for="(item, idx) in GSP_PREUNLOAD_ITEMS"
+                    :key="item.code"
+                    class="p-3 rounded-xl border transition-all text-xs"
+                    :class="checklistAnswers[item.code].result === 'OK' ? 'bg-emerald-50/40 border-emerald-200' : (checklistAnswers[item.code].result === 'NOT_OK' ? 'bg-rose-50/50 border-rose-200' : 'bg-slate-50/50 border-slate-200')"
+                  >
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                      <div class="flex items-start space-x-2 flex-1">
+                        <span class="font-bold text-slate-400 text-[11px] mt-0.5">{{ idx + 1 }}.</span>
+                        <div>
+                          <p class="font-bold text-slate-800 leading-snug">{{ item.label }}</p>
+                          <span class="font-mono text-[9px] text-slate-400">{{ item.code }}</span>
+                        </div>
+                      </div>
+
+                      <!-- Action Radios -->
+                      <div class="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          @click="setChecklistResult(item.code, 'OK')"
+                          class="px-3 py-1 rounded-lg font-black text-xs transition-all flex items-center gap-1"
+                          :class="checklistAnswers[item.code].result === 'OK' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'"
+                          :id="`btn-chk-${item.code}-ok`"
+                        >
+                          <span class="material-icons text-sm">check</span>
+                          OK
+                        </button>
+
+                        <button
+                          type="button"
+                          @click="setChecklistResult(item.code, 'NOT_OK')"
+                          class="px-3 py-1 rounded-lg font-black text-xs transition-all flex items-center gap-1"
+                          :class="checklistAnswers[item.code].result === 'NOT_OK' ? 'bg-rose-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'"
+                          :id="`btn-chk-${item.code}-notok`"
+                        >
+                          <span class="material-icons text-sm">close</span>
+                          NOT OK
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Notes input if NOT_OK or optional -->
+                    <div v-if="checklistAnswers[item.code].result === 'NOT_OK'" class="mt-2 pt-2 border-t border-rose-100">
+                      <input
+                        type="text"
+                        v-model="checklistAnswers[item.code].notes"
+                        placeholder="Keterangan temuan ketidaksesuaian..."
+                        class="w-full h-8 px-2.5 text-xs bg-white rounded-lg border border-rose-200 focus:outline-none focus:border-rose-400 text-rose-800 font-medium"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Dual Action Buttons -->
+                <div class="pt-3 border-t border-slate-100 flex flex-col gap-2">
+                  <!-- ALL 9 OK: MULAI BONGKAR -->
+                  <button
+                    v-if="isChecklistAllOk"
+                    type="button"
+                    @click="handleStartUnload"
+                    :disabled="isProcessing || !isChecklistComplete"
+                    class="w-full py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
+                    id="btn-start-unload"
+                  >
+                    <span v-if="isProcessing" class="material-icons text-base animate-spin">autorenew</span>
+                    <span v-else class="material-icons text-base">play_arrow</span>
+                    <span>MULAI BONGKAR (START UNLOAD)</span>
+                  </button>
+
+                  <!-- ANY NOT_OK: SIMPAN HASIL PEMERIKSAAN -->
+                  <button
+                    v-if="isChecklistAnyNotOk"
+                    type="button"
+                    @click="handleSaveFailedChecklist"
+                    :disabled="isProcessing || !isChecklistComplete"
+                    class="w-full py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 shadow-md transition-all flex items-center justify-center gap-2"
+                    id="btn-save-checklist-fail"
+                  >
+                    <span v-if="isProcessing" class="material-icons text-base animate-spin">autorenew</span>
+                    <span v-else class="material-icons text-base">warning</span>
+                    <span>SIMPAN HASIL PEMERIKSAAN (BONGKAR DITAHAN)</span>
+                  </button>
+
+                  <!-- Incomplete message -->
+                  <p v-if="!isChecklistComplete" class="text-center text-xs font-bold text-amber-600 py-2">
+                    Lengkapi seluruh 9 poin pemeriksaan pra-bongkar sebelum melanjutkan.
+                  </p>
                 </div>
               </div>
 
-              <!-- Sampling Result Badge -->
-              <div v-if="selectedTruck.status === 'INCOMING_CHECK_REJECTED'" class="mt-4 p-4 rounded-xl flex items-center space-x-3" style="background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.2)">
-                <span class="material-icons text-red-500 text-2xl">cancel</span>
-                <div>
-                  <p class="text-sm font-black text-red-700">Checklist REJECTED</p>
-                  <p class="text-[11px] text-red-500">Truck redirected to outbound weighbridge.</p>
+              <!-- Waiting for QC / PA Analysis Notice -->
+              <div v-if="['QC_VEHICLE_PENDING', 'QC_RETEST_REQUIRED', 'WAITING_UTILITY_DISPOSITION'].includes(selectedTruck.status)" class="space-y-3 p-5 rounded-2xl bg-amber-50/80 border border-amber-200">
+                <div class="flex items-center space-x-2 text-amber-800">
+                  <span class="material-icons text-xl animate-pulse">pending</span>
+                  <span class="text-xs font-black uppercase tracking-wider">Menunggu Hasil QC / PA Analysis</span>
+                </div>
+                <p class="text-xs font-medium text-amber-700 leading-relaxed">
+                  Muatan ini memerlukan persetujuan lulus uji laboratorium (RELEASE) sebelum proses bongkar di gudang GSP dapat dimulai.
+                </p>
+                <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                  <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  <span>Status: {{ getStatusLabel(selectedTruck.status, 'GSP') }}</span>
+                </div>
+              </div>
+
+              <!-- Material-Specific GSP Receiving Card (Decimal Safe) -->
+              <div v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS'" class="space-y-4 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm" id="card-gsp-receiving">
+                <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-indigo-600 text-xl">inventory_2</span>
+                    <div>
+                      <h4 class="text-xs font-black text-slate-800 uppercase tracking-wider">Penerimaan Material GSP</h4>
+                      <p class="text-[10px] text-slate-500 font-medium">Pencatatan kuantitas diterima sesuai satuan master material</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Missing receiptUnit Fail-Closed Alert -->
+                <div v-if="!selectedTruck.receiptUnit" class="p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-xs font-bold" id="alert-missing-receipt-unit">
+                  <div class="flex items-center space-x-2">
+                    <span class="material-icons text-red-600 text-lg">error</span>
+                    <span>Satuan penerimaan (receiptUnit) transaksi GSP belum terkonfigurasi. Proses penerimaan ditahan.</span>
+                  </div>
+                </div>
+
+                <!-- Receiving Form when receiptUnit is valid -->
+                <div v-else class="space-y-4">
+                  <!-- Read-only UOM Badge -->
+                  <div class="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <div>
+                      <span class="text-[11px] font-black text-slate-600 uppercase block">Satuan Penerimaan Material</span>
+                      <span class="text-[10px] text-slate-400">Terkonfigurasi dari Master Product Catalog</span>
+                    </div>
+                    <span class="px-3.5 py-1.5 rounded-lg text-xs font-black bg-blue-100 text-blue-800 font-mono" id="badge-receipt-unit">
+                      {{ selectedTruck.receiptUnit }}
+                    </span>
+                  </div>
+
+                  <!-- Decimal String Quantity Input -->
+                  <div>
+                    <label class="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                      Jumlah Diterima ({{ selectedTruck.receiptUnit }}) *
+                    </label>
+                    <div class="relative">
+                      <input
+                        type="text"
+                        v-model="receivedQuantityInput"
+                        placeholder="Contoh: 8000.250"
+                        id="input-gsp-received-quantity"
+                        class="w-full h-11 px-3.5 pr-14 bg-white rounded-xl border text-sm font-mono font-bold text-slate-800 focus:outline-none transition-colors"
+                        :class="isQuantityValid ? 'border-slate-200 focus:border-[#4A8BDF]' : 'border-red-400 bg-red-50/30'"
+                      />
+                      <span class="absolute right-3.5 top-3 text-xs font-mono font-bold text-slate-400">
+                        {{ selectedTruck.receiptUnit }}
+                      </span>
+                    </div>
+                    <p v-if="quantityValidationMessage" class="text-[11px] font-bold text-red-600 mt-1 flex items-center gap-1">
+                      <span class="material-icons text-sm">info</span>
+                      {{ quantityValidationMessage }}
+                    </p>
+                    <p v-else class="text-[10px] text-slate-400 mt-1">
+                      Maksimal 3 angka di belakang koma (contoh: 8000.250). Tanpa tanda koma atau notasi eksponen.
+                    </p>
+                  </div>
+
+                  <!-- Submit Receiving Button -->
+                  <button
+                    type="button"
+                    @click="handleCompleteReceiving"
+                    :disabled="isProcessing || !isQuantityValid"
+                    class="w-full py-3.5 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
+                    id="btn-complete-gsp-receiving"
+                  >
+                    <span v-if="isProcessing" class="material-icons text-base animate-spin">autorenew</span>
+                    <span v-else class="material-icons text-base">save</span>
+                    <span>Selesaikan Penerimaan GSP</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -177,7 +355,7 @@
                 <div class="mt-4 flex justify-between items-end pl-3">
                   <div class="flex items-center space-x-2">
                     <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest"
-                      :class="truck.status === 'INCOMING_CHECK_PENDING' ? 'bg-sky-50 text-sky-600 border border-sky-200' : 'bg-slate-50 text-slate-700 border border-slate-200'">
+                      :class="truck.status === 'WAREHOUSE_IN_PROGRESS' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-50 text-slate-700 border border-slate-200'">
                       {{ getStepLabel(truck) }}
                     </span>
                   </div>
@@ -208,82 +386,7 @@
         </div>
       </div>
     </div>
-    
-    <!-- Incoming Material Check Modal -->
-    <div v-if="showChecklistModal && selectedTruck" class="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="showChecklistModal = false"></div>
-      <div class="relative bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-slide-up">
-        
-        <div class="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <div>
-            <h3 class="text-xl font-black text-slate-800 tracking-tight">Incoming Material Check</h3>
-            <p class="text-xs font-bold text-slate-500 mt-1">{{ selectedTruck.plateNumber }} &middot; Cargo Type: {{ selectedTruck.cargoType || 'General Goods' }}</p>
-          </div>
-          <button @click="showChecklistModal = false" class="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors shadow-sm">
-            <span class="material-icons">close</span>
-          </button>
-        </div>
 
-        <div class="p-6 overflow-y-auto hide-scrollbar space-y-6">
-          <div class="space-y-4">
-            <div v-for="(item, index) in currentChecklist" :key="index" 
-              class="group relative overflow-hidden rounded-2xl transition-all duration-300"
-              :class="checklistStates[index] === true ? 'bg-emerald-50 border border-emerald-200' : (checklistStates[index] === false ? 'bg-red-50 border border-red-200' : 'bg-slate-50 border border-slate-200')">
-              <div class="p-4 flex items-center justify-between">
-                <div class="flex-1 pr-6">
-                  <div class="flex items-center space-x-3 mb-2">
-                    <span class="flex items-center justify-center w-6 h-6 rounded-full bg-white text-[10px] font-black border border-slate-200"
-                      :class="checklistStates[index] === true ? 'text-emerald-600 border-emerald-200' : (checklistStates[index] === false ? 'text-red-600 border-red-200' : 'text-slate-400')">
-                      {{ index + 1 }}
-                    </span>
-                    <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Inspection Item</span>
-                  </div>
-                  <p class="text-sm font-bold text-slate-700 leading-relaxed">{{ item }}</p>
-                </div>
-                <div class="flex items-center space-x-2 shrink-0">
-                  <button @click="checklistStates[index] = false" class="w-12 h-12 rounded-xl flex items-center justify-center transition-all border"
-                    :class="checklistStates[index] === false ? 'bg-red-500 text-white border-red-600 shadow-inner' : 'bg-white text-slate-400 border-slate-200 hover:bg-red-50 hover:text-red-500 hover:border-red-200'">
-                    <span class="material-icons text-lg">close</span>
-                  </button>
-                  <button @click="checklistStates[index] = true" class="w-12 h-12 rounded-xl flex items-center justify-center transition-all border"
-                    :class="checklistStates[index] === true ? 'bg-emerald-500 text-white border-emerald-600 shadow-inner' : 'bg-white text-slate-400 border-slate-200 hover:bg-emerald-50 hover:text-emerald-500 hover:border-emerald-200'">
-                    <span class="material-icons text-lg">check</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div v-if="hasChecklistReject" class="animate-fade-in space-y-2">
-            <label class="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">Rejection Reason *</label>
-            <textarea v-model="rejectComment" rows="3" class="w-full p-4 bg-red-50/50 rounded-2xl text-sm font-bold text-slate-700 outline-none border border-red-100 focus:border-red-300 focus:ring-4 focus:ring-red-500/10 transition-all resize-none placeholder:text-red-300/50" placeholder="Please provide details for the rejection..."></textarea>
-          </div>
-        </div>
-
-        <div v-if="!hasChecklistReject" class="p-6 border-t border-slate-100 bg-white grid grid-cols-2 gap-4">
-          <button @click="showChecklistModal = false" class="py-4 rounded-xl font-black text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">
-            Cancel
-          </button>
-          <button @click="acceptChecklist(false)" :disabled="!isChecklistComplete || isProcessing" class="py-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed" style="background:linear-gradient(135deg,#4A8BDF,#3A6ABF);">
-            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-            <span v-else class="material-icons text-lg">verified</span>
-            <span>Pass Inspection</span>
-          </button>
-        </div>
-        <div v-else class="p-6 border-t border-slate-100 bg-white flex flex-col sm:flex-row gap-3">
-          <button @click="rejectChecklist" :disabled="!rejectComment.trim() || isProcessing" class="flex-1 py-4 rounded-xl font-black text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center justify-center space-x-2 shadow-md">
-            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-            <span v-else class="material-icons text-lg">cancel</span>
-            <span>Reject Inspection</span>
-          </button>
-          <button @click="acceptChecklist(true)" :disabled="isProcessing" class="flex-1 py-4 rounded-xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-md hover:shadow-lg" style="background:linear-gradient(135deg,#F59E0B,#D97706);">
-            <span v-if="isProcessing" class="material-icons text-lg animate-spin">autorenew</span>
-            <span v-else class="material-icons text-lg">warning</span>
-            <span>Terima With Note</span>
-          </button>
-        </div>
-      </div>
-    </div>
     <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" size="wide" @close="showDetailsModal = false" />
   </div>
 </template>
@@ -291,7 +394,7 @@
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
 import PageHeader from '../components/PageHeader.vue'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
 import { useWarehouseStore } from '../stores/warehouseStore'
@@ -301,6 +404,35 @@ import StatusBadge from '../components/StatusBadge.vue'
 import StepTimeline from '../components/StepTimeline.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import Pagination from '../components/Pagination.vue'
+import { getStatusLabel } from '../utils/statusLabel'
+
+// Canonical GSP Pre-Unloading Checklist Items (SOP-GSP-2026.1 / GSP-PREUNLOAD-2026.1)
+const GSP_PREUNLOAD_ITEMS = [
+  { code: 'CLEAN_VEHICLE', label: 'Kendaraan bersih' },
+  { code: 'DOOR_SEAL_GOOD', label: 'Seal pintu kendaraan baik' },
+  {
+    code: 'NO_EXPIRED_GAS_CYLINDER',
+    label: 'Tidak ditemukan tabung gas yang sudah Exp date masa uji berlakunya',
+  },
+  { code: 'ITEMS_NEATLY_ARRANGED', label: 'Barang tertata rapi' },
+  {
+    code: 'NO_PEST_OR_ANIMAL_TRACE',
+    label: 'Tidak ditemukan hama / binatang dan/atau jejak / bekas binatang',
+  },
+  {
+    code: 'GOOD_CLEAN_SEALED',
+    label: 'Barang baik dan bersih serta tersegel',
+  },
+  { code: 'COA_MATCHES_BATCH', label: 'CoA tersedia dan sesuai batchnya' },
+  {
+    code: 'QTY_TYPE_MATCHES_SJ',
+    label: 'Jumlah dan jenis barang sesuai SJ',
+  },
+  {
+    code: 'VEHICLE_NO_LEAK_GOOD',
+    label: 'Kendaraan tidak bocor / kondisi baik',
+  },
+]
 
 // Safety Helpers at the top
 const getPlateNumber = (truck) => {
@@ -365,7 +497,68 @@ const suratJalanInput = ref('')
 const poNumberInput = ref('')
 const isProcessing = ref(false)
 
-const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'WAREHOUSE_IN_PROGRESS' || t.status === 'INCOMING_CHECK_PENDING' || t.status === 'INCOMING_CHECK_IN_PROGRESS') && getProcessType(t) === 'GSP'))
+// Pre-Unloading Checklist state
+const checklistAnswers = reactive({})
+const initChecklist = () => {
+  GSP_PREUNLOAD_ITEMS.forEach(item => {
+    checklistAnswers[item.code] = {
+      result: null, // 'OK' | 'NOT_OK' | null
+      notes: '',
+    }
+  })
+}
+initChecklist()
+
+const setChecklistResult = (code, result) => {
+  if (checklistAnswers[code]) {
+    checklistAnswers[code].result = result
+  }
+}
+
+const answeredCount = computed(() => {
+  return GSP_PREUNLOAD_ITEMS.filter(item => checklistAnswers[item.code]?.result !== null).length
+})
+
+const isChecklistComplete = computed(() => {
+  return answeredCount.value === GSP_PREUNLOAD_ITEMS.length
+})
+
+const isChecklistAllOk = computed(() => {
+  if (!isChecklistComplete.value) return false
+  return GSP_PREUNLOAD_ITEMS.every(item => checklistAnswers[item.code]?.result === 'OK')
+})
+
+const isChecklistAnyNotOk = computed(() => {
+  return GSP_PREUNLOAD_ITEMS.some(item => checklistAnswers[item.code]?.result === 'NOT_OK')
+})
+
+// Receiving Quantity Input state
+const receivedQuantityInput = ref('')
+
+const quantityValidationMessage = computed(() => {
+  const val = (receivedQuantityInput.value || '').trim()
+  if (!val) return null
+  if (val.includes(',')) return 'Gunakan titik (.) untuk desimal, bukan tanda koma (,).'
+  if (val.toLowerCase().includes('e')) return 'Notasi eksponensial (scientific) tidak diizinkan.'
+  if (!/^\d+(\.\d{1,3})?$/.test(val)) {
+    if (val.includes('.') && val.split('.')[1].length > 3) {
+      return 'Maksimal 3 angka di belakang koma (contoh: 8000.250).'
+    }
+    return 'Format angka tidak valid. Gunakan angka positif maksimal 3 desimal.'
+  }
+  const num = Number(val)
+  if (num <= 0) return 'Jumlah diterima harus lebih besar dari 0.'
+  if (num > 999999999.999) return 'Jumlah melebihi batas maksimum penerimaan.'
+  return null
+})
+
+const isQuantityValid = computed(() => {
+  const val = (receivedQuantityInput.value || '').trim()
+  if (!val) return false
+  return quantityValidationMessage.value === null
+})
+
+const gspTrucks = computed(() => truckStore.trucks.filter(t => (t.status === 'QC_VEHICLE_PASSED' || t.status === 'PA_NOT_REQUIRED' || t.status === 'WAREHOUSE_IN_PROGRESS') && getProcessType(t) === 'GSP'))
 const filteredGspTrucks = computed(() => {
   const keyword = searchQuery.value.toLowerCase().trim()
   if (!keyword) return gspTrucks.value
@@ -384,47 +577,144 @@ watch(filteredGspTrucks, () => {
   }
 })
 watch(searchQuery, () => { currentPage.value = 1 })
+
 const selectTruck = (truck) => { 
   selectedTruck.value = truck 
   suratJalanInput.value = truck.suratJalanNumber || ''
   poNumberInput.value = truck.poNumber || ''
+  receivedQuantityInput.value = ''
+  initChecklist()
 }
 const formatTime = formatPlantTime
 
 const saveSecurityInfo = async () => {
-  if (!suratJalanInput.value || !poNumberInput.value) { toast.warning('Please complete the Delivery Note and PO Number fields'); return }
-  if (isProcessing.value) return;
-  isProcessing.value = true;
+  if (!suratJalanInput.value || !poNumberInput.value) {
+    toast.warning('Harap lengkapi nomor Surat Jalan dan PO')
+    return
+  }
+  if (isProcessing.value) return
+  isProcessing.value = true
   try {
-    const sj = suratJalanInput.value.toUpperCase();
-    const po = poNumberInput.value.toUpperCase();
-    const response = await warehouseStore.startProcess(selectedTruck.value.id, { suratJalanNumber: sj, poNumber: po })
+    const sj = suratJalanInput.value.toUpperCase()
+    const po = poNumberInput.value.toUpperCase()
     
     // Explicitly update local state for immediate UI reflection
     if (selectedTruck.value) {
-      selectedTruck.value.suratJalanNumber = sj;
-      selectedTruck.value.poNumber = po;
+      selectedTruck.value.suratJalanNumber = sj
+      selectedTruck.value.poNumber = po
     }
-    
-    const updatedTruck = response?.data || response;
-    if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-    toast.success('Security data saved. Processing started.')
-  } catch(e) {} finally { isProcessing.value = false; }
+    toast.info('Data Surat Jalan & PO telah disiapkan di form; akan disimpan permanen saat verifikasi pra-bongkar diajukan.')
+  } catch (err) {
+    toast.error('Gagal menyimpan data Surat Jalan & PO')
+  } finally {
+    isProcessing.value = false
+  }
 }
 
-const handleWeightSave = async (weight) => {
-  if (!selectedTruck.value || isProcessing.value) return
-  const ok = await confirm({ title: 'Processing Complete?', message: `Save Processed Weight: ${weight}kg for ${selectedTruck.value.plateNumber}?`, type: 'success', confirmText: 'Yes, Save' })
+const buildChecklistPayload = () => {
+  return GSP_PREUNLOAD_ITEMS.map(item => ({
+    code: item.code,
+    result: checklistAnswers[item.code].result,
+    notes: checklistAnswers[item.code].notes?.trim() || undefined,
+  }))
+}
+
+const handleStartUnload = async () => {
+  if (!selectedTruck.value || isProcessing.value || !isChecklistAllOk.value) return
+  isProcessing.value = true
+  try {
+    const sj = (selectedTruck.value.suratJalanNumber || suratJalanInput.value || '').toUpperCase()
+    const po = (selectedTruck.value.poNumber || poNumberInput.value || '').toUpperCase()
+    const payload = {
+      suratJalanNumber: sj,
+      poNumber: po,
+      preUnloadChecklist: {
+        items: buildChecklistPayload(),
+      },
+    }
+
+    const response = await warehouseStore.startProcess(selectedTruck.value.id, payload)
+    const updatedTruck = response?.data || response
+    if (updatedTruck) {
+      truckStore.upsertTruck(updatedTruck)
+      selectedTruck.value = { ...selectedTruck.value, ...updatedTruck }
+    }
+    toast.success('Pemeriksaan pra-bongkar 9/9 OK. Proses bongkar GSP dimulai.')
+  } catch (err) {
+    toast.error(err?.response?.data?.message || err?.message || 'Gagal memulai proses bongkar GSP')
+  } finally {
+    isProcessing.value = false
+  }
+}
+
+const handleSaveFailedChecklist = async () => {
+  if (!selectedTruck.value || isProcessing.value || !isChecklistAnyNotOk.value) return
+  isProcessing.value = true
+  try {
+    const sj = (selectedTruck.value.suratJalanNumber || suratJalanInput.value || '').toUpperCase()
+    const po = (selectedTruck.value.poNumber || poNumberInput.value || '').toUpperCase()
+    const payload = {
+      suratJalanNumber: sj,
+      poNumber: po,
+      preUnloadChecklist: {
+        items: buildChecklistPayload(),
+      },
+    }
+
+    await warehouseStore.startProcess(selectedTruck.value.id, payload)
+    toast.warning('Hasil pemeriksaan tercatat. Proses bongkar DITAHAN.')
+  } catch (err) {
+    const backendErrors = err?.response?.data?.errors || []
+    if (backendErrors.includes('PREUNLOAD_CHECKLIST_ITEMS_NOT_OK')) {
+      // Proved that backend validated 9 items, recorded ActivityLog GSP_PREUNLOAD_CHECKLIST_FAILED, and blocked start
+      toast.warning('Hasil NOT_OK tercatat, bongkar ditahan: temuan ketidaksesuaian tersimpan pada sistem.')
+    } else {
+      // Any other error (network failure, 500, invalid structure, etc.) - DO NOT fake audit success!
+      toast.error(
+        err?.response?.data?.message ||
+        'Gagal mencatat audit checklist: silakan periksa koneksi atau kelengkapan data.'
+      )
+    }
+  } finally {
+    isProcessing.value = false
+  }
+}
+
+const handleCompleteReceiving = async () => {
+  if (!selectedTruck.value || isProcessing.value || !isQuantityValid.value) return
+  if (!selectedTruck.value.receiptUnit) {
+    toast.error('Satuan penerimaan belum terkonfigurasi. Penerimaan ditahan.')
+    return
+  }
+
+  const qty = receivedQuantityInput.value.trim()
+  const unit = selectedTruck.value.receiptUnit
+
+  const ok = await confirm({
+    title: 'Konfirmasi Penerimaan Material',
+    message: `Selesaikan penerimaan kuantitas: ${qty} ${unit} untuk kendaraan ${getPlateNumber(selectedTruck.value)}?`,
+    type: 'success',
+    confirmText: 'Ya, Selesaikan',
+  })
+
   if (ok) {
-    isProcessing.value = true;
+    isProcessing.value = true
     try {
-      const response = await warehouseStore.completeProcess(selectedTruck.value.id, { actualWeight: weight })
-      const updatedTruck = response?.data || response;
-      if (updatedTruck) truckStore.upsertTruck(updatedTruck);
-      toast.success(`Processed Weight ${weight}kg saved — proceed to Incoming Material Check.`)
+      const response = await warehouseStore.completeProcess(selectedTruck.value.id, {
+        receivedQuantity: qty,
+        receivedUnit: unit,
+      })
+      const updatedTruck = response?.data || response
+      if (updatedTruck) truckStore.upsertTruck(updatedTruck)
+      toast.success(`Penerimaan material ${qty} ${unit} berhasil dicatat.`)
       selectedTruck.value = null
-    } catch(e) {} finally { isProcessing.value = false; }
+      receivedQuantityInput.value = ''
+      await truckStore.fetchTrucks()
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Gagal menyelesaikan penerimaan GSP')
+    } finally {
+      isProcessing.value = false
+    }
   }
 }
 </script>
-

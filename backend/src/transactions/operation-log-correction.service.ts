@@ -14,11 +14,13 @@ import {
   CorrectionAction,
   CorrectionTargetModule,
   TransactionStatus,
+  QcResult,
 } from '@prisma/client';
 import * as crypto from 'crypto';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { sanitizeAuditData } from '../common/utils/mask-pii.util';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 
 const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   TRANSACTION: [
@@ -232,6 +234,7 @@ export class OperationLogCorrectionService {
       const tx: any = await prismaTx.transaction.findUnique({
         where: { id },
         include: {
+          productCatalog: true,
           weighbridgeRecords: { where: { isCurrent: true } },
           warehouseProcesses: { where: { isCurrent: true } },
           qcVehicleChecks: { where: { isCurrent: true } },
@@ -1074,7 +1077,7 @@ export class OperationLogCorrectionService {
             TransactionStatus.REGISTERED,
             TransactionStatus.QC_VEHICLE_PENDING,
             TransactionStatus.QC_VEHICLE_PASSED,
-            TransactionStatus.INCOMING_CHECK_PENDING,
+            TransactionStatus.PA_NOT_REQUIRED,
           ],
           GBJ: [
             TransactionStatus.REGISTERED,
@@ -1092,7 +1095,7 @@ export class OperationLogCorrectionService {
         }
 
         // Accept QC_VEHICLE_PASSED or legacy WAREHOUSE_IN_PROGRESS mapping to QC_VEHICLE_PASSED
-        const effectiveTarget =
+        let effectiveTarget =
           targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS
             ? TransactionStatus.QC_VEHICLE_PASSED
             : targetReopenStatus;
@@ -1105,6 +1108,48 @@ export class OperationLogCorrectionService {
             `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW transaksi tipe ${processType}. Target status harus sesuai dengan workflow matriks tipe proses.`,
           );
         }
+
+        // For GSP commodities:
+        if (processType === 'GSP') {
+          const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+            processType: tx.processType,
+            cargoType: tx.cargoType,
+            cargoSubType: tx.cargoSubType,
+          });
+
+          if (exemptionEval.isExempt) {
+            // Solar BBM is PA-exempt: CANONICAL invariant: MUST NEVER persist as QC_VEHICLE_PASSED
+            if (
+              effectiveTarget === TransactionStatus.QC_VEHICLE_PENDING ||
+              effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED
+            ) {
+              effectiveTarget = TransactionStatus.PA_NOT_REQUIRED;
+            }
+          } else {
+            // Non-exempt GSP: QC_VEHICLE_PASSED requires legitimate active PA release evidence
+            if (effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED) {
+              const activePa = await prismaTx.qcProductAnalysis.findFirst({
+                where: { transactionId: id, isVoided: false },
+                orderBy: { testRound: 'desc' },
+              });
+              const isDirectRelease =
+                activePa &&
+                activePa.status === 'RELEASE' &&
+                activePa.result === QcResult.PASS &&
+                activePa.isVoided === false;
+              const hasValidRelease =
+                activePa &&
+                activePa.productCatalogId === tx.productCatalogId &&
+                isDirectRelease;
+
+              if (!hasValidRelease) {
+                // If PA evidence is missing or invalid/superseded, downgrade to QC_VEHICLE_PENDING
+                effectiveTarget = TransactionStatus.QC_VEHICLE_PENDING;
+              }
+            }
+          }
+        }
+
         statusUpdatedTo = effectiveTarget;
         txUpdateData.status = effectiveTarget;
 
@@ -1181,8 +1226,23 @@ export class OperationLogCorrectionService {
               supersededByCorrectionId: correction.id,
             },
           });
+
+          // Invalidate active GSP PA evidence when reopening to REGISTERED (pre-PA stage)
+          if (processType === 'GSP') {
+            await prismaTx.qcProductAnalysis.updateMany({
+              where: { transactionId: id, isVoided: false },
+              data: {
+                isVoided: true,
+                voidedAt: new Date(),
+                voidReason: `Superseded by REOPEN_WORKFLOW to ${effectiveTarget} (Correction ID: ${correction.id})`,
+                status: 'VOIDED',
+              },
+            });
+          }
         } else if (
-          targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING
+          targetReopenStatus === TransactionStatus.QC_VEHICLE_PENDING ||
+          effectiveTarget === TransactionStatus.QC_VEHICLE_PENDING ||
+          effectiveTarget === TransactionStatus.PA_NOT_REQUIRED
         ) {
           // Weigh-in completed, reopening to QC Vehicle stage
           txUpdateData.qcEndAt = null;
@@ -1222,6 +1282,19 @@ export class OperationLogCorrectionService {
               supersededByCorrectionId: correction.id,
             },
           });
+
+          // Invalidate active GSP PA evidence when reopening to QC_VEHICLE_PENDING (pre-PA stage)
+          if (processType === 'GSP') {
+            await prismaTx.qcProductAnalysis.updateMany({
+              where: { transactionId: id, isVoided: false },
+              data: {
+                isVoided: true,
+                voidedAt: new Date(),
+                voidReason: `Superseded by REOPEN_WORKFLOW to ${effectiveTarget} (Correction ID: ${correction.id})`,
+                status: 'VOIDED',
+              },
+            });
+          }
         } else if (effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED) {
           // Reopen to Warehouse ready stage (QC_VEHICLE_PASSED)
           // Clears warehouse fields so actual Warehouse user triggers startWarehouse() for clean SoD & audit attribution
@@ -1256,7 +1329,12 @@ export class OperationLogCorrectionService {
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_PENDING ||
           targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
         ) {
-          // Reopen to Incoming QC stage (GBB / GSP)
+          if (processType !== 'GBB') {
+            throw new BadRequestException(
+              `Tahap Incoming QC hanya berlaku untuk proses GBB. Proses ${processType} tidak diizinkan reopen ke Incoming QC.`,
+            );
+          }
+          // Reopen to Incoming QC stage (GBB only)
           txUpdateData.incomingQcStartAt =
             targetReopenStatus === TransactionStatus.INCOMING_CHECK_IN_PROGRESS
               ? tx.incomingQcStartAt || new Date()

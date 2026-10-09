@@ -67,6 +67,8 @@ jobs:
             npx prisma migrate resolve --applied 20260714030729_init || true
           fi
           npx prisma migrate deploy
+          node scripts/verify-migration-invariants.js
+          node scripts/enforce-audit-immutability.js
 
       - name: Verify Migration Checksums (P0-01 Evidence)
         working-directory: ./backend
@@ -308,21 +310,27 @@ jobs:
           echo "Step 3: Running production preflight duplicate audit on rehearsal DB..."
           cd backend
           npm run prisma:preflight -- --report-only --fail-on-duplicates
-          echo "Step 4: Executing Prisma migration deployment on rehearsal DB (upgrading schema 6 -> 20)..."
+          echo "Step 4: Executing Prisma migration deployment on rehearsal DB..."
           npx prisma migrate deploy
+          node scripts/verify-migration-invariants.js
+          node scripts/enforce-audit-immutability.js
           cd ..
 
-          echo "Step 4.5: Verifying upgraded migration count (= 20)..."
+          echo "Step 4.5: Verifying upgraded migration count..."
           node -e "
             const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+            const migrationsDir = 'backend/prisma/migrations';
+            const expectedCount = fs.readdirSync(migrationsDir).filter(f => fs.statSync(path.join(migrationsDir, f)).isDirectory() && fs.existsSync(path.join(migrationsDir, f, 'migration.sql'))).length;
             const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
             const postUpgradeCount = parseInt(out, 10);
-            console.log('Post-upgrade migration count:', postUpgradeCount);
-            if (postUpgradeCount !== 20) {
-              console.error('FATAL: Post-upgrade migration count is not 20! Found: ' + postUpgradeCount);
+            console.log('Post-upgrade migration count:', postUpgradeCount, 'Expected:', expectedCount);
+            if (postUpgradeCount !== expectedCount) {
+              console.error('FATAL: Post-upgrade migration count is not ' + expectedCount + '! Found: ' + postUpgradeCount);
               process.exit(1);
             }
-            console.log('Schema upgrade from historical baseline to 20 migrations succeeded [PASS].');
+            console.log('Schema upgrade from historical baseline to ' + expectedCount + ' migrations succeeded [PASS].');
           "
 
           echo "Step 5: Verifying migration checksums..."
@@ -656,6 +664,14 @@ jobs:
                 EXECUTE 'GRANT ALL ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_owner;';
                 EXECUTE 'GRANT USAGE, SELECT, UPDATE ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_app;';
               END LOOP;
+              FOR r IN (
+                SELECT t.typname
+                FROM pg_type t
+                JOIN pg_namespace n ON n.oid = t.typnamespace
+                WHERE n.nspname = 'public' AND t.typtype = 'e'
+              ) LOOP
+                EXECUTE 'ALTER TYPE public.' || quote_ident(r.typname) || ' OWNER TO gms_owner;';
+              END LOOP;
             END \$\$;
           "
 
@@ -679,7 +695,63 @@ jobs:
           echo "4E: Deploying Forward Migrations via Migrator Container..."
           docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate deploy
           docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate status
+          docker compose -f docker-compose.prod.yml run --rm migrator node scripts/verify-migration-invariants.js
           docker compose -f docker-compose.prod.yml run --rm migrator node scripts/enforce-audit-immutability.js
+
+          echo "4F: Executing Deterministic Negative Production Compose Dependency Proof (P1-06 / NEG-001)..."
+          echo "Injecting invalid ACTIVE GSP catalog with NULL profile and receiptUnit into live database..."
+          docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+            INSERT INTO \"ProductCatalog\" (\"id\", \"code\", \"name\", \"category\", \"subCategory\", \"processType\", \"isActive\", \"gspAnalysisProfile\", \"receiptUnit\", \"policyVersion\", \"createdAt\", \"updatedAt\")
+            VALUES ('neg-cat-invalid-001', 'NEG-INVALID-GSP', 'Invalid Active GSP Master Proof', 'Chemical', 'PAC', 'GSP', true, NULL, NULL, 'SOP-GSP-2026.1', now(), now());
+          "
+
+          echo "Attempting to boot stack via docker compose (migrator default CMD must fail and block backend)..."
+          docker compose -f docker-compose.prod.yml rm -fs migrator backend 2>/dev/null || true
+          
+          set +e
+          docker compose -f docker-compose.prod.yml up --no-build migrator backend
+          COMPOSE_NEG_EXIT=$?
+          set -e
+
+          echo "Compose exited with code: $COMPOSE_NEG_EXIT (non-zero expected)"
+          if [ "$COMPOSE_NEG_EXIT" -eq 0 ]; then
+            echo "FATAL: Docker compose should have failed due to migrator invariant violation, but exited 0!"
+            exit 1
+          fi
+
+          MIGRATOR_STATE=$(docker inspect -f '{{.State.ExitCode}}' gate-system-migrator 2>/dev/null || echo "unknown")
+          BACKEND_RUNNING=$(docker inspect -f '{{.State.Running}}' gate-system-backend 2>/dev/null || echo "false")
+
+          echo "gate-system-migrator exit code: $MIGRATOR_STATE"
+          echo "gate-system-backend running state: $BACKEND_RUNNING"
+
+          if [ "$MIGRATOR_STATE" != "1" ]; then
+            echo "FATAL: Expected migrator to exit with code 1, got $MIGRATOR_STATE"
+            exit 1
+          fi
+
+          if [ "$BACKEND_RUNNING" = "true" ]; then
+            echo "FATAL: gate-system-backend started despite migrator failure! service_completed_successfully dependency was bypassed!"
+            exit 1
+          fi
+
+          echo "Negative dependency proof verified: migrator exited 1, backend blocked from starting [PASS]."
+
+          echo "Repairing database state: removing invalid catalog..."
+          docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+            DELETE FROM \"ProductCatalog\" WHERE \"id\" = 'neg-cat-invalid-001';
+          "
+
+          echo "Verifying repair: running migrator default CMD..."
+          docker compose -f docker-compose.prod.yml rm -fs migrator backend 2>/dev/null || true
+          docker compose -f docker-compose.prod.yml up --no-build migrator
+          REPAIR_MIGRATOR_EXIT=$(docker inspect -f '{{.State.ExitCode}}' gate-system-migrator 2>/dev/null || echo "unknown")
+          if [ "$REPAIR_MIGRATOR_EXIT" != "0" ]; then
+            echo "FATAL: Migrator failed after repair with exit code $REPAIR_MIGRATOR_EXIT"
+            docker logs gate-system-migrator
+            exit 1
+          fi
+          echo "Repaired migrator completed successfully with exit code 0 [PASS]."
 
           echo "Step 5: Booting Full Application Stack (--no-build)..."
           docker compose -f docker-compose.prod.yml up -d --no-build
@@ -735,6 +807,8 @@ jobs:
           DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
           E2E_API_URL: http://localhost:3001
+          ENABLE_TEST_SPEC_FIXTURES: "true"
+          GMS_TEST_HARNESS: "true"
           SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           TESTED_MERGE_SHA: ${{ github.sha }}
         run: |
@@ -746,12 +820,20 @@ jobs:
           echo "JWT_ACCESS_SECRET=test-jwt-access-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "JWT_REFRESH_SECRET=test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "BACKUP_SIGNATURE_SECRET=test-backup-signature-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+          echo "ENABLE_TEST_SPEC_FIXTURES=true" >> backend/.env
+          echo "ENABLE_TEST_SPEC_FIXTURES=true" >> .env
+          echo "GMS_TEST_HARNESS=true" >> backend/.env
+          echo "GMS_TEST_HARNESS=true" >> .env
           docker compose -f docker-compose.yml up -d postgres
           sleep 5
           docker compose -f docker-compose.yml run --rm migrator npx prisma migrate deploy
+          docker compose -f docker-compose.yml run --rm migrator node scripts/verify-migration-invariants.js
+          docker compose -f docker-compose.yml run --rm migrator node scripts/enforce-audit-immutability.js
           docker compose -f docker-compose.yml up -d --build
           sleep 5
           docker compose -f docker-compose.yml exec -T -e NODE_ENV=test -e SEED_ALL_USERS=true -e DEFAULT_ADMIN_PASSWORD=test-admin-password-12345 -e DEFAULT_QC_PASSWORD=test-qc-password-12345 -e DEFAULT_WAREHOUSE_PASSWORD=test-wh-password-12345 -e DEFAULT_SECURITY_PASSWORD=test-sec-password-12345 backend node dist/prisma/seed.js
+          docker compose -f docker-compose.yml exec -T backend node scripts/verify-canonical-seed.js
+          docker compose -f docker-compose.yml exec -T backend node scripts/verify-migration-invariants.js
           sleep 5
           docker compose ps
           echo "Executing Cross-Stack E2E API & Business Matrix Smoke Verification..."
@@ -949,6 +1031,33 @@ jobs:
       - name: Scan Backend Migrator Image with Trivy (Blocking Security Gate)
         run: |
           echo "Executing Trivy vulnerability scan against gms-backend-migrator:ci..."
+          echo "### Trivy Scan Results: gms-backend-migrator:ci" >> $GITHUB_STEP_SUMMARY
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 0 \
+            --ignore-unfixed \
+            --show-suppressed \
+            --format json \
+            --output /workspace/trivy-migrator.json \
+            --ignorefile /workspace/.trivyignore.yaml \
+            gms-backend-migrator:ci
+
+          node -e '
+            const fs = require("fs");
+            if (fs.existsSync("trivy-migrator.json")) {
+              const data = JSON.parse(fs.readFileSync("trivy-migrator.json", "utf8"));
+              for (const target of data.Results || []) {
+                for (const vuln of target.Vulnerabilities || []) {
+                  console.log(`::error file=.trivyignore.yaml,title=${vuln.VulnerabilityID} in ${vuln.PkgName}@${vuln.InstalledVersion}::Trivy Security Failure: ${vuln.VulnerabilityID} (${vuln.Severity}) in target ${target.Target} package ${vuln.PkgName}@${vuln.InstalledVersion} - ${vuln.Title}`);
+                }
+              }
+            }
+          '
+
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v ${{ github.workspace }}:/workspace \

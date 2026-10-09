@@ -10,9 +10,10 @@ import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { WeighInDto } from './dto/weigh-in.dto';
 import { WeighOutDto } from './dto/weigh-out.dto';
 import { WeighbridgeQueryDto } from './dto/weighbridge-query.dto';
-import { TransactionStatus, Prisma } from '@prisma/client';
+import { TransactionStatus, Prisma, GspAnalysisProfile } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
+import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 
 @Injectable()
 export class WeighbridgeService {
@@ -152,6 +153,7 @@ export class WeighbridgeService {
 
     const tx = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
+      include: { productCatalog: true },
     });
 
     if (!tx) {
@@ -237,12 +239,36 @@ export class WeighbridgeService {
     let tareWeight: number | null = null;
     let nextStatus: TransactionStatus;
 
-    if (tx.processType === 'GBB' || tx.processType === 'GSP') {
+    const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+      processType: tx.processType,
+      cargoType: tx.cargoType,
+      cargoSubType: tx.cargoSubType,
+    });
+
+    if (tx.processType === 'GSP') {
       grossWeight = dto.weight;
-      nextStatus = 'QC_VEHICLE_PENDING';
+      if (tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT) {
+        nextStatus = TransactionStatus.PA_NOT_REQUIRED;
+      } else if (
+        tx.gspAnalysisProfile === GspAnalysisProfile.COAL_PA ||
+        tx.gspAnalysisProfile === GspAnalysisProfile.PAC_PA ||
+        tx.gspAnalysisProfile === GspAnalysisProfile.RAPID_KLEN_PA
+      ) {
+        nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
+      } else {
+        // LEGACY COMPATIBILITY FALLBACK: for historical transactions where gspAnalysisProfile is null
+        if (exemptionEval.isExempt) {
+          nextStatus = TransactionStatus.PA_NOT_REQUIRED;
+        } else {
+          nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
+        }
+      }
+    } else if (tx.processType === 'GBB') {
+      grossWeight = dto.weight;
+      nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
     } else if (tx.processType === 'GBJ') {
       tareWeight = dto.weight;
-      nextStatus = 'QC_VEHICLE_PENDING';
+      nextStatus = TransactionStatus.QC_VEHICLE_PENDING;
     } else {
       throw new BadRequestException({
         success: false,
@@ -298,8 +324,10 @@ export class WeighbridgeService {
           revision: { increment: 1 },
           ...(grossWeight !== null && { grossWeight }),
           ...(tareWeight !== null && { tareWeight }),
-          ...(nextStatus === 'QC_VEHICLE_PENDING' &&
-            !tx.qcStartAt && { qcStartAt: new Date() }),
+          ...(nextStatus === TransactionStatus.PA_NOT_REQUIRED && {
+            paExemptionReason: exemptionEval.reason,
+            paPolicyVersion: exemptionEval.policyVersion,
+          }),
         },
       });
 
@@ -318,7 +346,10 @@ export class WeighbridgeService {
           oldStatus: tx.status,
           newStatus: nextStatus,
           changedById: user.id,
-          notes: dto.remarks || 'Weigh-in processed successfully',
+          notes:
+            nextStatus === TransactionStatus.PA_NOT_REQUIRED
+              ? `[PA_EXEMPT] ${exemptionEval.policyVersion}: ${exemptionEval.reason}`
+              : dto.remarks || 'Weigh-in processed successfully',
         },
       });
 
@@ -363,6 +394,21 @@ export class WeighbridgeService {
         status: 'SUCCESS',
       })
       .catch(() => {});
+
+    // Log PA exemption when applied
+    if (nextStatus === TransactionStatus.PA_NOT_REQUIRED) {
+      await this.activityLogsService
+        .logAction({
+          userId: user.id,
+          action: 'PA_EXEMPTION_APPLIED',
+          module: 'WEIGHBRIDGE',
+          referenceId: transactionId,
+          description:
+            exemptionEval.reason || 'PA exemption applied via master catalog',
+          status: 'SUCCESS',
+        })
+        .catch(() => {});
+    }
 
     return {
       success: true,
@@ -549,9 +595,24 @@ export class WeighbridgeService {
       });
     }
 
-    const netWeight = isRejected
-      ? Math.max(0, finalGrossWeight - finalTareWeight)
-      : finalGrossWeight - finalTareWeight;
+    // Calculate physical difference between scale readings (load cell delta)
+    const physicalScaleDelta = Math.max(0, finalGrossWeight - finalTareWeight);
+
+    // Audit Rule: Definition of columns
+    // 1. Transaction.netWeight: represents the physical scale differential (finalGrossWeight - finalTareWeight),
+    //    e.g. 30 kg for QC_VEHICLE_REJECTED (scale variance/fuel), or e.g. 15,000 kg if unloaded.
+    // 2. Accepted Inventory (Penerimaan Stok):
+    //    - If QC_VEHICLE_REJECTED: Cargo was NEVER unloaded. actualWeight = 0 kg, accepted inventory = 0 kg.
+    //    - If INCOMING_CHECK_REJECTED: Material was physically unloaded into hopper/silo before incoming inspection failed!
+    //      Physical scale delta reflects unloaded mass (e.g. 15,000 kg), but the material is QUARANTINED / INCIDENT.
+    //      Normal accepted stock = 0 kg. It must be tracked under quarantined inventory.
+    const netWeight = physicalScaleDelta;
+    let actualWeight: number | null | undefined = tx.actualWeight;
+    if (tx.status === 'QC_VEHICLE_REJECTED') {
+      actualWeight = 0;
+    } else if (tx.status === 'INCOMING_CHECK_REJECTED') {
+      actualWeight = physicalScaleDelta; // Physical material entered facility, but quarantined
+    }
 
     // 4. Update data in transaction
     const updated = await this.prisma.$transaction(async (prismaTx) => {
@@ -573,6 +634,15 @@ export class WeighbridgeService {
       });
       const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
+      let recordRemarks = dto.remarks || null;
+      if (tx.status === 'QC_VEHICLE_REJECTED') {
+        const detail = `[REJECT: Selisih skala fisik ${physicalScaleDelta} kg, Muatan tidak dibongkar, Penerimaan stok diakui: 0 kg]`;
+        recordRemarks = dto.remarks ? `${dto.remarks} ${detail}` : detail;
+      } else if (tx.status === 'INCOMING_CHECK_REJECTED') {
+        const detail = `[INCOMING_REJECT: Material fisik telah dibongkar (${physicalScaleDelta} kg). Status inventori: DIKARANTINA / INSIDEN OPERASIONAL. Penerimaan stok baik diakui: 0 kg]`;
+        recordRemarks = dto.remarks ? `${dto.remarks} ${detail}` : detail;
+      }
+
       await prismaTx.weighbridgeRecord.create({
         data: {
           transactionId,
@@ -581,7 +651,7 @@ export class WeighbridgeService {
           weight: dto.weight,
           ticketNumber: dto.ticketNumber || null,
           operatorId: user.id,
-          remarks: dto.remarks || null,
+          remarks: recordRemarks,
         },
       });
 
@@ -600,6 +670,7 @@ export class WeighbridgeService {
           grossWeight: finalGrossWeight,
           tareWeight: finalTareWeight,
           netWeight: netWeight,
+          ...(actualWeight !== undefined && { actualWeight }),
           revision: { increment: 1 },
         },
       });
@@ -613,13 +684,22 @@ export class WeighbridgeService {
         });
       }
 
+      let statusNotes = dto.remarks || 'Weigh-out processed successfully';
+      if (tx.status === 'QC_VEHICLE_REJECTED') {
+        const detail = `[REJECT_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Muatan tidak dibongkar; Penerimaan persediaan diakui: 0 kg.`;
+        statusNotes = dto.remarks ? `${dto.remarks} | ${detail}` : detail;
+      } else if (tx.status === 'INCOMING_CHECK_REJECTED') {
+        const detail = `[INCOMING_CHECK_REJECTED_WEIGH_OUT] Selisih fisik timbangan: ${physicalScaleDelta} kg (Gross: ${finalGrossWeight} kg, Keluar: ${finalTareWeight} kg). Material fisik telah masuk fasilitas; Status inventori: DIKARANTINA / INSIDEN OPERASIONAL; Penerimaan stok reguler: 0 kg.`;
+        statusNotes = dto.remarks ? `${dto.remarks} | ${detail}` : detail;
+      }
+
       await prismaTx.transactionStatusHistory.create({
         data: {
           transactionId,
           oldStatus: tx.status,
           newStatus: 'WEIGH_OUT_DONE',
           changedById: user.id,
-          notes: dto.remarks || 'Weigh-out processed successfully',
+          notes: statusNotes,
         },
       });
 

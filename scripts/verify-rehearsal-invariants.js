@@ -134,10 +134,16 @@ async function main() {
     reconciledFiles++;
   }
 
-  console.log(`Attachment reconciliation summary: DB=${actualCounts.attachments}, Reconciled=${reconciledFiles}, Missing=${missingFiles}`);
+  const migrationsDir = path.resolve(projectRoot, 'backend/prisma/migrations');
+  const expectedMigrations = fs.existsSync(migrationsDir)
+    ? fs.readdirSync(migrationsDir).filter(f => {
+        const full = path.join(migrationsDir, f);
+        return fs.statSync(full).isDirectory() && /^\d{14}_/.test(f);
+      }).length
+    : 22;
 
   const passed = (tableCount >= 14) &&
-                 (migrationCount === 20) &&
+                 (migrationCount === expectedMigrations) &&
                  (totalDupes === 0) &&
                  (totalOrphans === 0) &&
                  (gbbCompleted > 0) &&
