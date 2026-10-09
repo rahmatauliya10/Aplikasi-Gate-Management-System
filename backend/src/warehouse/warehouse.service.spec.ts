@@ -32,10 +32,20 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     userWarehouseAccess: {
       findMany: jest.fn(),
     },
+    user: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'usr-wh-1',
+        name: 'Warehouse Operator',
+        role: 'WAREHOUSE_OPERATOR',
+      }),
+    },
   };
 
   const mockActivityLogsService = {
     logAction: jest.fn().mockResolvedValue({}),
+    logActionStrict: jest
+      .fn()
+      .mockImplementation((data) => mockActivityLogsService.logAction(data)),
   };
 
   const mockAuthScopeService = {
@@ -570,6 +580,126 @@ describe('WarehouseService Revisioning (P1-01)', () => {
 
         // Must still block start and execute no transaction
         expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('detects failure injected into real Prisma ActivityLog write path (not just mocked logAction) and blocks start', async () => {
+        // Instantiate real ActivityLogsService wired to mockPrismaService
+        const realActivityLogsService = new ActivityLogsService(
+          mockPrismaService as any,
+        );
+        const warehouseWithRealAudit = new WarehouseService(
+          mockPrismaService as any,
+          realActivityLogsService,
+          mockAuthScopeService as any,
+        );
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createValidGspSolarTx(),
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: 'GSP' },
+        ]);
+        // Inject failure directly into Prisma activityLog.create
+        mockPrismaService.activityLog = {
+          create: jest
+            .fn()
+            .mockRejectedValueOnce(
+              new Error(
+                'Prisma database connection dropped during audit write',
+              ),
+            ),
+        };
+
+        try {
+          await warehouseWithRealAudit.startWarehouse(
+            'tx-gsp-chk-1',
+            {
+              suratJalanNumber: 'SJ-CHK-01',
+              poNumber: 'PO-CHK-01',
+              preUnloadChecklist: canonicalChecklistWithNotOk as any,
+            },
+            mockWarehouseUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          const response = err.getResponse();
+          expect(response.errors).toContain(
+            'PREUNLOAD_CHECKLIST_AUDIT_LOG_FAILED',
+          );
+          expect(response.errors).not.toContain(
+            'PREUNLOAD_CHECKLIST_ITEMS_NOT_OK',
+          );
+        }
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('confirms failed checklist records are persisted and retrievable from ActivityLog after successful acknowledgment', async () => {
+        const storedLogs: any[] = [];
+        mockPrismaService.activityLog = {
+          create: jest.fn().mockImplementation(async ({ data }) => {
+            const record = {
+              id: `log-${Date.now()}`,
+              ...data,
+              createdAt: new Date(),
+            };
+            storedLogs.push(record);
+            return record;
+          }),
+          findMany: jest.fn().mockImplementation(async ({ where }) => {
+            return storedLogs.filter(
+              (l) =>
+                (!where.referenceId || l.referenceId === where.referenceId) &&
+                (!where.action || l.action === where.action),
+            );
+          }),
+        };
+
+        const realActivityLogsService = new ActivityLogsService(
+          mockPrismaService as any,
+        );
+        const warehouseWithRealAudit = new WarehouseService(
+          mockPrismaService as any,
+          realActivityLogsService,
+          mockAuthScopeService as any,
+        );
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          createValidGspSolarTx(),
+        );
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: 'GSP' },
+        ]);
+
+        try {
+          await warehouseWithRealAudit.startWarehouse(
+            'tx-gsp-chk-persisted',
+            {
+              suratJalanNumber: 'SJ-CHK-01',
+              poNumber: 'PO-CHK-01',
+              preUnloadChecklist: canonicalChecklistWithNotOk as any,
+            },
+            mockWarehouseUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          const response = err.getResponse();
+          expect(response.errors).toContain('PREUNLOAD_CHECKLIST_ITEMS_NOT_OK');
+        }
+
+        // Verify the record can actually be retrieved from ActivityLog
+        const retrieved = await mockPrismaService.activityLog.findMany({
+          where: {
+            referenceId: 'tx-gsp-chk-persisted',
+            action: 'GSP_PREUNLOAD_CHECKLIST_FAILED',
+          },
+        });
+        expect(retrieved).toHaveLength(1);
+        expect(retrieved[0].action).toBe('GSP_PREUNLOAD_CHECKLIST_FAILED');
+        expect(retrieved[0].status).toBe('FAILED');
+        expect(retrieved[0].description).toContain('DOOR_SEAL_GOOD');
       });
     });
   });

@@ -5,7 +5,10 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { QcProductAnalysisService } from './qc-product-analysis.service';
+import {
+  QcProductAnalysisService,
+  parseStrictFiniteNumber,
+} from './qc-product-analysis.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import {
@@ -1511,6 +1514,219 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           }),
         );
       });
+    });
+
+    describe('parseStrictFiniteNumber - Type and Format Strictness', () => {
+      it('accepts valid JS finite numbers and decimal strings', () => {
+        expect(parseStrictFiniteNumber(40, 'param')).toBe(40);
+        expect(parseStrictFiniteNumber('40', 'param')).toBe(40);
+        expect(parseStrictFiniteNumber(40.5, 'param')).toBe(40.5);
+        expect(parseStrictFiniteNumber('40.5', 'param')).toBe(40.5);
+        expect(parseStrictFiniteNumber(0.14, 'param')).toBe(0.14);
+        expect(parseStrictFiniteNumber('0.14', 'param')).toBe(0.14);
+        expect(parseStrictFiniteNumber('.5', 'param')).toBe(0.5);
+        expect(parseStrictFiniteNumber('-5', 'param')).toBe(-5);
+        expect(parseStrictFiniteNumber('+12.5', 'param')).toBe(12.5);
+      });
+
+      it('rejects boolean values (true, false) to prevent implicit coercion', () => {
+        expect(() => parseStrictFiniteNumber(true, 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber(false, 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('rejects arrays (e.g. [40], ["40"]) to prevent implicit array coercion', () => {
+        expect(() => parseStrictFiniteNumber([40], 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber(['40'], 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('rejects objects to prevent implicit object coercion', () => {
+        expect(() => parseStrictFiniteNumber({}, 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber({ value: 40 }, 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('rejects hexadecimal strings (e.g. "0x28", "0x2F")', () => {
+        expect(() => parseStrictFiniteNumber('0x28', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('0x2F', 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('rejects octal and binary formatted strings', () => {
+        expect(() => parseStrictFiniteNumber('0o10', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('0b101', 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('rejects empty, whitespace-only, and non-numeric strings', () => {
+        expect(() => parseStrictFiniteNumber('', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('   ', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('abc', 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('rejects Infinity, -Infinity, NaN strings and values, and exponent overflow', () => {
+        expect(() => parseStrictFiniteNumber('Infinity', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('-Infinity', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('NaN', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('1e309', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber(Infinity, 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber(-Infinity, 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber(NaN, 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+    });
+
+    describe('Adversarial API-level submissions with coerced types', () => {
+      const validRapidSensory = {
+        visual: 'Jernih',
+        foreignMatters: 'Tidak ada kontaminasi',
+        packagingLabel: 'Kemasan & label tidak rusak',
+      };
+
+      const createRapidTx = () => ({
+        id: 'tx-rapid-adv',
+        status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'Rapid Klen',
+        gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+        revision: 1,
+      });
+
+      it.each([
+        ['boolean true', true],
+        ['boolean false', false],
+        ['array [40]', [40]],
+        ['array ["40"]', ['40']],
+        ['object', { val: 40 }],
+        ['hex string "0x28"', '0x28'],
+        ['whitespace string', '   '],
+        ['exponent overflow string "1e309"', '1e309'],
+        ['Infinity string', 'Infinity'],
+        ['NaN string', 'NaN'],
+      ])(
+        'Rapid Klen rejects %s in alkalinityNa2O with HTTP 400 without mutating transaction',
+        async (_, invalidVal) => {
+          mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+            createRapidTx(),
+          );
+          mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce(
+            [],
+          );
+
+          await expect(
+            service.submitProductAnalysis(
+              'tx-rapid-adv',
+              {
+                productCategory: 'Chemical',
+                productName: 'Rapid Klen',
+                parameters: {
+                  sensory: validRapidSensory,
+                  alkalinityNa2O: invalidVal as any,
+                  alkalinityNaOH: 46.0,
+                  ph: 13.0,
+                  density: 1.45,
+                },
+                revision: 1,
+              },
+              mockAnalystUser,
+            ),
+          ).rejects.toThrow(BadRequestException);
+
+          expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each([
+        ['boolean true', true],
+        ['boolean false', false],
+        ['array [30]', [30]],
+        ['array ["30"]', ['30']],
+        ['object', { moisture: 30 }],
+        ['hex string "0x28"', '0x28'],
+        ['whitespace string', '   '],
+        ['exponent overflow string "1e309"', '1e309'],
+        ['Infinity string', 'Infinity'],
+        ['NaN string', 'NaN'],
+      ])(
+        'Coal rejects %s in moisture with HTTP 400 INVALID_MOISTURE_MEASUREMENT without mutating transaction',
+        async (_, invalidMoisture) => {
+          mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+            id: 'tx-coal-adv',
+            status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
+            processType: ProcessType.GSP,
+            cargoType: 'Coal',
+            cargoSubType: 'Batubara',
+            gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+            revision: 1,
+          });
+          mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce(
+            [],
+          );
+
+          try {
+            await service.submitProductAnalysis(
+              'tx-coal-adv',
+              {
+                productCategory: 'Coal',
+                productName: 'Batubara',
+                parameters: {
+                  calorieBand: 'COAL_5600_6000',
+                  visual: validCoalVisual,
+                  moisture: invalidMoisture as any,
+                },
+                revision: 1,
+              },
+              mockAnalystUser,
+            );
+            fail('Expected BadRequestException');
+          } catch (err: any) {
+            expect(err).toBeInstanceOf(BadRequestException);
+            expect(err.getResponse()).toEqual(
+              expect.objectContaining({
+                error: 'INVALID_MOISTURE_MEASUREMENT',
+              }),
+            );
+          }
+
+          expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+        },
+      );
     });
   });
 });

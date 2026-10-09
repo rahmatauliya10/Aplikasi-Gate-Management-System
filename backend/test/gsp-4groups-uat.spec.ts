@@ -136,6 +136,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
 
     mockActivityLogsService = {
       logAction: jest.fn().mockResolvedValue({}),
+      logActionStrict: jest
+        .fn()
+        .mockImplementation((dto) => mockActivityLogsService.logAction(dto)),
     };
 
     mockAuthScopeService = {

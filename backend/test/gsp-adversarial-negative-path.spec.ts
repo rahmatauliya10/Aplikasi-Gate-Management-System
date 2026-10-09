@@ -134,6 +134,9 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
 
     mockActivityLogsService = {
       logAction: jest.fn().mockResolvedValue({}),
+      logActionStrict: jest
+        .fn()
+        .mockImplementation((dto) => mockActivityLogsService.logAction(dto)),
     };
 
     mockAuthScopeService = {
@@ -911,6 +914,106 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
           }),
         }),
       );
+    });
+
+    it('Vector 30: Rapid Klen strictly rejects hex, boolean, array, and non-finite inputs with HTTP 400', async () => {
+      const rkTx = {
+        id: 'tx-rk-hex-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical',
+        cargoSubType: 'Rapid Klen',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        revision: 2,
+      };
+
+      for (const invalidNa2O of [
+        '0x28',
+        true,
+        [40],
+        '1e309',
+        'Infinity',
+        'NaN',
+      ]) {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rkTx);
+        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
+
+        await expect(
+          qcAnalysisService.submitProductAnalysis(
+            'tx-rk-hex-adv',
+            {
+              productCategory: 'Chemical',
+              productName: 'Rapid Klen',
+              parameters: {
+                sensory: {
+                  visual: 'Jernih',
+                  foreignMatters: 'Tidak ada kontaminasi',
+                  packagingLabel: 'Kemasan & label tidak rusak',
+                },
+                alkalinityNa2O: invalidNa2O as any,
+                alkalinityNaOH: 46.0,
+                ph: 13.0,
+                density: 1.45,
+              },
+              revision: 2,
+            },
+            qcAnalystUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      }
+    });
+
+    it('Vector 31: Coal strictly rejects hex, boolean, array, and non-finite moisture with HTTP 400 INVALID_MOISTURE_MEASUREMENT', async () => {
+      const coalTx = {
+        id: 'tx-coal-hex-adv',
+        processType: ProcessType.GSP,
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        revision: 2,
+      };
+
+      for (const invalidMoisture of [
+        '0x28',
+        true,
+        [30],
+        '1e309',
+        'Infinity',
+        'NaN',
+      ]) {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+        mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
+
+        try {
+          await qcAnalysisService.submitProductAnalysis(
+            'tx-coal-hex-adv',
+            {
+              productCategory: 'Coal',
+              productName: 'Batubara',
+              parameters: {
+                calorieBand: 'COAL_5600_6000',
+                visual: {
+                  kondisi: 'Kering (Tidak Basah)',
+                  warna: 'Hitam',
+                  levelRank: 'Medium Rank Coal',
+                  kilap: 'Hitam Mengkilap',
+                  bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah',
+                },
+                moisture: invalidMoisture as any,
+              },
+              revision: 2,
+            },
+            qcAnalystUser,
+          );
+          fail('Expected BadRequestException');
+        } catch (err: any) {
+          expect(err).toBeInstanceOf(BadRequestException);
+          expect(err.getResponse()).toEqual(
+            expect.objectContaining({
+              error: 'INVALID_MOISTURE_MEASUREMENT',
+            }),
+          );
+        }
+      }
     });
   });
 });

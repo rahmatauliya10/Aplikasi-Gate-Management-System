@@ -40,8 +40,21 @@ import { SpecificationProvider } from './providers/specification.provider';
 
 /**
  * Strictly parses and validates that an input parameter is a valid finite number.
- * Rejects undefined, null, empty string, non-numeric strings, "Infinity", "-Infinity", "NaN",
- * and values that overflow to Infinity in JavaScript.
+ * Explicitly rejects:
+ * - null or undefined
+ * - boolean values (true, false)
+ * - arrays (e.g. [40], ["40"])
+ * - objects (e.g. { value: 40 })
+ * - hexadecimal strings (e.g. "0x28", "0x2F")
+ * - octal/binary strings (e.g. "0o10", "0b101")
+ * - whitespace-only or empty strings
+ * - non-numeric strings
+ * - non-finite strings ("Infinity", "-Infinity", "NaN")
+ * - exponent overflow (e.g. "1e309")
+ *
+ * Accepts ONLY:
+ * - JavaScript finite numbers (typeof value === 'number' && Number.isFinite(value) && !Number.isNaN(value))
+ * - Standard decimal strings (e.g. "40", "40.5", "0.14", ".5", "-5")
  */
 export function parseStrictFiniteNumber(
   value: unknown,
@@ -53,21 +66,49 @@ export function parseStrictFiniteNumber(
     );
   }
 
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (trimmed === '') {
-      throw new BadRequestException(
-        `Parameter '${fieldName}' tidak boleh kosong dan harus berupa angka numerik finite valid.`,
-      );
-    }
-    if (/^[+-]?infinity$/i.test(trimmed) || trimmed.toLowerCase() === 'nan') {
-      throw new BadRequestException(
-        `Parameter '${fieldName}' tidak valid (non-finite atau NaN). Nilai harus berupa angka finite.`,
-      );
-    }
+  if (typeof value === 'boolean') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak boleh bertipe boolean. Nilai harus berupa angka numerik finite valid.`,
+    );
   }
 
-  const num = Number(value);
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak valid (tipe data ${typeof value}). Nilai harus berupa angka numerik finite valid.`,
+    );
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Number.isNaN(value)) {
+      throw new BadRequestException(
+        `Parameter '${fieldName}' harus berupa angka numerik finite valid (tidak boleh non-finite, NaN, atau overflow).`,
+      );
+    }
+    return value;
+  }
+
+  // At this point, typeof value === 'string'
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak boleh kosong dan harus berupa angka numerik finite valid.`,
+    );
+  }
+
+  if (/^[+-]?infinity$/i.test(trimmed) || trimmed.toLowerCase() === 'nan') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak valid (non-finite atau NaN). Nilai harus berupa angka finite.`,
+    );
+  }
+
+  // Reject hexadecimal ("0x..."), octal ("0o..."), binary ("0b..."), and any non-decimal representations
+  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak valid ('${value}'). Format harus berupa angka desimal standar (tidak mendukung heksadesimal atau format lainnya).`,
+    );
+  }
+
+  const num = Number(trimmed);
   if (!Number.isFinite(num) || Number.isNaN(num)) {
     throw new BadRequestException(
       `Parameter '${fieldName}' harus berupa angka numerik finite valid (tidak boleh non-finite, NaN, atau overflow).`,
@@ -437,11 +478,7 @@ export class QcProductAnalysisService {
             : undefined;
 
       const rawMoistureVal = rawParams.moisture ?? rawParams.totalMoisture;
-      if (
-        rawMoistureVal === undefined ||
-        rawMoistureVal === null ||
-        String(rawMoistureVal).trim() === ''
-      ) {
+      if (rawMoistureVal === undefined || rawMoistureVal === null) {
         throw new BadRequestException({
           message:
             'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
@@ -449,8 +486,45 @@ export class QcProductAnalysisService {
         });
       }
 
-      if (typeof rawMoistureVal === 'string') {
+      if (typeof rawMoistureVal === 'boolean') {
+        throw new BadRequestException({
+          message:
+            'Kadar air (total moisture) batubara tidak boleh bertipe boolean. Nilai harus berupa angka finite antara 0% dan 100%.',
+          error: 'INVALID_MOISTURE_MEASUREMENT',
+        });
+      }
+
+      if (
+        typeof rawMoistureVal !== 'number' &&
+        typeof rawMoistureVal !== 'string'
+      ) {
+        throw new BadRequestException({
+          message:
+            'Kadar air (total moisture) batubara tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.',
+          error: 'INVALID_MOISTURE_MEASUREMENT',
+        });
+      }
+
+      let parsedMoisture: number;
+
+      if (typeof rawMoistureVal === 'number') {
+        if (!Number.isFinite(rawMoistureVal) || Number.isNaN(rawMoistureVal)) {
+          throw new BadRequestException({
+            message:
+              'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
+            error: 'INVALID_MOISTURE_MEASUREMENT',
+          });
+        }
+        parsedMoisture = rawMoistureVal;
+      } else {
         const trimmed = rawMoistureVal.trim();
+        if (trimmed === '') {
+          throw new BadRequestException({
+            message:
+              'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
+            error: 'INVALID_MOISTURE_MEASUREMENT',
+          });
+        }
         if (
           /^[+-]?infinity$/i.test(trimmed) ||
           trimmed.toLowerCase() === 'nan'
@@ -461,15 +535,27 @@ export class QcProductAnalysisService {
             error: 'INVALID_MOISTURE_MEASUREMENT',
           });
         }
+
+        // Reject hex ("0x..."), octal ("0o..."), binary ("0b..."), and any non-decimal representations
+        if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+          throw new BadRequestException({
+            message: `Kadar air (total moisture) batubara ('${rawMoistureVal}') tidak valid. Format harus berupa angka desimal standar (tidak mendukung heksadesimal).`,
+            error: 'INVALID_MOISTURE_MEASUREMENT',
+          });
+        }
+
+        const num = Number(trimmed);
+        if (!Number.isFinite(num) || Number.isNaN(num)) {
+          throw new BadRequestException({
+            message:
+              'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite, NaN, atau overflow).',
+            error: 'INVALID_MOISTURE_MEASUREMENT',
+          });
+        }
+        parsedMoisture = num;
       }
 
-      const parsedMoisture = Number(rawMoistureVal);
-      if (
-        !Number.isFinite(parsedMoisture) ||
-        Number.isNaN(parsedMoisture) ||
-        parsedMoisture < 0 ||
-        parsedMoisture > 100
-      ) {
+      if (parsedMoisture < 0 || parsedMoisture > 100) {
         throw new BadRequestException({
           message: `Kadar air (total moisture) batubara (${rawMoistureVal}) tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.`,
           error: 'INVALID_MOISTURE_MEASUREMENT',

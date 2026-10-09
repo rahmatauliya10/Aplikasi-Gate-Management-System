@@ -519,25 +519,35 @@ export class WarehouseService {
           if (item.notes) failedItemNotes[item.code] = item.notes;
         });
 
+        const auditPayload = {
+          userId: user.id,
+          userName: user.name || user.email,
+          role: user.role,
+          action: 'GSP_PREUNLOAD_CHECKLIST_FAILED',
+          module: 'WAREHOUSE',
+          referenceId: transactionId,
+          description: JSON.stringify({
+            checklistVersion: GSP_PREUNLOAD_VERSION,
+            submittedItems: submittedItems.map((item) => ({
+              code: item.code,
+              result: item.result,
+            })),
+            failedItemCodes,
+            failedItemNotes,
+            operatorId: user.id,
+            timestamp: new Date().toISOString(),
+          }),
+          status: 'FAILED' as const,
+        };
+
         try {
-          await this.activityLogsService.logAction({
-            userId: user.id,
-            action: 'GSP_PREUNLOAD_CHECKLIST_FAILED',
-            module: 'WAREHOUSE',
-            referenceId: transactionId,
-            description: JSON.stringify({
-              checklistVersion: GSP_PREUNLOAD_VERSION,
-              submittedItems: submittedItems.map((item) => ({
-                code: item.code,
-                result: item.result,
-              })),
-              failedItemCodes,
-              failedItemNotes,
-              operatorId: user.id,
-              timestamp: new Date().toISOString(),
-            }),
-            status: 'FAILED',
-          });
+          if (typeof this.activityLogsService.logActionStrict === 'function') {
+            await this.activityLogsService.logActionStrict(auditPayload);
+          } else {
+            await this.activityLogsService.logAction(auditPayload, undefined, {
+              requireDb: true,
+            });
+          }
         } catch (auditError: any) {
           this.logger.error(
             `Gagal mencatat ActivityLog audit untuk GSP_PREUNLOAD_CHECKLIST_FAILED: ${auditError?.message || auditError}`,

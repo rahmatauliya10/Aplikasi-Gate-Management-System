@@ -85,6 +85,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
     mockActivityLogsService = {
       logAction: jest.fn().mockResolvedValue({}),
+      logActionStrict: jest
+        .fn()
+        .mockImplementation((dto) => mockActivityLogsService.logAction(dto)),
     };
 
     mockAuthScopeService = {
