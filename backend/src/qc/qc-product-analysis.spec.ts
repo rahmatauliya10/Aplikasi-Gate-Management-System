@@ -1586,6 +1586,33 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         );
       });
 
+      it('rejects scientific/exponent notation strings (e.g. "1e2", "4.6e1", "1e309")', () => {
+        expect(() => parseStrictFiniteNumber('1e2', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('4.6e1', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('1e309', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('-2.5e3', 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
+      it('accepts ordinary finite decimal strings and valid frontend numeric payloads', () => {
+        expect(parseStrictFiniteNumber('40', 'param')).toBe(40);
+        expect(parseStrictFiniteNumber('40.5', 'param')).toBe(40.5);
+        expect(parseStrictFiniteNumber('.5', 'param')).toBe(0.5);
+        expect(parseStrictFiniteNumber('0.14', 'param')).toBe(0.14);
+        expect(parseStrictFiniteNumber('-5.2', 'param')).toBe(-5.2);
+        expect(parseStrictFiniteNumber('+12.3', 'param')).toBe(12.3);
+        expect(parseStrictFiniteNumber(40, 'param')).toBe(40);
+        expect(parseStrictFiniteNumber(40.5, 'param')).toBe(40.5);
+        expect(parseStrictFiniteNumber(0, 'param')).toBe(0);
+      });
+
       it('rejects Infinity, -Infinity, NaN strings and values, and exponent overflow', () => {
         expect(() => parseStrictFiniteNumber('Infinity', 'param')).toThrow(
           BadRequestException,
@@ -1635,6 +1662,8 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         ['array ["40"]', ['40']],
         ['object', { val: 40 }],
         ['hex string "0x28"', '0x28'],
+        ['scientific notation "1e2"', '1e2'],
+        ['scientific notation "4.6e1"', '4.6e1'],
         ['whitespace string', '   '],
         ['exponent overflow string "1e309"', '1e309'],
         ['Infinity string', 'Infinity'],
@@ -1679,6 +1708,8 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         ['array ["30"]', ['30']],
         ['object', { moisture: 30 }],
         ['hex string "0x28"', '0x28'],
+        ['scientific notation "1e2"', '1e2'],
+        ['scientific notation "4.6e1"', '4.6e1'],
         ['whitespace string', '   '],
         ['exponent overflow string "1e309"', '1e309'],
         ['Infinity string', 'Infinity'],

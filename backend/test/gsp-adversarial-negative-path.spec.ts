@@ -928,6 +928,8 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
 
       for (const invalidNa2O of [
         '0x28',
+        '1e2',
+        '4.6e1',
         true,
         [40],
         '1e309',
@@ -974,6 +976,8 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
 
       for (const invalidMoisture of [
         '0x28',
+        '1e2',
+        '4.6e1',
         true,
         [30],
         '1e309',

@@ -50,7 +50,7 @@ import { SpecificationProvider } from './providers/specification.provider';
  * - whitespace-only or empty strings
  * - non-numeric strings
  * - non-finite strings ("Infinity", "-Infinity", "NaN")
- * - exponent overflow (e.g. "1e309")
+ * - scientific/exponent notation (e.g. "1e2", "4.6e1", "1e309")
  *
  * Accepts ONLY:
  * - JavaScript finite numbers (typeof value === 'number' && Number.isFinite(value) && !Number.isNaN(value))
@@ -101,10 +101,10 @@ export function parseStrictFiniteNumber(
     );
   }
 
-  // Reject hexadecimal ("0x..."), octal ("0o..."), binary ("0b..."), and any non-decimal representations
-  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+  // Reject hexadecimal ("0x..."), octal ("0o..."), binary ("0b..."), scientific notation ("1e2"), and any non-decimal representations
+  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
     throw new BadRequestException(
-      `Parameter '${fieldName}' tidak valid ('${value}'). Format harus berupa angka desimal standar (tidak mendukung heksadesimal atau format lainnya).`,
+      `Parameter '${fieldName}' tidak valid ('${value}'). Format harus berupa angka desimal standar (tidak mendukung notasi ilmiah/eksponensial atau heksadesimal).`,
     );
   }
 
@@ -536,10 +536,10 @@ export class QcProductAnalysisService {
           });
         }
 
-        // Reject hex ("0x..."), octal ("0o..."), binary ("0b..."), and any non-decimal representations
-        if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(trimmed)) {
+        // Reject hex ("0x..."), octal ("0o..."), binary ("0b..."), scientific notation ("1e2"), and any non-decimal representations
+        if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
           throw new BadRequestException({
-            message: `Kadar air (total moisture) batubara ('${rawMoistureVal}') tidak valid. Format harus berupa angka desimal standar (tidak mendukung heksadesimal).`,
+            message: `Kadar air (total moisture) batubara ('${rawMoistureVal}') tidak valid. Format harus berupa angka desimal standar (tidak mendukung notasi ilmiah/eksponensial atau heksadesimal).`,
             error: 'INVALID_MOISTURE_MEASUREMENT',
           });
         }
