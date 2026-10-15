@@ -90,7 +90,8 @@ export class WarehouseController {
   @Post(':transactionId/checklist-disposition')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Submit pre-unload checklist disposition decision (ACCEPT_WITH_NOTE or REJECT)',
+    summary:
+      'Submit pre-unload checklist disposition decision (ACCEPT_WITH_NOTE or REJECT)',
   })
   @ApiResponse({
     status: 200,

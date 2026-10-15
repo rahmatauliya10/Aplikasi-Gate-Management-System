@@ -94,7 +94,8 @@ export class StartWarehouseDto {
   preUnloadChecklist?: PreUnloadChecklistDto;
 
   @ApiPropertyOptional({
-    description: 'GSP Pre-unloading checklist disposition decision (if any NOT_OK)',
+    description:
+      'GSP Pre-unloading checklist disposition decision (if any NOT_OK)',
     type: GspChecklistDispositionDto,
   })
   @IsOptional()

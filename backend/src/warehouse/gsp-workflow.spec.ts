@@ -411,7 +411,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             id: 'tx-solar-1',
-            status: { in: ['QC_VEHICLE_PASSED', 'PA_NOT_REQUIRED', 'WAITING_GSP_CHECKLIST_DISPOSITION'] },
+            status: {
+              in: [
+                'QC_VEHICLE_PASSED',
+                'PA_NOT_REQUIRED',
+                'WAITING_GSP_CHECKLIST_DISPOSITION',
+              ],
+            },
           }),
           data: expect.objectContaining({
             status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
@@ -892,7 +898,8 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         status: 'ACCEPT_WITH_NOTE',
         result: QcResult.REJECT, // Lab result remains factual OOS!
         dispositionAction: 'ACCEPT_WITH_NOTE',
-        dispositionReason: 'Penyimpangan pH diterima PIC Gudang GSP dengan catatan',
+        dispositionReason:
+          'Penyimpangan pH diterima PIC Gudang GSP dengan catatan',
         dispositionById: 'usr-wh-gsp',
         dispositionAt: new Date(),
         parameters: {
@@ -988,7 +995,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       ]);
 
       await expect(
-        warehouseService.startWarehouse('tx-chem-falsified-pass', validStartGspDto, mockUser),
+        warehouseService.startWarehouse(
+          'tx-chem-falsified-pass',
+          validStartGspDto,
+          mockUser,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1032,7 +1043,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       ]);
 
       await expect(
-        warehouseService.startWarehouse('tx-chem-missing-reason', validStartGspDto, mockUser),
+        warehouseService.startWarehouse(
+          'tx-chem-missing-reason',
+          validStartGspDto,
+          mockUser,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1076,7 +1091,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       ]);
 
       await expect(
-        warehouseService.startWarehouse('tx-chem-missing-actor', validStartGspDto, mockUser),
+        warehouseService.startWarehouse(
+          'tx-chem-missing-actor',
+          validStartGspDto,
+          mockUser,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1126,7 +1145,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       ]);
 
       await expect(
-        warehouseService.startWarehouse('tx-chem-critical-defect', validStartGspDto, mockUser),
+        warehouseService.startWarehouse(
+          'tx-chem-critical-defect',
+          validStartGspDto,
+          mockUser,
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -1462,7 +1485,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         revision: 2,
       };
 
-      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(waitingGspTx);
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        waitingGspTx,
+      );
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);
@@ -1960,7 +1985,12 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             checklistItems: {
               version: 'GSP-PREUNLOAD-2026.1',
               items: [
-                { code: 'CLEAN_VEHICLE', result: 'NOT_OK', notes: 'Bak kotor', photoUrl: 'data:image/png;base64,abc' },
+                {
+                  code: 'CLEAN_VEHICLE',
+                  result: 'NOT_OK',
+                  notes: 'Bak kotor',
+                  photoUrl: 'data:image/png;base64,abc',
+                },
               ],
             },
           },
@@ -1968,7 +1998,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       it('permits ACCEPT_WITH_NOTE concession: transitions to WAREHOUSE_IN_PROGRESS and records concession metadata', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockChecklistTx);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -1985,7 +2017,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             }),
           },
           warehouseProcess: {
-            findFirst: jest.fn().mockResolvedValue(mockChecklistTx.warehouseProcesses[0]),
+            findFirst: jest
+              .fn()
+              .mockResolvedValue(mockChecklistTx.warehouseProcesses[0]),
             update: jest.fn().mockResolvedValue({}),
           },
           transactionStatusHistory: {
@@ -1993,13 +2027,16 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           },
         };
 
-        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
 
         const res = await warehouseService.submitChecklistDisposition(
           'tx-chk-disposition-1',
           {
             action: 'ACCEPT_WITH_NOTE',
-            reason: 'Diterima dengan catatan oleh PIC Gudang GSP karena deviasi minor fisik luar',
+            reason:
+              'Diterima dengan catatan oleh PIC Gudang GSP karena deviasi minor fisik luar',
             revision: 4,
           },
           mockUser,
@@ -2030,7 +2067,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('permits REJECT decision: transitions to QC_VEHICLE_REJECTED', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockChecklistTx);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -2047,7 +2086,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             }),
           },
           warehouseProcess: {
-            findFirst: jest.fn().mockResolvedValue(mockChecklistTx.warehouseProcesses[0]),
+            findFirst: jest
+              .fn()
+              .mockResolvedValue(mockChecklistTx.warehouseProcesses[0]),
             update: jest.fn().mockResolvedValue({}),
           },
           transactionStatusHistory: {
@@ -2055,7 +2096,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           },
         };
 
-        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
 
         const res = await warehouseService.submitChecklistDisposition(
           'tx-chk-disposition-1',
@@ -2078,7 +2121,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
 
       it('rejects disposition submission if reason is shorter than 5 characters', async () => {
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockChecklistTx);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -2093,7 +2138,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
             mockUser,
           ),
-        ).rejects.toThrow('Alasan keputusan disposisi checklist wajib diisi (minimal 5 karakter).');
+        ).rejects.toThrow(
+          'Alasan keputusan disposisi checklist wajib diisi (minimal 5 karakter).',
+        );
       });
 
       it('rejects ACCEPT_WITH_NOTE if checklist contains non-concessible critical safety defect (e.g. NO_EXPIRED_GAS_CYLINDER or NO_PEST_OR_ANIMAL_TRACE)', async () => {
@@ -2106,15 +2153,23 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
                 items: [
-                  { code: 'NO_PEST_OR_ANIMAL_TRACE', label: 'Hama / binatang', result: 'NOT_OK' },
+                  {
+                    code: 'NO_PEST_OR_ANIMAL_TRACE',
+                    label: 'Hama / binatang',
+                    result: 'NOT_OK',
+                  },
                 ],
               },
             },
           ],
         };
 
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(criticalTx);
-        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(criticalTx.warehouseProcesses[0]);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          criticalTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          criticalTx.warehouseProcesses[0],
+        );
 
         await expect(
           warehouseService.submitChecklistDisposition(
@@ -2126,7 +2181,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
             mockUser,
           ),
-        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
+        ).rejects.toThrow(
+          'dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).',
+        );
       });
 
       it('rejects ACCEPT_WITH_NOTE for vehicle leak (VEHICLE_NO_LEAK_GOOD)', async () => {
@@ -2139,7 +2196,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
                 items: [
-                  { code: 'VEHICLE_NO_LEAK_GOOD', label: 'Kendaraan tidak bocor', result: 'NOT_OK' },
+                  {
+                    code: 'VEHICLE_NO_LEAK_GOOD',
+                    label: 'Kendaraan tidak bocor',
+                    result: 'NOT_OK',
+                  },
                 ],
               },
             },
@@ -2147,7 +2208,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         };
 
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(leakTx);
-        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(leakTx.warehouseProcesses[0]);
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          leakTx.warehouseProcesses[0],
+        );
 
         await expect(
           warehouseService.submitChecklistDisposition(
@@ -2159,7 +2222,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
             mockUser,
           ),
-        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
+        ).rejects.toThrow(
+          'dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).',
+        );
       });
 
       it('rejects ACCEPT_WITH_NOTE for broken seal (DOOR_SEAL_GOOD)', async () => {
@@ -2172,7 +2237,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
                 items: [
-                  { code: 'DOOR_SEAL_GOOD', label: 'Seal pintu baik', result: 'NOT_OK' },
+                  {
+                    code: 'DOOR_SEAL_GOOD',
+                    label: 'Seal pintu baik',
+                    result: 'NOT_OK',
+                  },
                 ],
               },
             },
@@ -2180,7 +2249,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         };
 
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(sealTx);
-        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(sealTx.warehouseProcesses[0]);
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          sealTx.warehouseProcesses[0],
+        );
 
         await expect(
           warehouseService.submitChecklistDisposition(
@@ -2192,7 +2263,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
             mockUser,
           ),
-        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
+        ).rejects.toThrow(
+          'dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).',
+        );
       });
 
       it('rejects ACCEPT_WITH_NOTE for CoA mismatch (COA_MATCHES_BATCH)', async () => {
@@ -2205,7 +2278,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
                 items: [
-                  { code: 'COA_MATCHES_BATCH', label: 'CoA sesuai batch', result: 'NOT_OK' },
+                  {
+                    code: 'COA_MATCHES_BATCH',
+                    label: 'CoA sesuai batch',
+                    result: 'NOT_OK',
+                  },
                 ],
               },
             },
@@ -2213,7 +2290,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         };
 
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coaTx);
-        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(coaTx.warehouseProcesses[0]);
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          coaTx.warehouseProcesses[0],
+        );
 
         await expect(
           warehouseService.submitChecklistDisposition(
@@ -2225,7 +2304,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
             mockUser,
           ),
-        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
+        ).rejects.toThrow(
+          'dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).',
+        );
       });
     });
   });

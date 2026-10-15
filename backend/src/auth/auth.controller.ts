@@ -218,7 +218,8 @@ export class AuthController {
     );
     return {
       success: true,
-      message: 'Akun berhasil dibuka kuncinya secara sah dan tercatat pada audit trail.',
+      message:
+        'Akun berhasil dibuka kuncinya secara sah dan tercatat pada audit trail.',
       data: {
         userId: targetUserId,
         unlockedBy: adminUser.id,

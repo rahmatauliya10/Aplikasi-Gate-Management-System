@@ -168,12 +168,14 @@ describe('AuthController & Cookie Fail-Closed Security', () => {
 
   describe('unlockUser', () => {
     it('should invoke authService.unlockUser with targetUserId, adminId, and audit reason', async () => {
-      const adminUser: any = { id: 'admin-1', email: 'admin@gms.local', role: 'ADMIN' };
-      const res = await controller.unlockUser(
-        'target-user-99',
-        adminUser,
-        { reason: 'Permintaan reset operator oleh Supervisor' },
-      );
+      const adminUser: any = {
+        id: 'admin-1',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      };
+      const res = await controller.unlockUser('target-user-99', adminUser, {
+        reason: 'Permintaan reset operator oleh Supervisor',
+      });
 
       expect(authService.unlockUser).toHaveBeenCalledWith(
         'target-user-99',

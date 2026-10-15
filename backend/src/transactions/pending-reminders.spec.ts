@@ -23,8 +23,8 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     };
     authScopeService = new AuthorizationScopeService();
     service = new TransactionsService(
-      mockPrisma as unknown as PrismaService,
-      mockActivityLogs as unknown as ActivityLogsService,
+      mockPrisma,
+      mockActivityLogs,
       authScopeService,
     );
   });
@@ -267,7 +267,9 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     const res = await service.getPendingReminders(adminUser);
 
     expect(res.data.reminders.length).toBe(2);
-    expect(res.data.reminders.every((r: any) => r.isMyAction === true)).toBe(true);
+    expect(res.data.reminders.every((r: any) => r.isMyAction === true)).toBe(
+      true,
+    );
     expect(res.data.summary.needActionCount).toBe(2);
   });
 
@@ -304,7 +306,11 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     const reminderId = 'tx-snooze-test-REGISTERED-1';
 
     // Shift A snoozes the reminder
-    const snoozeRes = await service.snoozeReminder(userShiftA.id, reminderId, 30);
+    const snoozeRes = await service.snoozeReminder(
+      userShiftA.id,
+      reminderId,
+      30,
+    );
     expect(snoozeRes.success).toBe(true);
 
     // When Shift A fetches reminders: item is snoozed
@@ -331,7 +337,10 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     const readRes = await service.markReminderRead(userId, reminderId);
     expect(readRes.success).toBe(true);
 
-    const readAllRes = await service.markAllRemindersRead(userId, [reminderId, 'rem-test-02']);
+    const readAllRes = await service.markAllRemindersRead(userId, [
+      reminderId,
+      'rem-test-02',
+    ]);
     expect(readAllRes.success).toBe(true);
     expect(readAllRes.data.count).toBe(2);
   });

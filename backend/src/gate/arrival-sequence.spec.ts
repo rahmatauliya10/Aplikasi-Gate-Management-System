@@ -23,10 +23,7 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
     mockActivityLogs = {
       logAction: jest.fn().mockResolvedValue({}),
     };
-    service = new GateService(
-      mockPrisma as unknown as PrismaService,
-      mockActivityLogs as unknown as ActivityLogsService,
-    );
+    service = new GateService(mockPrisma, mockActivityLogs);
   });
 
   it('1. should atomically allocate dailySequence = 1 for the first truck of the day', async () => {
@@ -41,13 +38,23 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
       transaction: {
         count: jest.fn().mockResolvedValue(0),
         findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'tx-1', ...data })),
+        create: jest
+          .fn()
+          .mockImplementation(({ data }) =>
+            Promise.resolve({ id: 'tx-1', ...data }),
+          ),
       },
     };
 
-    mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
+    mockPrisma.$transaction.mockImplementation(async (cb: any) =>
+      cb(mockTxClient),
+    );
 
-    const user: JwtPayloadUser = { id: 'sec-1', email: 'sec@gms.local', role: 'SECURITY' } as any;
+    const user: JwtPayloadUser = {
+      id: 'sec-1',
+      email: 'sec@gms.local',
+      role: 'SECURITY',
+    } as any;
 
     const result = await service.checkIn(
       {
@@ -56,7 +63,7 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
         driverPhone: '08123456789',
         vendorName: 'PT Logistik Prima',
         vehicleType: 'TRUCK_CDD',
-        processType: 'GBB' as any,
+        processType: 'GBB',
       },
       user,
     );
@@ -86,12 +93,22 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
       transaction: {
         count: jest.fn().mockResolvedValue(1),
         findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: `tx-${currentSeq}`, ...data })),
+        create: jest
+          .fn()
+          .mockImplementation(({ data }) =>
+            Promise.resolve({ id: `tx-${currentSeq}`, ...data }),
+          ),
       },
     };
 
-    mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
-    const user: JwtPayloadUser = { id: 'sec-1', email: 'sec@gms.local', role: 'SECURITY' } as any;
+    mockPrisma.$transaction.mockImplementation(async (cb: any) =>
+      cb(mockTxClient),
+    );
+    const user: JwtPayloadUser = {
+      id: 'sec-1',
+      email: 'sec@gms.local',
+      role: 'SECURITY',
+    } as any;
 
     // Second truck (GBJ)
     const resultGbj = await service.checkIn(
@@ -101,7 +118,7 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
         driverPhone: '08129876543',
         vendorName: 'PT Logistik Prima',
         vehicleType: 'TRUCK_WINGBOX',
-        processType: 'GBJ' as any,
+        processType: 'GBJ',
       },
       user,
     );
@@ -115,7 +132,7 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
         driverPhone: '08121111222',
         vendorName: 'PT Trans Kargo',
         vehicleType: 'TRUCK_FUSO',
-        processType: 'GBB' as any,
+        processType: 'GBB',
       },
       user,
     );
@@ -131,12 +148,22 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
       transaction: {
         count: jest.fn().mockResolvedValue(5),
         findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'tx-fallback', ...data })),
+        create: jest
+          .fn()
+          .mockImplementation(({ data }) =>
+            Promise.resolve({ id: 'tx-fallback', ...data }),
+          ),
       },
     };
 
-    mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTxClient));
-    const user: JwtPayloadUser = { id: 'sec-1', email: 'sec@gms.local', role: 'SECURITY' } as any;
+    mockPrisma.$transaction.mockImplementation(async (cb: any) =>
+      cb(mockTxClient),
+    );
+    const user: JwtPayloadUser = {
+      id: 'sec-1',
+      email: 'sec@gms.local',
+      role: 'SECURITY',
+    } as any;
 
     const result = await service.checkIn(
       {
@@ -145,7 +172,7 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
         driverPhone: '08123333444',
         vendorName: 'PT Maju Bersama',
         vehicleType: 'TRUCK_TRAILER',
-        processType: 'GBB' as any,
+        processType: 'GBB',
       },
       user,
     );

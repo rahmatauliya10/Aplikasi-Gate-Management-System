@@ -428,11 +428,11 @@ export class WarehouseService {
 
         const isConcessionReasonValid = Boolean(
           activePa.dispositionReason &&
-            activePa.dispositionReason.trim().length >= 5,
+          activePa.dispositionReason.trim().length >= 5,
         );
         const isConcessionActorValid = Boolean(
           activePa.dispositionById &&
-            activePa.dispositionById.trim().length > 0,
+          activePa.dispositionById.trim().length > 0,
         );
         const isConcessionTimestampValid = Boolean(activePa.dispositionAt);
         const isLabFactualOos = activePa.result === QcResult.REJECT;
@@ -454,8 +454,8 @@ export class WarehouseService {
             ? Boolean(
                 (sensory.foreignMatters &&
                   sensory.foreignMatters !== 'Tidak ada kontaminasi') ||
-                  (sensory.packagingLabel &&
-                    sensory.packagingLabel !== 'Kemasan & label tidak rusak'),
+                (sensory.packagingLabel &&
+                  sensory.packagingLabel !== 'Kemasan & label tidak rusak'),
               )
             : false;
 
@@ -609,7 +609,8 @@ export class WarehouseService {
                   processType: tx.processType,
                   startAt: new Date(),
                   startById: user.id,
-                  remarks: dto.remarks || 'Ditolak pada Pemeriksaan Pra-Bongkar',
+                  remarks:
+                    dto.remarks || 'Ditolak pada Pemeriksaan Pra-Bongkar',
                   checklistItems: {
                     version: GSP_PREUNLOAD_VERSION,
                     overallResult: 'REJECTED',
@@ -753,12 +754,18 @@ export class WarehouseService {
           };
 
           try {
-            if (typeof this.activityLogsService.logActionStrict === 'function') {
+            if (
+              typeof this.activityLogsService.logActionStrict === 'function'
+            ) {
               await this.activityLogsService.logActionStrict(auditPayload);
             } else {
-              await this.activityLogsService.logAction(auditPayload, undefined, {
-                requireDb: true,
-              });
+              await this.activityLogsService.logAction(
+                auditPayload,
+                undefined,
+                {
+                  requireDb: true,
+                },
+              );
             }
           } catch (auditError: any) {
             this.logger.error(
@@ -1193,7 +1200,8 @@ export class WarehouseService {
       // Serialize deliveryChecklist if present and append to remarks
       let finalRemarks = dto.remarks || '';
       if (normalizedDeliveryChecklist) {
-        const prodSummary = normalizedDeliveryChecklist.productTypes.join(' & ');
+        const prodSummary =
+          normalizedDeliveryChecklist.productTypes.join(' & ');
         finalRemarks = finalRemarks
           ? `${finalRemarks} | Products: [${prodSummary}]`
           : `Products: [${prodSummary}]`;
@@ -1280,7 +1288,7 @@ export class WarehouseService {
             condition: dto.condition,
             checklistItems:
               normalizedDeliveryChecklist ||
-              (dto.deliveryChecklist as any) ||
+              dto.deliveryChecklist ||
               activeProcess.checklistItems ||
               undefined,
             remarks: finalRemarks || null,
@@ -1320,9 +1328,7 @@ export class WarehouseService {
             rollCount: dto.rollCount,
             condition: dto.condition,
             checklistItems:
-              normalizedDeliveryChecklist ||
-              (dto.deliveryChecklist as any) ||
-              undefined,
+              normalizedDeliveryChecklist || dto.deliveryChecklist || undefined,
             remarks: finalRemarks || null,
           },
         });
@@ -1875,7 +1881,8 @@ export class WarehouseService {
     if (!dto.reason || dto.reason.trim().length < 5) {
       throw new BadRequestException({
         success: false,
-        message: 'Alasan keputusan disposisi checklist wajib diisi (minimal 5 karakter).',
+        message:
+          'Alasan keputusan disposisi checklist wajib diisi (minimal 5 karakter).',
         errors: ['INVALID_DISPOSITION_REASON'],
       });
     }

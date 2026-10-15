@@ -757,7 +757,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         warehouseUser,
       );
       expect(dispRes.success).toBe(true);
-      expect(dispRes.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_REJECTED);
+      expect(dispRes.data.newStatus).toBe(
+        TransactionStatus.QC_VEHICLE_REJECTED,
+      );
 
       // 2. GSP Warehouse: Attempt to start unloading -> MUST BE STRICTLY BLOCKED
       const rpdRejected = {
@@ -1338,13 +1340,16 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         chemRejectTx.id,
         {
           action: GspDispositionAction.REJECT,
-          reason: 'Mutu tidak memenuhi standar operasional. Ditolak bongkar oleh Gudang GSP.',
+          reason:
+            'Mutu tidak memenuhi standar operasional. Ditolak bongkar oleh Gudang GSP.',
           revision: 3,
         },
         warehouseUser,
       );
       expect(gspRejectRes.success).toBe(true);
-      expect(gspRejectRes.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_REJECTED);
+      expect(gspRejectRes.data.newStatus).toBe(
+        TransactionStatus.QC_VEHICLE_REJECTED,
+      );
 
       // 2. Warehouse operator attempts to start unloading -> BLOCKED
       const rejectedState = {

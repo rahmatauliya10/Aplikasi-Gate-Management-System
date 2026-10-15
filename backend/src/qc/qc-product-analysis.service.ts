@@ -343,7 +343,8 @@ export class QcProductAnalysisService {
       const clientCat = dto.productCategory.toUpperCase();
       const authCat = authoritativeProductCategory.toUpperCase();
       const authSub = (tx.cargoSubType || '').toUpperCase();
-      const isUtlClient = clientCat.includes('UTL') || clientCat.includes('UTILITY');
+      const isUtlClient =
+        clientCat.includes('UTL') || clientCat.includes('UTILITY');
       const isProdClient = clientCat.includes('PROD');
       const isUtlAuth = authCat.includes('UTL') || authCat.includes('UTILITY');
       const isProdAuth = authCat.includes('PROD');
@@ -381,10 +382,22 @@ export class QcProductAnalysisService {
       const normAuth = authName.replace(/EE/g, 'E');
       const normSub = authSub.replace(/EE/g, 'E');
 
-      const isPacClient = normClient.includes('PAC') || normClient.includes('POLYCOR');
-      const isRkClient = normClient.includes('RAPID') || normClient.includes('KLEN') || normClient.includes('PROCIP');
-      const isPacAuth = normAuth.includes('PAC') || normAuth.includes('POLYCOR') || normSub.includes('PAC');
-      const isRkAuth = normAuth.includes('RAPID') || normAuth.includes('KLEN') || normAuth.includes('PROCIP') || normSub.includes('RAPID') || normSub.includes('KLEN');
+      const isPacClient =
+        normClient.includes('PAC') || normClient.includes('POLYCOR');
+      const isRkClient =
+        normClient.includes('RAPID') ||
+        normClient.includes('KLEN') ||
+        normClient.includes('PROCIP');
+      const isPacAuth =
+        normAuth.includes('PAC') ||
+        normAuth.includes('POLYCOR') ||
+        normSub.includes('PAC');
+      const isRkAuth =
+        normAuth.includes('RAPID') ||
+        normAuth.includes('KLEN') ||
+        normAuth.includes('PROCIP') ||
+        normSub.includes('RAPID') ||
+        normSub.includes('KLEN');
 
       if ((isPacClient && isRkAuth) || (isRkClient && isPacAuth)) {
         throw new BadRequestException(
@@ -971,8 +984,7 @@ export class QcProductAnalysisService {
     // QC, Security, and non-GSP Warehouse remain strictly forbidden.
     const isAdmin = user.role === 'ADMIN';
     const isGspWarehouse =
-      user.role === 'WAREHOUSE' &&
-      (user.warehouseAccess || []).includes('GSP');
+      user.role === 'WAREHOUSE' && (user.warehouseAccess || []).includes('GSP');
 
     if (!isAdmin && !isGspWarehouse) {
       throw new ForbiddenException({

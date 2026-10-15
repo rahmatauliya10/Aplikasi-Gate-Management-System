@@ -1,10 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsArray,
-  IsOptional,
-  IsString,
-  ArrayMaxSize,
-} from 'class-validator';
+import { IsArray, IsOptional, IsString, ArrayMaxSize } from 'class-validator';
 
 export class DeliveryChecklistDto {
   @ApiPropertyOptional({

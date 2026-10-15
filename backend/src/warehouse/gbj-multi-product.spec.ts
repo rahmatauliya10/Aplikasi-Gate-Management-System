@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { WarehouseService } from './warehouse.service';
-import { VALID_GBJ_PRODUCT_TYPES, isValidGbjProductType } from './constants/gbj-products';
+import {
+  VALID_GBJ_PRODUCT_TYPES,
+  isValidGbjProductType,
+} from './constants/gbj-products';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
@@ -23,10 +26,7 @@ describe('GBJ Multi Product Type Unit Tests', () => {
     mockActivityLogs = {
       logAction: jest.fn().mockResolvedValue({}),
     };
-    service = new WarehouseService(
-      mockPrisma as unknown as PrismaService,
-      mockActivityLogs as unknown as ActivityLogsService,
-    );
+    service = new WarehouseService(mockPrisma, mockActivityLogs);
   });
 
   describe('GBJ Product Catalog Validation', () => {
@@ -184,7 +184,9 @@ describe('GBJ Multi Product Type Unit Tests', () => {
         },
       };
 
-      mockPrisma.$transaction.mockImplementation(async (fn: any) => fn(mockTxClient));
+      mockPrisma.$transaction.mockImplementation(async (fn: any) =>
+        fn(mockTxClient),
+      );
 
       const user: JwtPayloadUser = {
         id: 'user-wh',

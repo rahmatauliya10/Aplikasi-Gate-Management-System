@@ -97,7 +97,8 @@ export class TransactionsController {
 
   @Get('pending-reminders')
   @ApiOperation({
-    summary: 'Get role-scoped pending transaction reminders with categorization and SLA',
+    summary:
+      'Get role-scoped pending transaction reminders with categorization and SLA',
   })
   @ApiResponse({
     status: 200,
@@ -109,7 +110,10 @@ export class TransactionsController {
 
   @Post('pending-reminders/:id/snooze')
   @ApiOperation({ summary: 'Snooze pending reminder for current user' })
-  @ApiResponse({ status: 200, description: 'Reminder snoozed for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reminder snoozed for current user',
+  })
   snoozeReminder(
     @Param('id') reminderId: string,
     @CurrentUser() user: JwtPayloadUser,
@@ -124,7 +128,10 @@ export class TransactionsController {
 
   @Post('pending-reminders/:id/unsnooze')
   @ApiOperation({ summary: 'Unsnooze pending reminder for current user' })
-  @ApiResponse({ status: 200, description: 'Reminder unsnoozed for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reminder unsnoozed for current user',
+  })
   unsnoozeReminder(
     @Param('id') reminderId: string,
     @CurrentUser() user: JwtPayloadUser,
@@ -134,7 +141,10 @@ export class TransactionsController {
 
   @Post('pending-reminders/:id/read')
   @ApiOperation({ summary: 'Mark reminder as read for current user' })
-  @ApiResponse({ status: 200, description: 'Reminder marked read for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reminder marked read for current user',
+  })
   markReminderRead(
     @Param('id') reminderId: string,
     @CurrentUser() user: JwtPayloadUser,
@@ -144,7 +154,10 @@ export class TransactionsController {
 
   @Post('pending-reminders/read-all')
   @ApiOperation({ summary: 'Mark all reminders as read for current user' })
-  @ApiResponse({ status: 200, description: 'All reminders marked read for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'All reminders marked read for current user',
+  })
   markAllRemindersRead(
     @CurrentUser() user: JwtPayloadUser,
     @Body() body: { ids?: string[] },

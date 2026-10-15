@@ -122,7 +122,8 @@ export interface ChemicalEvaluationResult {
   productName: string;
   isCompliant: boolean;
   result: 'PASS' | 'REJECT';
-  decision: 'RELEASE' | 'REJECT' | 'PENDING_DISPOSITION' | 'WAITING_DISPOSITION';
+  decision:
+    'RELEASE' | 'REJECT' | 'PENDING_DISPOSITION' | 'WAITING_DISPOSITION';
   specMetadata: ChemicalSpecificationMetadata;
   violations: string[];
   summary: string;

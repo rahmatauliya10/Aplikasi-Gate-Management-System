@@ -967,7 +967,8 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
             productName: prod.name,
             parameters: {
               sensory: {
-                visual: prod.name === 'IPAC CIP A200' ? 'Coklat Jernih' : 'Kuning',
+                visual:
+                  prod.name === 'IPAC CIP A200' ? 'Coklat Jernih' : 'Kuning',
                 foreignMatters: 'Tidak ada kontaminasi',
                 packagingLabel: 'Kemasan & label tidak rusak',
               },
@@ -2080,14 +2081,18 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('successfully accepts OOS chemical with note (ACCEPT_WITH_NOTE)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        oosPaRecord,
+      );
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
+          update: jest
+            .fn()
+            .mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -2102,7 +2107,8 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         'tx-chem-held',
         {
           action: GspDispositionAction.ACCEPT_WITH_NOTE,
-          reason: 'Penyimpangan pH minor disetujui PIC Gudang GSP untuk operasional',
+          reason:
+            'Penyimpangan pH minor disetujui PIC Gudang GSP untuk operasional',
           revision: 2,
         },
         mockGspWarehouseUser,
@@ -2127,7 +2133,8 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           data: expect.objectContaining({
             status: 'ACCEPT_WITH_NOTE',
             dispositionAction: GspDispositionAction.ACCEPT_WITH_NOTE,
-            dispositionReason: 'Penyimpangan pH minor disetujui PIC Gudang GSP untuk operasional',
+            dispositionReason:
+              'Penyimpangan pH minor disetujui PIC Gudang GSP untuk operasional',
             dispositionById: mockGspWarehouseUser.id,
           }),
         }),
@@ -2136,7 +2143,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('rejects ACCEPT_WITH_NOTE if reason is missing or less than 5 characters', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        oosPaRecord,
+      );
 
       await expect(
         service.submitGspDisposition(
@@ -2164,7 +2173,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(contaminatedPa);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        contaminatedPa,
+      );
 
       try {
         await service.submitGspDisposition(
@@ -2189,14 +2200,18 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('successfully requests retest for Round 1 OOS (REQUEST_RETEST)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        oosPaRecord,
+      );
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'RETEST_REQUIRED' }),
+          update: jest
+            .fn()
+            .mockResolvedValue({ ...oosPaRecord, status: 'RETEST_REQUIRED' }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -2235,7 +2250,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(round2Pa);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        round2Pa,
+      );
 
       try {
         await service.submitGspDisposition(
@@ -2260,14 +2277,18 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('successfully rejects OOS chemical (REJECT)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        oosPaRecord,
+      );
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'REJECT' }),
+          update: jest
+            .fn()
+            .mockResolvedValue({ ...oosPaRecord, status: 'REJECT' }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -2342,7 +2363,10 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
       mockAuthScopeService.assertProcessAccess.mockImplementationOnce(
         (user: any, pt: string) => {
-          if (user.role === 'WAREHOUSE' && !user.warehouseAccess?.includes(pt)) {
+          if (
+            user.role === 'WAREHOUSE' &&
+            !user.warehouseAccess?.includes(pt)
+          ) {
             throw new ForbiddenException(
               `Akses ditolak: Anda tidak memiliki otoritas scope proses ${pt}.`,
             );
@@ -2371,14 +2395,18 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        oosPaRecord,
+      );
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
-          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
+          update: jest
+            .fn()
+            .mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
@@ -2418,7 +2446,8 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           'tx-chem-legacy-held',
           {
             action: GspDispositionAction.ACCEPT_WITH_NOTE,
-            reason: 'Persetujuan konsesi untuk transaksi historis berstatus WAITING_UTILITY_DISPOSITION',
+            reason:
+              'Persetujuan konsesi untuk transaksi historis berstatus WAITING_UTILITY_DISPOSITION',
             revision: 2,
           },
           mockGspWarehouseUser,
@@ -2439,7 +2468,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(damagedPackagingPa);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        damagedPackagingPa,
+      );
 
       try {
         await service.submitGspDisposition(
@@ -2481,7 +2512,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('rejects disposition on concurrency revision conflict (CAS failure)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+        oosPaRecord,
+      );
 
       const mockTxClientConflict = {
         transaction: {
@@ -2534,36 +2567,72 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
     });
 
     it('rejects malformed multiple commas ("1,2,3")', () => {
-      expect(() => parseStrictFiniteNumber('1,2,3', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('1,2,3', 'val')).toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects mixed comma and dot separators ("1,000.50" or "1.2,3")', () => {
-      expect(() => parseStrictFiniteNumber('1,000.50', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber('1.2,3', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('1,000.50', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber('1.2,3', 'val')).toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects non-finite inputs ("Infinity", "-Infinity", "NaN")', () => {
-      expect(() => parseStrictFiniteNumber('Infinity', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber('-Infinity', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber('NaN', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber(Infinity, 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber(NaN, 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('Infinity', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber('-Infinity', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber('NaN', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber(Infinity, 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber(NaN, 'val')).toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects scientific notation ("1e2", "2.5e3")', () => {
-      expect(() => parseStrictFiniteNumber('1e2', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber('2.5e3', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('1e2', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber('2.5e3', 'val')).toThrow(
+        BadRequestException,
+      );
     });
 
     it('rejects hexadecimal, non-numeric strings, and booleans', () => {
-      expect(() => parseStrictFiniteNumber('0x1f', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber('abc', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber('', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber('   ', 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber(true, 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber(false, 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber(null, 'val')).toThrow(BadRequestException);
-      expect(() => parseStrictFiniteNumber(undefined, 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('0x1f', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber('abc', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber('', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber('   ', 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber(true, 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber(false, 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber(null, 'val')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseStrictFiniteNumber(undefined, 'val')).toThrow(
+        BadRequestException,
+      );
     });
   });
 });

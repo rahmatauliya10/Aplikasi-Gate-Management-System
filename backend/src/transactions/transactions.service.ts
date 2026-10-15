@@ -34,10 +34,14 @@ export class TransactionsService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
-    this.logger.log('TransactionsService initialized with official user_reminder_states schema');
+    this.logger.log(
+      'TransactionsService initialized with official user_reminder_states schema',
+    );
   }
 
-  private async getUserReminderState(userId: string): Promise<UserReminderState> {
+  private async getUserReminderState(
+    userId: string,
+  ): Promise<UserReminderState> {
     if (this.userReminderStates.has(userId)) {
       return this.userReminderStates.get(userId)!;
     }
@@ -47,9 +51,9 @@ export class TransactionsService implements OnModuleInit {
       });
       if (record) {
         const state: UserReminderState = {
-          snoozedReminders: (record.snoozedReminders as any) || {},
+          snoozedReminders: record.snoozedReminders || {},
           readReminders: Array.isArray(record.readReminders)
-            ? (record.readReminders as any)
+            ? record.readReminders
             : [],
         };
         this.userReminderStates.set(userId, state);
@@ -265,7 +269,9 @@ export class TransactionsService implements OnModuleInit {
   }
 
   async getPendingReminders(user: JwtPayloadUser) {
-    this.logger.log(`Get pending reminders for user ${user.email} (${user.role})`);
+    this.logger.log(
+      `Get pending reminders for user ${user.email} (${user.role})`,
+    );
 
     const userState = await this.getUserReminderState(user.id);
     const scope = this.authorizationScopeService.getTransactionScope(user);
@@ -282,14 +288,14 @@ export class TransactionsService implements OnModuleInit {
 
     const now = new Date();
     const nowEpoch = now.getTime();
-    const userScopes = (user.warehouseAccess || []) as string[];
+    const userScopes = user.warehouseAccess || [];
 
     const reminders = activeTransactions.map((tx) => {
       let assignedRole: string = 'ADMIN';
       let pendingTask: string = 'Tindak Lanjut Transaksi';
       let targetRoute: string = '/dashboard';
 
-      switch (tx.status as TransactionStatus) {
+      switch (tx.status) {
         case TransactionStatus.REGISTERED:
           if (tx.processType === 'GBJ') {
             assignedRole = 'QC';
@@ -438,18 +444,23 @@ export class TransactionsService implements OnModuleInit {
 
       // Calculate stage duration and waiting time
       const latestHistory = tx.statusHistory?.[0];
-      const stageStartedAt = latestHistory?.changedAt || tx.updatedAt || tx.createdAt;
+      const stageStartedAt =
+        latestHistory?.changedAt || tx.updatedAt || tx.createdAt;
       const waitingDurationMin = Math.max(
         0,
-        Math.floor((now.getTime() - new Date(stageStartedAt).getTime()) / 60000),
+        Math.floor(
+          (now.getTime() - new Date(stageStartedAt).getTime()) / 60000,
+        ),
       );
 
       // Configurable SLA check: only evaluate overdue if an official SLA is configured
       const slaMinutes = getStageSlaMinutes(tx.status, tx.processType);
-      const isOverdue = slaMinutes !== null && waitingDurationMin > slaMinutes && isMyAction;
+      const isOverdue =
+        slaMinutes !== null && waitingDurationMin > slaMinutes && isMyAction;
 
       // Determine categorization
-      let category: 'NEED_ACTION' | 'IN_PROGRESS' | 'WAITING_OTHER_PROCESS' | 'OVERDUE';
+      let category:
+        'NEED_ACTION' | 'IN_PROGRESS' | 'WAITING_OTHER_PROCESS' | 'OVERDUE';
       if (!isMyAction) {
         category = 'WAITING_OTHER_PROCESS';
       } else if (isOverdue) {
@@ -499,7 +510,8 @@ export class TransactionsService implements OnModuleInit {
       needActionCount: reminders.filter(
         (r) => r.category === 'NEED_ACTION' || r.category === 'OVERDUE',
       ).length,
-      inProgressCount: reminders.filter((r) => r.category === 'IN_PROGRESS').length,
+      inProgressCount: reminders.filter((r) => r.category === 'IN_PROGRESS')
+        .length,
       waitingOtherCount: reminders.filter(
         (r) => r.category === 'WAITING_OTHER_PROCESS',
       ).length,
@@ -507,7 +519,9 @@ export class TransactionsService implements OnModuleInit {
       totalActiveCount: reminders.length,
       unsnoozedNeedActionCount: reminders.filter(
         (r) =>
-          (r.category === 'NEED_ACTION' || r.category === 'OVERDUE' || r.isMyAction) &&
+          (r.category === 'NEED_ACTION' ||
+            r.category === 'OVERDUE' ||
+            r.isMyAction) &&
           !r.isSnoozed,
       ).length,
       unsnoozedOverdueCount: reminders.filter(
