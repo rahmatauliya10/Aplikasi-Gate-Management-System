@@ -411,7 +411,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         expect.objectContaining({
           where: expect.objectContaining({
             id: 'tx-solar-1',
-            status: { in: ['QC_VEHICLE_PASSED', 'PA_NOT_REQUIRED'] },
+            status: { in: ['QC_VEHICLE_PASSED', 'PA_NOT_REQUIRED', 'WAITING_GSP_CHECKLIST_DISPOSITION'] },
           }),
           data: expect.objectContaining({
             status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
@@ -862,6 +862,274 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       );
     });
 
+    it('G: status = ACCEPT_WITH_NOTE, result = REJECT, valid dispositionById and dispositionAction -> Warehouse Start ALLOWED (Approved Concession)', async () => {
+      const chemTx = {
+        id: 'tx-chem-concession-pass',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        receiptUnit: WarehouseUnit.LITER,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        weighInAt: new Date(),
+        grossWeight: 20000,
+        revision: 3,
+        productCatalogId: 'cat-pac-1',
+        productCatalog: {
+          id: 'cat-pac-1',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-concession-release',
+        transactionId: 'tx-chem-concession-pass',
+        productCatalogId: 'cat-pac-1',
+        status: 'ACCEPT_WITH_NOTE',
+        result: QcResult.REJECT, // Lab result remains factual OOS!
+        dispositionAction: 'ACCEPT_WITH_NOTE',
+        dispositionReason: 'Penyimpangan pH diterima PIC Gudang GSP dengan catatan',
+        dispositionById: 'usr-wh-gsp',
+        dispositionAt: new Date(),
+        parameters: {
+          ph: 5.2,
+          density: 1.2,
+          sensory: {
+            visual: 'Kuning',
+            foreignMatters: 'Tidak ada kontaminasi',
+            packagingLabel: 'Kemasan & label tidak rusak',
+          },
+        },
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findUnique: jest.fn().mockResolvedValue({
+            ...chemTx,
+            status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            warehouseStartBy: { id: mockUser.id, name: 'Admin', role: 'ADMIN' },
+          }),
+        },
+        warehouseProcess: {
+          aggregate: jest.fn().mockResolvedValue({ _max: { revision: 0 } }),
+          create: jest.fn().mockResolvedValue({ id: 'wp-chem-1' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await warehouseService.startWarehouse(
+        'tx-chem-concession-pass',
+        validStartGspDto,
+        mockUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+          }),
+        }),
+      );
+    });
+
+    it('P0-01: blocks startWarehouse if concession activePa.result was falsified to PASS (factual lab must be REJECT)', async () => {
+      const chemTx = {
+        id: 'tx-chem-falsified-pass',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        receiptUnit: WarehouseUnit.LITER,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        weighInAt: new Date(),
+        grossWeight: 20000,
+        revision: 3,
+        productCatalogId: 'cat-pac-1',
+        productCatalog: {
+          id: 'cat-pac-1',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-concession-falsified',
+        transactionId: 'tx-chem-falsified-pass',
+        productCatalogId: 'cat-pac-1',
+        status: 'ACCEPT_WITH_NOTE',
+        result: QcResult.PASS, // Tampered/falsified! Must be REJECT for concession
+        dispositionAction: 'ACCEPT_WITH_NOTE',
+        dispositionReason: 'Alasan manipulasi',
+        dispositionById: 'usr-wh-gsp',
+        dispositionAt: new Date(),
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-chem-falsified-pass', validStartGspDto, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('P0-01: blocks startWarehouse if concession dispositionReason is missing or < 5 characters', async () => {
+      const chemTx = {
+        id: 'tx-chem-missing-reason',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        receiptUnit: WarehouseUnit.LITER,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        weighInAt: new Date(),
+        grossWeight: 20000,
+        revision: 3,
+        productCatalogId: 'cat-pac-1',
+        productCatalog: {
+          id: 'cat-pac-1',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-concession-no-reason',
+        transactionId: 'tx-chem-missing-reason',
+        productCatalogId: 'cat-pac-1',
+        status: 'ACCEPT_WITH_NOTE',
+        result: QcResult.REJECT,
+        dispositionAction: 'ACCEPT_WITH_NOTE',
+        dispositionReason: 'ok', // < 5 chars
+        dispositionById: 'usr-wh-gsp',
+        dispositionAt: new Date(),
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-chem-missing-reason', validStartGspDto, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('P0-01: blocks startWarehouse if concession dispositionById is missing', async () => {
+      const chemTx = {
+        id: 'tx-chem-missing-actor',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        receiptUnit: WarehouseUnit.LITER,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        weighInAt: new Date(),
+        grossWeight: 20000,
+        revision: 3,
+        productCatalogId: 'cat-pac-1',
+        productCatalog: {
+          id: 'cat-pac-1',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-concession-no-actor',
+        transactionId: 'tx-chem-missing-actor',
+        productCatalogId: 'cat-pac-1',
+        status: 'ACCEPT_WITH_NOTE',
+        result: QcResult.REJECT,
+        dispositionAction: 'ACCEPT_WITH_NOTE',
+        dispositionReason: 'Alasan lengkap tapi tanpa aktor disposisi',
+        dispositionById: null, // missing!
+        dispositionAt: new Date(),
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-chem-missing-actor', validStartGspDto, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('P0-01: blocks startWarehouse if concession contains non-waivable critical contamination', async () => {
+      const chemTx = {
+        id: 'tx-chem-critical-defect',
+        status: TransactionStatus.QC_VEHICLE_PASSED,
+        processType: ProcessType.GSP,
+        receiptUnit: WarehouseUnit.LITER,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        weighInAt: new Date(),
+        grossWeight: 20000,
+        revision: 3,
+        productCatalogId: 'cat-pac-1',
+        productCatalog: {
+          id: 'cat-pac-1',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'pa-concession-critical',
+        transactionId: 'tx-chem-critical-defect',
+        productCatalogId: 'cat-pac-1',
+        status: 'ACCEPT_WITH_NOTE',
+        result: QcResult.REJECT,
+        dispositionAction: 'ACCEPT_WITH_NOTE',
+        dispositionReason: 'Alasan lengkap tapi ada kontaminasi fisik',
+        dispositionById: 'usr-wh-gsp',
+        dispositionAt: new Date(),
+        parameters: {
+          sensory: {
+            foreignMatters: 'Ditemukan serpihan kaca', // CRITICAL!
+            packagingLabel: 'Kemasan & label tidak rusak',
+          },
+        },
+        isVoided: false,
+      });
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-chem-critical-defect', validStartGspDto, mockUser),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('strictly blocks startWarehouse when GSP Batubara is still QC_VEHICLE_PENDING', async () => {
       const coalTx = {
         id: 'tx-coal-1',
@@ -1166,7 +1434,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       });
     });
 
-    it('strictly blocks startWarehouse when status is QC_RETEST_REQUIRED or WAITING_UTILITY_DISPOSITION', async () => {
+    it('strictly blocks startWarehouse when status is QC_RETEST_REQUIRED, WAITING_GSP_DISPOSITION, or WAITING_UTILITY_DISPOSITION', async () => {
       const retestTx = {
         id: 'tx-coal-retest',
         status: TransactionStatus.QC_RETEST_REQUIRED,
@@ -1183,6 +1451,24 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
       await expect(
         warehouseService.startWarehouse('tx-coal-retest', {}, mockUser),
+      ).rejects.toThrow(BadRequestException);
+
+      const waitingGspTx = {
+        id: 'tx-chem-waiting-gsp',
+        status: TransactionStatus.WAITING_GSP_DISPOSITION,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(waitingGspTx);
+      mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+        { processType: ProcessType.GSP },
+      ]);
+
+      await expect(
+        warehouseService.startWarehouse('tx-chem-waiting-gsp', {}, mockUser),
       ).rejects.toThrow(BadRequestException);
 
       const waitingTx = {
@@ -1643,6 +1929,303 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             }),
           }),
         );
+      });
+    });
+
+    describe('GSP Pre-Unloading Checklist Concession & Disposition (GSP-CHECKLIST-CONCESSION-2026)', () => {
+      const mockChecklistTx = {
+        id: 'tx-chk-disposition-1',
+        status: TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION,
+        processType: ProcessType.GSP,
+        receiptUnit: WarehouseUnit.LITER,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        suratJalanNumber: 'SJ-2026-CHK',
+        poNumber: 'PO-2026-CHK',
+        revision: 4,
+        productCatalogId: 'cat-pac-1',
+        productCatalog: {
+          id: 'cat-pac-1',
+          code: 'CHEM-PAC',
+          name: 'PAC 280 AC',
+          processType: ProcessType.GSP,
+          isActive: true,
+          isPaRequired: true,
+        },
+        warehouseProcesses: [
+          {
+            id: 'wp-chk-1',
+            status: 'IN_PROGRESS',
+            revision: 1,
+            checklistItems: {
+              version: 'GSP-PREUNLOAD-2026.1',
+              items: [
+                { code: 'CLEAN_VEHICLE', result: 'NOT_OK', notes: 'Bak kotor', photoUrl: 'data:image/png;base64,abc' },
+              ],
+            },
+          },
+        ],
+      };
+
+      it('permits ACCEPT_WITH_NOTE concession: transitions to WAREHOUSE_IN_PROGRESS and records concession metadata', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockChecklistTx);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
+
+        const mockTxClient = {
+          transaction: {
+            update: jest.fn().mockResolvedValue({
+              ...mockChecklistTx,
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            }),
+            findUnique: jest.fn().mockResolvedValue({
+              ...mockChecklistTx,
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            }),
+          },
+          warehouseProcess: {
+            findFirst: jest.fn().mockResolvedValue(mockChecklistTx.warehouseProcesses[0]),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+
+        const res = await warehouseService.submitChecklistDisposition(
+          'tx-chk-disposition-1',
+          {
+            action: 'ACCEPT_WITH_NOTE',
+            reason: 'Diterima dengan catatan oleh PIC Gudang GSP karena deviasi minor fisik luar',
+            revision: 4,
+          },
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.transaction.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'tx-chk-disposition-1' },
+            data: expect.objectContaining({
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            }),
+          }),
+        );
+        expect(mockTxClient.warehouseProcess.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { id: 'wp-chk-1' },
+            data: expect.objectContaining({
+              checklistItems: expect.objectContaining({
+                disposition: expect.objectContaining({
+                  action: 'ACCEPT_WITH_NOTE',
+                  decidedById: mockUser.id,
+                }),
+              }),
+            }),
+          }),
+        );
+      });
+
+      it('permits REJECT decision: transitions to QC_VEHICLE_REJECTED', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockChecklistTx);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
+
+        const mockTxClient = {
+          transaction: {
+            update: jest.fn().mockResolvedValue({
+              ...mockChecklistTx,
+              status: TransactionStatus.QC_VEHICLE_REJECTED,
+            }),
+            findUnique: jest.fn().mockResolvedValue({
+              ...mockChecklistTx,
+              status: TransactionStatus.QC_VEHICLE_REJECTED,
+            }),
+          },
+          warehouseProcess: {
+            findFirst: jest.fn().mockResolvedValue(mockChecklistTx.warehouseProcesses[0]),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) => cb(mockTxClient));
+
+        const res = await warehouseService.submitChecklistDisposition(
+          'tx-chk-disposition-1',
+          {
+            action: 'REJECT',
+            reason: 'Muatan ditolak karena kondisi fisik tangki bocor parah',
+            revision: 4,
+          },
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.transaction.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.QC_VEHICLE_REJECTED,
+            }),
+          }),
+        );
+      });
+
+      it('rejects disposition submission if reason is shorter than 5 characters', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(mockChecklistTx);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GSP },
+        ]);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Acc', // < 5 chars
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('Alasan keputusan disposisi checklist wajib diisi (minimal 5 karakter).');
+      });
+
+      it('rejects ACCEPT_WITH_NOTE if checklist contains non-concessible critical safety defect (e.g. NO_EXPIRED_GAS_CYLINDER or NO_PEST_OR_ANIMAL_TRACE)', async () => {
+        const criticalTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-crit-1',
+              revision: 1,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: [
+                  { code: 'NO_PEST_OR_ANIMAL_TRACE', label: 'Hama / binatang', result: 'NOT_OK' },
+                ],
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(criticalTx);
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(criticalTx.warehouseProcesses[0]);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Diterima oleh supervisor dengan dispensasi khusus',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
+      });
+
+      it('rejects ACCEPT_WITH_NOTE for vehicle leak (VEHICLE_NO_LEAK_GOOD)', async () => {
+        const leakTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-leak-1',
+              revision: 1,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: [
+                  { code: 'VEHICLE_NO_LEAK_GOOD', label: 'Kendaraan tidak bocor', result: 'NOT_OK' },
+                ],
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(leakTx);
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(leakTx.warehouseProcesses[0]);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Mencoba dispensasi kebocoran tangki',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
+      });
+
+      it('rejects ACCEPT_WITH_NOTE for broken seal (DOOR_SEAL_GOOD)', async () => {
+        const sealTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-seal-1',
+              revision: 1,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: [
+                  { code: 'DOOR_SEAL_GOOD', label: 'Seal pintu baik', result: 'NOT_OK' },
+                ],
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(sealTx);
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(sealTx.warehouseProcesses[0]);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Mencoba dispensasi segel putus',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
+      });
+
+      it('rejects ACCEPT_WITH_NOTE for CoA mismatch (COA_MATCHES_BATCH)', async () => {
+        const coaTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-coa-1',
+              revision: 1,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: [
+                  { code: 'COA_MATCHES_BATCH', label: 'CoA sesuai batch', result: 'NOT_OK' },
+                ],
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coaTx);
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(coaTx.warehouseProcesses[0]);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Mencoba dispensasi ketidaksesuaian CoA',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).');
       });
     });
   });

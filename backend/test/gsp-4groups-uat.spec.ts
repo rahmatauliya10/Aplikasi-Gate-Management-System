@@ -20,6 +20,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { ActivityLogsService } from '../src/activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../src/auth/authorization-scope.service';
 import { AnalysisDecision } from '../src/qc/dto/submit-product-analysis.dto';
+import { GspDispositionAction } from '../src/qc/dto/submit-gsp-disposition.dto';
 import { JwtPayloadUser } from '../src/common/decorators/current-user.decorator';
 import { isValidStatusTransition } from '../src/common/state-machine/workflow-state-machine';
 import { SpecificationProvider } from '../src/qc/providers/specification.provider';
@@ -67,6 +68,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
     id: 'wh-1',
     role: Role.WAREHOUSE,
     email: 'warehouse@gms.local',
+    warehouseAccess: ['GSP'],
   } as any;
   const adminUser: JwtPayloadUser = {
     id: 'admin-1',
@@ -652,7 +654,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         },
       };
 
-      // 1. QC Lab: Submit PA with out-of-spec Alkalinity -> Decision: REJECT
+      // 1. QC Lab: Submit PA with out-of-spec Alkalinity -> Evaluator returns WAITING_DISPOSITION
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rpdTx);
 
       const mockTxClientQc = {
@@ -690,7 +692,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             density: 1.45,
           },
           result: QcResult.REJECT,
-          decision: AnalysisDecision.REJECT,
+          decision: AnalysisDecision.WAITING_DISPOSITION,
           notes: 'Alkalinitas Na2O di bawah batas minimal SOP (28% < 35%)',
           revision: 2,
         },
@@ -698,20 +700,70 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       );
       expect(qcRes.success).toBe(true);
 
-      // Verify status transitioned to QC_VEHICLE_REJECTED
+      // Verify status transitioned to WAITING_GSP_DISPOSITION (held for GSP Warehouse disposition)
       expect(mockTxClientQc.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: TransactionStatus.QC_VEHICLE_REJECTED,
+            status: TransactionStatus.WAITING_GSP_DISPOSITION,
           }),
         }),
       );
+
+      // 1b. Gudang GSP: Reviews OOS parameters and formally rejects
+      const rpdWaitingState = {
+        ...rpdTx,
+        status: TransactionStatus.WAITING_GSP_DISPOSITION,
+        revision: 3,
+      };
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        rpdWaitingState,
+      );
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'analysis-rpd-1',
+        transactionId: rpdTx.id,
+        testRound: 1,
+        parameters: {
+          sensory: {
+            visual: 'Keruh',
+            foreignMatters: 'Ada kontaminasi partikel',
+            packagingLabel: 'Kemasan & label tidak rusak',
+          },
+        },
+        isVoided: false,
+      });
+
+      const mockTxClientGspReject = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientGspReject),
+      );
+
+      const dispRes = await qcAnalysisService.submitGspDisposition(
+        rpdTx.id,
+        {
+          action: GspDispositionAction.REJECT,
+          reason: 'Kontaminasi partikel dan Na2O OOS. Ditolak oleh Gudang GSP.',
+          revision: 3,
+        },
+        warehouseUser,
+      );
+      expect(dispRes.success).toBe(true);
+      expect(dispRes.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_REJECTED);
 
       // 2. GSP Warehouse: Attempt to start unloading -> MUST BE STRICTLY BLOCKED
       const rpdRejected = {
         ...rpdTx,
         status: TransactionStatus.QC_VEHICLE_REJECTED,
-        revision: 3,
+        revision: 4,
       };
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
         rpdRejected,
@@ -1228,8 +1280,8 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
             density: 1.35, // Below 1.400 min
           },
           result: QcResult.REJECTED,
-          decision: AnalysisDecision.REJECT,
-          notes: 'Mutu tidak memenuhi standar operasional. Ditolak bongkar.',
+          decision: AnalysisDecision.WAITING_DISPOSITION,
+          notes: 'Mutu tidak memenuhi standar operasional. Menunggu disposisi.',
           revision: 2,
         },
         qcAnalystUser,
@@ -1239,16 +1291,66 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
       expect(mockTxClientReject.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: TransactionStatus.QC_VEHICLE_REJECTED,
+            status: TransactionStatus.WAITING_GSP_DISPOSITION,
           }),
         }),
       );
+
+      // 1b. Gudang GSP: Reviews OOS parameters and formally rejects
+      const chemWaitingState = {
+        ...chemRejectTx,
+        status: TransactionStatus.WAITING_GSP_DISPOSITION,
+        revision: 3,
+      };
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+        chemWaitingState,
+      );
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        id: 'analysis-chem-rej-1',
+        transactionId: chemRejectTx.id,
+        testRound: 1,
+        parameters: {
+          sensory: {
+            visual: 'Keruh',
+            foreignMatters: 'Ada kontaminasi partikel',
+            packagingLabel: 'Kemasan & label tidak rusak',
+          },
+        },
+        isVoided: false,
+      });
+
+      const mockTxClientGspReject7 = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientGspReject7),
+      );
+
+      const gspRejectRes = await qcAnalysisService.submitGspDisposition(
+        chemRejectTx.id,
+        {
+          action: GspDispositionAction.REJECT,
+          reason: 'Mutu tidak memenuhi standar operasional. Ditolak bongkar oleh Gudang GSP.',
+          revision: 3,
+        },
+        warehouseUser,
+      );
+      expect(gspRejectRes.success).toBe(true);
+      expect(gspRejectRes.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_REJECTED);
 
       // 2. Warehouse operator attempts to start unloading -> BLOCKED
       const rejectedState = {
         ...chemRejectTx,
         status: TransactionStatus.QC_VEHICLE_REJECTED,
-        revision: 3,
+        revision: 4,
       };
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
         rejectedState,
@@ -1313,7 +1415,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         {
           weight: 21970, // Actual physical scale reading on exit
           weighbridgeNumber: 'WB-02',
-          revision: 3,
+          revision: 4,
         },
         weighbridgeUser,
       );

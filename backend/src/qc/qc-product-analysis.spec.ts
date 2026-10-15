@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
@@ -16,8 +17,10 @@ import {
   ProcessType,
   QcResult,
   GspAnalysisProfile,
+  Role,
 } from '@prisma/client';
 import { AnalysisDecision } from './dto/submit-product-analysis.dto';
+import { GspDispositionAction } from './dto/submit-gsp-disposition.dto';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
@@ -50,6 +53,20 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
     id: 'user-analyst-1',
     role: 'QC',
     email: 'analyst@gms.local',
+  } as unknown as JwtPayloadUser;
+
+  const mockGspWarehouseUser: JwtPayloadUser = {
+    id: 'user-wh-gsp',
+    role: 'WAREHOUSE',
+    email: 'warehouse-gsp@gms.local',
+    warehouseAccess: ['GSP'],
+  } as unknown as JwtPayloadUser;
+
+  const mockNonGspWarehouseUser: JwtPayloadUser = {
+    id: 'user-wh-gbb',
+    role: 'WAREHOUSE',
+    email: 'warehouse-gbb@gms.local',
+    warehouseAccess: ['GBB'],
   } as unknown as JwtPayloadUser;
 
   beforeEach(async () => {
@@ -512,6 +529,104 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       );
     });
 
+    it('blocks Round 3 lab analysis if maximum 2 rounds cap has been reached', async () => {
+      const txRetest = {
+        id: 'tx-pac-round2',
+        status: TransactionStatus.QC_RETEST_REQUIRED,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        revision: 3,
+        weighInAt: new Date(),
+        grossWeight: 15000,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(txRetest);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        { id: 'pa-r2', testRound: 2, isVoided: false },
+        { id: 'pa-r1', testRound: 1, isVoided: false },
+      ]);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-pac-round2',
+          {
+            testRound: 3,
+            parameters: {
+              sensory: {
+                visual: 'Kuning',
+                foreignMatters: 'Tidak ada kontaminasi',
+                packagingLabel: 'Kemasan & label tidak rusak',
+              },
+              ph: 4.5,
+              density: 1.2,
+            },
+            revision: 3,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('strictly forbids cross-category mismatch between Chemical UTL and Chemical PROD', async () => {
+      const txUtl = {
+        id: 'tx-chem-utl',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        revision: 1,
+        weighInAt: new Date(),
+        grossWeight: 15000,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(txUtl);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-chem-utl',
+          {
+            productCategory: 'Chemical PROD',
+            productName: 'PAC 280 AC',
+            parameters: { ph: 4.5, density: 1.2 },
+            revision: 1,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('strictly forbids cross-product mismatch between PAC and Rapid Klen', async () => {
+      const txUtl = {
+        id: 'tx-chem-utl-2',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        revision: 1,
+        weighInAt: new Date(),
+        grossWeight: 15000,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(txUtl);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-chem-utl-2',
+          {
+            productCategory: 'Chemicals',
+            productName: 'Rapid Klen',
+            parameters: { ph: 4.5, density: 1.2 },
+            revision: 1,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('resets authoritative test round to Round 1 if previous PA records were voided (after REOPEN to pre-PA stage)', async () => {
       const reopenedTx = {
         id: 'tx-coal-reopened',
@@ -708,7 +823,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
             density: 1.45,
           },
           result: QcResult.REJECT,
-          decision: AnalysisDecision.REJECT,
+          decision: AnalysisDecision.WAITING_DISPOSITION,
           revision: 2,
         },
         mockAnalystUser,
@@ -719,21 +834,14 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             result: QcResult.REJECT,
-            status: 'REJECT',
+            status: 'WAITING_DISPOSITION',
           }),
         }),
       );
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: TransactionStatus.QC_VEHICLE_REJECTED,
-          }),
-        }),
-      );
-      expect(mockTxClient.transaction.updateMany).not.toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+            status: TransactionStatus.WAITING_GSP_DISPOSITION,
           }),
         }),
       );
@@ -800,6 +908,171 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           }),
         }),
       );
+    });
+
+    it('evaluates all 3 PAC UTL products (PAC 280 AC, POLYCOR P9, IPAC CIP A200) under category "Chemical UTL" with comma and dot input', async () => {
+      const pacProducts = [
+        { name: 'PAC 280 AC', code: 'PAC-001' },
+        { name: 'POLYCOR P9', code: 'PAC-002' },
+        { name: 'IPAC CIP A200', code: 'PAC-003' },
+      ];
+
+      for (const prod of pacProducts) {
+        const pacTx = {
+          id: `tx-${prod.code}`,
+          status: TransactionStatus.QC_VEHICLE_PENDING,
+          processType: ProcessType.GSP,
+          cargoType: 'Chemical UTL',
+          cargoSubType: prod.name,
+          productCatalogId: prod.code,
+          productCatalog: {
+            id: prod.code,
+            code: prod.code,
+            name: prod.name,
+            category: 'Chemical UTL',
+            processType: ProcessType.GSP,
+            gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+            isPaRequired: true,
+          },
+          gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+          revision: 2,
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacTx);
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          qcProductAnalysis: {
+            create: jest
+              .fn()
+              .mockResolvedValue({ id: `analysis-${prod.code}`, testRound: 1 }),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        // Test with string comma decimal (e.g. "4,20" and "1,210")
+        const res = await service.submitProductAnalysis(
+          pacTx.id,
+          {
+            productCategory: 'Chemical UTL',
+            productName: prod.name,
+            parameters: {
+              sensory: {
+                visual: prod.name === 'IPAC CIP A200' ? 'Coklat Jernih' : 'Kuning',
+                foreignMatters: 'Tidak ada kontaminasi',
+                packagingLabel: 'Kemasan & label tidak rusak',
+              },
+              ph: '4,20' as any,
+              density: '1,210' as any,
+            },
+            result: QcResult.PASS,
+            decision: AnalysisDecision.RELEASE,
+            revision: 2,
+          },
+          mockAnalystUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.QC_VEHICLE_PASSED,
+            }),
+          }),
+        );
+      }
+    });
+
+    it('evaluates both Rapid Klen PROD products (Rapid Klen, PRO-CIP B++) under category "Chemical PROD" with comma and dot input', async () => {
+      const prodProducts = [
+        { name: 'Rapid Klen', code: 'RPD-001' },
+        { name: 'PRO-CIP B++', code: 'RPD-002' },
+      ];
+
+      for (const prod of prodProducts) {
+        const rkTx = {
+          id: `tx-${prod.code}`,
+          status: TransactionStatus.QC_VEHICLE_PENDING,
+          processType: ProcessType.GSP,
+          cargoType: 'Chemical PROD',
+          cargoSubType: prod.name,
+          productCatalogId: prod.code,
+          productCatalog: {
+            id: prod.code,
+            code: prod.code,
+            name: prod.name,
+            category: 'Chemical PROD',
+            processType: ProcessType.GSP,
+            gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+            isPaRequired: true,
+          },
+          gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+          revision: 2,
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rkTx);
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          qcProductAnalysis: {
+            create: jest
+              .fn()
+              .mockResolvedValue({ id: `analysis-${prod.code}`, testRound: 1 }),
+            findFirst: jest.fn().mockResolvedValue(null),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        // Test with string comma decimal (e.g. "36,50", "47,20", "13,000", "1,500")
+        const res = await service.submitProductAnalysis(
+          rkTx.id,
+          {
+            productCategory: 'Chemical PROD',
+            productName: prod.name,
+            parameters: {
+              sensory: {
+                visual: 'Jernih',
+                foreignMatters: 'Tidak ada kontaminasi',
+                packagingLabel: 'Kemasan & label tidak rusak',
+              },
+              alkalinityNa2O: '36,50' as any,
+              alkalinityNaOH: '47,20' as any,
+              ph: '13,000' as any,
+              density: '1,500' as any,
+            },
+            result: QcResult.PASS,
+            decision: AnalysisDecision.RELEASE,
+            revision: 2,
+          },
+          mockAnalystUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.QC_VEHICLE_PASSED,
+            }),
+          }),
+        );
+      }
     });
   });
 
@@ -1529,6 +1802,19 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         expect(parseStrictFiniteNumber('+12.5', 'param')).toBe(12.5);
       });
 
+      it('supports local Indonesian comma decimal strings (e.g. "1,17" -> 1.17, "1,500" -> 1.5)', () => {
+        expect(parseStrictFiniteNumber('1,17', 'param')).toBe(1.17);
+        expect(parseStrictFiniteNumber('1,500', 'param')).toBe(1.5);
+        expect(parseStrictFiniteNumber('4,0', 'param')).toBe(4.0);
+        expect(parseStrictFiniteNumber('+35,01', 'param')).toBe(35.01);
+        expect(() => parseStrictFiniteNumber('1,17,0', 'param')).toThrow(
+          BadRequestException,
+        );
+        expect(() => parseStrictFiniteNumber('1,17.0', 'param')).toThrow(
+          BadRequestException,
+        );
+      });
+
       it('rejects boolean values (true, false) to prevent implicit coercion', () => {
         expect(() => parseStrictFiniteNumber(true, 'param')).toThrow(
           BadRequestException,
@@ -1758,6 +2044,526 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
         },
       );
+    });
+  });
+
+  describe('submitGspDisposition (Controlled Disposition Workflow)', () => {
+    const heldTx = {
+      id: 'tx-chem-held',
+      status: TransactionStatus.WAITING_GSP_DISPOSITION,
+      processType: ProcessType.GSP,
+      cargoType: 'Chemical UTL',
+      cargoSubType: 'PAC 280 AC',
+      gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+      revision: 2,
+    };
+
+    const oosPaRecord = {
+      id: 'pa-oos-1',
+      transactionId: 'tx-chem-held',
+      testRound: 1,
+      productCategory: 'Chemical UTL',
+      productName: 'PAC 280 AC',
+      parameters: {
+        sensory: {
+          visual: 'Kuning',
+          foreignMatters: 'Tidak ada kontaminasi',
+          packagingLabel: 'Kemasan & label tidak rusak',
+        },
+        ph: 5.2, // OOS (> 5.0)
+        density: 1.2,
+      },
+      result: QcResult.REJECT,
+      status: 'WAITING_DISPOSITION',
+      isVoided: false,
+    };
+
+    it('successfully accepts OOS chemical with note (ACCEPT_WITH_NOTE)', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitGspDisposition(
+        'tx-chem-held',
+        {
+          action: GspDispositionAction.ACCEPT_WITH_NOTE,
+          reason: 'Penyimpangan pH minor disetujui PIC Gudang GSP untuk operasional',
+          revision: 2,
+        },
+        mockGspWarehouseUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_PASSED);
+      expect(res.data.paStatus).toBe('ACCEPT_WITH_NOTE');
+
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'tx-chem-held', revision: 2 },
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PASSED,
+          }),
+        }),
+      );
+
+      expect(mockTxClient.qcProductAnalysis.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pa-oos-1' },
+          data: expect.objectContaining({
+            status: 'ACCEPT_WITH_NOTE',
+            dispositionAction: GspDispositionAction.ACCEPT_WITH_NOTE,
+            dispositionReason: 'Penyimpangan pH minor disetujui PIC Gudang GSP untuk operasional',
+            dispositionById: mockGspWarehouseUser.id,
+          }),
+        }),
+      );
+    });
+
+    it('rejects ACCEPT_WITH_NOTE if reason is missing or less than 5 characters', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'ok',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('strictly forbids ACCEPT_WITH_NOTE when critical sensory defects exist (foreign contamination)', async () => {
+      const contaminatedPa = {
+        ...oosPaRecord,
+        parameters: {
+          ...oosPaRecord.parameters,
+          sensory: {
+            ...oosPaRecord.parameters.sensory,
+            foreignMatters: 'Ada partikel hitam', // CRITICAL CONTAMINATION
+          },
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(contaminatedPa);
+
+      try {
+        await service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'Mencoba menerima padahal kontaminasi',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        );
+        fail('Expected BadRequestException for critical defect');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect(err.getResponse()).toEqual(
+          expect.objectContaining({
+            errors: ['CRITICAL_DEFECT_NOT_WAIVABLE'],
+          }),
+        );
+      }
+    });
+
+    it('successfully requests retest for Round 1 OOS (REQUEST_RETEST)', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'RETEST_REQUIRED' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitGspDisposition(
+        'tx-chem-held',
+        {
+          action: GspDispositionAction.REQUEST_RETEST,
+          reason: 'Diminta uji ulang botol kedua',
+          revision: 2,
+        },
+        mockGspWarehouseUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.newStatus).toBe(TransactionStatus.QC_RETEST_REQUIRED);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_RETEST_REQUIRED,
+          }),
+        }),
+      );
+    });
+
+    it('blocks REQUEST_RETEST if maximum 2 rounds has been reached', async () => {
+      const round2Pa = {
+        ...oosPaRecord,
+        testRound: 2, // Maximum reached
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(round2Pa);
+
+      try {
+        await service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.REQUEST_RETEST,
+            reason: 'Mencoba retest ronde 3',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        );
+        fail('Expected BadRequestException for max retest');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect(err.getResponse()).toEqual(
+          expect.objectContaining({
+            errors: ['MAX_RETEST_ROUNDS_REACHED'],
+          }),
+        );
+      }
+    });
+
+    it('successfully rejects OOS chemical (REJECT)', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'REJECT' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitGspDisposition(
+        'tx-chem-held',
+        {
+          action: GspDispositionAction.REJECT,
+          reason: 'Mutu tidak memenuhi syarat operasional, tolak bongkar',
+          revision: 2,
+        },
+        mockGspWarehouseUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_REJECTED);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_REJECTED,
+          }),
+        }),
+      );
+    });
+
+    it('forbids QC users from making disposition decisions (separation of duties)', async () => {
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'QC analyst cannot disposition',
+          },
+          mockAnalystUser, // QC role
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('forbids Security users from making disposition decisions', async () => {
+      const mockSecurityUser: JwtPayloadUser = {
+        id: 'user-sec-1',
+        email: 'security@gms.local',
+        role: Role.SECURITY,
+        warehouseAccess: [],
+      };
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'Security cannot disposition',
+          },
+          mockSecurityUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('forbids unscoped Warehouse users without GSP access from making disposition decisions', async () => {
+      const mockGbbWarehouseUser: JwtPayloadUser = {
+        id: 'user-wh-gbb',
+        email: 'warehouse-gbb@gms.local',
+        role: Role.WAREHOUSE,
+        warehouseAccess: ['GBB'], // No GSP scope
+      };
+
+      mockAuthScopeService.assertProcessAccess.mockImplementationOnce(
+        (user: any, pt: string) => {
+          if (user.role === 'WAREHOUSE' && !user.warehouseAccess?.includes(pt)) {
+            throw new ForbiddenException(
+              `Akses ditolak: Anda tidak memiliki otoritas scope proses ${pt}.`,
+            );
+          }
+        },
+      );
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'GBB warehouse user cannot disposition GSP',
+          },
+          mockGbbWarehouseUser,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('allows ADMIN users to submit GSP quality disposition (Phase 1 ADMIN Full Operational Access)', async () => {
+      const mockAdminUser: JwtPayloadUser = {
+        id: 'user-admin-root',
+        email: 'admin@gms.local',
+        role: Role.ADMIN,
+        warehouseAccess: [],
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          update: jest.fn().mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitGspDisposition(
+        'tx-chem-held',
+        {
+          action: GspDispositionAction.ACCEPT_WITH_NOTE,
+          reason: 'Persetujuan penerimaan bersyarat oleh Admin sistem',
+          revision: 2,
+        },
+        mockAdminUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(res.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_PASSED);
+      expect(res.data.paStatus).toBe('ACCEPT_WITH_NOTE');
+    });
+
+    it('strictly rejects disposition for legacy WAITING_UTILITY_DISPOSITION (read-only historical status)', async () => {
+      const legacyTx = {
+        ...heldTx,
+        id: 'tx-chem-legacy-held',
+        status: TransactionStatus.WAITING_UTILITY_DISPOSITION,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(legacyTx);
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-legacy-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'Persetujuan konsesi untuk transaksi historis berstatus WAITING_UTILITY_DISPOSITION',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('strictly forbids ACCEPT_WITH_NOTE when packaging is damaged (broken seal/torn)', async () => {
+      const damagedPackagingPa = {
+        ...oosPaRecord,
+        parameters: {
+          ...oosPaRecord.parameters,
+          sensory: {
+            ...oosPaRecord.parameters.sensory,
+            packagingLabel: 'Kemasan rusak / segel terbuka', // CRITICAL PACKAGING DAMAGE
+          },
+        },
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(damagedPackagingPa);
+
+      try {
+        await service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'Mencoba menerima kemasan rusak',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        );
+        fail('Expected BadRequestException for packaging defect');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect(err.getResponse()).toEqual(
+          expect.objectContaining({
+            errors: ['CRITICAL_DEFECT_NOT_WAIVABLE'],
+          }),
+        );
+      }
+    });
+
+    it('rejects disposition if active PA record is missing', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(null);
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'Valid reason but missing PA',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects disposition on concurrency revision conflict (CAS failure)', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(oosPaRecord);
+
+      const mockTxClientConflict = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }), // CAS conflict
+        },
+        qcProductAnalysis: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientConflict),
+      );
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.ACCEPT_WITH_NOTE,
+            reason: 'Stale revision concurrency test',
+            revision: 1, // Stale revision
+          },
+          mockGspWarehouseUser,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('parseStrictFiniteNumber (Locale Decimal & Strict Finite Parsing)', () => {
+    it('accepts finite JavaScript numbers', () => {
+      expect(parseStrictFiniteNumber(1.17, 'density')).toBe(1.17);
+      expect(parseStrictFiniteNumber(0, 'val')).toBe(0);
+      expect(parseStrictFiniteNumber(-42.5, 'val')).toBe(-42.5);
+    });
+
+    it('accepts standard dot decimal strings', () => {
+      expect(parseStrictFiniteNumber('1.17', 'density')).toBe(1.17);
+      expect(parseStrictFiniteNumber('36.0', 'alkalinityNa2O')).toBe(36.0);
+      expect(parseStrictFiniteNumber('.5', 'val')).toBe(0.5);
+    });
+
+    it('accepts local Indonesian decimal comma string ("1,17" -> 1.17)', () => {
+      expect(parseStrictFiniteNumber('1,17', 'density')).toBe(1.17);
+      expect(parseStrictFiniteNumber('1,500', 'density')).toBe(1.5);
+      expect(parseStrictFiniteNumber('4,00', 'ph')).toBe(4.0);
+      expect(parseStrictFiniteNumber('35,5', 'alkalinityNa2O')).toBe(35.5);
+    });
+
+    it('rejects malformed multiple commas ("1,2,3")', () => {
+      expect(() => parseStrictFiniteNumber('1,2,3', 'val')).toThrow(BadRequestException);
+    });
+
+    it('rejects mixed comma and dot separators ("1,000.50" or "1.2,3")', () => {
+      expect(() => parseStrictFiniteNumber('1,000.50', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('1.2,3', 'val')).toThrow(BadRequestException);
+    });
+
+    it('rejects non-finite inputs ("Infinity", "-Infinity", "NaN")', () => {
+      expect(() => parseStrictFiniteNumber('Infinity', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('-Infinity', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('NaN', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber(Infinity, 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber(NaN, 'val')).toThrow(BadRequestException);
+    });
+
+    it('rejects scientific notation ("1e2", "2.5e3")', () => {
+      expect(() => parseStrictFiniteNumber('1e2', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('2.5e3', 'val')).toThrow(BadRequestException);
+    });
+
+    it('rejects hexadecimal, non-numeric strings, and booleans', () => {
+      expect(() => parseStrictFiniteNumber('0x1f', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('abc', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber('   ', 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber(true, 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber(false, 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber(null, 'val')).toThrow(BadRequestException);
+      expect(() => parseStrictFiniteNumber(undefined, 'val')).toThrow(BadRequestException);
     });
   });
 });

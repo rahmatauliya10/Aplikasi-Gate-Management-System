@@ -122,7 +122,7 @@ export interface ChemicalEvaluationResult {
   productName: string;
   isCompliant: boolean;
   result: 'PASS' | 'REJECT';
-  decision: 'RELEASE' | 'REJECT' | 'PENDING_DISPOSITION';
+  decision: 'RELEASE' | 'REJECT' | 'PENDING_DISPOSITION' | 'WAITING_DISPOSITION';
   specMetadata: ChemicalSpecificationMetadata;
   violations: string[];
   summary: string;
@@ -223,10 +223,10 @@ export function evaluatePacAnalysis(
   // It does NOT participate in compliance or cause violations.
 
   const isCompliant = violations.length === 0;
-  const decision = isCompliant ? 'RELEASE' : 'REJECT';
+  const decision = isCompliant ? 'RELEASE' : 'WAITING_DISPOSITION';
   const summary = isCompliant
     ? `PAC memenuhi seluruh parameter wajib (pH: ${params.ph}, Density: ${params.density}, Sensori OK). Disetujui RELEASE berdasarkan spesifikasi ${specMetadata.version}.`
-    : `PAC ditolak karena melanggar ${violations.length} parameter spesifikasi: ${violations.join('; ')}`;
+    : `PAC OOS (${violations.length} penyimpangan: ${violations.join('; ')}). Menunggu disposisi terkendali Gudang GSP.`;
 
   return {
     productName,
@@ -349,10 +349,10 @@ export function evaluateRapidKlenAnalysis(
   }
 
   const isCompliant = violations.length === 0;
-  const decision = isCompliant ? 'RELEASE' : 'REJECT';
+  const decision = isCompliant ? 'RELEASE' : 'WAITING_DISPOSITION';
   const summary = isCompliant
     ? `Rapid Klen memenuhi seluruh parameter (Na2O: ${params.alkalinityNa2O}%, NaOH: ${params.alkalinityNaOH}%, pH: ${params.ph}, Density: ${params.density}, Kemasan OK). Disetujui RELEASE berdasarkan spesifikasi ${specMetadata.version}.`
-    : `Rapid Klen ditolak karena melanggar spesifikasi: ${violations.join('; ')}`;
+    : `Rapid Klen OOS (${violations.length} penyimpangan: ${violations.join('; ')}). Menunggu disposisi terkendali Gudang GSP.`;
 
   return {
     productName,

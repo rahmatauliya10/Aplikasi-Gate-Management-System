@@ -271,7 +271,12 @@
             <tr v-for="truck in activeTrucks" :key="truck.id" class="transition-colors hover:bg-slate-50/80">
               <td class="px-4 sm:px-6 py-3 border-y border-l border-slate-100 rounded-l-2xl">
                 <div>
-                  <span class="font-black text-slate-900 text-xs sm:text-sm font-mono tracking-tight block">{{ truck?.plateNumber || truck?.licensePlate || '-' }}</span>
+                  <div class="flex items-center space-x-1.5">
+                    <span class="font-black text-slate-900 text-xs sm:text-sm font-mono tracking-tight block">{{ truck?.plateNumber || truck?.licensePlate || '-' }}</span>
+                    <span v-if="truck?.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      #{{ String(truck.dailySequence).padStart(3, '0') }}
+                    </span>
+                  </div>
                   <span class="text-[10px] text-slate-600 block">{{ truck?.driverName || 'No Driver' }}</span>
                 </div>
               </td>

@@ -95,6 +95,66 @@ export class TransactionsController {
     return this.transactionsService.findActive(user);
   }
 
+  @Get('pending-reminders')
+  @ApiOperation({
+    summary: 'Get role-scoped pending transaction reminders with categorization and SLA',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending transaction reminders retrieved',
+  })
+  getPendingReminders(@CurrentUser() user: JwtPayloadUser) {
+    return this.transactionsService.getPendingReminders(user);
+  }
+
+  @Post('pending-reminders/:id/snooze')
+  @ApiOperation({ summary: 'Snooze pending reminder for current user' })
+  @ApiResponse({ status: 200, description: 'Reminder snoozed for current user' })
+  snoozeReminder(
+    @Param('id') reminderId: string,
+    @CurrentUser() user: JwtPayloadUser,
+    @Body() body: { minutes?: number },
+  ) {
+    return this.transactionsService.snoozeReminder(
+      user.id,
+      reminderId,
+      body?.minutes || 30,
+    );
+  }
+
+  @Post('pending-reminders/:id/unsnooze')
+  @ApiOperation({ summary: 'Unsnooze pending reminder for current user' })
+  @ApiResponse({ status: 200, description: 'Reminder unsnoozed for current user' })
+  unsnoozeReminder(
+    @Param('id') reminderId: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.transactionsService.unsnoozeReminder(user.id, reminderId);
+  }
+
+  @Post('pending-reminders/:id/read')
+  @ApiOperation({ summary: 'Mark reminder as read for current user' })
+  @ApiResponse({ status: 200, description: 'Reminder marked read for current user' })
+  markReminderRead(
+    @Param('id') reminderId: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.transactionsService.markReminderRead(user.id, reminderId);
+  }
+
+  @Post('pending-reminders/read-all')
+  @ApiOperation({ summary: 'Mark all reminders as read for current user' })
+  @ApiResponse({ status: 200, description: 'All reminders marked read for current user' })
+  markAllRemindersRead(
+    @CurrentUser() user: JwtPayloadUser,
+    @Body() body: { ids?: string[] },
+  ) {
+    return this.transactionsService.markAllRemindersRead(
+      user.id,
+      body?.ids || [],
+    );
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get transaction details by ID' })
   @ApiResponse({ status: 200, description: 'Transaction details retrieved' })

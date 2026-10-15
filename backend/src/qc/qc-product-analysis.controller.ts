@@ -21,6 +21,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { QcProductAnalysisService } from './qc-product-analysis.service';
 import { SubmitProductAnalysisDto } from './dto/submit-product-analysis.dto';
+import { SubmitGspDispositionDto } from './dto/submit-gsp-disposition.dto';
 
 @ApiTags('QC Product Analysis')
 @ApiBearerAuth()
@@ -115,5 +116,37 @@ export class QcProductAnalysisController {
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.productAnalysisService.getAnalysisHistory(transactionId, user);
+  }
+
+  @Post('product-analysis/:transactionId/disposition')
+  @Roles('WAREHOUSE', 'ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Submit GSP warehouse quality disposition for OOS chemical product analysis (ACCEPT_WITH_NOTE, REQUEST_RETEST, REJECT)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'GSP quality disposition recorded successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Invalid disposition action, missing reason, critical defect not waivable, or max retest exceeded',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden: caller is not Gudang GSP or Admin',
+  })
+  submitGspDisposition(
+    @Param('transactionId') transactionId: string,
+    @Body() dto: SubmitGspDispositionDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.productAnalysisService.submitGspDisposition(
+      transactionId,
+      dto,
+      user,
+    );
   }
 }

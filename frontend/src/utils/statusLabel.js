@@ -7,6 +7,8 @@ export const getStatusLabel = (status, processType) => {
   const EXPLICIT_LABELS = {
     PA_NOT_REQUIRED: 'TIDAK PERLU PA',
     QC_RETEST_REQUIRED: 'UJI ULANG DIPERLUKAN',
+    WAITING_GSP_DISPOSITION: 'MENUNGGU DISPOSISI GUDANG GSP',
+    WAITING_GSP_CHECKLIST_DISPOSITION: 'MENUNGGU KEPUTUSAN PENERIMAAN GSP',
     WAITING_UTILITY_DISPOSITION: 'MENUNGGU DISPOSISI UTILITY',
   }
   if (EXPLICIT_LABELS[status]) return EXPLICIT_LABELS[status]
@@ -23,7 +25,12 @@ export const getStatusBadgeClass = (status) => {
   if (status === 'PA_NOT_REQUIRED') {
     return 'bg-slate-100 text-slate-700 border border-slate-300 shadow-sm'
   }
-  if (status === 'QC_RETEST_REQUIRED' || status === 'WAITING_UTILITY_DISPOSITION') {
+  if (
+    status === 'QC_RETEST_REQUIRED' ||
+    status === 'WAITING_GSP_DISPOSITION' ||
+    status === 'WAITING_GSP_CHECKLIST_DISPOSITION' ||
+    status === 'WAITING_UTILITY_DISPOSITION'
+  ) {
     return 'bg-orange-50 text-orange-600 border border-orange-200 shadow-sm'
   }
   if (status.includes('PENDING')) {

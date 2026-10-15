@@ -120,8 +120,11 @@
           <div v-for="(truck, i) in paginatedRegisteredTrucks" :key="truck.id"
             class="group relative bg-white hover:bg-slate-50/80 border-b border-slate-100/80 last:border-b-0 first:rounded-t-none last:rounded-b-xl transition-all duration-200 flex flex-wrap md:flex-nowrap items-center px-6 py-4 md:py-3.5"
           >
-            <!-- COL 1: Plate Number (Clean Box) -->
-            <div class="w-full md:w-[130px] shrink-0 flex items-center">
+            <!-- COL 1: Plate Number (Clean Box) & Arrival Sequence -->
+            <div class="w-full md:w-[150px] shrink-0 flex items-center space-x-1.5">
+              <span v-if="truck.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                #{{ String(truck.dailySequence).padStart(3, '0') }}
+              </span>
               <div class="h-8 bg-slate-100/90 border border-slate-200 rounded-lg flex items-center justify-center text-slate-800 font-mono font-bold text-[11px] shadow-2xs tracking-wider px-2.5 whitespace-nowrap group-hover:border-slate-300 group-hover:bg-slate-100 transition-colors">
                 {{ getPlateNumber(truck) }}
               </div>

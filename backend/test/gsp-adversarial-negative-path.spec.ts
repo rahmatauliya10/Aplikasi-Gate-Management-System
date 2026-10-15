@@ -778,7 +778,7 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
             density: 1.45,
           },
           result: QcResult.REJECT,
-          decision: AnalysisDecision.REJECT,
+          decision: AnalysisDecision.WAITING_DISPOSITION,
           revision: 2,
         },
         qcAnalystUser,
@@ -789,14 +789,14 @@ describe('GSP Adversarial Negative-Path & Anti-Bypass Test Suite (P0 Remediation
         expect.objectContaining({
           data: expect.objectContaining({
             result: QcResult.REJECT,
-            status: 'REJECT',
+            status: 'WAITING_DISPOSITION',
           }),
         }),
       );
       expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: TransactionStatus.QC_VEHICLE_REJECTED,
+            status: TransactionStatus.WAITING_GSP_DISPOSITION,
           }),
         }),
       );

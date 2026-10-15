@@ -67,6 +67,7 @@ RUN npm ci --omit=dev --ignore-scripts
 
 # Copy generated Prisma engine & client artifacts directly from builder
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
 
 # ------------------------------------------------------------------------------
 # Stage 4: Production Runtime (Zero npm/npx Hardened Node 22 Alpine Container)

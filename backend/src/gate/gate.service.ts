@@ -77,7 +77,45 @@ export class GateService {
             // Fallback for non-postgres database environments in testing
           }
 
-          const transactionNumber = await this.generateTransactionNumber(tx);
+          // Atomic daily arrival sequence counter for plant day (WIB)
+          const plantDay = getPlantDay();
+          let dailySequence: number | null = null;
+          try {
+            if (tx.dailyArrivalCounter) {
+              const arrivalCounter = await tx.dailyArrivalCounter.upsert({
+                where: { dateKey: plantDay.dateKey },
+                create: { dateKey: plantDay.dateKey, lastSeq: 1 },
+                update: { lastSeq: { increment: 1 } },
+              });
+              dailySequence = arrivalCounter.lastSeq;
+            } else {
+              const count = await tx.transaction.count({
+                where: {
+                  createdAt: {
+                    gte: plantDay.start,
+                    lt: plantDay.end,
+                  },
+                },
+              });
+              dailySequence = count + 1;
+            }
+          } catch (counterErr) {
+            this.logger.warn(
+              `Failed to allocate atomic dailyArrivalCounter: ${counterErr.message}. Fallback to count.`,
+            );
+            const count = await tx.transaction.count({
+              where: {
+                createdAt: {
+                  gte: plantDay.start,
+                  lt: plantDay.end,
+                },
+              },
+            });
+            dailySequence = count + 1;
+          }
+
+          const sequenceStr = (dailySequence || 1).toString().padStart(4, '0');
+          const transactionNumber = `GMS-${plantDay.dateKey}-${sequenceStr}`;
 
           const activeTransaction = await tx.transaction.findFirst({
             where: {
@@ -231,6 +269,7 @@ export class GateService {
           return tx.transaction.create({
             data: {
               transactionNumber,
+              dailySequence,
               plateNumber: normalizedPlate,
               driverName: dto.driverName,
               driverPhone: dto.driverPhone,

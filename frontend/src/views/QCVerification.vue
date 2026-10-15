@@ -25,7 +25,12 @@
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
               <div class="col-span-2 bg-slate-100/90 p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between hover:-translate-y-0.5 hover:border-slate-300 transition-all duration-300">
-                <span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.15em] mb-1.5">Plate Number</span>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.15em]">Plate Number</span>
+                  <span v-if="selectedTruck.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    #{{ String(selectedTruck.dailySequence).padStart(3, '0') }}
+                  </span>
+                </div>
                 <span class="text-xl font-black truncate font-mono tracking-widest text-slate-900">{{ getPlateNumber(selectedTruck) }}</span>
               </div>
               
@@ -64,14 +69,14 @@
                 </button>
               </div>
 
-              <!-- GSP Batubara Retest Mode -->
+              <!-- GSP PA Retest Mode (Coal & Chemical) -->
               <div v-else-if="selectedTruck.status === 'QC_RETEST_REQUIRED'" class="space-y-4">
                 <button @click="openGspPaModal(selectedTruck, 2)" class="w-full py-4 rounded-2xl font-black text-white flex items-center justify-center space-x-2 transition-all shadow-lg hover:shadow-xl hover:-translate-y-1"
                   style="background:linear-gradient(135deg,#F97316,#C2410C);"
                   id="btn-start-coal-retest">
                   <span v-if="isProcessing" class="material-icons text-xl animate-spin">autorenew</span>
                   <span v-else class="material-icons text-xl">refresh</span>
-                  <span class="text-base tracking-wide">🔄 Lakukan Uji Ulang PA Batubara (Round 2)</span>
+                  <span class="text-base tracking-wide">{{ isProfileCoal(selectedTruck) ? '🔄 Lakukan Uji Ulang PA Batubara (Round 2)' : (isProfilePac(selectedTruck) ? '🔄 Lakukan Uji Ulang PA PAC (Round 2)' : '🔄 Lakukan Uji Ulang PA Rapid Klen (Round 2)') }}</span>
                 </button>
               </div>
 
@@ -91,6 +96,15 @@
                   <span>Muatan Ditolak (QC REJECTED)</span>
                 </div>
                 <p class="text-xs text-rose-700 font-medium">Hasil evaluasi mutu tidak memenuhi standar acuan operasional. Proses dihentikan dan muatan ditolak.</p>
+              </div>
+
+              <!-- GSP Waiting Disposition Notice -->
+              <div v-else-if="selectedTruck.status === 'WAITING_GSP_DISPOSITION'" class="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-center space-y-2 shadow-sm" id="card-gsp-waiting">
+                <div class="flex items-center justify-center gap-2 text-amber-800 font-black text-sm">
+                  <span class="material-icons text-xl text-amber-600">gavel</span>
+                  <span>Menunggu Disposisi Gudang GSP</span>
+                </div>
+                <p class="text-xs text-amber-700 font-medium">Hasil evaluasi mutu OOS sedang menunggu keputusan penerimaan operasional oleh Gudang GSP.</p>
               </div>
 
               <!-- GSP Waiting Utility Disposition (Legacy Read-Only Notice) -->
@@ -185,7 +199,12 @@
                 
                 <div class="flex justify-between items-start pl-3">
                   <div>
-                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">Process Type</div>
+                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 flex items-center space-x-1.5">
+                      <span>Process Type</span>
+                      <span v-if="truck.dailySequence" class="px-1.5 py-0.2 rounded text-[9px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        #{{ String(truck.dailySequence).padStart(3, '0') }}
+                      </span>
+                    </div>
                     <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ getPlateNumber(truck) }}</div>
                   </div>
                   <div class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest bg-slate-100 text-slate-600 font-mono border border-slate-200"
@@ -674,12 +693,14 @@
             <ChemicalPacForm
               v-else-if="isProfilePac(selectedTruck)"
               :transaction="selectedTruck"
+              :test-round="gspTestRound"
               :is-submitting="isProcessing"
               @submit="handleGspPaSubmit"
             />
             <ChemicalRapidKlenForm
               v-else-if="isProfileRapidKlen(selectedTruck)"
               :transaction="selectedTruck"
+              :test-round="gspTestRound"
               :is-submitting="isProcessing"
               @submit="handleGspPaSubmit"
             />
@@ -717,6 +738,7 @@ import Pagination from '../components/Pagination.vue'
 import CoalAnalysisForm from '../components/qc/CoalAnalysisForm.vue'
 import ChemicalPacForm from '../components/qc/ChemicalPacForm.vue'
 import ChemicalRapidKlenForm from '../components/qc/ChemicalRapidKlenForm.vue'
+import { useUnsavedWarning } from '../composables/useUnsavedWarning'
 import api from '../services/api'
 import {
   GBJ_VEHICLE_CHECKLIST,
@@ -853,8 +875,8 @@ const qcTrucks = computed(() => {
     if (t.status === 'QC_VEHICLE_PENDING' || t.status === 'QC_VEHICLE_IN_PROGRESS') {
       return true
     }
-    // GSP Retest or Waiting Utility Disposition
-    if (t.status === 'QC_RETEST_REQUIRED' || t.status === 'WAITING_UTILITY_DISPOSITION') {
+    // GSP Retest or Waiting GSP / Utility Disposition
+    if (t.status === 'QC_RETEST_REQUIRED' || t.status === 'WAITING_GSP_DISPOSITION' || t.status === 'WAITING_UTILITY_DISPOSITION') {
       return true
     }
     // QC Lab Analysis (Stage 3) for GBB and GSP
@@ -916,6 +938,21 @@ const vehicleChecklist = GBJ_VEHICLE_CHECKLIST
 
 const showDeviationModal = ref(false)
 const deviationReason = ref('')
+
+const isQcFormDirty = computed(() => {
+  if (showSamplingModal.value) {
+    return Boolean(samplingForm.value.note || samplingForm.value.moistureEst)
+  }
+  if (showChecklistModal.value) {
+    return checklistStates.value.some(s => s.status !== null)
+  }
+  if (showDeviationModal.value) {
+    return (deviationReason.value || '').trim().length > 0
+  }
+  return false
+})
+
+useUnsavedWarning(isQcFormDirty)
 
 const handlePhotoUpload = (event, index) => {
   const file = event.target.files[0]

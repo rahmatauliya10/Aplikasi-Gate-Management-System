@@ -86,9 +86,9 @@
             <span class="text-[10px] font-bold text-slate-400">Std: &gt; 35.00%</span>
           </div>
           <input
-            type="number"
-            step="0.01"
-            v-model.number="formData.alkalinityNa2O"
+            type="text"
+            inputmode="decimal"
+            v-model="formData.alkalinityNa2O"
             placeholder="Contoh: 36.20"
             id="input-rapid-na2o"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
@@ -106,9 +106,9 @@
             <span class="text-[10px] font-bold text-slate-400">Std: &gt; 45.16%</span>
           </div>
           <input
-            type="number"
-            step="0.01"
-            v-model.number="formData.alkalinityNaOH"
+            type="text"
+            inputmode="decimal"
+            v-model="formData.alkalinityNaOH"
             placeholder="Contoh: 46.50"
             id="input-rapid-naoh"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
@@ -126,9 +126,9 @@
             <span class="text-[10px] font-bold text-slate-400">Std: &gt; 12.000</span>
           </div>
           <input
-            type="number"
-            step="0.001"
-            v-model.number="formData.ph"
+            type="text"
+            inputmode="decimal"
+            v-model="formData.ph"
             placeholder="Contoh: 13.000"
             id="input-rapid-ph"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
@@ -146,9 +146,9 @@
             <span class="text-[10px] font-bold text-slate-400">Std: &gt; 1.400</span>
           </div>
           <input
-            type="number"
-            step="0.001"
-            v-model.number="formData.density"
+            type="text"
+            inputmode="decimal"
+            v-model="formData.density"
             placeholder="Contoh: 1.425"
             id="input-rapid-density"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
@@ -174,26 +174,30 @@
 
     <!-- Actions -->
     <div class="pt-4 border-t border-slate-100 flex flex-col md:flex-row gap-3">
+      <!-- In-Spec Submission (Direct Release) -->
       <button
+        v-if="isAllInSpec"
         type="button"
         @click="submitAnalysis"
-        :disabled="isSubmitting || !isFormComplete || !isAllInSpec"
+        :disabled="isSubmitting || !isFormComplete"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-rapid-release"
       >
         <span class="material-icons text-base">send</span>
-        <span>Kirim Hasil Analisis PA</span>
+        <span>Kirim Hasil Analisis PA (Sesuai Spesifikasi)</span>
       </button>
 
+      <!-- OOS Submission (Requires GSP Disposition) -->
       <button
+        v-else
         type="button"
         @click="submitAnalysis"
         :disabled="isSubmitting || !isFormComplete"
-        class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all flex items-center justify-center gap-2"
+        class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-rapid-reject"
       >
-        <span class="material-icons text-base">send</span>
-        <span>Kirim Hasil Analisis PA</span>
+        <span class="material-icons text-base">warning</span>
+        <span>Kirim Hasil Analisis PA (OOS — Disposisi Gudang GSP)</span>
       </button>
     </div>
   </div>
@@ -204,6 +208,7 @@ import { reactive, computed } from 'vue'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
+  testRound: { type: Number, default: 1 },
   isSubmitting: { type: Boolean, default: false },
 })
 
@@ -222,6 +227,15 @@ const formData = reactive({
   notes: '',
 })
 
+// Helper to support both comma (Indonesian) and dot decimal input
+const parseLocalDecimal = (val) => {
+  if (val === null || val === undefined || val === '') return null
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null
+  const str = String(val).trim().replace(',', '.')
+  const num = parseFloat(str)
+  return isNaN(num) || !Number.isFinite(num) ? null : num
+}
+
 const isVisualValid = computed(() => {
   return formData.sensory.visual === 'Jernih'
 })
@@ -236,23 +250,27 @@ const isPackagingValid = computed(() => {
 
 // Authoritative rule: STRICTLY > (greater than)
 const isNa2OValid = computed(() => {
-  if (formData.alkalinityNa2O == null) return true
-  return formData.alkalinityNa2O > 35.00
+  const val = parseLocalDecimal(formData.alkalinityNa2O)
+  if (val == null) return true
+  return val > 35.00
 })
 
 const isNaOHValid = computed(() => {
-  if (formData.alkalinityNaOH == null) return true
-  return formData.alkalinityNaOH > 45.16
+  const val = parseLocalDecimal(formData.alkalinityNaOH)
+  if (val == null) return true
+  return val > 45.16
 })
 
 const isPhValid = computed(() => {
-  if (formData.ph == null) return true
-  return formData.ph > 12.000
+  const val = parseLocalDecimal(formData.ph)
+  if (val == null) return true
+  return val > 12.000
 })
 
 const isDensityValid = computed(() => {
-  if (formData.density == null) return true
-  return formData.density > 1.400
+  const val = parseLocalDecimal(formData.density)
+  if (val == null) return true
+  return val > 1.400
 })
 
 const isSensoryComplete = computed(() => {
@@ -264,10 +282,10 @@ const isFormComplete = computed(() => {
     Boolean(formData.sensory.visual) &&
     Boolean(formData.sensory.foreignMatters) &&
     Boolean(formData.sensory.packagingLabel) &&
-    formData.alkalinityNa2O != null &&
-    formData.alkalinityNaOH != null &&
-    formData.ph != null &&
-    formData.density != null
+    parseLocalDecimal(formData.alkalinityNa2O) != null &&
+    parseLocalDecimal(formData.alkalinityNaOH) != null &&
+    parseLocalDecimal(formData.ph) != null &&
+    parseLocalDecimal(formData.density) != null
   )
 })
 
@@ -283,10 +301,23 @@ const isAllInSpec = computed(() => {
 })
 
 const submitAnalysis = () => {
+  const category =
+    props.transaction?.productCatalog?.category ||
+    (props.transaction?.cargoType && props.transaction.cargoType !== 'Chemicals'
+      ? props.transaction.cargoType
+      : 'Chemical PROD')
+
+  const name =
+    props.transaction?.productCatalog?.name ||
+    props.transaction?.cargoSubType ||
+    'Rapid Klen'
+
+  const round = props.testRound || props.transaction?.testRound || 1
+
   emit('submit', {
-    productCategory: 'Chemicals',
-    productName: props.transaction.cargoSubType || 'Rapid Klen',
-    testRound: 1,
+    productCategory: category,
+    productName: name,
+    testRound: round,
     parameters: {
       sensory: {
         visual: formData.sensory.visual,
@@ -296,10 +327,10 @@ const submitAnalysis = () => {
       visual: formData.sensory.visual,
       foreignMatters: formData.sensory.foreignMatters,
       packagingCondition: formData.sensory.packagingLabel,
-      alkalinityNa2O: formData.alkalinityNa2O,
-      alkalinityNaOH: formData.alkalinityNaOH,
-      ph: formData.ph,
-      density: formData.density,
+      alkalinityNa2O: parseLocalDecimal(formData.alkalinityNa2O),
+      alkalinityNaOH: parseLocalDecimal(formData.alkalinityNaOH),
+      ph: parseLocalDecimal(formData.ph),
+      density: parseLocalDecimal(formData.density),
     },
     notes: formData.notes,
   })

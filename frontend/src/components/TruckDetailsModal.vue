@@ -23,8 +23,8 @@
                   {{ truck.processType }}
                 </span>
                 <StatusBadge :status="truck.status" :process-type="truck.processType" />
-                <ProcessTimerBadge 
-                  :start-time="activeStageStartTime" 
+                <ProcessTimerBadge
+                  :start-time="activeStageStartTime"
                   :end-time="truck.completedAt || truck.cancelledAt"
                   :sla-minutes="60"
                   label="Durasi"
@@ -97,191 +97,457 @@
                 </div>
               </div>
 
-              <!-- 1. Initial QC Sampling Card / SAMPLING PARAMETERS (For GBB & GSP) -->
-              <div v-if="(truck.processType === 'GBB' || truck.processType === 'GSP') && initialSamplingDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm space-y-2 p-3">
-                <div class="flex items-center justify-between border-b border-slate-50 pb-2">
-                  <div class="flex items-center space-x-2">
-                    <span class="material-icons text-indigo-500 text-[14px]">biotech</span>
-                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">SAMPLING PARAMETERS</h3>
-                  </div>
-                  <span class="text-[9px] font-bold text-slate-400">PIC: [SAMPLING QC] {{ initialSamplingDetails.pic || 'QC Inspector' }}</span>
-                </div>
-
-                <!-- 3 Sampling Parameter Cards: MOISTURE, VISUAL, ODOR (Sesuai Gambar User) -->
-                <div class="grid grid-cols-3 gap-2.5">
-                  <div v-for="item in initialSamplingMetrics" :key="item.label" 
-                       class="p-3 rounded-2xl border transition-all text-center flex flex-col items-center justify-center space-y-1.5"
-                       :class="item.isOk ? 'border-emerald-200/80 bg-emerald-50/20' : 'border-rose-200/80 bg-rose-50/20'">
-                    <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest">{{ item.label }}</div>
-                    
-                    <!-- Numeric Moisture Value Badge -->
-                    <template v-if="!item.isText">
-                      <div class="text-xs font-black font-mono text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
-                        {{ item.value }}
-                      </div>
-                    </template>
-
-                    <!-- Icon + OK / NOT OK Badge for Visual & Odor -->
-                    <template v-else>
-                      <div class="flex items-center space-x-1 font-black text-xs" :class="item.isOk ? 'text-emerald-600' : 'text-rose-600'">
-                        <span class="material-icons text-[14px]">{{ item.isOk ? 'check_circle' : 'cancel' }}</span>
-                        <span>{{ item.value }}</span>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-
-                <!-- Overall Status Banner -->
-                <div class="rounded-xl p-2.5 text-white relative overflow-hidden shadow-sm"
-                     :style="{ background: initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #10B981, #047857)' }">
-                  <div class="flex items-center space-x-2">
-                    <span class="material-icons text-white/90 text-sm">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
-                    <span class="text-xs font-black tracking-widest uppercase">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'REJECTED' : 'APPROVED' }}</span>
-                  </div>
-                  <p v-if="initialSamplingDetails.note" class="text-[10px] font-bold text-white mt-1.5 p-2 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ initialSamplingDetails.note }}"</p>
-                </div>
-              </div>
-
-              <!-- 2. Quality Analysis (QC Lab) Card (For GBB & GSP) -->
-              <div v-if="(truck.processType === 'GBB' || truck.processType === 'GSP') && qcLabDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
-                <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
-                  <div class="flex items-center space-x-2">
-                    <span class="material-icons text-blue-500 text-[14px]">science</span>
-                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Quality Analysis (QC Lab)</h3>
-                  </div>
-                  <span v-if="!qcLabDetails.isSkipped" class="text-[9px] font-bold text-slate-400">PIC: [LAB QC] {{ qcLabDetails.pic || 'QC Lab Team' }}</span>
-                </div>
-                <div class="p-3">
-                  <div v-if="qcLabDetails.isSkipped" class="rounded-xl p-3 text-slate-500 relative overflow-hidden bg-slate-50 border border-slate-200 shadow-sm flex items-center space-x-2">
-                    <span class="material-icons text-slate-400 text-sm">next_plan</span>
-                    <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED ({{ qcLabDetails.reason }})</span>
-                  </div>
-                  <div v-else class="space-y-2.5">
-                    <div v-if="qcMetrics.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
-                      <div v-for="item in qcMetrics" :key="item.label" class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
-                        <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
-                        <div class="text-sm font-black text-slate-800 font-mono">{{ item.value }}</div>
-                      </div>
-                    </div>
-                    <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
-                         :style="{ background: qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'linear-gradient(135deg, #F59E0B, #D97706)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)') }">
-                      <div class="flex items-center space-x-2">
-                        <span class="material-icons text-white/90 text-sm">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'cancel' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'warning' : 'verified') }}</span>
-                        <span class="text-xs font-black tracking-widest uppercase">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'REJECTED' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? '⚠️ APPROVED WITH NOTE (QUALITY CONCESSION)' : (qcLabDetails.status || 'ACCEPTED')) }}</span>
-                      </div>
-                      <p v-if="qcLabDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcLabDetails.note }}"</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 3. QC Vehicle Card (For GBJ) -->
-              <div v-if="truck.processType === 'GBJ' && qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
-                <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
-                  <div class="flex items-center space-x-2">
-                    <span class="material-icons text-indigo-500 text-[14px]">local_shipping</span>
-                    <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">QC Vehicle Inspection</h3>
-                  </div>
-                  <span v-if="qcPicLabel" class="text-[9px] font-bold text-slate-400">PIC: {{ qcPicLabel }}</span>
-                </div>
-                <div class="p-3">
-                  <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
-                       :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
+              <!-- ================= GSP DEDICATED SECTIONS ================= -->
+              <template v-if="currentTruck.processType === 'GSP'">
+                <!-- GSP 1. Analisis Laboratorium (QC PA) -->
+                <!-- 1a. Solar PA Exempt Banner -->
+                <div v-if="isSolarCommodity" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm p-3.5 space-y-2">
+                  <div class="flex items-center justify-between border-b border-slate-50 pb-2">
                     <div class="flex items-center space-x-2">
-                      <span class="material-icons text-white/90 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
-                      <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'REJECTED' : 'ACCEPTED' }}</span>
+                      <span class="material-icons text-amber-500 text-[15px]">local_gas_station</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Analisis Laboratorium (QC PA) — Solar</h3>
                     </div>
-                    <p v-if="qcDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcDetails.note }}"</p>
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-50 text-blue-700 border border-blue-200 uppercase tracking-wider">
+                      Bebas Uji Lab (PA Exempt)
+                    </span>
+                  </div>
+                  <div class="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-600 space-y-1">
+                    <p class="font-bold text-slate-800">Komoditas Solar (BBM)</p>
+                    <p class="text-[11px] text-slate-500 leading-relaxed">
+                      Sesuai kebijakan mutu operasional GSP, komoditas Solar dibebaskan dari pengujian laboratorium dan langsung diarahkan ke tahap penerimaan tangki gudang setelah penimbangan masuk.
+                    </p>
                   </div>
                 </div>
-              </div>
 
-              <!-- Incoming Checklist Results (when remarks contain checklist data or it is a warehouse rejection or vehicle check) -->
-              <div v-if="parsedChecklist || isWarehouseRejection" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
-                <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50" 
-                     :style="checklistStatusInfo.headerStyle">
-                  <div class="flex items-center space-x-2">
-                    <span class="material-icons text-[14px]" :style="checklistStatusInfo.iconStyle">{{ truck?.processType === 'GBJ' ? 'local_shipping' : 'assignment_turned_in' }}</span>
-                    <h3 class="text-[10px] font-black uppercase tracking-[0.15em]" :style="checklistStatusInfo.titleStyle">{{ truck?.processType === 'GBJ' ? 'Vehicle & Goods Inspection' : 'Incoming QC Checklist' }}</h3>
+                <!-- 1b. Coal & Chemical QC Product Analysis Rounds -->
+                <div v-else class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                  <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-blue-500 text-[15px]">science</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Analisis Laboratorium (QC PA)</h3>
+                    </div>
+                    <span class="text-[9px] font-bold text-slate-500 font-mono">
+                      {{ currentTruck.gspAnalysisProfile || currentTruck.cargoSubType || 'GSP' }}
+                    </span>
                   </div>
-                  <!-- Status Pill & PIC -->
-                  <div class="flex items-center space-x-2.5">
-                    <span v-if="checklistPicLabel && truck?.processType !== 'GBJ'" class="text-[9px] font-bold text-slate-400">PIC: {{ checklistPicLabel }}</span>
+                  <div class="p-3 space-y-3">
+                    <!-- If no PA rounds recorded yet -->
+                    <div v-if="!gspPaRounds || gspPaRounds.length === 0" class="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-1">
+                      <span class="material-icons text-slate-300 text-2xl">biotech</span>
+                      <p class="text-[11px] font-bold text-slate-500">Belum Ada Catatan Pengujian Laboratorium</p>
+                      <p class="text-[10px] text-slate-400">Pengujian laboratorium QC belum dimulai atau belum selesai dicatat.</p>
+                    </div>
+
+                    <!-- PA Rounds List -->
+                    <div v-for="round in gspPaRounds" :key="round.id || round.testRound" class="space-y-2 border border-slate-100 rounded-xl p-3 bg-slate-50/30">
+                      <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                        <div class="flex items-center space-x-2">
+                          <span class="w-5 h-5 rounded-md bg-blue-100 text-blue-800 font-mono font-black text-[10px] flex items-center justify-center">
+                            R{{ round.testRound }}
+                          </span>
+                          <span class="text-[11px] font-black text-slate-800 uppercase tracking-wide">
+                            Uji Laboratorium Ronde {{ round.testRound }}
+                          </span>
+                        </div>
+                        <span class="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
+                          :class="getPaStatusBadgeClass(round.status || round.result)">
+                          {{ getPaStatusLabel(round.status || round.result) }}
+                        </span>
+                      </div>
+
+                      <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                        <span>Tester: {{ round.testedBy?.name || round.testedById || 'Analis QC' }}</span>
+                        <span>{{ formatTimeFull(round.testedAt || round.createdAt) }}</span>
+                      </div>
+
+                      <!-- Parameters Grid -->
+                      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                        <div v-for="param in getFormattedPaParameters(round)" :key="param.label"
+                          class="p-2 rounded-lg border text-center flex flex-col justify-between"
+                          :class="param.isOk ? 'bg-emerald-50/40 border-emerald-200/60' : 'bg-rose-50/40 border-rose-200/60'">
+                          <div class="text-[8px] font-black text-slate-400 uppercase tracking-wider mb-0.5">{{ param.label }}</div>
+                          <div class="text-xs font-black font-mono" :class="param.isOk ? 'text-emerald-800' : 'text-rose-700'">
+                            {{ param.value }}
+                          </div>
+                          <div class="text-[8px] font-mono mt-0.5" :class="param.isOk ? 'text-emerald-600' : 'text-rose-600'">
+                            {{ param.specText }} &bull; {{ param.isOk ? 'PASS' : 'OOS' }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Round Notes if any -->
+                      <div v-if="round.notes || round.parameters?.notes" class="text-[10px] font-medium text-slate-600 bg-white p-2 rounded-lg border border-slate-100 italic">
+                        "{{ round.notes || round.parameters?.notes }}"
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- GSP 2. Disposisi Mutu Gudang GSP Card -->
+                <div v-if="hasGspDisposition || currentTruck.status === 'WAITING_GSP_DISPOSITION' || currentTruck.status === 'WAITING_UTILITY_DISPOSITION'"
+                  class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm p-3 space-y-2.5">
+                  <div class="flex items-center justify-between border-b border-slate-50 pb-2">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-amber-600 text-[15px]">assignment_late</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Disposisi Mutu Gudang GSP</h3>
+                    </div>
+                    <span v-if="currentTruck.status === 'WAITING_GSP_DISPOSITION'" class="px-2.5 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 uppercase tracking-wider animate-pulse border border-amber-300">
+                      Menunggu Disposisi
+                    </span>
+                    <span v-else-if="currentTruck.status === 'WAITING_UTILITY_DISPOSITION'" class="px-2.5 py-0.5 rounded-full text-[9px] font-black bg-slate-100 text-slate-700 uppercase tracking-wider border border-slate-200">
+                      Legacy Read-Only
+                    </span>
+                    <span v-else class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider"
+                      :class="latestDisposedPa?.dispositionAction === 'ACCEPT_WITH_NOTE' ? 'bg-amber-100 text-amber-800 border border-amber-200' : latestDisposedPa?.dispositionAction === 'REQUEST_RETEST' ? 'bg-blue-100 text-blue-800 border border-blue-200' : 'bg-rose-100 text-rose-800 border border-rose-200'">
+                      {{ getDispositionActionLabel(latestDisposedPa?.dispositionAction) }}
+                    </span>
+                  </div>
+
+                  <!-- Waiting GSP Disposition Notice -->
+                  <div v-if="currentTruck.status === 'WAITING_GSP_DISPOSITION'" class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 space-y-1">
+                    <div class="flex items-center space-x-1.5 font-black text-xs text-amber-800">
+                      <span class="material-icons text-sm text-amber-600">warning</span>
+                      <span>Parameter Laboratorium OOS (Out-of-Specification)</span>
+                    </div>
+                    <p class="text-[11px] font-medium text-amber-900 leading-relaxed">
+                      Hasil laboratorium memiliki parameter yang menyimpang dari spesifikasi mutu. Menunggu keputusan disposisi oleh PIC Gudang GSP atau Administrator: <b>Terima dengan Catatan</b>, <b>Uji Ulang (Retest)</b>, atau <b>Tolak Muatan</b>.
+                    </p>
+                  </div>
+
+                  <!-- Legacy Read-Only Notice -->
+                  <div v-else-if="currentTruck.status === 'WAITING_UTILITY_DISPOSITION'" class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 space-y-1">
+                    <div class="flex items-center space-x-1.5 font-black text-xs text-slate-800">
+                      <span class="material-icons text-sm text-slate-500">lock</span>
+                      <span>Status Historis: WAITING_UTILITY_DISPOSITION</span>
+                    </div>
+                    <p class="text-[11px] font-medium text-slate-600 leading-relaxed">
+                      Transaksi ini menggunakan alur terdahulu dan berstatus read-only (tidak dapat diajukan disposisi baru).
+                    </p>
+                  </div>
+
+                  <!-- Executed Disposition Details -->
+                  <div v-else-if="latestDisposedPa" class="p-3 rounded-xl border space-y-2"
+                    :class="latestDisposedPa.dispositionAction === 'ACCEPT_WITH_NOTE' ? 'bg-amber-50/50 border-amber-200' : latestDisposedPa.dispositionAction === 'REQUEST_RETEST' ? 'bg-blue-50/50 border-blue-200' : 'bg-rose-50/50 border-rose-200'">
+                    <div class="flex items-center justify-between text-[10px]">
+                      <span class="font-bold text-slate-600">
+                        Disposisi Oleh: <b class="text-slate-900">{{ latestDisposedPa.dispositionBy?.name || latestDisposedPa.dispositionById || 'Gudang GSP / Admin' }}</b>
+                      </span>
+                      <span class="font-mono text-slate-500">{{ formatTimeFull(latestDisposedPa.dispositionAt) }}</span>
+                    </div>
+                    <div class="p-2.5 bg-white/90 rounded-lg border border-slate-100 text-xs text-slate-800 space-y-1">
+                      <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Alasan & Justifikasi Disposisi:</span>
+                      <p class="font-semibold italic">"{{ latestDisposedPa.dispositionReason || 'Tanpa catatan' }}"</p>
+                    </div>
+                    <div v-if="latestDisposedPa.dispositionAction === 'ACCEPT_WITH_NOTE'" class="text-[9px] text-amber-800 bg-amber-100/60 p-2 rounded-md font-medium leading-normal border border-amber-200/50">
+                      <b>Catatan Integritas Data:</b> Hasil pengujian teknis laboratorium tetap tercatat <b>REJECT (faktual)</b>. Penerimaan muatan adalah konsesi operasional bersyarat dari Gudang GSP.
+                    </div>
+                  </div>
+                </div>
+
+                <!-- GSP 3. Pemeriksaan Pra-Bongkar (9 Parameter) -->
+                <div class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                  <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-teal-600 text-[15px]">fact_check</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Pemeriksaan Pra-Bongkar (9 Parameter)</h3>
+                    </div>
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider"
+                      :class="gspPreUnloadStatus.badgeClass">
+                      {{ gspPreUnloadStatus.label }}
+                    </span>
+                  </div>
+                  <div class="p-3">
+                    <!-- If NO checklist conducted yet -->
+                    <div v-if="!gspPreUnloadItems || gspPreUnloadItems.length === 0" class="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-200 text-center space-y-1">
+                      <span class="material-icons text-slate-300 text-2xl">checklist_rtl</span>
+                      <p class="text-[11px] font-black text-slate-500 uppercase tracking-wider">Belum Ada Pemeriksaan Pre-Unloading</p>
+                      <p class="text-[10px] text-slate-400">Pemeriksaan 9 parameter pra-bongkar belum dicatat oleh tim gudang.</p>
+                    </div>
+
+                    <!-- 9 Checklist Items Grid -->
+                    <div v-else class="space-y-2">
+                      <div class="flex items-center justify-between text-[10px] text-slate-500 pb-1 border-b border-slate-100">
+                        <span>Pemeriksa: <b class="text-slate-800">{{ gspPreUnloadMeta.inspector }}</b></span>
+                        <span class="font-mono">{{ formatTimeFull(gspPreUnloadMeta.inspectedAt) }}</span>
+                      </div>
+                      <div class="space-y-1.5">
+                        <div v-for="(item, idx) in gspPreUnloadItems" :key="item.code || idx"
+                          class="p-2.5 rounded-lg border text-xs"
+                          :class="item.result === 'OK' || item.ok ? 'bg-emerald-50/30 border-emerald-100 text-slate-700' : 'bg-rose-50/40 border-rose-200 text-rose-800'">
+                          <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-1.5 truncate pr-2">
+                              <span class="material-icons text-[14px]" :class="item.result === 'OK' || item.ok ? 'text-emerald-500' : 'text-rose-500'">
+                                {{ item.result === 'OK' || item.ok ? 'check_circle' : 'cancel' }}
+                              </span>
+                              <span class="text-[11px] font-bold truncate" :title="item.label">{{ idx + 1 }}. {{ item.label }}</span>
+                            </div>
+                            <span class="text-[9px] font-mono font-black px-2 py-0.5 rounded shrink-0 uppercase"
+                              :class="item.result === 'OK' || item.ok ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'">
+                              {{ item.result === 'OK' || item.ok ? 'OK' : 'NOT OK' }}
+                            </span>
+                          </div>
+                          <!-- Notes if present -->
+                          <div v-if="item.notes" class="mt-1.5 text-[10px] font-medium text-slate-700 bg-white/80 p-1.5 rounded border border-slate-100 italic">
+                            Catatan: "{{ item.notes }}"
+                          </div>
+                          <!-- Photo thumbnail if present -->
+                          <div v-if="item.photoUrl" class="mt-2 flex items-center space-x-2">
+                            <img :src="item.photoUrl" alt="Foto Bukti" @click="activePreviewPhoto = item.photoUrl" class="w-12 h-12 object-cover rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:opacity-90 transition-opacity" />
+                            <div class="text-[9px] text-slate-500 flex flex-col">
+                              <span class="font-bold text-slate-700">Foto Bukti Terlampir</span>
+                              <button type="button" @click="activePreviewPhoto = item.photoUrl" class="text-blue-600 hover:underline text-left">Klik untuk perbesar</button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- GSP 4. Keputusan Penerimaan GSP (Disposisi Checklist) Card -->
+                <div v-if="hasChecklistDisposition || currentTruck.status === 'WAITING_GSP_CHECKLIST_DISPOSITION'"
+                  class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm p-3 space-y-2.5">
+                  <div class="flex items-center justify-between border-b border-slate-50 pb-2">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-amber-600 text-[15px]">verified_user</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Keputusan Penerimaan GSP (Checklist)</h3>
+                    </div>
+                    <span v-if="currentTruck.status === 'WAITING_GSP_CHECKLIST_DISPOSITION'" class="px-2.5 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 uppercase tracking-wider animate-pulse border border-amber-300">
+                      Menunggu Keputusan
+                    </span>
+                    <span v-else class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider"
+                      :class="latestChecklistDisposition?.action === 'ACCEPT_WITH_NOTE' ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-rose-100 text-rose-800 border border-rose-200'">
+                      {{ latestChecklistDisposition?.action === 'ACCEPT_WITH_NOTE' ? 'TERIMA DENGAN CATATAN (KONSESI)' : 'TOLAK MUATAN' }}
+                    </span>
+                  </div>
+
+                  <!-- Waiting Checklist Decision Notice -->
+                  <div v-if="currentTruck.status === 'WAITING_GSP_CHECKLIST_DISPOSITION'" class="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 space-y-1">
+                    <div class="flex items-center space-x-1.5 font-black text-xs text-amber-800">
+                      <span class="material-icons text-sm text-amber-600">warning</span>
+                      <span>Ditemukan Ketidaksesuaian Pada Checklist Pra-Bongkar</span>
+                    </div>
+                    <p class="text-[11px] font-medium text-amber-900 leading-relaxed">
+                      Pemeriksaan fisik kendaraan atau dokumen memuat butir NOT OK. Menunggu keputusan penerimaan oleh PIC Gudang GSP atau Administrator: <b>Terima dengan Catatan (Konsesi)</b> atau <b>Tolak Muatan</b>.
+                    </p>
+                  </div>
+
+                  <!-- Executed Disposition Details -->
+                  <div v-else-if="latestChecklistDisposition" class="p-3 rounded-xl border space-y-2"
+                    :class="latestChecklistDisposition.action === 'ACCEPT_WITH_NOTE' ? 'bg-amber-50/50 border-amber-200' : 'bg-rose-50/50 border-rose-200'">
+                    <div class="flex items-center justify-between text-[10px]">
+                      <span class="font-bold text-slate-600">
+                        Disposisi Oleh: <b class="text-slate-900">{{ latestChecklistDisposition.decidedByName || latestChecklistDisposition.decidedById || 'Gudang GSP / Admin' }}</b>
+                      </span>
+                      <span class="font-mono text-slate-500">{{ formatTimeFull(latestChecklistDisposition.decidedAt) }}</span>
+                    </div>
+                    <div class="p-2.5 bg-white/90 rounded-lg border border-slate-100 text-xs text-slate-800 space-y-1">
+                      <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Alasan & Justifikasi Keputusan:</span>
+                      <p class="font-semibold italic">"{{ latestChecklistDisposition.reason || 'Tanpa catatan' }}"</p>
+                    </div>
+                    <div v-if="latestChecklistDisposition.action === 'ACCEPT_WITH_NOTE'" class="text-[9px] text-amber-800 bg-amber-100/60 p-2 rounded-md font-medium leading-normal border border-amber-200/50">
+                      <b>Catatan Integritas Data:</b> Hasil pemeriksaan fisik pra-bongkar tetap tercatat <b>NOT OK (faktual)</b>. Penerimaan muatan adalah konsesi operasional bersyarat dari Gudang GSP.
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- ================= GBB / GBJ SECTIONS ================= -->
+              <template v-else>
+                <!-- 1. Initial QC Sampling Card / SAMPLING PARAMETERS (For GBB) -->
+                <div v-if="truck.processType === 'GBB' && initialSamplingDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm space-y-2 p-3">
+                  <div class="flex items-center justify-between border-b border-slate-50 pb-2">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-indigo-500 text-[14px]">biotech</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">SAMPLING PARAMETERS</h3>
+                    </div>
+                    <span class="text-[9px] font-bold text-slate-400">PIC: [SAMPLING QC] {{ initialSamplingDetails.pic || 'QC Inspector' }}</span>
+                  </div>
+
+                  <!-- 3 Sampling Parameter Cards: MOISTURE, VISUAL, ODOR -->
+                  <div class="grid grid-cols-3 gap-2.5">
+                    <div v-for="item in initialSamplingMetrics" :key="item.label"
+                         class="p-3 rounded-2xl border transition-all text-center flex flex-col items-center justify-center space-y-1.5"
+                         :class="item.isOk ? 'border-emerald-200/80 bg-emerald-50/20' : 'border-rose-200/80 bg-rose-50/20'">
+                      <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest">{{ item.label }}</div>
+
+                      <!-- Numeric Moisture Value Badge -->
+                      <template v-if="!item.isText">
+                        <div class="text-xs font-black font-mono text-emerald-700 bg-emerald-100/60 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
+                          {{ item.value }}
+                        </div>
+                      </template>
+
+                      <!-- Icon + OK / NOT OK Badge for Visual & Odor -->
+                      <template v-else>
+                        <div class="flex items-center space-x-1 font-black text-xs" :class="item.isOk ? 'text-emerald-600' : 'text-rose-600'">
+                          <span class="material-icons text-[14px]">{{ item.isOk ? 'check_circle' : 'cancel' }}</span>
+                          <span>{{ item.value }}</span>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- Overall Status Banner -->
+                  <div class="rounded-xl p-2.5 text-white relative overflow-hidden shadow-sm"
+                       :style="{ background: initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #10B981, #047857)' }">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-white/90 text-sm">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
+                      <span class="text-xs font-black tracking-widest uppercase">{{ initialSamplingDetails.status === 'REJECT' || initialSamplingDetails.status === 'REJECTED' ? 'REJECTED' : 'APPROVED' }}</span>
+                    </div>
+                    <p v-if="initialSamplingDetails.note" class="text-[10px] font-bold text-white mt-1.5 p-2 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ initialSamplingDetails.note }}"</p>
+                  </div>
+                </div>
+
+                <!-- 2. Quality Analysis (QC Lab) Card (For GBB) -->
+                <div v-if="truck.processType === 'GBB' && qcLabDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                  <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-blue-500 text-[14px]">science</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Quality Analysis (QC Lab)</h3>
+                    </div>
+                    <span v-if="!qcLabDetails.isSkipped" class="text-[9px] font-bold text-slate-400">PIC: [LAB QC] {{ qcLabDetails.pic || 'QC Lab Team' }}</span>
+                  </div>
+                  <div class="p-3">
+                    <div v-if="qcLabDetails.isSkipped" class="rounded-xl p-3 text-slate-500 relative overflow-hidden bg-slate-50 border border-slate-200 shadow-sm flex items-center space-x-2">
+                      <span class="material-icons text-slate-400 text-sm">next_plan</span>
+                      <span class="text-[10px] font-black tracking-widest uppercase">SKIPPED ({{ qcLabDetails.reason }})</span>
+                    </div>
+                    <div v-else class="space-y-2.5">
+                      <div v-if="qcMetrics.length > 0" class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2.5">
+                        <div v-for="item in qcMetrics" :key="item.label" class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
+                          <div class="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ item.label }}</div>
+                          <div class="text-sm font-black text-slate-800 font-mono">{{ item.value }}</div>
+                        </div>
+                      </div>
+                      <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
+                           :style="{ background: qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'linear-gradient(135deg, #F59E0B, #D97706)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)') }">
+                        <div class="flex items-center space-x-2">
+                          <span class="material-icons text-white/90 text-sm">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'cancel' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? 'warning' : 'verified') }}</span>
+                          <span class="text-xs font-black tracking-widest uppercase">{{ qcLabDetails.status === 'REJECT' || qcLabDetails.status === 'REJECTED' ? 'REJECTED' : (qcLabDetails.status?.includes('Note') || qcLabDetails.note?.includes('[DITERIMA DENGAN CATATAN]') ? '⚠️ APPROVED WITH NOTE (QUALITY CONCESSION)' : (qcLabDetails.status || 'ACCEPTED')) }}</span>
+                        </div>
+                        <p v-if="qcLabDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcLabDetails.note }}"</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3. QC Vehicle Card (For GBJ) -->
+                <div v-if="truck.processType === 'GBJ' && qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                  <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-indigo-500 text-[14px]">local_shipping</span>
+                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">QC Vehicle Inspection</h3>
+                    </div>
+                    <span v-if="qcPicLabel" class="text-[9px] font-bold text-slate-400">PIC: {{ qcPicLabel }}</span>
+                  </div>
+                  <div class="p-3">
+                    <div class="rounded-xl p-3 text-white relative overflow-hidden shadow-sm"
+                         :style="{ background: qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'linear-gradient(135deg, #EF4444, #B91C1C)' : 'linear-gradient(135deg, #4A8BDF, #3A6ABF)' }">
+                      <div class="flex items-center space-x-2">
+                        <span class="material-icons text-white/90 text-sm">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'cancel' : 'verified' }}</span>
+                        <span class="text-xs font-black tracking-widest uppercase">{{ qcDetails.status === 'REJECT' || qcDetails.status === 'REJECTED' ? 'REJECTED' : 'ACCEPTED' }}</span>
+                      </div>
+                      <p v-if="qcDetails.note" class="text-[11px] font-bold text-white mt-2 p-2.5 rounded-lg bg-black/15 border border-white/25 backdrop-blur-sm shadow-inner leading-relaxed">"{{ qcDetails.note }}"</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Incoming Checklist Results for GBJ -->
+                <div v-if="truck.processType === 'GBJ' && (parsedChecklist || isWarehouseRejection)" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                  <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50"
+                       :style="checklistStatusInfo.headerStyle">
+                    <div class="flex items-center space-x-2">
+                      <span class="material-icons text-[14px]" :style="checklistStatusInfo.iconStyle">local_shipping</span>
+                      <h3 class="text-[10px] font-black uppercase tracking-[0.15em]" :style="checklistStatusInfo.titleStyle">Vehicle &amp; Goods Inspection</h3>
+                    </div>
                     <div class="flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
                           :class="checklistStatusInfo.badgeClass">
                       <span class="material-icons text-[10px]">{{ checklistStatusInfo.icon }}</span>
                       <span>{{ checklistStatusInfo.label }}</span>
                     </div>
                   </div>
-                </div>
-
-                <div class="p-3 space-y-4">
-                  <!-- 1. Sampling Parameters Grid (3 columns) -->
-                  <div v-if="parsedChecklist && parsedChecklist.samplings.length" class="space-y-1.5">
-                    <h4 class="text-[8px] font-black text-slate-400 uppercase tracking-widest">Sampling Parameters</h4>
-                    <div class="grid grid-cols-3 gap-2">
-                      <div v-for="s in parsedChecklist.samplings" :key="s.label" 
-                            class="flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-300"
-                            :class="s.compliant ? 'bg-emerald-50/20 border-emerald-100/60 text-emerald-800' : 'bg-rose-50/30 border-rose-100 text-rose-800'">
-                        <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1.5">{{ s.label }}</span>
-                        <div class="flex items-center space-x-1">
-                          <span class="material-icons text-[12px]" :class="s.compliant ? 'text-emerald-500' : 'text-rose-500'">
-                            {{ s.compliant ? 'check_circle' : 'cancel' }}
-                          </span>
-                          <span class="text-[11px] font-black tracking-tight" :class="s.compliant ? 'text-emerald-700' : 'text-rose-700'">
-                            {{ s.compliant ? 'OK' : 'FAIL' }}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- 2. Inspection Items Grid (2 columns) -->
-                  <div v-if="parsedChecklist && parsedChecklist.items.length" class="space-y-1.5">
-                    <h4 class="text-[8px] font-black text-slate-400 uppercase tracking-widest">Vehicle & Goods Inspection</h4>
-                    <div class="grid grid-cols-2 gap-2">
-                      <div v-for="c in parsedChecklist.items" :key="c.label" 
-                            class="flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300 hover:translate-y-[-1px] bg-slate-50/30"
-                            :class="c.ok ? 'border-slate-100 text-slate-700 hover:bg-white hover:shadow-[0_2px_8px_rgba(0,0,0,0.02)]' : 'border-rose-100 text-rose-800 bg-rose-50/20'">
-                        <div class="flex items-center space-x-2 truncate">
-                          <span class="material-icons text-[13px]" :class="c.ok ? 'text-emerald-500' : 'text-rose-500'">
-                            {{ c.ok ? 'check_circle' : 'cancel' }}
-                          </span>
-                          <span class="text-[11px] font-bold text-slate-700 truncate" :title="c.label">{{ c.label }}</span>
-                        </div>
-                        <div class="flex items-center space-x-2 shrink-0">
-                          <span class="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wide"
+                  <div class="p-3 space-y-4">
+                    <div v-if="parsedChecklist && parsedChecklist.items.length" class="space-y-1.5">
+                      <div class="grid grid-cols-2 gap-2">
+                        <div v-for="c in parsedChecklist.items" :key="c.label"
+                              class="flex items-center justify-between p-2.5 rounded-xl border transition-all duration-300 bg-slate-50/30"
+                              :class="c.ok ? 'border-slate-100 text-slate-700' : 'border-rose-100 text-rose-800 bg-rose-50/20'">
+                          <div class="flex items-center space-x-2 truncate">
+                            <span class="material-icons text-[13px]" :class="c.ok ? 'text-emerald-500' : 'text-rose-500'">
+                              {{ c.ok ? 'check_circle' : 'cancel' }}
+                            </span>
+                            <span class="text-[11px] font-bold text-slate-700 truncate" :title="c.label">{{ c.label }}</span>
+                          </div>
+                          <span class="text-[9px] font-black px-1.5 py-0.5 rounded uppercase"
                                 :class="c.ok ? 'bg-emerald-100/50 text-emerald-700' : 'bg-rose-100 text-rose-700'">
                             {{ c.ok ? 'OK' : 'NOT OK' }}
                           </span>
-                          <button v-if="c.photo" @click="selectedPhoto = c.photo" title="View Attachment" class="flex items-center justify-center w-6 h-6 rounded bg-rose-100 hover:bg-rose-200 text-rose-600 transition-colors ml-2">
-                            <span class="material-icons text-[14px]">image</span>
-                          </button>
                         </div>
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  <!-- Deviation Reason Note Banner -->
-                  <div v-if="parsedChecklist?.deviationReason" class="rounded-xl p-3 bg-amber-50 border border-amber-200 text-amber-900 space-y-1">
-                    <div class="flex items-center space-x-1.5 font-black text-xs text-amber-800">
-                      <span class="material-icons text-sm text-amber-600">verified</span>
-                      <span>Dispensasi / Deviation Reason:</span>
-                    </div>
-                    <p class="text-[11px] font-medium italic text-amber-900 pl-5">"{{ parsedChecklist.deviationReason }}"</p>
-                  </div>
-
-                  <!-- 3. Rejection Banner (only show if isWarehouseRejection is true) -->
-                  <div v-if="isWarehouseRejection && qcDetails" class="rounded-xl p-3 text-white relative overflow-hidden bg-gradient-to-r from-red-500 to-red-600 shadow-sm">
+                <!-- GBJ Warehouse Loading & Delivery Checklist -->
+                <div v-if="truck.processType === 'GBJ' && gbjDeliveryData" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                  <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50 bg-indigo-50/40">
                     <div class="flex items-center space-x-2">
-                      <span class="material-icons text-white/80 text-sm">cancel</span>
-                      <span class="text-xs font-black tracking-widest uppercase">REJECTED BY WAREHOUSE (INCOMING CHECKLIST FAIL)</span>
+                      <span class="material-icons text-indigo-600 text-[15px]">fact_check</span>
+                      <h3 class="text-[10px] font-black text-slate-800 uppercase tracking-[0.15em]">Delivery Checklist &amp; Product Manifest</h3>
                     </div>
-                    <p v-if="qcDetails.note" class="text-[10px] font-bold text-white/80 mt-1 italic">"{{ qcDetails.note }}"</p>
-                    <span v-if="checklistPicLabel" class="absolute right-3 bottom-1.5 text-[8px] font-bold text-white/60">PIC: {{ checklistPicLabel }}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-black bg-indigo-100 text-indigo-700 border border-indigo-200 uppercase tracking-wider">
+                      Finished Goods
+                    </span>
+                  </div>
+                  <div class="p-3.5 space-y-3">
+                    <!-- Product Types Display -->
+                    <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider block mb-1.5">Product Types (Jenis Produk)</span>
+                      <div class="flex flex-wrap gap-2">
+                        <span v-for="(pName, pIdx) in gbjProductTypes" :key="pName" class="inline-flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-200 text-xs font-black">
+                          <span class="material-icons text-[14px] text-indigo-600">inventory_2</span>
+                          <span>{{ pName }}</span>
+                          <span class="text-[9px] font-bold text-indigo-500 uppercase ml-1">Produk {{ pIdx + 1 }}</span>
+                        </span>
+                        <span v-if="gbjProductTypes.length === 0" class="text-xs font-bold text-slate-400">Tidak tercatat</span>
+                      </div>
+                    </div>
+
+                    <!-- Customer Destination & SJ -->
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Customer Destination</span>
+                        <span class="font-bold text-slate-800">{{ gbjDeliveryData.customer || gbjDeliveryData.customerDestination || '-' }}</span>
+                      </div>
+                      <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span class="text-[8px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Surat Jalan (SJ)</span>
+                        <span class="font-bold text-slate-800 font-mono">{{ truck.suratJalanNumber || gbjDeliveryData.suratJalanNumber || '-' }}</span>
+                      </div>
+                    </div>
+
+                    <!-- Inspection Checklists (Condition & Documents) -->
+                    <div v-if="gbjConditionItems.length || gbjDocumentItems.length" class="space-y-2 pt-1 border-t border-slate-100">
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div class="space-y-1.5">
+                          <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Kondisi Produk</span>
+                          <div v-for="(item, idx) in gbjConditionItems" :key="'c'+idx" class="flex items-center justify-between text-[11px] p-1.5 rounded-lg bg-slate-50 border border-slate-100">
+                            <span class="font-bold text-slate-700 truncate mr-2">{{ item.label }}</span>
+                            <span class="px-1.5 py-0.2 rounded text-[9px] font-black shrink-0" :class="item.checked ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'">{{ item.checked ? 'SESUAI' : '-' }}</span>
+                          </div>
+                        </div>
+                        <div class="space-y-1.5">
+                          <span class="text-[9px] font-black text-slate-400 uppercase tracking-wider block">Kelengkapan Dokumen</span>
+                          <div v-for="(item, idx) in gbjDocumentItems" :key="'d'+idx" class="flex items-center justify-between text-[11px] p-1.5 rounded-lg bg-slate-50 border border-slate-100">
+                            <span class="font-bold text-slate-700 truncate mr-2">{{ item.label }}</span>
+                            <span class="px-1.5 py-0.2 rounded text-[9px] font-black shrink-0" :class="item.checked ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'">{{ item.checked ? 'ADA' : '-' }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </template>
 
               <!-- Fraud Recon (only show if data exists) -->
               <div v-if="fraudMetrics.status !== 'NOT_RECORDED'"
@@ -295,7 +561,11 @@
                     Integrity Check
                   </h3>
                 </div>
-                <div class="p-3 space-y-2">
+                <div v-if="isUomMismatch" class="p-3 text-center bg-slate-50 text-slate-500 rounded-xl text-xs space-y-1">
+                  <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Metrik Deviasi Dinonaktifkan</span>
+                  <p class="text-[10px] text-slate-500 font-medium">Satuan timbangan (KG) dan penerimaan (LITER) berbeda.</p>
+                </div>
+                <div v-else class="p-3 space-y-2">
                   <div class="grid grid-cols-3 gap-2">
                     <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-center">
                       <span class="text-[8px] font-black text-slate-400 uppercase tracking-widest block mb-1">Ratio</span>
@@ -384,14 +654,23 @@
                     <div class="p-3 rounded-2xl bg-amber-50/30 border border-amber-200/60 flex flex-col justify-between">
                       <div>
                         <span class="text-[9px] font-black text-amber-700/80 uppercase tracking-widest block mb-1">WAREHOUSE REALIZATION</span>
-                        <div class="text-xl font-black text-amber-800 font-mono tracking-tight">{{ formatWeightCustom(warehouseRealization) }}</div>
+                        <div class="text-xl font-black text-amber-800 font-mono tracking-tight">{{ formattedRealizationDisplay }}</div>
                       </div>
-                      <span v-if="props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name" class="text-[9px] font-bold text-amber-700/80 block mt-2">PIC: [GUDANG] {{ props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name }}</span>
+                      <span v-if="currentTruck.warehouseEndBy?.name || currentTruck.warehouseStartBy?.name || props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name" class="text-[9px] font-bold text-amber-700/80 block mt-2">PIC: [GUDANG] {{ currentTruck.warehouseEndBy?.name || currentTruck.warehouseStartBy?.name || props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name }}</span>
                     </div>
                   </div>
 
                   <!-- 3. Status and Alert Bar (DEVIATION CARD & BUTTON) -->
-                  <div class="p-4 rounded-2xl border border-rose-200/70 bg-rose-50/40 flex items-center justify-between gap-3">
+                  <div v-if="isUomMismatch" class="p-4 rounded-2xl border border-sky-200 bg-sky-50/60 flex items-center space-x-3">
+                    <span class="material-icons text-sky-600 text-xl flex-shrink-0">info</span>
+                    <div class="flex-1">
+                      <span class="text-[9px] font-black text-sky-800 uppercase tracking-widest block">INFO SATUAN BERBEDA</span>
+                      <p class="text-[11px] font-bold text-sky-900 leading-snug mt-0.5">
+                        Deviasi belum dapat dihitung — satuan timbangan (KG) dan penerimaan (LITER) berbeda.
+                      </p>
+                    </div>
+                  </div>
+                  <div v-else class="p-4 rounded-2xl border border-rose-200/70 bg-rose-50/40 flex items-center justify-between gap-3">
                     <div class="flex flex-col">
                       <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">DEVIATION</span>
                       <div class="text-2xl font-black text-rose-700 font-mono tracking-tight">
@@ -408,7 +687,7 @@
                   </div>
 
                   <!-- 4. Alert Warning if triggerAlert is true -->
-                  <div v-if="shouldShowAlert" class="p-3.5 rounded-2xl bg-rose-50/60 border border-rose-200 flex items-center space-x-3">
+                  <div v-if="shouldShowAlert && !isUomMismatch" class="p-3.5 rounded-2xl bg-rose-50/60 border border-rose-200 flex items-center space-x-3">
                     <span class="material-icons text-rose-600 text-xl flex-shrink-0">warning</span>
                     <div class="flex-1">
                       <h4 class="text-[10px] font-black text-rose-900 uppercase tracking-widest">TONNAGE DEVIATION ALERT!</h4>
@@ -442,21 +721,22 @@
                         :style="{ height: activeLineHeight }">
                       </div>
                     </div>
-                    
+
                     <div v-for="(ts, idx) in timestampRows" :key="ts.label" class="relative pl-8 flex items-center justify-between group z-10">
                       <!-- Dot indicator -->
                       <div class="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-white border-2 flex items-center justify-center transition-all duration-300 group-hover:scale-110"
-                        :class="ts.value ? 'border-[#4A8BDF] shadow-[0_0_6px_rgba(74,139,223,0.35)]' : 'border-slate-200'">
+                        :class="ts.value && ts.value !== 'NOT APPLICABLE' && ts.value !== 'N/A' ? 'border-[#4A8BDF] shadow-[0_0_6px_rgba(74,139,223,0.35)]' : (ts.value === 'NOT APPLICABLE' || ts.value === 'N/A' ? 'border-slate-300 bg-slate-50' : 'border-slate-200')">
                         <!-- Glowing active pulse ring -->
-                        <span v-if="idx === lastCompletedIdx" class="absolute -inset-[3px] rounded-full border border-[#4A8BDF]/50 bg-[#4A8BDF]/10 animate-ping"></span>
-                        <div class="w-1.5 h-1.5 rounded-full z-10" :style="{ backgroundColor: ts.value ? '#4A8BDF' : '#CBD5E1' }"></div>
+                        <span v-if="idx === lastCompletedIdx && ts.value !== 'NOT APPLICABLE'" class="absolute -inset-[3px] rounded-full border border-[#4A8BDF]/50 bg-[#4A8BDF]/10 animate-ping"></span>
+                        <div class="w-1.5 h-1.5 rounded-full z-10" :style="{ backgroundColor: ts.value && ts.value !== 'NOT APPLICABLE' && ts.value !== 'N/A' ? '#4A8BDF' : (ts.value === 'NOT APPLICABLE' || ts.value === 'N/A' ? '#94A3B8' : '#CBD5E1') }"></div>
                       </div>
-                      
+
                       <!-- Label and value -->
                       <span class="text-[9px] font-black text-slate-500 uppercase tracking-widest">{{ ts.label }}</span>
                       <div class="flex items-center space-x-1.5">
-                        <span class="text-[11px] font-bold text-slate-700 font-mono">{{ formatTimeFull(ts.value) }}</span>
-                        <span v-if="ts.value" class="material-icons text-[12px] text-emerald-500">check_circle</span>
+                        <span v-if="ts.value === 'NOT APPLICABLE' || ts.value === 'N/A'" class="px-2 py-0.5 rounded text-[8.5px] font-black uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">NOT APPLICABLE</span>
+                        <span v-else class="text-[11px] font-bold text-slate-700 font-mono">{{ formatTimeFull(ts.value) }}</span>
+                        <span v-if="ts.value && ts.value !== 'NOT APPLICABLE' && ts.value !== 'N/A'" class="material-icons text-[12px] text-emerald-500">check_circle</span>
                       </div>
                     </div>
                   </div>
@@ -541,7 +821,7 @@
                   </div>
                   <span class="text-[10px] text-slate-400 font-mono">{{ formatTimeFull(item.timestamp || item.createdAt) }}</span>
                 </div>
-                
+
                 <div class="flex items-center justify-between text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-100">
                   <div class="flex items-center gap-2">
                     <span class="text-slate-500 font-bold">Oleh:</span>
@@ -586,8 +866,8 @@
 
         <!-- Footer (Compact) -->
         <div class="px-4 py-2.5 flex justify-between shrink-0" style="background: #FAFBFF; border-top: 1px solid #E8EEF7;">
-          <button v-if="authStore.isAdmin && !props.truck?.isVoided && props.truck?.status !== 'COMPLETED'" 
-            @click="openVoidModal" 
+          <button v-if="authStore.isAdmin && !props.truck?.isVoided && props.truck?.status !== 'COMPLETED'"
+            @click="openVoidModal"
             title="Mengeluarkan transaksi dari operasional tanpa menghapus data historis (Void / Soft-Delete)"
             class="group relative overflow-hidden flex items-center space-x-1.5 px-4 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
             style="background: linear-gradient(135deg, #EF4444, #B91C1C); box-shadow: 0 2px 8px rgba(239,68,68,0.25);">
@@ -604,7 +884,7 @@
       </div>
     </div>
   </transition>
-  
+
   <!-- Photo Viewer Lightbox -->
   <transition name="fade">
     <div v-if="selectedPhoto" class="fixed inset-0 z-[10000] flex flex-col items-center justify-center p-4" style="background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(8px);" @click.self="selectedPhoto = null">
@@ -622,7 +902,7 @@
           </button>
         </div>
       </div>
-      
+
       <!-- Image Container -->
       <img :src="selectedPhoto" class="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain ring-1 ring-white/10" />
     </div>
@@ -777,26 +1057,26 @@
                   <!-- Segmented Control Tab Bar (4 Module Columns) -->
                   <div class="bg-slate-200/70 p-1 rounded-xl font-bold text-xs border border-slate-200/80">
                     <div class="grid grid-cols-4 gap-1 text-[11px]">
-                      <button type="button" @click="activeCorrectionTab = 'WEIGHBRIDGE'" 
-                        :class="activeCorrectionTab === 'WEIGHBRIDGE' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                      <button type="button" @click="activeCorrectionTab = 'WEIGHBRIDGE'"
+                        :class="activeCorrectionTab === 'WEIGHBRIDGE' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
                         class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
                         <span class="material-icons text-sm">scale</span>
                         <span class="truncate">Timbangan</span>
                       </button>
-                      <button type="button" @click="activeCorrectionTab = 'IDENTITY'" 
-                        :class="activeCorrectionTab === 'IDENTITY' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                      <button type="button" @click="activeCorrectionTab = 'IDENTITY'"
+                        :class="activeCorrectionTab === 'IDENTITY' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
                         class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
                         <span class="material-icons text-sm">badge</span>
                         <span class="truncate">Identitas</span>
                       </button>
-                      <button type="button" @click="activeCorrectionTab = 'QC_LAB'" 
-                        :class="activeCorrectionTab === 'QC_LAB' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                      <button type="button" @click="activeCorrectionTab = 'QC_LAB'"
+                        :class="activeCorrectionTab === 'QC_LAB' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
                         class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
                         <span class="material-icons text-sm">science</span>
                         <span class="truncate">QC Lab</span>
                       </button>
-                      <button type="button" @click="activeCorrectionTab = 'QC_SAMPLING'" 
-                        :class="activeCorrectionTab === 'QC_SAMPLING' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'" 
+                      <button type="button" @click="activeCorrectionTab = 'QC_SAMPLING'"
+                        :class="activeCorrectionTab === 'QC_SAMPLING' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
                         class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
                         <span class="material-icons text-sm">fact_check</span>
                         <span class="truncate">QC Sampling</span>
@@ -812,8 +1092,8 @@
                     <div class="space-y-1">
                       <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Gross Weight (kg) [Source IN]</label>
                       <div class="relative">
-                        <input v-model.number="correctionForm.grossWeight" type="number" 
-                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        <input v-model.number="correctionForm.grossWeight" type="number"
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           :class="Number(correctionForm.grossWeight) !== Number(props.truck?.grossWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
                       <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.grossWeight || 0 }} kg</span>
@@ -823,8 +1103,8 @@
                     <div class="space-y-1">
                       <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Tare Weight (kg) [Source OUT]</label>
                       <div class="relative">
-                        <input v-model.number="correctionForm.tareWeight" type="number" 
-                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        <input v-model.number="correctionForm.tareWeight" type="number"
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           :class="Number(correctionForm.tareWeight) !== Number(props.truck?.tareWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
                       <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.tareWeight || 0 }} kg</span>
@@ -834,8 +1114,8 @@
                     <div class="space-y-1">
                       <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Warehouse Realization (kg)</label>
                       <div class="relative">
-                        <input v-model.number="correctionForm.actualWeight" type="number" 
-                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" 
+                        <input v-model.number="correctionForm.actualWeight" type="number"
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           :class="Number(correctionForm.actualWeight) !== Number(props.truck?.actualWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
                       <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.actualWeight || 0 }} kg</span>
@@ -1362,7 +1642,16 @@
           </div>
         </div>
       </transition>
-  
+
+    <!-- Photo Preview Modal -->
+    <div v-if="activePreviewPhoto" class="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" @click="activePreviewPhoto = null">
+      <div class="relative max-w-3xl max-h-[90vh] bg-white rounded-2xl overflow-hidden p-2 shadow-2xl" @click.stop>
+        <button @click="activePreviewPhoto = null" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900 transition-colors z-10">
+          <span class="material-icons text-lg">close</span>
+        </button>
+        <img :src="activePreviewPhoto" alt="Preview Foto Bukti" class="max-w-full max-h-[80vh] object-contain rounded-xl mx-auto" />
+      </div>
+    </div>
   </teleport>
 </template>
 
@@ -1377,6 +1666,7 @@ import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useConfirm } from '../composables/useConfirm'
 import truckService from '../services/truckService'
+import qcService from '../services/qcService'
 import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
 import { getWeightRecordTypes } from '../utils/weightHelpers'
 import { printTruckReport } from '../utils/pdfGenerator'
@@ -1389,9 +1679,16 @@ const props = defineProps({
 const emit = defineEmits(['close', 'deleted'])
 const close = () => emit('close')
 
+const detailedTruck = ref(null)
+const gspPaRounds = ref([])
+const loadingDetails = ref(false)
+const activePreviewPhoto = ref(null)
+
+const currentTruck = computed(() => detailedTruck.value || props.truck || {})
+
 const downloadReceiptPDF = () => {
-  if (props.truck) {
-    printTruckReport(props.truck)
+  if (currentTruck.value) {
+    printTruckReport(currentTruck.value)
   }
 }
 
@@ -1631,11 +1928,12 @@ const correctionForm = ref({
 })
 
 const currentProcessType = computed(() => {
-  return (props.truck?.processType || 'GBB').toUpperCase()
+  return (currentTruck.value?.processType || props.truck?.processType || 'GBB').toUpperCase()
 })
 
 const isSolarCommodity = computed(() => {
-  const cargo = (props.truck?.cargoSubType || props.truck?.cargoType || props.truck?.productCatalog?.name || '').toLowerCase()
+  const t = currentTruck.value || props.truck || {}
+  const cargo = (t.cargoSubType || t.cargoType || t.productCatalog?.name || '').toLowerCase()
   return cargo.includes('solar')
 })
 
@@ -1746,11 +2044,48 @@ const correctionCount = computed(() => {
   return 0
 })
 
+const fetchTruckDetails = async () => {
+  if (!props.truck?.id) return
+  loadingDetails.value = true
+  try {
+    const res = await truckService.getById(props.truck.id)
+    detailedTruck.value = res.data?.data || res.data || res
+  } catch (err) {
+    console.warn('Gagal memuat detail transaksi:', err)
+  } finally {
+    loadingDetails.value = false
+  }
+
+  const pType = detailedTruck.value?.processType || props.truck?.processType
+  if (pType === 'GSP') {
+    try {
+      const paRes = await qcService.getProductAnalysisHistory(props.truck.id)
+      gspPaRounds.value = paRes.data?.data || paRes.data || []
+    } catch (err) {
+      console.warn('Gagal memuat riwayat PA:', err)
+      gspPaRounds.value = []
+    }
+  } else {
+    gspPaRounds.value = []
+  }
+}
+
 watch(() => props.isOpen, (newVal) => {
   if (newVal) {
     fetchCorrectionHistory()
+    fetchTruckDetails()
+  } else {
+    detailedTruck.value = null
+    gspPaRounds.value = []
   }
 }, { immediate: true })
+
+watch(() => props.truck?.id, (newId) => {
+  if (newId && props.isOpen) {
+    fetchCorrectionHistory()
+    fetchTruckDetails()
+  }
+})
 
 const handleItemPhotoUpload = (e, fieldKey) => {
   const file = e.target.files?.[0]
@@ -2084,16 +2419,90 @@ const executeVoidSubmission = async () => {
   }
 }
 
+const gbjDeliveryData = computed(() => {
+  const t = currentTruck.value || props.truck || {}
+  if (t.deliveryChecklist) {
+    if (typeof t.deliveryChecklist === 'string') {
+      try { return JSON.parse(t.deliveryChecklist) } catch { return null }
+    }
+    return t.deliveryChecklist
+  }
+  const wh = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  if (wh?.checklistItems) {
+    if (typeof wh.checklistItems === 'string') {
+      try { return JSON.parse(wh.checklistItems) } catch { return null }
+    }
+    return wh.checklistItems
+  }
+  return null
+})
+
+const gbjProductTypes = computed(() => {
+  const d = gbjDeliveryData.value
+  if (!d) return []
+  if (Array.isArray(d.productTypes) && d.productTypes.length > 0) {
+    return d.productTypes
+  }
+  if (d.productType) {
+    return [d.productType]
+  }
+  return []
+})
+
+const gbjConditionItems = computed(() => {
+  const d = gbjDeliveryData.value
+  if (!d || !Array.isArray(d.productCondition)) return []
+  const labels = [
+    "Menggunakan pallet",
+    "Dalam kondisi baik",
+    "Jenis & jumlah tepat",
+    "Disusun dengan baik"
+  ]
+  return d.productCondition.map((val, idx) => ({
+    label: labels[idx] || `Kondisi ${idx + 1}`,
+    checked: val === true
+  }))
+})
+
+const gbjDocumentItems = computed(() => {
+  const d = gbjDeliveryData.value
+  if (!d || !Array.isArray(d.documentAvailability)) return []
+  const labels = [
+    "Surat Jalan (SJ)",
+    "Dokumen CoA",
+    "Sertifikat Halal",
+    "Purchasing Order (PO)"
+  ]
+  return d.documentAvailability.map((val, idx) => ({
+    label: labels[idx] || `Dokumen ${idx + 1}`,
+    checked: val === true
+  }))
+})
+
 const identityFields = computed(() => {
   const permitCardVal = props.truck?.permitCardNumber || props.truck?.permitCard
   const guestIdVal = props.truck?.guestIdNumber || props.truck?.guestId
 
-  const fields = [
+  const fields = []
+
+  const seqVal = props.truck?.dailySequence != null
+    ? `#${String(props.truck.dailySequence).padStart(3, '0')}`
+    : null
+  if (seqVal) {
+    fields.push({ label: 'No. Urut Kedatangan', value: seqVal, highlight: true })
+  }
+
+  fields.push(
     { label: 'Driver Name', value: props.truck?.driverName },
     { label: 'Carrier Vendor', value: props.truck?.vendorName || props.truck?.vendor },
     { label: 'Vehicle Type', value: props.truck?.vehicleType },
     { label: 'Process Type', value: props.truck?.processType === 'GBB' ? 'Raw Material (Unloading)' : props.truck?.processType === 'GBJ' ? 'Finished Goods (Loading)' : props.truck?.processType === 'GSP' ? 'Sparepart Warehouse' : props.truck?.processType },
-  ]
+  )
+
+  if (props.truck?.processType === 'GBJ' && gbjProductTypes.value.length > 0) {
+    fields.push({ label: 'Finished Goods', value: gbjProductTypes.value.join(' & '), highlight: true })
+  }
+
   if (props.truck?.driverPhone || true) fields.push({ label: 'Driver Phone', value: props.truck?.driverPhone, highlight: true })
   if (props.truck?.suratJalanNumber || true) fields.push({ label: 'Delivery Note (SJ)', value: props.truck?.suratJalanNumber, highlight: true })
   if (props.truck?.poNumber || true) fields.push({ label: 'Logistics PO', value: props.truck?.poNumber, highlight: true })
@@ -2139,8 +2548,8 @@ const extractMoistureValue = (target) => {
   const items = target.checklistItems;
   if (Array.isArray(items)) {
     const mItem = items.find(i => i && i.label && (
-      i.label.toLowerCase().includes('moisture') || 
-      i.label.toLowerCase().includes('kadar air') || 
+      i.label.toLowerCase().includes('moisture') ||
+      i.label.toLowerCase().includes('kadar air') ||
       i.label.toLowerCase().includes('estimasi')
     ));
     if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
@@ -2152,8 +2561,8 @@ const extractMoistureValue = (target) => {
     if (items.kadarAir !== undefined && items.kadarAir !== null) return Number(items.kadarAir);
     if (Array.isArray(items.items)) {
       const mItem = items.items.find(i => i && i.label && (
-        i.label.toLowerCase().includes('moisture') || 
-        i.label.toLowerCase().includes('kadar air') || 
+        i.label.toLowerCase().includes('moisture') ||
+        i.label.toLowerCase().includes('kadar air') ||
         i.label.toLowerCase().includes('estimasi')
       ));
       if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
@@ -2227,10 +2636,10 @@ const initialSamplingDetails = computed(() => {
 const initialSamplingMetrics = computed(() => {
   if (!initialSamplingDetails.value) return []
   const d = initialSamplingDetails.value
-  
+
   const odorPass = d.bau === 'PASS' || d.bau === 'Normal' || d.bau === 'COMPLIANT' || d.bau === 'OK'
   const visualPass = d.visual === 'PASS' || d.visual === 'Normal' || d.visual === 'COMPLIANT' || d.visual === 'OK'
-  
+
   const extractedM = d.moisture !== null && d.moisture !== undefined ? Number(d.moisture) : extractMoistureValue(props.truck)
   const moistureVal = (extractedM !== undefined && extractedM !== null && !isNaN(extractedM)) ? `${Number(extractedM).toFixed(2)}%` : '0.00%'
 
@@ -2322,8 +2731,8 @@ const isWarehouseRejection = computed(() => {
   const t = props.truck
   const isGbbOrGsp = t.processType === 'GBB' || t.processType === 'GSP'
   const qcStart = t.timestamps?.qcStartAt || t.qcStartAt || null
-  const hasReject = t.incomingMaterialChecks?.some(c => c.result === 'REJECT') || 
-                    qcDetails.value?.status === 'REJECT' || 
+  const hasReject = t.incomingMaterialChecks?.some(c => c.result === 'REJECT') ||
+                    qcDetails.value?.status === 'REJECT' ||
                     qcDetails.value?.status === 'REJECTED'
   return isGbbOrGsp && hasReject && !qcStart
 })
@@ -2339,8 +2748,8 @@ const checklistPicLabel = computed(() => {
   if (isWarehouseRejection.value) {
     return `[GUDANG] ${qcDetails.value?.pic || 'Admin'}`
   }
-  const opName = props.truck.warehouseEndBy?.name || 
-                 props.truck.warehouseStartBy?.name || 
+  const opName = props.truck.warehouseEndBy?.name ||
+                 props.truck.warehouseStartBy?.name ||
                  props.truck.warehouseProcesses?.[0]?.endBy?.name ||
                  'Staff Gudang'
   return `[GUDANG] ${opName}`
@@ -2357,7 +2766,7 @@ const qcMetrics = computed(() => {
   if (details.kadarAir !== null && details.kadarAir !== undefined) metrics.push({ label: 'Moisture', value: details.kadarAir + '%' })
   if (details.totalFM !== null && details.totalFM !== undefined) metrics.push({ label: 'Total FM', value: details.totalFM + '%' })
   if (details.bijiOK !== null && details.bijiOK !== undefined) metrics.push({ label: 'Good Beans', value: details.bijiOK + '%' })
-  
+
   // If it's a vehicle check (GBJ)
   if (props.truck?.processType === 'GBJ' && props.truck.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
     const check = props.truck.qcVehicleChecks[0];
@@ -2380,7 +2789,7 @@ const parsedChecklist = computed(() => {
     const check = props.truck.qcVehicleChecks[0];
     const norm = normalizeChecklistItems(check.checklistItems);
     let items = norm.items;
-    
+
     // Use new checklistItems format if available (includes photos)
     if (items.length === 0) {
       // Fallback for old data
@@ -2418,7 +2827,7 @@ const parsedChecklist = computed(() => {
   if (!remarksStr || (!remarksStr.includes('Sampling:') && !remarksStr.includes('Checklist:'))) return null
 
   const hasIssue = remarksStr.includes('DITERIMA DENGAN CATATAN') || remarksStr.includes('NON-COMPLIANT') || remarksStr.includes('NOT OK')
-  
+
   // Parse Sampling: [Odor: COMPLIANT, Color: NON-COMPLIANT, ...]
   const samplings = []
   const samplingMatch = remarksStr.match(/Sampling:\s*\[([^\]]+)\]/)
@@ -2455,7 +2864,7 @@ const parsedChecklist = computed(() => {
       const hasImg = c.includes('||IMG:')
       const textPart = hasImg ? c.split('||IMG:')[0] : c
       const photo = hasImg ? c.split('||IMG:')[1].trim() : null
-      
+
       const parts = textPart.trim().match(/^(.+?):\s*(OK|NOT OK)$/)
       if (parts) {
         let label = parts[1].trim()
@@ -2501,8 +2910,8 @@ const checklistStatusInfo = computed(() => {
     }
   }
 
-  const hasIssue = checklist?.hasIssue || 
-                   checklist?.samplings?.some(s => !s.compliant) || 
+  const hasIssue = checklist?.hasIssue ||
+                   checklist?.samplings?.some(s => !s.compliant) ||
                    checklist?.items?.some(i => !i.ok)
 
   if (hasIssue) {
@@ -2582,20 +2991,27 @@ const grossOutVal = computed(() => {
 const isRejected = computed(() => {
   if (!props.truck) return false
   const t = props.truck
-  return t.status === 'INCOMING_CHECK_REJECTED' || 
-         t.status === 'QC_VEHICLE_REJECTED' || 
-         t.incomingMaterialChecks?.some(c => c.result === 'REJECT') || 
+  return t.status === 'INCOMING_CHECK_REJECTED' ||
+         t.status === 'QC_VEHICLE_REJECTED' ||
+         t.incomingMaterialChecks?.some(c => c.result === 'REJECT') ||
          t.qcVehicleChecks?.some(c => c.result === 'REJECT')
 })
 
 const warehouseRealization = computed(() => {
-  if (!props.truck) return null
+  const t = currentTruck.value
+  if (!t) return null
   if (isRejected.value) return 0
-  const t = props.truck
   if (t.processType === 'GBB') {
     return t.nettoTimbanganRoll !== undefined && t.nettoTimbanganRoll !== null ? t.nettoTimbanganRoll : (t.weights?.nettoTimbanganRoll !== undefined && t.weights?.nettoTimbanganRoll !== null ? t.weights.nettoTimbanganRoll : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
   }
   if (t.processType === 'GSP') {
+    if (t.receivedQuantity !== undefined && t.receivedQuantity !== null && t.receivedQuantity !== '') {
+      return Number(t.receivedQuantity)
+    }
+    const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+    if (whProcess?.receivedQuantity !== undefined && whProcess?.receivedQuantity !== null && whProcess?.receivedQuantity !== '') {
+      return Number(whProcess.receivedQuantity)
+    }
     return t.jumlahNettoGSP !== undefined && t.jumlahNettoGSP !== null ? t.jumlahNettoGSP : (t.weights?.jumlahNettoGSP !== undefined && t.weights?.jumlahNettoGSP !== null ? t.weights.jumlahNettoGSP : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
   }
   if (t.processType === 'GBJ') {
@@ -2604,10 +3020,47 @@ const warehouseRealization = computed(() => {
   return null
 })
 
+const isGspProcess = computed(() => {
+  const p = currentTruck.value?.processType || props.truck?.processType
+  return p === 'GSP'
+})
+
+const gspCommodityName = computed(() => {
+  const t = currentTruck.value || props.truck || {}
+  return (t.cargoSubType || t.cargoType || t.productCatalog?.name || '').toLowerCase()
+})
+
+const gspReceiptUnit = computed(() => {
+  const t = currentTruck.value || props.truck || {}
+  if (t.receiptUnit) return String(t.receiptUnit).toUpperCase()
+  const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  if (whProcess?.receivedUnit) return String(whProcess.receivedUnit).toUpperCase()
+  if (!isGspProcess.value) return 'KG'
+  const name = gspCommodityName.value
+  if (name.includes('coal') || name.includes('batubara')) return 'KG'
+  if (name.includes('solar') || name.includes('pac') || name.includes('rapid') || name.includes('chemical')) return 'LITER'
+  return 'KG'
+})
+
+const isUomMismatch = computed(() => {
+  return isGspProcess.value && gspReceiptUnit.value === 'LITER'
+})
+
+const formattedRealizationDisplay = computed(() => {
+  const val = warehouseRealization.value
+  if (val === undefined || val === null || val === '' || Number(val) === 0 || isNaN(Number(val))) return '-'
+  const formattedNum = new Intl.NumberFormat('id-ID').format(Number(val))
+  if (isGspProcess.value) {
+    return `${formattedNum} ${gspReceiptUnit.value}`
+  }
+  return `${formattedNum} kg`
+})
+
 const isDataCompleteForCalc = computed(() => {
-  if (!props.truck) return false
+  const t = currentTruck.value
+  if (!t) return false
   if (isRejected.value) return true
-  const t = props.truck
+  if (isUomMismatch.value) return false
   const area = t.processType
   const whReal = warehouseRealization.value
 
@@ -2634,8 +3087,8 @@ const isDataCompleteForCalc = computed(() => {
 })
 
 const nettoTimbanganJembatan = computed(() => {
-  if (!props.truck) return null
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return null
   const area = t.processType
   if (area === 'GBB' || area === 'GSP') {
     const gIn = grossInVal.value
@@ -2653,6 +3106,7 @@ const nettoTimbanganJembatan = computed(() => {
 
 const persentaseAnalisa = computed(() => {
   if (isRejected.value) return 100
+  if (isUomMismatch.value) return null
   if (!isDataCompleteForCalc.value) return null
   const bridgeNet = nettoTimbanganJembatan.value
   const whReal = warehouseRealization.value
@@ -2662,6 +3116,7 @@ const persentaseAnalisa = computed(() => {
 
 const deviationPercentage = computed(() => {
   if (isRejected.value) return 0
+  if (isUomMismatch.value) return null
   if (!isDataCompleteForCalc.value) return null
   const pct = persentaseAnalisa.value
   if (pct === null) return null
@@ -2677,8 +3132,9 @@ const toleranceLimit = computed(() => {
 })
 
 const statusTonnage = computed(() => {
-  if (!props.truck) return 'PENDING'
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return 'PENDING'
+  if (isUomMismatch.value) return 'UOM_DIFFERENT'
   const area = t.processType
   const whReal = warehouseRealization.value
 
@@ -2746,7 +3202,7 @@ const badgeStyle = computed(() => {
   if (status === 'OK') {
     return 'background: linear-gradient(135deg, #10B981, #059669); box-shadow: 0 2px 8px rgba(16,185,129,0.25);'
   }
-  if (status === 'PENDING') {
+  if (status === 'PENDING' || status === 'UOM_DIFFERENT') {
     return 'background: linear-gradient(135deg, #64748B, #475569); box-shadow: 0 2px 8px rgba(100,116,139,0.25);'
   }
   if (status === 'ERROR DATA') {
@@ -2765,32 +3221,74 @@ const hasWeightData = computed(() => {
 })
 
 const getTimestampVal = (key) => {
-  return props.truck?.timestamps?.[key] || props.truck?.[key] || null;
+  return currentTruck.value?.timestamps?.[key] || currentTruck.value?.[key] || props.truck?.timestamps?.[key] || props.truck?.[key] || null;
 }
 
 const timestampRows = computed(() => {
-  const pType = props.truck?.processType || 'GBB';
-  const isSamplingRejected = props.truck?.status === 'QC_VEHICLE_REJECTED';
+  const t = currentTruck.value || props.truck;
+  const pType = t?.processType || 'GBB';
+  const isSamplingRejected = t?.status === 'QC_VEHICLE_REJECTED';
 
   if (pType === 'GBJ') {
     return [
       { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
       { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-      { label: 'QC Vehicle', value: props.truck?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+      { label: 'QC Vehicle', value: t?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
       { label: 'GBJ Loading', value: isSamplingRejected ? null : (getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt')) },
       { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
       { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
     ]
   }
-  
-  const unloadLabel = pType === 'GSP' ? 'GSP Processing' : 'GBB Unloading';
+
+  if (pType === 'GSP') {
+    const isSolar = isSolarCommodity.value;
+    const paTime = isSolar ? 'PA EXEMPT' : (gspPaRounds.value?.[0]?.testedAt || getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt'));
+
+    // Disposisi Mutu jika OOS (atau NOT APPLICABLE jika compliant/tidak ada OOS)
+    const isDispApplicable = hasGspDisposition.value || t?.status === 'WAITING_GSP_DISPOSITION' || t?.status === 'WAITING_UTILITY_DISPOSITION';
+    const dispTime = latestDisposedPa.value?.dispositionAt ||
+                     (hasGspDisposition.value ? (getTimestampVal('qcEndAt') || getTimestampVal('updatedAt')) : null);
+    const dispVal = isDispApplicable ? (dispTime || getTimestampVal('updatedAt')) : 'NOT APPLICABLE';
+
+    // Checklist Pra-Bongkar (9 parameter)
+    const whProcess = t?.warehouseProcesses?.find(p => p.isCurrent !== false) || t?.warehouseProcesses?.[0];
+    const checklistTime = whProcess?.startAt || whProcess?.startedAt || getTimestampVal('warehouseStartAt') || null;
+
+    // Disposisi Pra-Bongkar (jika ada NOT OK atau disposisi checklist)
+    const isChkDispApplicable = hasChecklistDisposition.value || t?.status === 'WAITING_GSP_CHECKLIST_DISPOSITION';
+    const chkDispTime = latestChecklistDisposition.value?.decidedAt || (hasChecklistDisposition.value ? getTimestampVal('updatedAt') : null);
+    const chkDispVal = isChkDispApplicable ? (chkDispTime || getTimestampVal('updatedAt')) : 'NOT APPLICABLE';
+
+    // Bongkar GSP / Proses Gudang
+    const processTime = (t?.status === 'WAREHOUSE_IN_PROGRESS' || t?.status === 'COMPLETED' || t?.status === 'DISPATCHED' || t?.warehouseEndAt)
+      ? (getTimestampVal('warehouseStartAt') || whProcess?.startAt || null)
+      : null;
+
+    // Receiving Gudang / Konfirmasi Penerimaan
+    const receivingTime = getTimestampVal('warehouseEndAt') || whProcess?.completedAt || null;
+
+    return [
+      { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
+      { label: 'Weigh In', value: getTimestampVal('weighInAt') },
+      { label: isSolar ? 'QC PA (Exempt)' : 'QC PA Lab', value: paTime },
+      { label: 'Disposisi Mutu', value: dispVal },
+      { label: 'Pemeriksaan Pra-Bongkar', value: checklistTime },
+      { label: 'Disposisi Pra-Bongkar', value: chkDispVal },
+      { label: 'Bongkar GSP', value: processTime },
+      { label: 'Receiving Gudang', value: receivingTime },
+      { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
+      { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
+    ];
+  }
+
+  const unloadLabel = 'GBB Unloading';
 
   return [
     { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
     { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-    { label: 'QC Sampling', value: props.truck?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+    { label: 'QC Sampling', value: t?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
     { label: unloadLabel, value: isSamplingRejected ? null : (getTimestampVal('warehouseStartAt') || getTimestampVal('warehouseEndAt')) },
-    { label: 'QC Lab Check', value: isSamplingRejected ? null : (props.truck?.incomingMaterialChecks?.[0]?.completedAt || (props.truck?.status?.startsWith('INCOMING_CHECK') ? getTimestampVal('qcEndAt') : null)) },
+    { label: 'QC Lab Check', value: isSamplingRejected ? null : (t?.incomingMaterialChecks?.[0]?.completedAt || (t?.status?.startsWith('INCOMING_CHECK') ? getTimestampVal('qcEndAt') : null)) },
     { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
     { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
   ]
@@ -2800,7 +3298,7 @@ const lastCompletedIdx = computed(() => {
   const rows = timestampRows.value;
   let lastIdx = -1;
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i].value) {
+    if (rows[i].value && rows[i].value !== 'NOT APPLICABLE' && rows[i].value !== 'N/A') {
       lastIdx = i;
     }
   }
@@ -2815,21 +3313,24 @@ const activeLineHeight = computed(() => {
 })
 
 const fraudMetrics = computed(() => {
-  if (!props.truck) return { status: 'NOT_RECORDED' }
+  const t = currentTruck.value
+  if (!t) return { status: 'NOT_RECORDED' }
   const net = nettoTimbanganJembatan.value || 0
   const roll = warehouseRealization.value || 0
-  if (net === 0 || roll === 0) return { net, roll, diff: 0, ratioPercent: 0, deviationPercent: 0, direction: '=', status: 'NOT_RECORDED' }
+  if (isUomMismatch.value || net === 0 || roll === 0) {
+    return { net, roll, diff: 0, ratioPercent: 0, deviationPercent: 0, direction: '=', status: 'NOT_RECORDED' }
+  }
   const ratioPercent = (roll / net) * 100
   const rawDiff = roll - net
   const diff = Math.abs(rawDiff)
   const deviationPercent = Math.abs(100 - ratioPercent)
   const direction = rawDiff > 0 ? '+' : rawDiff < 0 ? '-' : '='
-  
+
   let status = 'SAFE'
   const tol = toleranceLimit.value
   if (deviationPercent > tol) status = 'CRITICAL'
   else if (deviationPercent > tol / 2) status = 'WARNING'
-  
+
   return { net, roll, diff, ratioPercent, deviationPercent, direction, status }
 })
 
@@ -2861,9 +3362,312 @@ const formatPercentageCustom1 = (val) => {
 
 const formatTimeFull = (isoString) => {
   if (!isoString) return '-'
+  if (isoString === 'NOT APPLICABLE' || isoString === 'N/A' || isoString === 'PA EXEMPT' || isoString === 'EXEMPT') {
+    return isoString
+  }
   const d = new Date(isoString)
-  if (Number.isNaN(d.getTime())) return '-'
+  if (Number.isNaN(d.getTime())) return typeof isoString === 'string' ? isoString : '-'
   return `${formatPlantTime(d, true)}, ${formatPlantDate(d)} WIB`
+}
+
+// ================= GSP SPECIFIC COMPUTEDS & HELPERS =================
+const canonicalGspChecklistItems = [
+  { code: 'CLEAN_VEHICLE', label: 'Kendaraan bersih' },
+  { code: 'DOOR_SEAL_GOOD', label: 'Seal pintu kendaraan baik' },
+  { code: 'NO_EXPIRED_GAS_CYLINDER', label: 'Tidak ditemukan tabung gas yang sudah Exp date masa uji berlakunya' },
+  { code: 'ITEMS_NEATLY_ARRANGED', label: 'Barang tertata rapi' },
+  { code: 'NO_PEST_OR_ANIMAL_TRACE', label: 'Tidak ditemukan hama / binatang dan/atau jejak / bekas binatang' },
+  { code: 'GOOD_CLEAN_SEALED', label: 'Barang baik dan bersih serta tersegel' },
+  { code: 'COA_MATCHES_BATCH', label: 'CoA tersedia dan sesuai batchnya' },
+  { code: 'QTY_TYPE_MATCHES_SJ', label: 'Jumlah dan jenis barang sesuai SJ' },
+  { code: 'VEHICLE_NO_LEAK_GOOD', label: 'Kendaraan tidak bocor / kondisi baik' },
+]
+
+const latestChecklistDisposition = computed(() => {
+  const t = currentTruck.value
+  if (!t || t.processType !== 'GSP') return null
+  const whProcesses = t.warehouseProcesses || []
+  for (const proc of whProcesses) {
+    const rawChecklist = proc.checklistItems
+    if (rawChecklist?.disposition) {
+      return rawChecklist.disposition
+    }
+  }
+  if (t.checklistDisposition) return t.checklistDisposition
+  return null
+})
+
+const hasChecklistDisposition = computed(() => {
+  return latestChecklistDisposition.value !== null
+})
+
+const gspPreUnloadMeta = computed(() => {
+  const t = currentTruck.value
+  if (!t || t.processType !== 'GSP') return {}
+  const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  const rawChecklist = whProcess?.checklistItems || t.preUnloadChecklist
+  const inspector = whProcess?.startBy?.name || whProcess?.startedBy?.name || rawChecklist?.inspectedBy?.name || t.warehouseStartBy?.name || 'Tim Gudang GSP'
+  const inspectedAt = whProcess?.startAt || whProcess?.startedAt || rawChecklist?.inspectedAt || t.warehouseStartAt
+  return { inspector, inspectedAt }
+})
+
+const gspPreUnloadItems = computed(() => {
+  const t = currentTruck.value
+  if (!t || t.processType !== 'GSP') return []
+  const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  const rawChecklist = whProcess?.checklistItems || t.preUnloadChecklist
+  if (!rawChecklist) return []
+
+  const items = Array.isArray(rawChecklist)
+    ? rawChecklist
+    : (Array.isArray(rawChecklist.items) ? rawChecklist.items : [])
+
+  if (items.length === 0) return []
+
+  return canonicalGspChecklistItems.map(canonical => {
+    const matched = items.find(i => (i.code && i.code === canonical.code) || (i.label && i.label.toLowerCase() === canonical.label.toLowerCase()))
+    const isOk = matched ? (matched.result === 'OK' || matched.ok === true || matched.result === 'PASS') : false
+    return {
+      code: canonical.code,
+      label: canonical.label,
+      ok: isOk,
+      result: isOk ? 'OK' : 'NOT OK',
+      notes: matched?.notes || matched?.note || '',
+      photoUrl: matched?.photoUrl || null
+    }
+  })
+})
+
+const gspPreUnloadStatus = computed(() => {
+  const items = gspPreUnloadItems.value
+  if (!items || items.length === 0) {
+    return {
+      label: 'BELUM ADA PEMERIKSAAN',
+      badgeClass: 'bg-slate-100 text-slate-600 border border-slate-200'
+    }
+  }
+  const allOk = items.every(i => i.ok)
+  if (allOk) {
+    return {
+      label: 'COMPLIANT (9/9)',
+      badgeClass: 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+    }
+  }
+  return {
+    label: hasChecklistDisposition.value ? 'DEFECT (DISPOSISI KONSESI)' : 'ADA DEFECT (NOT OK)',
+    badgeClass: hasChecklistDisposition.value ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-rose-100 text-rose-800 border border-rose-200'
+  }
+})
+
+const latestDisposedPa = computed(() => {
+  if (!gspPaRounds.value || gspPaRounds.value.length === 0) return null
+  const withDisp = [...gspPaRounds.value].filter(r => r.dispositionAction).sort((a, b) => (b.testRound || 0) - (a.testRound || 0))
+  return withDisp[0] || null
+})
+
+const hasGspDisposition = computed(() => {
+  return latestDisposedPa.value !== null
+})
+
+const getPaStatusBadgeClass = (status) => {
+  if (!status) return 'bg-slate-100 text-slate-700'
+  const s = String(status).toUpperCase()
+  if (s === 'PASS' || s === 'APPROVED') return 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+  if (s === 'REJECT' || s === 'REJECTED' || s === 'FAIL') return 'bg-rose-100 text-rose-800 border border-rose-200'
+  if (s.includes('NOTE') || s.includes('CONCESSION') || s.includes('ACCEPT')) return 'bg-amber-100 text-amber-800 border border-amber-200'
+  if (s.includes('RETEST')) return 'bg-blue-100 text-blue-800 border border-blue-200'
+  return 'bg-slate-100 text-slate-700 border border-slate-200'
+}
+
+const getPaStatusLabel = (status) => {
+  if (!status) return '-'
+  const s = String(status).toUpperCase()
+  if (s === 'PASS' || s === 'APPROVED') return 'PASS'
+  if (s === 'REJECT' || s === 'REJECTED' || s === 'FAIL') return 'REJECT (OOS)'
+  if (s.includes('NOTE') || s.includes('CONCESSION')) return 'TERIMA DENGAN CATATAN'
+  if (s.includes('RETEST')) return 'RETEST'
+  return s
+}
+
+const getDispositionActionLabel = (action) => {
+  if (!action) return '-'
+  const a = String(action).toUpperCase()
+  if (a === 'ACCEPT_WITH_NOTE') return 'TERIMA DENGAN CATATAN (KONSESI)'
+  if (a === 'REQUEST_RETEST') return 'UJI ULANG (RETEST)'
+  if (a === 'REJECT') return 'TOLAK MUATAN'
+  return a
+}
+
+const getFormattedPaParameters = (round) => {
+  if (!round || !round.parameters) return []
+  const params = round.parameters
+  const pName = (round.productName || '').toLowerCase()
+  const pCat = (round.productCategory || '').toLowerCase()
+  const list = []
+
+  // Extract nested or flat parameters safely
+  const sensoryVisual = params.visual || params.sensory?.visual
+  const sensoryForeign = params.foreignMatters || params.sensory?.foreignMatters
+  const sensoryPkg = params.packagingCondition || params.packagingLabel || params.sensory?.packagingLabel
+  const rawDensity = params.density !== undefined ? params.density : params.specificGravity
+  const rawPh = params.ph
+
+  // 1. PAC (Poly Aluminium Chloride)
+  if (pName.includes('pac') || pCat.includes('utl') || (params.al2o3Content !== undefined)) {
+    // 1) Visual
+    if (sensoryVisual !== undefined) {
+      const v = String(sensoryVisual)
+      const ok = v === 'Kuning' || v === 'Coklat Jernih'
+      list.push({ label: 'Kondisi Visual', value: v, specText: 'Kuning / Coklat Jernih', isOk: ok })
+    }
+    // 2) Foreign matters
+    if (sensoryForeign !== undefined) {
+      const v = String(sensoryForeign)
+      const ok = v === 'Tidak ada kontaminasi'
+      list.push({ label: 'Bahan Pengotor', value: v, specText: 'Tidak ada kontaminasi', isOk: ok })
+    }
+    // 3) Packaging condition / label
+    if (sensoryPkg !== undefined) {
+      const v = String(sensoryPkg)
+      const ok = v === 'Kemasan & label tidak rusak'
+      list.push({ label: 'Integritas Kemasan/Label', value: v, specText: 'Tidak rusak', isOk: ok })
+    }
+    // 4) pH (3.50 - 5.00)
+    if (rawPh !== undefined && rawPh !== null) {
+      const v = Number(rawPh)
+      const ok = v >= 3.50 && v <= 5.00
+      list.push({ label: 'pH', value: v.toFixed(2), specText: '3.50 - 5.00', isOk: ok })
+    }
+    // 5) Density (1.170 - 1.260 g/mL)
+    if (rawDensity !== undefined && rawDensity !== null) {
+      const v = Number(rawDensity)
+      const ok = v >= 1.170 && v <= 1.260
+      list.push({ label: 'Density', value: `${v.toFixed(3)} g/mL`, specText: '1.170 - 1.260 g/mL', isOk: ok })
+    }
+    // Extra legacy PAC params if present
+    if (params.al2o3Content !== undefined) {
+      const v = Number(params.al2o3Content)
+      const ok = v >= 10.0 && v <= 11.5
+      list.push({ label: 'Al2O3 Content', value: `${v.toFixed(2)}%`, specText: '10.00 - 11.50%', isOk: ok })
+    }
+    if (params.basicity !== undefined) {
+      const v = Number(params.basicity)
+      const ok = v >= 40.0 && v <= 60.0
+      list.push({ label: 'Basicity', value: `${v.toFixed(2)}%`, specText: '40.00 - 60.00%', isOk: ok })
+    }
+  }
+  // 2. Rapid Klen / PRO-CIP B++ / Chemical PROD
+  else if (pName.includes('rapid') || pName.includes('cip') || pCat.includes('prod') || (params.alkalinityNa2O !== undefined) || (params.alkalinity !== undefined)) {
+    // 1) Visual
+    if (sensoryVisual !== undefined) {
+      const v = String(sensoryVisual)
+      const ok = v === 'Jernih' || v === 'Pass' || v === 'Clear Liquid'
+      list.push({ label: 'Kondisi Visual', value: v, specText: 'Jernih', isOk: ok })
+    }
+    // 2) Foreign matters
+    if (sensoryForeign !== undefined) {
+      const v = String(sensoryForeign)
+      const ok = v === 'Tidak ada kontaminasi'
+      list.push({ label: 'Bahan Pengotor', value: v, specText: 'Tidak ada kontaminasi', isOk: ok })
+    }
+    // 3) Packaging condition / label
+    if (sensoryPkg !== undefined) {
+      const v = String(sensoryPkg)
+      const ok = v === 'Kemasan & label tidak rusak'
+      list.push({ label: 'Integritas Kemasan', value: v, specText: 'Tidak rusak', isOk: ok })
+    }
+    // 4) Na2O (> 35.00%)
+    if (params.alkalinityNa2O !== undefined && params.alkalinityNa2O !== null) {
+      const v = Number(params.alkalinityNa2O)
+      const ok = v > 35.00
+      list.push({ label: 'Alkalinitas (Na₂O)', value: `${v.toFixed(2)}%`, specText: '> 35.00%', isOk: ok })
+    } else if (params.alkalinity !== undefined && params.alkalinity !== null) {
+      const v = Number(params.alkalinity)
+      const ok = v >= 18.0 && v <= 24.0
+      list.push({ label: 'Total Alkalinity', value: `${v.toFixed(2)}%`, specText: '18.00 - 24.00%', isOk: ok })
+    }
+    // 5) NaOH (> 45.16%)
+    if (params.alkalinityNaOH !== undefined && params.alkalinityNaOH !== null) {
+      const v = Number(params.alkalinityNaOH)
+      const ok = v > 45.16
+      list.push({ label: 'Alkalinitas (NaOH)', value: `${v.toFixed(2)}%`, specText: '> 45.16%', isOk: ok })
+    }
+    // 6) pH (> 12.000)
+    if (rawPh !== undefined && rawPh !== null) {
+      const v = Number(rawPh)
+      const ok = v > 12.000
+      list.push({ label: 'pH', value: v.toFixed(3), specText: '> 12.000', isOk: ok })
+    }
+    // 7) Density (> 1.400 g/mL)
+    if (rawDensity !== undefined && rawDensity !== null) {
+      const v = Number(rawDensity)
+      const ok = v > 1.400
+      list.push({ label: 'Density', value: `${v.toFixed(3)} g/mL`, specText: '> 1.400 g/mL', isOk: ok })
+    }
+  }
+  // 3. Batubara (Coal)
+  else if (pName.includes('batu') || pName.includes('coal') || pCat.includes('coal') || (params.targetCalorie !== undefined) || (params.calorieBand !== undefined) || (params.grossCalorificValue !== undefined)) {
+    const knd = params.kondisi || params.visual?.kondisi
+    if (knd !== undefined) {
+      const ok = knd === 'Kering (Tidak Basah)'
+      list.push({ label: 'Kondisi Batubara', value: knd, specText: 'Kering (Tidak Basah)', isOk: ok })
+    }
+    const wrn = params.warna || params.visual?.warna
+    if (wrn !== undefined) {
+      const ok = ['Hitam', 'Hitam Kecoklatan', 'Coklat'].includes(wrn)
+      list.push({ label: 'Warna Batubara', value: wrn, specText: 'Hitam / Kecoklatan', isOk: ok })
+    }
+    const rnk = params.levelRank || params.visual?.levelRank
+    if (rnk !== undefined) {
+      const ok = ['High Rank Coal', 'Medium Rank Coal', 'Low Rank Coal'].includes(rnk)
+      list.push({ label: 'Level Rank', value: rnk, specText: 'High/Med/Low Rank', isOk: ok })
+    }
+    const klp = params.kilap || params.visual?.kilap
+    if (klp !== undefined) {
+      const ok = ['Hitam Mengkilap', 'Hitam Kecoklatan', 'Mudah Lapuk'].includes(klp)
+      list.push({ label: 'Kilap Batubara', value: klp, specText: 'Mengkilap/Kecoklatan', isOk: ok })
+    }
+    const bpn = params.bahanPengotor || params.visual?.bahanPengotor
+    if (bpn !== undefined) {
+      const ok = bpn === 'Tidak ada kontaminasi batuan maupun tanah'
+      list.push({ label: 'Bahan Pengotor', value: bpn, specText: 'Bebas kontaminasi', isOk: ok })
+    }
+    const cal = params.targetCalorie || params.calorieBand
+    if (cal !== undefined) {
+      const calLabel = cal === 'COAL_GT_6000' ? '> 6000 kcal/kg' : cal === 'COAL_5600_6000' ? '5600 - 6000 kcal/kg' : String(cal)
+      list.push({ label: 'Target Kalori / Band', value: calLabel, specText: 'Sesuai Target', isOk: true })
+    }
+    if (params.totalMoisture !== undefined && params.totalMoisture !== null) {
+      const v = Number(params.totalMoisture)
+      const maxTm = cal === 'COAL_GT_6000' ? 25.00 : 33.00
+      const ok = v <= maxTm
+      list.push({ label: 'Total Moisture (TM)', value: `${v.toFixed(2)}%`, specText: `≤ ${maxTm.toFixed(2)}%`, isOk: ok })
+    }
+    // Keputusan Ronde
+    const rVerdict = round.status || round.result || 'PASS'
+    list.push({ label: 'Keputusan Ronde', value: String(rVerdict).toUpperCase(), specText: 'PASS / RELEASE', isOk: String(rVerdict).toUpperCase() === 'PASS' })
+
+    // Legacy Coal params if present
+    if (params.grossCalorificValue !== undefined) {
+      const v = Number(params.grossCalorificValue)
+      const ok = v >= 3800
+      list.push({ label: 'Calorific Value (GCV)', value: `${v} kcal/kg`, specText: '≥ 3800 kcal/kg', isOk: ok })
+    }
+    if (params.ashContent !== undefined) {
+      const v = Number(params.ashContent)
+      const ok = v <= 8.00
+      list.push({ label: 'Ash Content', value: `${v.toFixed(2)}%`, specText: '≤ 8.00%', isOk: ok })
+    }
+  }
+  // 4. Fallback for any other product
+  else {
+    for (const [k, v] of Object.entries(params)) {
+      if (k === 'notes' || k === 'id' || typeof v === 'object') continue
+      list.push({ label: k, value: String(v), specText: 'Parameter', isOk: true })
+    }
+  }
+
+  return list
 }
 </script>
 

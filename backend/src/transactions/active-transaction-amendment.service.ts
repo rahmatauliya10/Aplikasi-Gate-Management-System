@@ -235,6 +235,8 @@ export class ActiveTransactionAmendmentService {
           tx.status === TransactionStatus.QC_VEHICLE_PASSED ||
           tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS ||
           tx.status === TransactionStatus.QC_RETEST_REQUIRED ||
+          tx.status === TransactionStatus.WAITING_GSP_DISPOSITION ||
+          tx.status === TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION ||
           tx.status === TransactionStatus.WAITING_UTILITY_DISPOSITION
         ) {
           newStatus = TransactionStatus.QC_VEHICLE_PENDING;

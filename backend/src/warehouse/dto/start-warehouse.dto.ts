@@ -24,6 +24,21 @@ export class PreUnloadChecklistItemDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  photoUrl?: string;
+}
+
+export class GspChecklistDispositionDto {
+  @IsIn(['ACCEPT_WITH_NOTE', 'REJECT'], {
+    message: "Action must be 'ACCEPT_WITH_NOTE' or 'REJECT'",
+  })
+  action: 'ACCEPT_WITH_NOTE' | 'REJECT';
+
+  @IsString()
+  @IsNotEmpty()
+  reason: string;
 }
 
 export class PreUnloadChecklistDto {
@@ -77,4 +92,13 @@ export class StartWarehouseDto {
   @ValidateNested()
   @Type(() => PreUnloadChecklistDto)
   preUnloadChecklist?: PreUnloadChecklistDto;
+
+  @ApiPropertyOptional({
+    description: 'GSP Pre-unloading checklist disposition decision (if any NOT_OK)',
+    type: GspChecklistDispositionDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GspChecklistDispositionDto)
+  checklistDisposition?: GspChecklistDispositionDto;
 }

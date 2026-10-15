@@ -15,6 +15,10 @@ import {
   AnalysisDecision,
 } from './dto/submit-product-analysis.dto';
 import {
+  SubmitGspDispositionDto,
+  GspDispositionAction,
+} from './dto/submit-gsp-disposition.dto';
+import {
   QcResult,
   TransactionStatus,
   GspAnalysisProfile,
@@ -101,14 +105,23 @@ export function parseStrictFiniteNumber(
     );
   }
 
+  // Support local Indonesian decimal comma ("1,17" -> "1.17") if string contains exactly one comma and no dot
+  let normalizedStr = trimmed;
+  if (trimmed.includes(',') && !trimmed.includes('.')) {
+    const commaCount = (trimmed.match(/,/g) || []).length;
+    if (commaCount === 1) {
+      normalizedStr = trimmed.replace(',', '.');
+    }
+  }
+
   // Reject hexadecimal ("0x..."), octal ("0o..."), binary ("0b..."), scientific notation ("1e2"), and any non-decimal representations
-  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
+  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalizedStr)) {
     throw new BadRequestException(
       `Parameter '${fieldName}' tidak valid ('${value}'). Format harus berupa angka desimal standar (tidak mendukung notasi ilmiah/eksponensial atau heksadesimal).`,
     );
   }
 
-  const num = Number(trimmed);
+  const num = Number(normalizedStr);
   if (!Number.isFinite(num) || Number.isNaN(num)) {
     throw new BadRequestException(
       `Parameter '${fieldName}' harus berupa angka numerik finite valid (tidak boleh non-finite, NaN, atau overflow).`,
@@ -330,10 +343,27 @@ export class QcProductAnalysisService {
       const clientCat = dto.productCategory.toUpperCase();
       const authCat = authoritativeProductCategory.toUpperCase();
       const authSub = (tx.cargoSubType || '').toUpperCase();
+      const isUtlClient = clientCat.includes('UTL') || clientCat.includes('UTILITY');
+      const isProdClient = clientCat.includes('PROD');
+      const isUtlAuth = authCat.includes('UTL') || authCat.includes('UTILITY');
+      const isProdAuth = authCat.includes('PROD');
+
+      if ((isUtlClient && isProdAuth) || (isProdClient && isUtlAuth)) {
+        throw new BadRequestException(
+          `Kategori produk (${dto.productCategory}) tidak sesuai dengan transaksi (${authoritativeProductCategory}).`,
+        );
+      }
+
+      const isChemicalMatch =
+        (clientCat.startsWith('CHEMICAL') && authCat.startsWith('CHEMICAL')) ||
+        (clientCat === 'CHEMICALS' && authCat.startsWith('CHEMICAL')) ||
+        (clientCat.startsWith('CHEMICAL') && authCat === 'CHEMICALS');
+
       if (
         !authCat.includes(clientCat) &&
         !clientCat.includes(authCat) &&
-        !authSub.includes(clientCat)
+        !authSub.includes(clientCat) &&
+        !isChemicalMatch
       ) {
         throw new BadRequestException(
           `Kategori produk (${dto.productCategory}) tidak sesuai dengan transaksi (${authoritativeProductCategory}).`,
@@ -350,6 +380,18 @@ export class QcProductAnalysisService {
       const normClient = clientName.replace(/EE/g, 'E');
       const normAuth = authName.replace(/EE/g, 'E');
       const normSub = authSub.replace(/EE/g, 'E');
+
+      const isPacClient = normClient.includes('PAC') || normClient.includes('POLYCOR');
+      const isRkClient = normClient.includes('RAPID') || normClient.includes('KLEN') || normClient.includes('PROCIP');
+      const isPacAuth = normAuth.includes('PAC') || normAuth.includes('POLYCOR') || normSub.includes('PAC');
+      const isRkAuth = normAuth.includes('RAPID') || normAuth.includes('KLEN') || normAuth.includes('PROCIP') || normSub.includes('RAPID') || normSub.includes('KLEN');
+
+      if ((isPacClient && isRkAuth) || (isRkClient && isPacAuth)) {
+        throw new BadRequestException(
+          `Nama produk (${dto.productName}) tidak sesuai dengan spesifikasi komoditas transaksi (${authoritativeProductName}).`,
+        );
+      }
+
       if (
         !normAuth.includes(normClient) &&
         !normClient.includes(normAuth) &&
@@ -371,6 +413,12 @@ export class QcProductAnalysisService {
     const currentMaxRound =
       historyList.length > 0 ? historyList[0].testRound : 0;
     const authoritativeTestRound = currentMaxRound + 1;
+
+    if (authoritativeTestRound > 2) {
+      throw new BadRequestException(
+        `Batas maksimum pengujian laboratorium (2 ronde) telah tercapai. Tidak dapat melakukan pengujian ronde ke-${authoritativeTestRound}.`,
+      );
+    }
 
     if (dto.testRound != null && dto.testRound !== authoritativeTestRound) {
       throw new BadRequestException(
@@ -408,7 +456,11 @@ export class QcProductAnalysisService {
     let evalResult: {
       result?: 'PASS' | 'REJECT';
       decision?:
-        'RELEASE' | 'RETEST_REQUIRED' | 'PENDING_DISPOSITION' | 'REJECT';
+        | 'RELEASE'
+        | 'RETEST_REQUIRED'
+        | 'PENDING_DISPOSITION'
+        | 'WAITING_DISPOSITION'
+        | 'REJECT';
       notes?: string;
       isConfigured?: boolean;
       error?: string;
@@ -706,6 +758,9 @@ export class QcProductAnalysisService {
       case AnalysisDecision.RETEST_REQUIRED:
         nextStatus = TransactionStatus.QC_RETEST_REQUIRED;
         break;
+      case AnalysisDecision.WAITING_DISPOSITION:
+        nextStatus = TransactionStatus.WAITING_GSP_DISPOSITION;
+        break;
       case AnalysisDecision.PENDING_DISPOSITION:
         // NEW canonical GSP transactions must NEVER enter WAITING_UTILITY_DISPOSITION
         // Fail-closed governance blocker without routing to Utility disposition
@@ -783,7 +838,9 @@ export class QcProductAnalysisService {
           changedById: user.id,
           notes:
             dto.notes ||
-            `Analisis PA Round ${authoritativeTestRound}: Evaluasi Otoritatif Server ${authoritativeDecision} (${serverQcResult})`,
+            (authoritativeDecision === AnalysisDecision.WAITING_DISPOSITION
+              ? `Analisis PA Round ${authoritativeTestRound}: Menunggu Disposisi Gudang GSP (${(evalResult as any).violations?.length || 0} parameter OOS)`
+              : `Analisis PA Round ${authoritativeTestRound}: Evaluasi Otoritatif Server ${authoritativeDecision} (${serverQcResult})`),
         },
       });
     });
@@ -799,13 +856,20 @@ export class QcProductAnalysisService {
       })
       .catch(() => {});
 
+    const successMsg =
+      authoritativeDecision === AnalysisDecision.WAITING_DISPOSITION
+        ? `Analisis produk Round ${authoritativeTestRound} dicatat: Hasil OOS, menunggu disposisi Gudang GSP`
+        : `Analisis produk Round ${authoritativeTestRound} berhasil dicatat`;
+
     return {
       success: true,
-      message: `Analisis produk Round ${authoritativeTestRound} berhasil dicatat`,
+      message: successMsg,
       data: {
         transactionId,
         testRound: authoritativeTestRound,
         newStatus: nextStatus,
+        result: serverQcResult,
+        decision: authoritativeDecision,
       },
     };
   }
@@ -889,6 +953,211 @@ export class QcProductAnalysisService {
     return {
       success: true,
       data: records,
+    };
+  }
+
+  /**
+   * Submit controlled GSP warehouse disposition for held/OOS chemical transaction.
+   * Actions: ACCEPT_WITH_NOTE, REQUEST_RETEST, REJECT.
+   * Authority: Strictly WAREHOUSE role with explicit GSP process scope.
+   */
+  async submitGspDisposition(
+    transactionId: string,
+    dto: SubmitGspDispositionDto,
+    user: JwtPayloadUser,
+  ) {
+    // P0 / Phase 1: ADMIN has full operational access across all GMS scopes.
+    // WAREHOUSE role requires explicit GSP warehouseAccess scope.
+    // QC, Security, and non-GSP Warehouse remain strictly forbidden.
+    const isAdmin = user.role === 'ADMIN';
+    const isGspWarehouse =
+      user.role === 'WAREHOUSE' &&
+      (user.warehouseAccess || []).includes('GSP');
+
+    if (!isAdmin && !isGspWarehouse) {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Hanya personel operasional Gudang GSP atau Administrator yang memiliki kewenangan memberikan disposisi mutu penerimaan.',
+        errors: ['FORBIDDEN_DISPOSITION_ROLE'],
+      });
+    }
+
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      select: {
+        id: true,
+        status: true,
+        processType: true,
+        cargoType: true,
+        cargoSubType: true,
+        gspAnalysisProfile: true,
+        productCatalogId: true,
+        revision: true,
+      },
+    });
+
+    if (!tx) {
+      throw new NotFoundException('Transaksi tidak ditemukan');
+    }
+
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Disposisi mutu hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    if (tx.status !== TransactionStatus.WAITING_GSP_DISPOSITION) {
+      throw new BadRequestException({
+        success: false,
+        message: `Disposisi ditolak: Transaksi berstatus ${tx.status}, bukan WAITING_GSP_DISPOSITION. Status historis WAITING_UTILITY_DISPOSITION bersifat read-only.`,
+        errors: ['INVALID_TRANSACTION_STATUS'],
+      });
+    }
+
+    const activePa = await this.prisma.qcProductAnalysis.findFirst({
+      where: {
+        transactionId,
+        isVoided: false,
+      },
+      orderBy: { testRound: 'desc' },
+    });
+
+    if (!activePa) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Catatan analisis laboratorium (PA) aktif tidak ditemukan untuk transaksi ini.',
+        errors: ['MISSING_ACTIVE_PA'],
+      });
+    }
+
+    let nextStatus: TransactionStatus;
+    let paStatus: string;
+    let dispositionReason: string;
+
+    if (dto.action === GspDispositionAction.ACCEPT_WITH_NOTE) {
+      const trimmedReason = (dto.reason || '').trim();
+      if (trimmedReason.length < 5) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Alasan penerimaan dengan catatan (disposisi mutu) wajib diisi minimal 5 karakter.',
+          errors: ['REASON_REQUIRED'],
+        });
+      }
+
+      // Enforce critical defect non-waivability
+      const rawParams = activePa.parameters as any;
+      const sensory = rawParams?.sensory;
+      const isForeignOk = sensory?.foreignMatters === 'Tidak ada kontaminasi';
+      const isPackagingOk =
+        sensory?.packagingLabel === 'Kemasan & label tidak rusak';
+
+      if (!isForeignOk || !isPackagingOk) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Penyimpangan kritis (kontaminasi benda asing atau kerusakan kemasan/label) tidak dapat diterima dengan catatan. Muatan harus DITOLAK (REJECT).',
+          errors: ['CRITICAL_DEFECT_NOT_WAIVABLE'],
+        });
+      }
+
+      nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
+      paStatus = 'ACCEPT_WITH_NOTE';
+      dispositionReason = trimmedReason;
+    } else if (dto.action === GspDispositionAction.REQUEST_RETEST) {
+      if (activePa.testRound >= 2) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Batas maksimum pengujian kimia (2 ronde) telah tercapai. Keputusan hanya dapat berupa Terima dengan Catatan (jika non-kritis) atau Tolak (REJECT).',
+          errors: ['MAX_RETEST_ROUNDS_REACHED'],
+        });
+      }
+
+      nextStatus = TransactionStatus.QC_RETEST_REQUIRED;
+      paStatus = 'RETEST_REQUIRED';
+      dispositionReason =
+        (dto.reason || '').trim() ||
+        `Permintaan Uji Ulang (Retest Ronde ${activePa.testRound + 1}) oleh Gudang GSP`;
+    } else if (dto.action === GspDispositionAction.REJECT) {
+      nextStatus = TransactionStatus.QC_VEHICLE_REJECTED;
+      paStatus = 'REJECT';
+      dispositionReason =
+        (dto.reason || '').trim() || 'Ditolak oleh Gudang GSP (OOS Mutu)';
+    } else {
+      throw new BadRequestException(
+        `Aksi disposisi tidak valid: ${dto.action}`,
+      );
+    }
+
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    const now = new Date();
+    const expectedRevision = dto.revision ?? tx.revision;
+
+    await this.prisma.$transaction(async (prismaTx) => {
+      // 1. CAS update transaction
+      const claimed = await prismaTx.transaction.updateMany({
+        where: { id: transactionId, revision: expectedRevision },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+        },
+      });
+
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          'Transaksi telah diperbarui oleh pengguna lain (konflik konkurensi).',
+        );
+      }
+
+      // 2. Update QcProductAnalysis with disposition audit trail
+      await prismaTx.qcProductAnalysis.update({
+        where: { id: activePa.id },
+        data: {
+          status: paStatus,
+          dispositionAction: dto.action,
+          dispositionReason,
+          dispositionById: user.id,
+          dispositionAt: now,
+        },
+      });
+
+      // 3. Insert transaction status history
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: `Disposisi Gudang GSP (${dto.action}): ${dispositionReason}`,
+        },
+      });
+    });
+
+    await this.activityLogsService
+      .logAction({
+        userId: user.id,
+        action: `GSP_DISPOSITION_${dto.action}`,
+        module: 'WAREHOUSE',
+        referenceId: transactionId,
+        description: `Gudang GSP menetapkan disposisi ${dto.action} untuk transaksi ${transactionId} (Ronde ${activePa.testRound}). Alasan: ${dispositionReason}`,
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
+
+    return {
+      success: true,
+      message: `Disposisi Gudang GSP berhasil dicatat: ${dto.action}`,
+      data: {
+        transactionId,
+        action: dto.action,
+        newStatus: nextStatus,
+        paStatus,
+        dispositionReason,
+      },
     };
   }
 }

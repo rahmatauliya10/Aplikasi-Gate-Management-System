@@ -5,10 +5,13 @@ import {
   IsOptional,
   IsString,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WarehouseUnit, WarehouseCondition, Prisma } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
+import { DeliveryChecklistDto } from './delivery-checklist.dto';
 
 export function validateReceivedQuantityString(val: any): Prisma.Decimal {
   if (typeof val !== 'string' || !val.trim()) {
@@ -151,7 +154,10 @@ export class CompleteWarehouseDto {
 
   @ApiPropertyOptional({
     description: 'Optional Delivery Checklist JSON payload',
+    type: () => DeliveryChecklistDto,
   })
   @IsOptional()
-  deliveryChecklist?: any;
+  @ValidateNested()
+  @Type(() => DeliveryChecklistDto)
+  deliveryChecklist?: DeliveryChecklistDto | any;
 }

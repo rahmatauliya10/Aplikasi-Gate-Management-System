@@ -67,6 +67,8 @@ enum TransactionStatus {
   PA_NOT_REQUIRED
   QC_RETEST_REQUIRED
   WAITING_UTILITY_DISPOSITION
+  WAITING_GSP_DISPOSITION
+  WAITING_GSP_CHECKLIST_DISPOSITION
   WAREHOUSE_IN_PROGRESS
   WAREHOUSE_DONE
   INCOMING_CHECK_PENDING
@@ -176,6 +178,7 @@ model User {
   cancelledTransactions     Transaction[]           @relation("CancelledByUser")
   voidedTransactions        Transaction[]           @relation("VoidedByUser")
   statusHistoryChanges      TransactionStatusHistory[] @relation("StatusChangedBy")
+  reminderState             UserReminderState?
   productAnalysesAsTester    QcProductAnalysis[]       @relation("ProductAnalysisTestedBy")
   productAnalysesAsDisposer  QcProductAnalysis[]       @relation("ProductAnalysisDispositionBy")
 }
@@ -244,6 +247,8 @@ model Transaction {
   incomingQcStartAt     DateTime?
   qcAnalysisCompleted   Boolean           @default(false)
   qcAnalysisCompletedAt DateTime?
+  dailySequence         Int?
+  deliveryChecklist     Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -675,4 +680,21 @@ model QcProductAnalysis {
   @@index([productCatalogId])
   @@index([testedById])
   @@index([dispositionById])
+}
+
+model DailyArrivalCounter {
+  dateKey   String   @id
+  lastSeq   Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model UserReminderState {
+  userId           String   @id @map("user_id")
+  snoozedReminders Json     @default("{}") @map("snoozed_reminders")
+  readReminders    Json     @default("{}") @map("read_reminders")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_reminder_states")
 }

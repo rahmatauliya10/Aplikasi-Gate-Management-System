@@ -95,7 +95,7 @@ const mappedStepKey = computed(() => {
   if (status === 'QC_VEHICLE_PENDING') return 'qc_vehicle';
   if (status === 'QC_VEHICLE_IN_PROGRESS') return 'qc_vehicle';
   if (status === 'QC_RETEST_REQUIRED') return 'qc_vehicle';
-  if (status === 'WAITING_UTILITY_DISPOSITION') return 'qc_vehicle';
+  if (status === 'WAITING_GSP_DISPOSITION' || status === 'WAITING_UTILITY_DISPOSITION') return 'qc_vehicle';
   if (status === 'QC_VEHICLE_PASSED') return 'warehouse';
   if (status === 'PA_NOT_REQUIRED') return 'warehouse';
   if (status === 'WAREHOUSE_IN_PROGRESS') return 'warehouse';

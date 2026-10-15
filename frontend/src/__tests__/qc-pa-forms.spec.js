@@ -224,16 +224,20 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(wrapper.find('#select-pac-visual').element.value).toBe('Kuning')
       expect(wrapper.find('#select-pac-foreign-matters').element.value).toBe('Tidak ada kontaminasi')
 
-      // Enter invalid pH (2.0 < 3.50)
+      // Enter invalid pH (2.0 < 3.50) -> renders OOS button
       await wrapper.find('#input-pac-ph').setValue(2.0)
       await wrapper.find('#input-pac-density').setValue(1.20)
 
-      const releaseBtn = wrapper.find('#btn-pac-release')
-      expect(releaseBtn.attributes('disabled')).toBeDefined()
+      expect(wrapper.find('#btn-pac-release').exists()).toBe(false)
+      const oosBtn = wrapper.find('#btn-pac-reject')
+      expect(oosBtn.exists()).toBe(true)
+      expect(oosBtn.text()).toContain('OOS — Disposisi Gudang GSP')
 
-      // Fix pH to valid (4.25 in 3.50 - 5.00)
+      // Fix pH to valid (4.25 in 3.50 - 5.00) -> switches to release button
       await wrapper.find('#input-pac-ph').setValue(4.25)
-      expect(releaseBtn.attributes('disabled')).toBeUndefined()
+      const releaseBtn = wrapper.find('#btn-pac-release')
+      expect(releaseBtn.exists()).toBe(true)
+      expect(wrapper.find('#btn-pac-reject').exists()).toBe(false)
       expect(releaseBtn.text()).toContain('Kirim Hasil Analisis PA')
 
       // Submit
@@ -241,7 +245,7 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(wrapper.emitted('submit')).toBeTruthy()
       const emittedPayload = wrapper.emitted('submit')[0][0]
 
-      expect(emittedPayload.productCategory).toBe('Chemicals')
+      expect(emittedPayload.productCategory).toBe('Chemical UTL')
       expect(emittedPayload.productName).toBe('PAC 280 AC')
       expect(emittedPayload.testRound).toBe(1)
       expect(emittedPayload.parameters.ph).toBe(4.25)
@@ -251,6 +255,41 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       // Server-authoritative contract: No client result or decision
       expect(emittedPayload.result).toBeUndefined()
       expect(emittedPayload.decision).toBeUndefined()
+    })
+
+    it('supports local Indonesian comma decimal strings and preserves all 3 PAC UTL product identities', async () => {
+      const pacProducts = ['PAC 280 AC', 'POLYCOR P9', 'IPAC CIP A200']
+
+      for (const prodName of pacProducts) {
+        const wrapper = mount(ChemicalPacForm, {
+          props: {
+            transaction: {
+              id: `tx-${prodName}`,
+              cargoType: 'Chemical UTL',
+              cargoSubType: prodName,
+              productCatalog: {
+                category: 'Chemical UTL',
+                name: prodName,
+              },
+            },
+            testRound: 1,
+          },
+        })
+
+        // Test comma decimal parsing (e.g. 4,20 and 1,210)
+        await wrapper.find('#input-pac-ph').setValue('4,20')
+        await wrapper.find('#input-pac-density').setValue('1,210')
+
+        const releaseBtn = wrapper.find('#btn-pac-release')
+        expect(releaseBtn.exists()).toBe(true)
+        await releaseBtn.trigger('click')
+
+        const payload = wrapper.emitted('submit')[0][0]
+        expect(payload.productCategory).toBe('Chemical UTL')
+        expect(payload.productName).toBe(prodName)
+        expect(payload.parameters.ph).toBe(4.2)
+        expect(payload.parameters.density).toBe(1.21)
+      }
     })
   })
 
@@ -274,16 +313,21 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       await wrapper.find('#input-rapid-ph').setValue(12.000)
       await wrapper.find('#input-rapid-density').setValue(1.400)
 
-      const releaseBtn = wrapper.find('#btn-rapid-release')
-      expect(releaseBtn.attributes('disabled')).toBeDefined()
+      // Boundary values = OOS -> renders OOS button
+      expect(wrapper.find('#btn-rapid-release').exists()).toBe(false)
+      const oosBtn = wrapper.find('#btn-rapid-reject')
+      expect(oosBtn.exists()).toBe(true)
+      expect(oosBtn.text()).toContain('OOS — Disposisi Gudang GSP')
 
-      // Set values strictly greater than boundaries
+      // Set values strictly greater than boundaries -> switches to release button
       await wrapper.find('#input-rapid-na2o').setValue(35.01)
       await wrapper.find('#input-rapid-naoh').setValue(45.17)
       await wrapper.find('#input-rapid-ph').setValue(12.001)
       await wrapper.find('#input-rapid-density').setValue(1.401)
 
-      expect(releaseBtn.attributes('disabled')).toBeUndefined()
+      const releaseBtn = wrapper.find('#btn-rapid-release')
+      expect(releaseBtn.exists()).toBe(true)
+      expect(wrapper.find('#btn-rapid-reject').exists()).toBe(false)
       expect(releaseBtn.text()).toContain('Kirim Hasil Analisis PA')
 
       // Submit
@@ -291,7 +335,7 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       expect(wrapper.emitted('submit')).toBeTruthy()
       const emittedPayload = wrapper.emitted('submit')[0][0]
 
-      expect(emittedPayload.productCategory).toBe('Chemicals')
+      expect(emittedPayload.productCategory).toBe('Chemical PROD')
       expect(emittedPayload.productName).toBe('Rapid Klen')
       expect(emittedPayload.testRound).toBe(1)
       expect(emittedPayload.parameters.alkalinityNa2O).toBe(35.01)
@@ -302,6 +346,45 @@ describe('QC PA Dynamic Forms Tests - Real Component Contract Tests', () => {
       // Server-authoritative contract: No client result or decision
       expect(emittedPayload.result).toBeUndefined()
       expect(emittedPayload.decision).toBeUndefined()
+    })
+
+    it('supports local comma decimals and covers both Rapid Klen PROD products (Rapid Klen, PRO-CIP B++)', async () => {
+      const prodProducts = ['Rapid Klen', 'PRO-CIP B++']
+
+      for (const prodName of prodProducts) {
+        const wrapper = mount(ChemicalRapidKlenForm, {
+          props: {
+            transaction: {
+              id: `tx-${prodName}`,
+              cargoType: 'Chemical PROD',
+              cargoSubType: prodName,
+              productCatalog: {
+                category: 'Chemical PROD',
+                name: prodName,
+              },
+            },
+            testRound: 1,
+          },
+        })
+
+        // Test comma decimal inputs
+        await wrapper.find('#input-rapid-na2o').setValue('36,50')
+        await wrapper.find('#input-rapid-naoh').setValue('47,20')
+        await wrapper.find('#input-rapid-ph').setValue('13,000')
+        await wrapper.find('#input-rapid-density').setValue('1,500')
+
+        const releaseBtn = wrapper.find('#btn-rapid-release')
+        expect(releaseBtn.exists()).toBe(true)
+        await releaseBtn.trigger('click')
+
+        const payload = wrapper.emitted('submit')[0][0]
+        expect(payload.productCategory).toBe('Chemical PROD')
+        expect(payload.productName).toBe(prodName)
+        expect(payload.parameters.alkalinityNa2O).toBe(36.5)
+        expect(payload.parameters.alkalinityNaOH).toBe(47.2)
+        expect(payload.parameters.ph).toBe(13)
+        expect(payload.parameters.density).toBe(1.5)
+      }
     })
   })
 })

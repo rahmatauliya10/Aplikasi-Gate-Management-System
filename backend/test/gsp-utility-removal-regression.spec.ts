@@ -501,7 +501,7 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
       );
     });
 
-    it('RAPID_KLEN_PA operates under ACTIVE_CONFIGURED and routes directly to REJECT on OOS (never WAITING_UTILITY_DISPOSITION)', async () => {
+    it('RAPID_KLEN_PA operates under ACTIVE_CONFIGURED and routes to WAITING_GSP_DISPOSITION on OOS for GSP disposition', async () => {
       const rapidTx = {
         id: 'tx-rapid-1',
         status: TransactionStatus.QC_VEHICLE_IN_PROGRESS,
@@ -548,14 +548,13 @@ describe('GSP Utility Removal & Two-Round Flow Regression Suite', () => {
         mockQcAnalystUser,
       );
 
-      expect(res.data.newStatus).toBe(TransactionStatus.QC_VEHICLE_REJECTED);
-      expect(res.data.newStatus).not.toBe(
-        TransactionStatus.WAITING_UTILITY_DISPOSITION,
+      expect(res.data.newStatus).toBe(
+        TransactionStatus.WAITING_GSP_DISPOSITION,
       );
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            status: TransactionStatus.QC_VEHICLE_REJECTED,
+            status: TransactionStatus.WAITING_GSP_DISPOSITION,
           }),
         }),
       );

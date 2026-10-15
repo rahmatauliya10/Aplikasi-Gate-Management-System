@@ -52,7 +52,12 @@
               <!-- Info Section -->
               <div class="flex-1 grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
-                  <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1.5">Plate Number</div>
+                  <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1.5 flex items-center space-x-1.5">
+                    <span>Plate Number</span>
+                    <span v-if="truck.dailySequence" class="px-1.5 py-0.2 rounded text-[9px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      #{{ String(truck.dailySequence).padStart(3, '0') }}
+                    </span>
+                  </div>
                   <div class="text-lg font-black text-slate-900 font-mono tracking-tight">{{ getPlateNumber(truck) }}</div>
                 </div>
                 

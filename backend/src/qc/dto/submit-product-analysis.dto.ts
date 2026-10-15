@@ -16,6 +16,7 @@ export enum AnalysisDecision {
   REJECT = 'REJECT',
   RETEST_REQUIRED = 'RETEST_REQUIRED',
   PENDING_DISPOSITION = 'PENDING_DISPOSITION',
+  WAITING_DISPOSITION = 'WAITING_DISPOSITION',
 }
 
 export class SubmitProductAnalysisDto {

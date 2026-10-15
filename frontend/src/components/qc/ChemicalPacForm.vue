@@ -87,9 +87,9 @@
             <span class="text-[10px] font-bold text-slate-400">Std: 3.50 - 5.00</span>
           </div>
           <input
-            type="number"
-            step="0.01"
-            v-model.number="formData.ph"
+            type="text"
+            inputmode="decimal"
+            v-model="formData.ph"
             placeholder="Contoh: 4.20"
             id="input-pac-ph"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
@@ -104,9 +104,9 @@
             <span class="text-[10px] font-bold text-slate-400">Std: 1.170 - 1.260</span>
           </div>
           <input
-            type="number"
-            step="0.001"
-            v-model.number="formData.density"
+            type="text"
+            inputmode="decimal"
+            v-model="formData.density"
             placeholder="Contoh: 1.210"
             id="input-pac-density"
             class="w-full h-10 px-3 bg-white rounded-xl border text-xs font-bold text-slate-800 focus:outline-none transition-colors"
@@ -129,26 +129,30 @@
 
     <!-- Actions -->
     <div class="pt-4 border-t border-slate-100 flex flex-col md:flex-row gap-3">
+      <!-- In-Spec Submission (Direct Release) -->
       <button
+        v-if="isAllInSpec"
         type="button"
         @click="submitAnalysis"
-        :disabled="isSubmitting || !isFormComplete || !isAllInSpec"
+        :disabled="isSubmitting || !isFormComplete"
         class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-pac-release"
       >
         <span class="material-icons text-base">send</span>
-        <span>Kirim Hasil Analisis PA</span>
+        <span>Kirim Hasil Analisis PA (Sesuai Spesifikasi)</span>
       </button>
 
+      <!-- OOS Submission (Requires GSP Disposition) -->
       <button
+        v-else
         type="button"
         @click="submitAnalysis"
         :disabled="isSubmitting || !isFormComplete"
-        class="py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 transition-all flex items-center justify-center gap-2"
+        class="flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all flex items-center justify-center gap-2"
         id="btn-pac-reject"
       >
-        <span class="material-icons text-base">send</span>
-        <span>Kirim Hasil Analisis PA</span>
+        <span class="material-icons text-base">warning</span>
+        <span>Kirim Hasil Analisis PA (OOS — Disposisi Gudang GSP)</span>
       </button>
     </div>
   </div>
@@ -159,6 +163,7 @@ import { reactive, computed } from 'vue'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
+  testRound: { type: Number, default: 1 },
   isSubmitting: { type: Boolean, default: false },
 })
 
@@ -175,6 +180,15 @@ const formData = reactive({
   notes: '',
 })
 
+// Helper to support both comma (Indonesian) and dot decimal input
+const parseLocalDecimal = (val) => {
+  if (val === null || val === undefined || val === '') return null
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null
+  const str = String(val).trim().replace(',', '.')
+  const num = parseFloat(str)
+  return isNaN(num) || !Number.isFinite(num) ? null : num
+}
+
 const isVisualValid = computed(() => {
   return formData.sensory.visual === 'Kuning' || formData.sensory.visual === 'Coklat Jernih'
 })
@@ -188,13 +202,15 @@ const isPackagingValid = computed(() => {
 })
 
 const isPhValid = computed(() => {
-  if (formData.ph == null) return true
-  return formData.ph >= 3.50 && formData.ph <= 5.00
+  const parsed = parseLocalDecimal(formData.ph)
+  if (parsed == null) return true
+  return parsed >= 3.50 && parsed <= 5.00
 })
 
 const isDensityValid = computed(() => {
-  if (formData.density == null) return true
-  return formData.density >= 1.170 && formData.density <= 1.260
+  const parsed = parseLocalDecimal(formData.density)
+  if (parsed == null) return true
+  return parsed >= 1.170 && parsed <= 1.260
 })
 
 const isSensoryComplete = computed(() => {
@@ -206,8 +222,8 @@ const isFormComplete = computed(() => {
     Boolean(formData.sensory.visual) &&
     Boolean(formData.sensory.foreignMatters) &&
     Boolean(formData.sensory.packagingLabel) &&
-    formData.ph != null &&
-    formData.density != null
+    parseLocalDecimal(formData.ph) != null &&
+    parseLocalDecimal(formData.density) != null
   )
 })
 
@@ -217,10 +233,23 @@ const isAllInSpec = computed(() => {
 })
 
 const submitAnalysis = () => {
+  const category =
+    props.transaction?.productCatalog?.category ||
+    (props.transaction?.cargoType && props.transaction.cargoType !== 'Chemicals'
+      ? props.transaction.cargoType
+      : 'Chemical UTL')
+
+  const name =
+    props.transaction?.productCatalog?.name ||
+    props.transaction?.cargoSubType ||
+    'PAC 280 AC'
+
+  const round = props.testRound || props.transaction?.testRound || 1
+
   emit('submit', {
-    productCategory: 'Chemicals',
-    productName: props.transaction.cargoSubType || 'PAC 280 AC',
-    testRound: 1,
+    productCategory: category,
+    productName: name,
+    testRound: round,
     parameters: {
       sensory: {
         visual: formData.sensory.visual,
@@ -230,8 +259,8 @@ const submitAnalysis = () => {
       visual: formData.sensory.visual,
       foreignMatters: formData.sensory.foreignMatters,
       packagingCondition: formData.sensory.packagingLabel,
-      ph: formData.ph,
-      density: formData.density,
+      ph: parseLocalDecimal(formData.ph),
+      density: parseLocalDecimal(formData.density),
     },
     notes: formData.notes,
   })

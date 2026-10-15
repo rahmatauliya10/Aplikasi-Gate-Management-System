@@ -114,7 +114,12 @@
                 
                 <div class="flex justify-between items-start pl-3">
                   <div>
-                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">{{ getStepLabel(truck) }}</div>
+                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 flex items-center space-x-1.5">
+                      <span>{{ getStepLabel(truck) }}</span>
+                      <span v-if="truck.dailySequence" class="px-1.5 py-0.2 rounded text-[9px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        #{{ String(truck.dailySequence).padStart(3, '0') }}
+                      </span>
+                    </div>
                     <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ getPlateNumber(truck) }}</div>
                   </div>
                   <div class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest"
@@ -286,6 +291,7 @@ const truckInfoRows = computed(() => {
   if (!selectedTruck.value) return []
   const t = selectedTruck.value
   return [
+    ...(t.dailySequence ? [{ label: 'No. Urut Kedatangan', value: `#${String(t.dailySequence).padStart(3, '0')}`, cls: 'text-indigo-600 font-mono text-base font-black' }] : []),
     { label: 'Plate Number', value: getPlateNumber(t), cls: 'text-slate-900 font-mono text-lg tracking-widest' },
     { label: 'Driver', value: t.driverName || '-' },
     { label: 'Vendor', value: getVendor(t), cls: 'text-slate-700' },

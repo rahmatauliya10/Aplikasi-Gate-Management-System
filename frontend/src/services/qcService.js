@@ -35,6 +35,14 @@ const qcService = {
   },
 
   /**
+   * Get Product Analysis (PA) history and rounds for GSP
+   * @param {Number|String} transactionId
+   */
+  getProductAnalysisHistory(transactionId) {
+    return api.get(`/qc/product-analysis/${transactionId}`)
+  },
+
+  /**
    * Submit QC Vehicle result (approve/reject) - For GBJ
    * @param {Number|String} transactionId
    * @param {Object} data - { result: 'PASS'|'REJECT', vehicleCleanliness, ... }

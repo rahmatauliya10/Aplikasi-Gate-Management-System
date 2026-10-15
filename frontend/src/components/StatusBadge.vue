@@ -26,7 +26,12 @@ const badgeClasses = computed(() => {
     return 'bg-slate-100 text-slate-700 border border-slate-300 shadow-sm'
   }
   // Retest/disposition: distinct orange-warning styling
-  if (props.status === 'QC_RETEST_REQUIRED' || props.status === 'WAITING_UTILITY_DISPOSITION') {
+  if (
+    props.status === 'QC_RETEST_REQUIRED' ||
+    props.status === 'WAITING_GSP_DISPOSITION' ||
+    props.status === 'WAITING_GSP_CHECKLIST_DISPOSITION' ||
+    props.status === 'WAITING_UTILITY_DISPOSITION'
+  ) {
     return 'bg-orange-50 text-orange-600 border border-orange-200 shadow-sm'
   }
   if (props.status.includes('PENDING')) {
@@ -46,7 +51,12 @@ const dotClasses = computed(() => {
   if (props.status === 'PA_NOT_REQUIRED') {
     return 'bg-slate-500'
   }
-  if (props.status === 'QC_RETEST_REQUIRED' || props.status === 'WAITING_UTILITY_DISPOSITION') {
+  if (
+    props.status === 'QC_RETEST_REQUIRED' ||
+    props.status === 'WAITING_GSP_DISPOSITION' ||
+    props.status === 'WAITING_GSP_CHECKLIST_DISPOSITION' ||
+    props.status === 'WAITING_UTILITY_DISPOSITION'
+  ) {
     return 'bg-orange-500 animate-pulse'
   }
   if (props.status.includes('PENDING')) {

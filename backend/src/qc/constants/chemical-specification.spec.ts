@@ -100,7 +100,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         OPERATIONAL_PAC_SPEC_METADATA,
       );
       expect(resLowPh.result).toBe('REJECT');
-      expect(resLowPh.decision).toBe('REJECT');
+      expect(resLowPh.decision).toBe('WAITING_DISPOSITION');
 
       const resHighPh = evaluatePacAnalysis(
         { sensory: validPacSensory, ph: 5.01, density: 1.2 },
@@ -131,7 +131,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.21,
       });
       expect(res.result).toBe('REJECT');
-      expect(res.decision).toBe('REJECT');
+      expect(res.decision).toBe('WAITING_DISPOSITION');
     });
 
     it('ADVERSARIAL: rejects PAC when visual is boolean true or foreign matters/packaging omitted', () => {
@@ -146,7 +146,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.21,
       });
       expect(resBooleanVisual.result).toBe('REJECT');
-      expect(resBooleanVisual.decision).toBe('REJECT');
+      expect(resBooleanVisual.decision).toBe('WAITING_DISPOSITION');
 
       // foreignMatters omitted must not PASS
       const resOmittedForeign = evaluatePacAnalysis({
@@ -155,7 +155,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.21,
       });
       expect(resOmittedForeign.result).toBe('REJECT');
-      expect(resOmittedForeign.decision).toBe('REJECT');
+      expect(resOmittedForeign.decision).toBe('WAITING_DISPOSITION');
 
       // packaging omitted must not PASS
       const resOmittedPkg = evaluatePacAnalysis({
@@ -167,7 +167,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.21,
       });
       expect(resOmittedPkg.result).toBe('REJECT');
-      expect(resOmittedPkg.decision).toBe('REJECT');
+      expect(resOmittedPkg.decision).toBe('WAITING_DISPOSITION');
     });
 
     it('P0-04: Al2O3 does NOT participate in compliance decision (arbitrary/low Al2O3 still PASSES)', () => {
@@ -276,7 +276,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.45,
       });
       expect(res.result).toBe('REJECT');
-      expect(res.decision).toBe('REJECT');
+      expect(res.decision).toBe('WAITING_DISPOSITION');
     });
 
     it('P0-05 ADVERSARIAL: Rapid Klen requires NaOH (omitted NaOH must NOT RELEASE)', () => {
@@ -288,7 +288,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.45,
       });
       expect(resNoNaOH.result).toBe('REJECT');
-      expect(resNoNaOH.decision).toBe('REJECT');
+      expect(resNoNaOH.decision).toBe('WAITING_DISPOSITION');
       expect(resNoNaOH.violations).toContain(
         'Kadar Alkalinitas NaOH wajib diisi',
       );
@@ -308,7 +308,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.45,
       });
       expect(resBoolVisual.result).toBe('REJECT');
-      expect(resBoolVisual.decision).toBe('REJECT');
+      expect(resBoolVisual.decision).toBe('WAITING_DISPOSITION');
 
       // foreignMatters omitted
       const resNoForeign = evaluateRapidKlenAnalysis({
@@ -319,7 +319,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.45,
       });
       expect(resNoForeign.result).toBe('REJECT');
-      expect(resNoForeign.decision).toBe('REJECT');
+      expect(resNoForeign.decision).toBe('WAITING_DISPOSITION');
 
       // packaging omitted
       const resNoPkg = evaluateRapidKlenAnalysis({
@@ -333,7 +333,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.45,
       });
       expect(resNoPkg.result).toBe('REJECT');
-      expect(resNoPkg.decision).toBe('REJECT');
+      expect(resNoPkg.decision).toBe('WAITING_DISPOSITION');
     });
 
     it('P0-04 ADVERSARIAL: Rapid Klen strictly rejects legacy packaging alias in place of packagingLabel', () => {
@@ -349,7 +349,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.45,
       });
       expect(resLegacyPkg.result).toBe('REJECT');
-      expect(resLegacyPkg.decision).toBe('REJECT');
+      expect(resLegacyPkg.decision).toBe('WAITING_DISPOSITION');
     });
   });
 
@@ -365,7 +365,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.21,
       });
       expect(resOdor.result).toBe('REJECT');
-      expect(resOdor.decision).toBe('REJECT');
+      expect(resOdor.decision).toBe('WAITING_DISPOSITION');
     });
 
     it('rejects PAC when packagingLabel is omitted even if legacy packaging alias is provided', () => {
@@ -379,7 +379,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: 1.21,
       });
       expect(resPkg.result).toBe('REJECT');
-      expect(resPkg.decision).toBe('REJECT');
+      expect(resPkg.decision).toBe('WAITING_DISPOSITION');
     });
   });
 
@@ -404,7 +404,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: Infinity,
       });
       expect(res.result).toBe('REJECT');
-      expect(res.decision).toBe('REJECT');
+      expect(res.decision).toBe('WAITING_DISPOSITION');
       expect(res.isCompliant).toBe(false);
       expect(res.violations).toEqual(
         expect.arrayContaining([
@@ -425,7 +425,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: -Infinity,
       });
       expect(res.result).toBe('REJECT');
-      expect(res.decision).toBe('REJECT');
+      expect(res.decision).toBe('WAITING_DISPOSITION');
       expect(res.isCompliant).toBe(false);
     });
 
@@ -436,7 +436,7 @@ describe('Chemical Quality Specifications (SOP-GSP-2026.1 Rev 2.1)', () => {
         density: Infinity,
       });
       expect(res.result).toBe('REJECT');
-      expect(res.decision).toBe('REJECT');
+      expect(res.decision).toBe('WAITING_DISPOSITION');
       expect(res.isCompliant).toBe(false);
       expect(res.violations).toEqual(
         expect.arrayContaining([

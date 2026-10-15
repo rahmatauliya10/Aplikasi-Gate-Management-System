@@ -16,7 +16,12 @@
             
             <div class="grid grid-cols-2 gap-3 relative z-10">
               <div class="col-span-2 bg-slate-100/90 p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between hover:-translate-y-0.5 hover:border-slate-300 transition-all duration-300">
-                <span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.15em] mb-1.5">Plate Number</span>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.15em]">Plate Number</span>
+                  <span v-if="selectedTruck.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    #{{ String(selectedTruck.dailySequence).padStart(3, '0') }}
+                  </span>
+                </div>
                 <span class="text-xl font-black truncate font-mono tracking-widest text-slate-900">{{ getPlateNumber(selectedTruck) }}</span>
               </div>
               
@@ -199,7 +204,12 @@
                 
                 <div class="flex justify-between items-start pl-3">
                   <div>
-                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">Arrival Time</div>
+                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 flex items-center space-x-1.5">
+                      <span>Arrival Time</span>
+                      <span v-if="truck.dailySequence" class="px-1.5 py-0.2 rounded text-[9px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        #{{ String(truck.dailySequence).padStart(3, '0') }}
+                      </span>
+                    </div>
                     <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ getPlateNumber(truck) }}</div>
                   </div>
                   <div class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest bg-slate-100 text-slate-600 font-mono border border-slate-200">

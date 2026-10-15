@@ -143,62 +143,10 @@ export class AttachmentsService {
       const attachmentLineageId = crypto.randomUUID();
       const attachmentType = dto.attachmentType || AttachmentType.OTHER;
 
-      // 4. Create Attachment record in atomic database transaction
-      const attachment = await this.prisma.$transaction(async (prismaTx) => {
-        const created = await prismaTx.attachment.create({
-          data: {
-            attachmentLineageId,
-            transactionId,
-            module: rawModule.toUpperCase(),
-            attachmentType,
-            originalName: file.originalname,
-            fileName: uuidFilename,
-            filePath: relativeFilePath,
-            mimeType: file.mimetype,
-            size: file.size,
-            description: dto.description || null,
-            uploadedById: user.id,
-            sha256,
-            isCurrent: true,
-            revision: 1,
-          },
-        });
-
-        await this.activityLogsService.logAction(
-          {
-            userId: user.id,
-            action: 'ATTACHMENT_UPLOAD',
-            module: 'ATTACHMENTS',
-            referenceId: created.id,
-            description: `Uploaded attachment ${file.originalname} (${sha256.substring(
-              0,
-              8,
-            )}...) for transaction ${transactionId}`,
-            status: 'SUCCESS',
-            ipAddress,
-          },
-          prismaTx,
-        );
-
-        return created;
-      });
-
-      // 5. Atomic file move from quarantine to permanent storage with compensating cleanup
+      // 4. Move physical file from quarantine to permanent storage FIRST
       try {
         fs.renameSync(tempPath, destPath);
       } catch (moveErr: any) {
-        // Compensating action: Delete DB record if file move fails
-        if (attachment?.id) {
-          try {
-            await this.prisma.attachment.delete({
-              where: { id: attachment.id },
-            });
-          } catch (delErr: any) {
-            this.logger.error(
-              `Compensating DB cleanup failed: ${delErr.message}`,
-            );
-          }
-        }
         this.logger.error(
           `Failed to move physical file: ${moveErr.message}`,
           moveErr.stack,
@@ -206,6 +154,61 @@ export class AttachmentsService {
         throw new InternalServerErrorException(
           'Gagal memindahkan berkas fisik ke lokasi permanen.',
         );
+      }
+
+      // 5. Create Attachment record & audit log in atomic DB transaction
+      let attachment: any;
+      try {
+        attachment = await this.prisma.$transaction(async (prismaTx) => {
+          const created = await prismaTx.attachment.create({
+            data: {
+              attachmentLineageId,
+              transactionId,
+              module: rawModule.toUpperCase(),
+              attachmentType,
+              originalName: file.originalname,
+              fileName: uuidFilename,
+              filePath: relativeFilePath,
+              mimeType: file.mimetype,
+              size: file.size,
+              description: dto.description || null,
+              uploadedById: user.id,
+              sha256,
+              isCurrent: true,
+              revision: 1,
+            },
+          });
+
+          await this.activityLogsService.logAction(
+            {
+              userId: user.id,
+              action: 'ATTACHMENT_UPLOAD',
+              module: 'ATTACHMENTS',
+              referenceId: created.id,
+              description: `Uploaded attachment ${file.originalname} (${sha256.substring(
+                0,
+                8,
+              )}...) for transaction ${transactionId}`,
+              status: 'SUCCESS',
+              ipAddress,
+            },
+            prismaTx,
+          );
+
+          return created;
+        });
+      } catch (dbErr: any) {
+        // Compensating action: Delete moved physical file if DB transaction fails
+        if (fs.existsSync(destPath)) {
+          try {
+            fs.unlinkSync(destPath);
+          } catch (unlinkErr: any) {
+            this.logger.error(
+              `Compensating physical file cleanup failed: ${unlinkErr.message}`,
+            );
+          }
+        }
+        throw dbErr;
       }
 
       return {

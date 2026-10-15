@@ -203,6 +203,7 @@ describe('GSPProcess.vue — Canonical Pre-Unloading Checklist & Material-Specif
       expect(startProcessSpy).toHaveBeenCalledWith('tx-4', {
         suratJalanNumber: 'SJ-001',
         poNumber: 'PO-001',
+        process: 'submit_checklist_for_decision',
         preUnloadChecklist: {
           items: expect.arrayContaining([
             expect.objectContaining({ code: 'DOOR_SEAL_GOOD', result: 'NOT_OK' }),
