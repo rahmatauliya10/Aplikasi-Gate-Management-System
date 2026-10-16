@@ -8,6 +8,7 @@ jest.mock('fs', () => {
     writeFileSync: jest.fn(),
     unlinkSync: jest.fn(),
     mkdirSync: jest.fn(),
+    readFileSync: jest.fn(),
   };
 });
 import { Test, TestingModule } from '@nestjs/testing';
@@ -66,17 +67,22 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
   beforeEach(async () => {
     mockPrismaService = {
-      $transaction: jest.fn(),
+      $transaction: jest.fn().mockImplementation(async (cb: any) => {
+        if (typeof cb === 'function') {
+          return cb(mockPrismaService);
+        }
+        return Promise.resolve(cb);
+      }),
       transaction: {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
-        update: jest.fn(),
-        updateMany: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       warehouseProcess: {
         findFirst: jest.fn(),
         create: jest.fn(),
-        update: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
         aggregate: jest.fn(),
       },
       incomingMaterialCheck: {
@@ -145,6 +151,19 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
 
     warehouseService = module.get<WarehouseService>(WarehouseService);
     weighbridgeService = module.get<WeighbridgeService>(WeighbridgeService);
+
+    (fs.existsSync as jest.Mock).mockReset();
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    (fs.writeFileSync as jest.Mock).mockReset();
+    (fs.unlinkSync as jest.Mock).mockReset();
+    (fs.mkdirSync as jest.Mock).mockReset();
+    (fs.readFileSync as jest.Mock).mockReset();
+    (fs.readFileSync as jest.Mock).mockReturnValue(
+      Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    );
   });
 
   describe('Weighbridge In - GSP 4-Group Status Assignment', () => {
@@ -2719,11 +2738,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           mockChecklistTx.warehouseProcesses[0],
         );
 
-        // Existing attachment with identical sha256
+        // Existing attachment with identical sha256, matching item code and revision
         mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
           id: 'att-existing-sha256-1',
           transactionId: 'tx-chk-disposition-1',
           filePath: 'checklist-evidence/existing.png',
+          originalName: 'CLEAN_VEHICLE_evidence.png',
+          revision: 1,
         });
 
         const mockTxClient = {
@@ -2769,6 +2790,405 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         expect(failedItem.photoUrl).toBe(
           '/api/attachments/att-existing-sha256-1/download',
         );
+      });
+
+      it('P0: de-duplication - rejects reuse and creates fresh attachment if physical file is missing on disk', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        // Existing attachment in DB, but file missing on disk
+        mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
+          id: 'att-missing-file-1',
+          transactionId: 'tx-chk-disposition-1',
+          filePath: 'checklist-evidence/missing.png',
+          originalName: 'CLEAN_VEHICLE_evidence.png',
+          revision: 1,
+        });
+
+        // Simulate file missing on disk
+        (fs.existsSync as jest.Mock).mockReturnValueOnce(false);
+
+        const res = await warehouseService.submitChecklistDisposition(
+          'tx-chk-disposition-1',
+          {
+            action: 'ACCEPT_WITH_NOTE',
+            reason: 'Diterima - fallback tulis baru karena file fisik hilang',
+            revision: 4,
+          },
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        // fresh attachment MUST be created because physical file was missing
+        expect(mockPrismaService.attachment.create).toHaveBeenCalled();
+        expect(fs.writeFileSync).toHaveBeenCalled();
+      });
+
+      it('P0: de-duplication - rejects reuse if existing attachment item code does not match', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        // Existing attachment with different item code (e.g. CONTAINER_SEAL_GOOD instead of CLEAN_VEHICLE)
+        mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
+          id: 'att-different-item-1',
+          transactionId: 'tx-chk-disposition-1',
+          filePath: 'checklist-evidence/different.png',
+          originalName: 'CONTAINER_SEAL_GOOD_evidence.png',
+          revision: 1,
+        });
+
+        const res = await warehouseService.submitChecklistDisposition(
+          'tx-chk-disposition-1',
+          {
+            action: 'ACCEPT_WITH_NOTE',
+            reason: 'Diterima - buat bukti baru karena beda item code',
+            revision: 4,
+          },
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockPrismaService.attachment.create).toHaveBeenCalled();
+      });
+
+      it('P0: de-duplication - rejects reuse if existing attachment revision does not match current checklist revision', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        // Existing attachment with stale revision (e.g. 0 vs 1)
+        mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
+          id: 'att-stale-rev-1',
+          transactionId: 'tx-chk-disposition-1',
+          filePath: 'checklist-evidence/stale.png',
+          originalName: 'CLEAN_VEHICLE_evidence.png',
+          revision: 0,
+        });
+
+        const res = await warehouseService.submitChecklistDisposition(
+          'tx-chk-disposition-1',
+          {
+            action: 'ACCEPT_WITH_NOTE',
+            reason: 'Diterima - buat bukti baru karena beda revisi',
+            revision: 4,
+          },
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockPrismaService.attachment.create).toHaveBeenCalled();
+      });
+
+      it('P0: atomic transaction rollback - cleans up physical file when transaction fails after attachment created', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        const mockTxClient = {
+          attachment: {
+            findFirst: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue({
+              id: 'att-rolled-back-1',
+              filePath: 'checklist-evidence/test.png',
+            }),
+          },
+          transaction: {
+            updateMany: jest
+              .fn()
+              .mockRejectedValue(
+                new Error(
+                  'PostgreSQL foreign key / disk failure after attachment created',
+                ),
+              ),
+          },
+          warehouseProcess: {
+            update: jest.fn(),
+          },
+          transactionStatusHistory: {
+            create: jest.fn(),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason:
+                'Simulasi kegagalan transaksi setelah record Attachment dibuat',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow(
+          'PostgreSQL foreign key / disk failure after attachment created',
+        );
+
+        // Verify physical file compensation cleanup was executed!
+        expect(fs.unlinkSync).toHaveBeenCalled();
+      });
+
+      it('P0: retry after rollback - successfully creates fresh valid evidence without orphan conflict', async () => {
+        // Step 1: Failed attempt cleans up physical file
+        const txAttempt1 = createFreshMockChecklistTx();
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          txAttempt1,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          txAttempt1.warehouseProcesses[0],
+        );
+
+        const failingTxClient = {
+          attachment: {
+            findFirst: jest.fn().mockResolvedValue(null),
+            create: jest.fn().mockResolvedValue({
+              id: 'att-first-attempt-rolled-back',
+              filePath: 'checklist-evidence/first.png',
+            }),
+          },
+          transaction: {
+            updateMany: jest
+              .fn()
+              .mockRejectedValue(new Error('Simulated transient DB abort')),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(failingTxClient),
+        );
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Percobaan 1 yang gagal',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('Simulated transient DB abort');
+
+        expect(fs.unlinkSync).toHaveBeenCalled();
+
+        // Step 2: Retry with identical photo succeeds and creates fresh valid attachment
+        const txAttempt2 = createFreshMockChecklistTx();
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          txAttempt2,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          txAttempt2.warehouseProcesses[0],
+        );
+
+        const successTxClient = {
+          attachment: {
+            findFirst: jest.fn().mockResolvedValue(null), // no orphan row exists because previous transaction rolled back
+            create: jest.fn().mockResolvedValue({
+              id: 'att-retry-success-1',
+              filePath: 'checklist-evidence/retry.png',
+            }),
+          },
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findUnique: jest.fn().mockResolvedValue({
+              ...mockChecklistTx,
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            }),
+          },
+          warehouseProcess: {
+            update: jest.fn().mockResolvedValue({}),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(successTxClient),
+        );
+
+        const retryRes = await warehouseService.submitChecklistDisposition(
+          'tx-chk-disposition-1',
+          {
+            action: 'ACCEPT_WITH_NOTE',
+            reason: 'Percobaan 2 (retry) berhasil penuh',
+            revision: 4,
+          },
+          mockUser,
+        );
+
+        expect(retryRes.success).toBe(true);
+        expect(successTxClient.attachment.create).toHaveBeenCalled();
+      });
+
+      it('P0: validates existing attachment ID - strictly rejects if physical file is missing on disk', async () => {
+        const existingAttTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-attid-1',
+              revision: 1,
+              isCurrent: true,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: createCanonical9PreunloadItems(
+                  'CLEAN_VEHICLE',
+                  'Bak kotor dengan ID lampiran',
+                  'att-existing-id-1',
+                ),
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          existingAttTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          existingAttTx.warehouseProcesses[0],
+        );
+
+        mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
+          id: 'att-existing-id-1',
+          transactionId: 'tx-chk-disposition-1',
+          filePath: 'checklist-evidence/ghost.png',
+          originalName: 'CLEAN_VEHICLE_evidence.png',
+          revision: 1,
+        });
+
+        // Simulate physical file missing
+        (fs.existsSync as jest.Mock).mockReturnValue(false);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason:
+                'Disposisi dengan attachment ID yang filenya hilang di disk',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('tidak ditemukan pada penyimpanan server');
+      });
+
+      it('P0: validates existing attachment ID - strictly rejects if item code mismatches', async () => {
+        const existingAttTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-attid-2',
+              revision: 1,
+              isCurrent: true,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: createCanonical9PreunloadItems(
+                  'CLEAN_VEHICLE',
+                  'Bak kotor dengan ID lampiran',
+                  'att-wrong-item-1',
+                ),
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          existingAttTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          existingAttTx.warehouseProcesses[0],
+        );
+
+        mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
+          id: 'att-wrong-item-1',
+          transactionId: 'tx-chk-disposition-1',
+          filePath: 'checklist-evidence/seal.png',
+          originalName: 'CONTAINER_SEAL_GOOD_evidence.png', // Mismatched item code
+          revision: 1,
+        });
+
+        (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Disposisi dengan attachment ID dari item lain',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('terikat pada item lain');
+      });
+
+      it('P0: validates existing attachment ID - strictly rejects if attachment revision is stale', async () => {
+        const existingAttTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-attid-3',
+              revision: 1,
+              isCurrent: true,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: createCanonical9PreunloadItems(
+                  'CLEAN_VEHICLE',
+                  'Bak kotor dengan ID lampiran',
+                  'att-stale-rev-1',
+                ),
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          existingAttTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          existingAttTx.warehouseProcesses[0],
+        );
+
+        mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
+          id: 'att-stale-rev-1',
+          transactionId: 'tx-chk-disposition-1',
+          filePath: 'checklist-evidence/old.png',
+          originalName: 'CLEAN_VEHICLE_evidence.png',
+          revision: 0, // Stale revision (expected 1)
+        });
+
+        (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Disposisi dengan attachment ID dari revisi lama',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('berasal dari revisi lama');
       });
 
       it('H-02: atomic audit log - uses prismaTx inside transaction and fails whole transaction if audit fails', async () => {

@@ -96,11 +96,14 @@ export function getStageSlaMinutes(
     }
   }
 
-  // If provisional SLAs are disabled via environment without explicit approved JSON, return null
-  if (
-    process.env.GMS_DISABLE_PROVISIONAL_OVERDUE === 'true' &&
-    !process.env.GMS_STAGE_SLA_JSON
-  ) {
+  // If provisional SLAs are disabled via environment, unapproved stages (not defined in GMS_STAGE_SLA_JSON) must return null
+  if (process.env.GMS_DISABLE_PROVISIONAL_OVERDUE === 'true') {
+    if (process.env.GMS_DEFAULT_SLA_MINUTES) {
+      const parsed = parseInt(process.env.GMS_DEFAULT_SLA_MINUTES, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
     return null;
   }
 

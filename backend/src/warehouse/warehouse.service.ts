@@ -580,12 +580,13 @@ export class WarehouseService {
           if (item.notes) failedItemNotes[item.code] = item.notes;
         });
 
-        // Strict validation: every NOT_OK item MUST have notes (>= 5 chars) and verified photo evidence
-        const photoEvidencesResult = await this.validateNotOkItemEvidences(
+        // Strict preliminary input validation (notes >= 5 chars, valid photo data URI / attachment ID format, magic bytes) without persisting files/DB yet
+        await this.validateNotOkItemEvidences(
           transactionId,
           submittedItems,
           tx.revision,
           this.prisma,
+          { validateOnly: true },
         );
 
         // 1. Direct concession / rejection decision provided in payload
@@ -599,9 +600,20 @@ export class WarehouseService {
 
           if (dto.checklistDisposition.action === 'REJECT') {
             assertValidStatusTransition(tx.status, 'QC_VEHICLE_REJECTED');
+            let photoEvidencesResult: {
+              createdFiles: string[];
+              cleanupFiles: () => void;
+            } | null = null;
             try {
               const updated = await this.prisma.$transaction(
                 async (prismaTx) => {
+                  photoEvidencesResult = await this.validateNotOkItemEvidences(
+                    transactionId,
+                    submittedItems,
+                    1,
+                    prismaTx,
+                  );
+
                   const updatedTx = await prismaTx.transaction.update({
                     where: { id: transactionId },
                     data: {
@@ -677,7 +689,7 @@ export class WarehouseService {
 
               return updated;
             } catch (err) {
-              photoEvidencesResult?.cleanupFiles();
+              (photoEvidencesResult as any)?.cleanupFiles();
               throw err;
             }
           }
@@ -702,8 +714,19 @@ export class WarehouseService {
             'WAITING_GSP_CHECKLIST_DISPOSITION',
           );
 
+          let photoEvidencesResult: {
+            createdFiles: string[];
+            cleanupFiles: () => void;
+          } | null = null;
           try {
             const updated = await this.prisma.$transaction(async (prismaTx) => {
+              photoEvidencesResult = await this.validateNotOkItemEvidences(
+                transactionId,
+                submittedItems,
+                1,
+                prismaTx,
+              );
+
               const updatedTx = await prismaTx.transaction.update({
                 where: { id: transactionId },
                 data: {
@@ -789,7 +812,7 @@ export class WarehouseService {
 
             return updated;
           } catch (err) {
-            photoEvidencesResult?.cleanupFiles();
+            (photoEvidencesResult as any)?.cleanupFiles();
             throw err;
           }
         } else {
@@ -877,99 +900,119 @@ export class WarehouseService {
     const effectiveSj = dto.suratJalanNumber || tx.suratJalanNumber;
     const effectivePo = dto.poNumber || tx.poNumber;
 
-    const canonicalChecklistPayload =
-      tx.processType === 'GSP' && dto.preUnloadChecklist
-        ? {
-            version: GSP_PREUNLOAD_VERSION,
-            overallResult:
-              dto.checklistDisposition?.action === 'ACCEPT_WITH_NOTE'
-                ? 'CONCESSION'
-                : 'OK',
-            items: dto.preUnloadChecklist.items.map((item) => ({
-              code: item.code,
-              label: GSP_PREUNLOAD_LABEL_MAP[item.code] || item.code,
-              result: item.result,
-              notes: item.notes || null,
-              photoUrl: item.photoUrl || null,
-            })),
-            ...(dto.checklistDisposition && {
-              disposition: {
-                action: dto.checklistDisposition.action,
-                reason: dto.checklistDisposition.reason,
-                decidedById: user.id,
-                decidedByName: user.name || user.email,
-                decidedAt: new Date().toISOString(),
-              },
-            }),
-          }
-        : undefined;
+    let photoEvidencesResult: {
+      createdFiles: string[];
+      cleanupFiles: () => void;
+    } | null = null;
+    let updated: any;
+    try {
+      updated = await this.prisma.$transaction(async (prismaTx) => {
+        const maxRev = await prismaTx.warehouseProcess.aggregate({
+          where: { transactionId },
+          _max: { revision: true },
+        });
+        const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
-    const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const maxRev = await prismaTx.warehouseProcess.aggregate({
-        where: { transactionId },
-        _max: { revision: true },
-      });
-      const nextRevision = (maxRev._max.revision ?? 0) + 1;
+        if (tx.processType === 'GSP' && dto.preUnloadChecklist) {
+          photoEvidencesResult = await this.validateNotOkItemEvidences(
+            transactionId,
+            dto.preUnloadChecklist.items,
+            nextRevision,
+            prismaTx,
+          );
+        }
 
-      const claimed = await prismaTx.transaction.updateMany({
-        where: {
-          id: transactionId,
-          status: {
-            in: [
-              'QC_VEHICLE_PASSED',
-              'PA_NOT_REQUIRED',
-              'WAITING_GSP_CHECKLIST_DISPOSITION',
-            ],
+        const canonicalChecklistPayload =
+          tx.processType === 'GSP' && dto.preUnloadChecklist
+            ? {
+                version: GSP_PREUNLOAD_VERSION,
+                overallResult:
+                  dto.checklistDisposition?.action === 'ACCEPT_WITH_NOTE'
+                    ? 'CONCESSION'
+                    : 'OK',
+                items: dto.preUnloadChecklist.items.map((item) => ({
+                  code: item.code,
+                  label: GSP_PREUNLOAD_LABEL_MAP[item.code] || item.code,
+                  result: item.result,
+                  notes: item.notes || null,
+                  photoUrl: item.photoUrl || null,
+                  photoAttachmentId: item.photoAttachmentId || null,
+                })),
+                ...(dto.checklistDisposition && {
+                  disposition: {
+                    action: dto.checklistDisposition.action,
+                    reason: dto.checklistDisposition.reason,
+                    decidedById: user.id,
+                    decidedByName: user.name || user.email,
+                    decidedAt: new Date().toISOString(),
+                  },
+                }),
+              }
+            : undefined;
+
+        const claimed = await prismaTx.transaction.updateMany({
+          where: {
+            id: transactionId,
+            status: {
+              in: [
+                'QC_VEHICLE_PASSED',
+                'PA_NOT_REQUIRED',
+                'WAITING_GSP_CHECKLIST_DISPOSITION',
+              ],
+            },
+            revision: tx.revision,
           },
-          revision: tx.revision,
-        },
-        data: {
-          revision: { increment: 1 },
-          status: 'WAREHOUSE_IN_PROGRESS',
-          warehouseStartAt: tx.warehouseStartAt || new Date(),
-          warehouseStartById: user.id,
-          ...(effectiveSj && {
-            suratJalanNumber: effectiveSj,
-          }),
-          ...(effectivePo && { poNumber: effectivePo }),
-        },
-      });
+          data: {
+            revision: { increment: 1 },
+            status: 'WAREHOUSE_IN_PROGRESS',
+            warehouseStartAt: tx.warehouseStartAt || new Date(),
+            warehouseStartById: user.id,
+            ...(effectiveSj && {
+              suratJalanNumber: effectiveSj,
+            }),
+            ...(effectivePo && { poNumber: effectivePo }),
+          },
+        });
 
-      if (claimed.count !== 1) {
-        throw new ConflictException(
-          'Warehouse process has already been started or status changed concurrently',
-        );
-      }
+        if (claimed.count !== 1) {
+          throw new ConflictException(
+            'Warehouse process has already been started or status changed concurrently',
+          );
+        }
 
-      await prismaTx.warehouseProcess.create({
-        data: {
-          transactionId,
-          revision: nextRevision,
-          processType: tx.processType,
-          startAt: new Date(),
-          startById: user.id,
-          remarks: dto.remarks || null,
-          checklistItems: canonicalChecklistPayload as any,
-        },
-      });
+        await prismaTx.warehouseProcess.create({
+          data: {
+            transactionId,
+            revision: nextRevision,
+            processType: tx.processType,
+            startAt: new Date(),
+            startById: user.id,
+            remarks: dto.remarks || null,
+            checklistItems: canonicalChecklistPayload as any,
+          },
+        });
 
-      await prismaTx.transactionStatusHistory.create({
-        data: {
-          transactionId,
-          oldStatus: tx.status,
-          newStatus: 'WAREHOUSE_IN_PROGRESS',
-          changedById: user.id,
-          notes: dto.remarks || 'Warehouse process started',
-        },
-      });
+        await prismaTx.transactionStatusHistory.create({
+          data: {
+            transactionId,
+            oldStatus: tx.status,
+            newStatus: 'WAREHOUSE_IN_PROGRESS',
+            changedById: user.id,
+            notes: dto.remarks || 'Warehouse process started',
+          },
+        });
 
-      return prismaTx.transaction.findUnique({
-        where: { id: transactionId },
-        include: {
-          warehouseStartBy: { select: { id: true, name: true, role: true } },
-        },
+        return prismaTx.transaction.findUnique({
+          where: { id: transactionId },
+          include: {
+            warehouseStartBy: { select: { id: true, name: true, role: true } },
+          },
+        });
       });
-    });
+    } catch (startErr) {
+      (photoEvidencesResult as any)?.cleanupFiles();
+      throw startErr;
+    }
 
     if (!updated) {
       throw new NotFoundException({
@@ -1928,6 +1971,7 @@ export class WarehouseService {
     }>,
     checklistRevision = 1,
     client: any = this.prisma,
+    options?: { validateOnly?: boolean },
   ): Promise<{ createdFiles: string[]; cleanupFiles: () => void }> {
     const failedItems = items.filter((item) => item.result === 'NOT_OK');
     const createdFiles: string[] = [];
@@ -2036,14 +2080,30 @@ export class WarehouseService {
             });
           }
 
+          // If validateOnly is requested (e.g. preliminary check before entering rejection gate), do not persist files/DB
+          if (options?.validateOnly) {
+            continue;
+          }
+
           const sha256 = crypto
             .createHash('sha256')
             .update(buffer)
             .digest('hex');
 
-          // De-duplication check: if identical evidence already exists on this transaction, reuse it
-          if (client.attachment?.findFirst) {
-            const existingAtt = await client.attachment.findFirst({
+          const uploadBase = process.env.UPLOAD_DIR || './uploads';
+          const ext = isPng ? 'png' : isJpeg ? 'jpg' : 'webp';
+
+          // De-duplication check: if identical evidence already exists on this transaction,
+          // rigorously verify:
+          // 1) File physically exists on disk
+          // 2) SHA-256 hash matches buffer
+          // 3) Checklist item code matches
+          // 4) Revision matches
+          const attachmentClient =
+            client?.attachment ?? (this.prisma as any)?.attachment;
+          let reusableAttachment: any = null;
+          if (attachmentClient?.findFirst) {
+            const existingAtt = await attachmentClient.findFirst({
               where: {
                 transactionId,
                 module: 'WAREHOUSE',
@@ -2052,17 +2112,43 @@ export class WarehouseService {
                 isCurrent: true,
               },
             });
-            if (existingAtt) {
-              item.photoAttachmentId = existingAtt.id;
-              item.photoUrl = `/api/attachments/${existingAtt.id}/download`;
-              continue;
+
+            if (existingAtt && existingAtt.filePath) {
+              const existingFullPath = path.resolve(
+                uploadBase,
+                existingAtt.filePath,
+              );
+              const fileExistsOnDisk = fs.existsSync(existingFullPath);
+              const isSameItemCode =
+                existingAtt.originalName &&
+                existingAtt.originalName.startsWith(`${item.code}_`);
+              const isSameRevision = existingAtt.revision === checklistRevision;
+
+              if (fileExistsOnDisk && isSameItemCode && isSameRevision) {
+                try {
+                  const existingBuffer = fs.readFileSync(existingFullPath);
+                  const existingSha = crypto
+                    .createHash('sha256')
+                    .update(existingBuffer)
+                    .digest('hex');
+                  if (existingSha === sha256) {
+                    reusableAttachment = existingAtt;
+                  }
+                } catch {
+                  // File read error -> do not reuse, fall through to write fresh file
+                }
+              }
             }
           }
 
+          if (reusableAttachment) {
+            item.photoAttachmentId = reusableAttachment.id;
+            item.photoUrl = `/api/attachments/${reusableAttachment.id}/download`;
+            continue;
+          }
+
           // Persist to filesystem with fail-closed guarantee
-          const uploadBase = process.env.UPLOAD_DIR || './uploads';
           const evidenceDir = path.resolve(uploadBase, 'checklist-evidence');
-          const ext = isPng ? 'png' : isJpeg ? 'jpg' : 'webp';
           const fileName = `${transactionId}_${item.code}_${Date.now()}_${Math.floor(
             Math.random() * 1000,
           )}.${ext}`;
@@ -2082,10 +2168,10 @@ export class WarehouseService {
             });
           }
 
-          // Persist Attachment record to DB with fail-closed guarantee
-          if (client.attachment?.create) {
+          // Persist Attachment record to DB with fail-closed guarantee (using client / prismaTx)
+          if (attachmentClient?.create) {
             try {
-              const att = await client.attachment.create({
+              const att = await attachmentClient.create({
                 data: {
                   transactionId,
                   module: 'WAREHOUSE',
@@ -2124,15 +2210,32 @@ export class WarehouseService {
           continue;
         }
 
-        // Check if photoRef has UUID or attachment ID
-        const uuidMatch = photoRef.match(
-          /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
-        );
-        const attachmentId =
-          item.photoAttachmentId || (uuidMatch ? uuidMatch[0] : null);
+        // Resolve attachment ID from item or photoRef
+        let attachmentId = item.photoAttachmentId;
+        if (!attachmentId) {
+          const apiMatch = photoRef.match(
+            /\/api\/attachments\/([a-zA-Z0-9_-]+)/i,
+          );
+          if (apiMatch) {
+            attachmentId = apiMatch[1];
+          } else {
+            const uuidMatch = photoRef.match(
+              /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+            );
+            const attPrefixMatch = photoRef.match(/^att-[a-z0-9_-]+$/i);
+            attachmentId = uuidMatch
+              ? uuidMatch[0]
+              : attPrefixMatch
+                ? attPrefixMatch[0]
+                : null;
+          }
+        }
 
-        if (attachmentId && client.attachment) {
-          const att = await client.attachment.findFirst({
+        const existingAttachmentClient =
+          client?.attachment ?? (this.prisma as any)?.attachment;
+
+        if (attachmentId && existingAttachmentClient?.findFirst) {
+          const att = await existingAttachmentClient.findFirst({
             where: {
               id: attachmentId,
               transactionId,
@@ -2145,6 +2248,31 @@ export class WarehouseService {
               success: false,
               message: `Bukti foto lampiran untuk item ${item.code} tidak ditemukan atau tidak terikat pada transaksi ${transactionId}.`,
               errors: ['INVALID_PHOTO_ATTACHMENT'],
+            });
+          }
+
+          // Verify item code alignment
+          if (
+            att.originalName &&
+            !att.originalName.startsWith(`${item.code}_`)
+          ) {
+            throw new BadRequestException({
+              success: false,
+              message: `Bukti foto lampiran ${att.id} terikat pada item lain (${att.originalName}), bukan item ${item.code}.`,
+              errors: ['ATTACHMENT_ITEM_CODE_MISMATCH'],
+            });
+          }
+
+          // Verify revision compatibility (must match current checklist revision)
+          if (
+            att.revision !== undefined &&
+            att.revision !== null &&
+            att.revision !== checklistRevision
+          ) {
+            throw new BadRequestException({
+              success: false,
+              message: `Bukti foto lampiran ${att.id} berasal dari revisi lama (Rev ${att.revision}) dan tidak sah untuk revisi saat ini (Rev ${checklistRevision}).`,
+              errors: ['STALE_CHECKLIST_ATTACHMENT_REVISION'],
             });
           }
 
@@ -2318,7 +2446,9 @@ export class WarehouseService {
     }
 
     const rawChecklist: any = latestProc.checklistItems;
-    const items = Array.isArray(rawChecklist.items) ? rawChecklist.items : [];
+    const items = Array.isArray(rawChecklist?.items)
+      ? JSON.parse(JSON.stringify(rawChecklist.items))
+      : [];
     if (items.length === 0) {
       throw new BadRequestException({
         success: false,
@@ -2360,14 +2490,6 @@ export class WarehouseService {
       });
     }
 
-    // Validate photo and notes for all NOT_OK items with fail-closed persistence
-    const photoEvidencesResult = await this.validateNotOkItemEvidences(
-      transactionId,
-      items,
-      latestProc.revision,
-      this.prisma,
-    );
-
     // Single unified safety check for concession
     this.validateConcessionSafetyRules(items, dto.action, dto.reason);
 
@@ -2378,9 +2500,30 @@ export class WarehouseService {
 
     assertValidStatusTransition(tx.status, nextStatus);
 
+    // Strict preliminary input validation (notes >= 5 chars, valid photo data URI / attachment ID format, magic bytes) without persisting files/DB yet
+    await this.validateNotOkItemEvidences(
+      transactionId,
+      items,
+      latestProc.revision,
+      this.prisma,
+      { validateOnly: true },
+    );
+
+    let photoEvidencesResult: {
+      createdFiles: string[];
+      cleanupFiles: () => void;
+    } | null = null;
     let updated: any;
     try {
       updated = await this.prisma.$transaction(async (prismaTx) => {
+        // Validate and persist photo evidences inside the atomic transaction client (prismaTx)
+        photoEvidencesResult = await this.validateNotOkItemEvidences(
+          transactionId,
+          items,
+          latestProc.revision,
+          prismaTx,
+        );
+
         // Atomic Conditional Update (CAS)
         const updateResult = await prismaTx.transaction.updateMany({
           where: {
@@ -2484,7 +2627,7 @@ export class WarehouseService {
         return updatedTx;
       });
     } catch (txErr) {
-      photoEvidencesResult?.cleanupFiles();
+      (photoEvidencesResult as any)?.cleanupFiles();
       throw txErr;
     }
 

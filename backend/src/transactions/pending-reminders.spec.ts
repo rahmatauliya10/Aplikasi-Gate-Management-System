@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { getStageSlaMinutes } from './constants/stage-sla.config';
 
 describe('Pending Transaction Reminders Unit Tests', () => {
   let service: TransactionsService;
@@ -463,6 +464,40 @@ describe('Pending Transaction Reminders Unit Tests', () => {
       expect(res.data.summary.overdueCount).toBe(0);
     } finally {
       delete process.env.GMS_DISABLE_PROVISIONAL_OVERDUE;
+    }
+  });
+
+  it('12. should handle partial GMS_STAGE_SLA_JSON without falling back to provisional SLA when GMS_DISABLE_PROVISIONAL_OVERDUE is active', async () => {
+    process.env.GMS_DISABLE_PROVISIONAL_OVERDUE = 'true';
+    process.env.GMS_STAGE_SLA_JSON = JSON.stringify({ WEIGH_IN_DONE: 45 });
+
+    try {
+      // Specifically approved stage returns the explicit JSON override value
+      expect(getStageSlaMinutes('WEIGH_IN_DONE')).toBe(45);
+
+      // Unapproved stage omitted from JSON returns null (does NOT fall back to 60 min provisional)
+      expect(getStageSlaMinutes('QC_VEHICLE_PENDING')).toBeNull();
+      expect(getStageSlaMinutes('REGISTERED')).toBeNull();
+    } finally {
+      delete process.env.GMS_DISABLE_PROVISIONAL_OVERDUE;
+      delete process.env.GMS_STAGE_SLA_JSON;
+    }
+  });
+
+  it('13. should propagate unexpected database lock failure in non-test mode', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+
+    try {
+      mockPrisma.$executeRaw.mockRejectedValueOnce(
+        new Error('FATAL: lock acquisition timeout on advisory lock'),
+      );
+
+      await expect(
+        service.snoozeReminder('user-lock-fail', 'rem-1', 15),
+      ).rejects.toThrow('FATAL: lock acquisition timeout on advisory lock');
+    } finally {
+      process.env.NODE_ENV = originalEnv;
     }
   });
 });

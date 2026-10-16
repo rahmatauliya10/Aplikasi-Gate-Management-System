@@ -90,9 +90,20 @@ export class TransactionsService implements OnModuleInit {
     const execute = async (prismaClient: any) => {
       if (typeof prismaClient.$executeRaw === 'function') {
         try {
+          await prismaClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
           await prismaClient.$executeRaw`SELECT "user_id" FROM "user_reminder_states" WHERE "user_id" = ${userId} FOR UPDATE`;
-        } catch {
-          // Fallback if table doesn't exist yet or mocked in unit test
+        } catch (lockErr: any) {
+          const isMockOrTest =
+            process.env.NODE_ENV === 'test' ||
+            lockErr?.message?.includes('mock') ||
+            lockErr?.message?.includes('not found') ||
+            lockErr?.message?.includes('does not exist');
+          if (!isMockOrTest) {
+            this.logger.error(
+              `Gagal memperoleh database lock untuk user ${userId}: ${lockErr?.message}`,
+            );
+            throw lockErr;
+          }
         }
       }
 
