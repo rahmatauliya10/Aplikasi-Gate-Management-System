@@ -20,7 +20,6 @@ jest.mock('fs', () => {
   };
 });
 
-
 describe('AttachmentsService', () => {
   let service: AttachmentsService;
 
