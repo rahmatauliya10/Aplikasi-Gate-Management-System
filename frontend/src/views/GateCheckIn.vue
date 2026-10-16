@@ -106,87 +106,95 @@
           style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
         
         <!-- Table Header (Hidden on Mobile) -->
-        <div class="relative z-10 hidden md:flex items-center px-6 py-4 bg-[#f8fafc] text-[10px] font-bold text-slate-500 uppercase tracking-[0.15em] w-full border border-slate-100 border-b-0 rounded-t-xl shadow-sm">
-          <div class="w-[130px] shrink-0">PLATE NO</div>
-          <div class="flex-[2] min-w-0 px-3">VENDOR</div>
-          <div class="w-[70px] shrink-0 text-center">WHSE</div>
-          <div class="flex-[2] min-w-0 px-3">CURRENT PHASE</div>
-          <div class="w-[165px] shrink-0 text-center">REGISTERED (WIB)</div>
-          <div class="w-[100px] shrink-0 text-center">ELAPSED</div>
-          <div class="w-[50px] shrink-0 text-center">VIEW</div>
+        <div class="relative z-10 hidden md:grid grid-cols-[165px_minmax(180px,1.4fr)_80px_minmax(180px,1.2fr)_165px_95px_70px] items-center px-6 py-3.5 bg-slate-50/90 text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-full min-w-[980px] border border-slate-200/80 border-b-0 rounded-t-xl select-none">
+          <div>Plate No</div>
+          <div class="px-2">Vendor / Info</div>
+          <div class="text-center">Whse</div>
+          <div class="px-2">Current Phase</div>
+          <div class="text-center">Registered (WIB)</div>
+          <div class="text-center">Elapsed</div>
+          <div class="text-center">Action</div>
         </div>
         
-        <transition-group name="list" tag="div" class="relative z-10 w-full border border-slate-100 bg-white rounded-b-xl shadow-sm">
+        <transition-group name="list" tag="div" class="relative z-10 w-full min-w-[980px] border border-slate-200/80 bg-white rounded-b-xl shadow-xs overflow-hidden">
           <div v-for="(truck, i) in paginatedRegisteredTrucks" :key="truck.id"
-            class="group relative bg-white hover:bg-slate-50/80 border-b border-slate-100/80 last:border-b-0 first:rounded-t-none last:rounded-b-xl transition-all duration-200 flex flex-wrap md:flex-nowrap items-center px-6 py-4 md:py-3.5"
+            class="group relative bg-white hover:bg-slate-50/80 border-b border-slate-100 last:border-b-0 transition-colors duration-150 flex flex-wrap md:grid md:grid-cols-[165px_minmax(180px,1.4fr)_80px_minmax(180px,1.2fr)_165px_95px_70px] items-center px-6 py-3.5 gap-y-2 md:gap-y-0"
           >
-            <!-- COL 1: Plate Number (Clean Box) & Arrival Sequence -->
-            <div class="w-full md:w-[150px] shrink-0 flex items-center space-x-1.5">
-              <span v-if="truck.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+            <!-- COL 1: Plate Number (Clean Badge) & Arrival Sequence -->
+            <div class="w-full md:w-auto flex items-center space-x-2">
+              <span v-if="truck.dailySequence" class="px-1.5 py-0.5 rounded text-[11px] font-semibold font-sans bg-indigo-50 text-indigo-700 border border-indigo-200/80 shrink-0 tabular-nums">
                 #{{ String(truck.dailySequence).padStart(3, '0') }}
               </span>
-              <div class="h-8 bg-slate-100/90 border border-slate-200 rounded-lg flex items-center justify-center text-slate-800 font-mono font-bold text-[11px] shadow-2xs tracking-wider px-2.5 whitespace-nowrap group-hover:border-slate-300 group-hover:bg-slate-100 transition-colors">
+              <div class="h-7.5 px-2.5 bg-slate-50 border border-slate-300/80 rounded-md flex items-center justify-center text-slate-800 font-sans font-bold text-xs tracking-wider shadow-2xs group-hover:border-slate-400 group-hover:bg-white transition-colors whitespace-nowrap">
                 {{ getPlateNumber(truck) }}
               </div>
             </div>
 
-            <!-- COL 2: Vendor (Plain text) -->
-            <div class="flex-[2] min-w-0 px-3">
-              <span class="font-bold text-slate-800 text-[13px] leading-tight block truncate" :title="getVendor(truck)">
-                {{ getDisplayVendor(truck).length > 40 ? getDisplayVendor(truck).substring(0, 40) + '...' : getDisplayVendor(truck) }}
+            <!-- COL 2: Vendor & Driver / Cargo -->
+            <div class="w-full md:w-auto min-w-0 px-2">
+              <span class="font-semibold text-slate-800 text-xs leading-snug block truncate" :title="getDisplayVendor(truck)">
+                {{ getDisplayVendor(truck) }}
+              </span>
+              <span v-if="getDriver(truck)" class="text-[11px] text-slate-500 font-normal leading-tight block truncate mt-0.5" :title="getDriver(truck)">
+                Supir: {{ getDriver(truck) }}
+              </span>
+              <span v-else-if="getCargoDescription(truck) && getCargoDescription(truck) !== getDisplayVendor(truck)" class="text-[11px] text-slate-500 font-normal leading-tight block truncate mt-0.5" :title="getCargoDescription(truck)">
+                Muatan: {{ getCargoDescription(truck) }}
               </span>
             </div>
 
-            <!-- COL 3: Process Pill -->
-            <div class="w-auto md:w-[70px] shrink-0 flex justify-center">
-              <span class="inline-flex items-center justify-center w-[46px] py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
-                   :class="getProcessType(truck) === 'GBB' ? 'bg-[#FDF2F8] text-[#A0006D]' : getProcessType(truck) === 'GBJ' ? 'bg-[#EFF6FF] text-[#3A6ABF]' : 'bg-emerald-50 text-emerald-600'">
+            <!-- COL 3: Warehouse Pill -->
+            <div class="w-auto md:w-auto flex justify-center">
+              <span class="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide border shadow-2xs"
+                   :class="getProcessType(truck) === 'GBB' ? 'bg-pink-50 text-pink-700 border-pink-200/70' : getProcessType(truck) === 'GBJ' ? 'bg-blue-50 text-blue-700 border-blue-200/70' : 'bg-emerald-50 text-emerald-700 border-emerald-200/70'">
                 {{ getProcessType(truck) }}
               </span>
             </div>
 
-            <!-- COL 4: Status / Stage -->
-            <div class="w-full md:w-auto flex-[2] min-w-0 flex items-center px-3">
-              <div class="w-2 h-2 rounded-full mr-2.5 shrink-0" :class="truck.status.includes('PENDING') ? 'bg-[#F97316] shadow-[0_0_6px_rgba(249,115,22,0.5)]' : truck.status.includes('PASSED') ? 'bg-[#10B981] shadow-[0_0_6px_rgba(16,185,129,0.5)]' : truck.status.includes('REJECTED') ? 'bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]' : 'bg-[#4A8BDF] shadow-[0_0_6px_rgba(74,139,223,0.5)]'"></div>
-              <span class="text-[11px] font-black uppercase tracking-[0.06em] truncate" 
-                    :class="truck.status.includes('PENDING') ? 'text-[#F97316]' : truck.status.includes('PASSED') ? 'text-[#10B981]' : truck.status.includes('REJECTED') ? 'text-red-500' : 'text-slate-600'">
-                {{ getStepLabel(truck) }}
-              </span>
+            <!-- COL 4: Current Phase / Status -->
+            <div class="w-full md:w-auto min-w-0 px-2 flex items-center">
+              <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border shadow-2xs max-w-full"
+                   :class="getStatusBadgeClass(truck.status)">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="getStatusDotClass(truck.status)"></span>
+                <span class="truncate">{{ getStepLabel(truck) }}</span>
+              </div>
             </div>
 
-            <!-- COL 5: Time -->
-            <div class="w-auto md:w-[165px] shrink-0 text-center">
-              <span class="text-[11px] font-mono text-slate-500 font-semibold tracking-tight">{{ formatPlantDateTime(getEntryTimestamp(truck)) }}</span>
+            <!-- COL 5: Registered (WIB) -->
+            <div class="w-auto md:w-auto text-center font-sans text-xs text-slate-600 font-medium tabular-nums">
+              {{ formatPlantDateTime(getEntryTimestamp(truck)) }}
             </div>
 
-            <!-- COL 6: Duration -->
-            <div class="w-auto md:w-[100px] shrink-0 flex items-center justify-center gap-1.5 text-slate-400">
-              <span class="material-icons text-[14px]">schedule</span>
-              <span class="text-[11px] font-mono font-semibold">{{ calculateDuration(getEntryTimestamp(truck)) }}</span>
+            <!-- COL 6: Elapsed Duration -->
+            <div class="w-auto md:w-auto flex justify-center">
+              <div class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100/70 text-slate-600 text-xs font-medium font-sans tabular-nums border border-slate-200/60 shadow-2xs">
+                <span class="material-icons text-[14px] text-slate-400">schedule</span>
+                <span>{{ calculateDuration(getEntryTimestamp(truck)) }}</span>
+              </div>
             </div>
 
-            <!-- COL 7: Action Icon -->
-            <div class="w-full md:w-[50px] shrink-0 flex items-center justify-end md:justify-center gap-1">
-              <button v-if="truck.status === 'REGISTERED'" @click="cancelRegistration(truck)" class="w-7 h-7 rounded-md flex items-center justify-center text-slate-300 hover:bg-red-50 hover:text-red-500 transition-all duration-200" title="Cancel Registration">
-                <span class="material-icons text-[17px]">cancel</span>
+            <!-- COL 7: Action Icons -->
+            <div class="w-full md:w-auto flex items-center justify-end md:justify-center gap-1">
+              <button v-if="truck.status === 'REGISTERED'" @click="cancelRegistration(truck)" class="w-7.5 h-7.5 rounded-lg flex items-center justify-center text-slate-400 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 border border-transparent transition-all duration-150" title="Cancel Registration">
+                <span class="material-icons text-[18px]">cancel</span>
               </button>
-              <button @click="viewDetails(truck)" class="w-7 h-7 rounded-md flex items-center justify-center text-slate-300 hover:bg-[#E6F0FA] hover:text-[#4A8BDF] transition-all duration-200" title="View Details">
-                <span class="material-icons text-[17px]">visibility</span>
+              <button @click="viewDetails(truck)" class="w-7.5 h-7.5 rounded-lg flex items-center justify-center text-slate-400 hover:bg-blue-50 hover:text-[#4A8BDF] hover:border-blue-200 border border-transparent transition-all duration-150" title="View Details">
+                <span class="material-icons text-[18px]">visibility</span>
               </button>
             </div>
           </div>
           
-          <div v-if="filteredTrucks.length === 0" key="empty" class="flex flex-col items-center justify-center py-28 relative">
-            <div class="relative mb-6">
-              <div class="w-24 h-24 rounded-3xl bg-slate-50 flex items-center justify-center animate-gentle-float border border-slate-100">
-                <span class="material-icons text-slate-300 text-5xl">cloud_queue</span>
+          <div v-if="filteredTrucks.length === 0" key="empty" class="flex flex-col items-center justify-center py-24 relative">
+            <div class="relative mb-4">
+              <div class="w-20 h-20 rounded-2xl bg-slate-50 flex items-center justify-center border border-slate-100 shadow-xs">
+                <span class="material-icons text-slate-300 text-4xl">cloud_queue</span>
               </div>
-              <div class="absolute -right-2 -bottom-2 w-10 h-10 rounded-2xl bg-[#E6F0FA] flex items-center justify-center animate-pulse">
-                <span class="material-icons text-[#4A8BDF] text-xl">radar</span>
+              <div class="absolute -right-2 -bottom-2 w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center animate-pulse border border-blue-100">
+                <span class="material-icons text-[#4A8BDF] text-base">radar</span>
               </div>
             </div>
-            <p class="text-base font-black text-slate-400 tracking-[0.3em] uppercase">No active registrations</p>
-            <p class="text-xs font-bold text-slate-400 mt-2 italic">Scanning for incoming gate entries...</p>
+            <p class="text-xs font-semibold text-slate-500 tracking-wider uppercase">Tidak ada pendaftaran aktif</p>
+            <p class="text-xs text-slate-400 mt-1">Memindai kedatangan truk di gerbang security...</p>
           </div>
         </transition-group>
       </div>
@@ -274,6 +282,40 @@ const getStepLabel = (truck) => {
 const getEntryTimestamp = (truck) => {
   if (!truck) return null
   return truck.timestamps?.entry || truck.timestamps?.gateInAt || truck.gateInAt || truck.createdAt || null
+}
+
+const getDriver = (truck) => {
+  if (!truck) return ''
+  return truck.driverName || truck.driver?.name || truck.driver || ''
+}
+
+const getCargoDescription = (truck) => {
+  if (!truck) return ''
+  return truck.cargoSubType || truck.cargoType || truck.cargo?.type || ''
+}
+
+const getStatusBadgeClass = (status) => {
+  if (!status) return 'bg-slate-50 text-slate-700 border-slate-200/80'
+  const s = String(status).toUpperCase()
+  if (s.includes('PENDING')) {
+    return 'bg-amber-50 text-amber-700 border-amber-200/80'
+  }
+  if (s.includes('PASSED') || s.includes('COMPLETED') || s.includes('DONE')) {
+    return 'bg-emerald-50 text-emerald-700 border-emerald-200/80'
+  }
+  if (s.includes('REJECTED') || s.includes('CANCELLED')) {
+    return 'bg-rose-50 text-rose-700 border-rose-200/80'
+  }
+  return 'bg-blue-50 text-blue-700 border-blue-200/80'
+}
+
+const getStatusDotClass = (status) => {
+  if (!status) return 'bg-slate-400'
+  const s = String(status).toUpperCase()
+  if (s.includes('PENDING')) return 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.5)]'
+  if (s.includes('PASSED') || s.includes('COMPLETED') || s.includes('DONE')) return 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]'
+  if (s.includes('REJECTED') || s.includes('CANCELLED')) return 'bg-rose-500 shadow-[0_0_6px_rgba(239,68,68,0.5)]'
+  return 'bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.5)]'
 }
 
 const openModal = () => { isModalOpen.value = true }

@@ -259,12 +259,12 @@
         <table class="w-full min-w-[700px] border-collapse">
           <thead>
             <tr style="background:#FAFBFF;border-bottom:1px solid #E8EEF7">
-              <th class="px-4 sm:px-6 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Plate / Driver</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Type / Vendor</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Status / Location</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Registered (WIB)</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Stage SLA</th>
-              <th class="px-3 sm:px-4 py-3.5 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">Action</th>
+              <th class="px-4 sm:px-6 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Plate / Driver</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Type / Vendor</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Status / Location</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Registered (WIB)</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Current Stage SLA</th>
+              <th class="px-3 sm:px-4 py-3.5 text-center text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Action</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -272,8 +272,8 @@
               <td class="px-4 sm:px-6 py-3 border-y border-l border-slate-100 rounded-l-2xl">
                 <div>
                   <div class="flex items-center space-x-1.5">
-                    <span class="font-black text-slate-900 text-xs sm:text-sm font-mono tracking-tight block">{{ truck?.plateNumber || truck?.licensePlate || '-' }}</span>
-                    <span v-if="truck?.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    <span class="font-bold text-slate-900 text-xs sm:text-sm font-sans tracking-wide block">{{ truck?.plateNumber || truck?.licensePlate || '-' }}</span>
+                    <span v-if="truck?.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-semibold font-sans bg-indigo-50 text-indigo-700 border border-indigo-200 tabular-nums">
                       #{{ String(truck.dailySequence).padStart(3, '0') }}
                     </span>
                   </div>
@@ -281,7 +281,7 @@
                 </div>
               </td>
               <td class="px-2 sm:px-4 py-3 border-y border-slate-100">
-                <span class="text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-0.5" 
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-0.5"
                   :style="(truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType) === 'GBB' ? 'color:#A0006D;background:rgba(160,0,109,0.06)' : (truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType) === 'GBJ' ? 'color:#4A8BDF;background:rgba(74,139,223,0.06)' : 'color:#059669;background:rgba(5,150,105,0.06)'">
                   {{ truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType || '-' }}
                 </span>
@@ -295,7 +295,7 @@
                   <span class="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider truncate max-w-[180px] sm:max-w-[220px]" :class="getStatusTextClass(truck.status)">{{ getStatusLabel(truck?.status, truck?.processType) }}</span>
                 </div>
               </td>
-              <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-[10px] sm:text-[11px] font-bold text-slate-500 font-mono border-y border-slate-100">{{ formatPlantDateTime(truck?.gateInAt || truck?.createdAt) }}</td>
+              <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-[10px] sm:text-[11px] font-medium text-slate-600 font-sans tabular-nums border-y border-slate-100">{{ formatPlantDateTime(truck?.gateInAt || truck?.createdAt) }}</td>
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-slate-100">
                 <ProcessTimerBadge 
                   :start-time="truck.warehouseStartAt || truck.qcStartAt || truck.weighInAt || truck.gateInAt || truck.createdAt" 
