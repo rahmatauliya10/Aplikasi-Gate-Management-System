@@ -17,6 +17,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { AttachmentsService } from './attachments.service';
 import { UploadAttachmentDto } from './dto/upload-attachment.dto';
+import { ReconcileAttachmentDto } from './dto/reconcile-attachment.dto';
 import { AttachmentUploadAccessGuard } from './guards/attachment-upload-access.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
@@ -30,6 +31,16 @@ import type { Response } from 'express';
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class AttachmentsController {
   constructor(private readonly attachmentsService: AttachmentsService) {}
+
+  @Post('reconcile')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary:
+      'Reconcile physical storage files against active database attachment records and clean orphan files',
+  })
+  reconcileStorage(@Body() dto?: ReconcileAttachmentDto) {
+    return this.attachmentsService.reconcileAttachmentStorage(dto);
+  }
 
   @Post('upload/:transactionId')
   @Roles('ADMIN', 'SECURITY', 'WAREHOUSE', 'QC')

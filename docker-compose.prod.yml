@@ -109,6 +109,7 @@ services:
       - OFFSITE_BACKUP_DIR=/app/backups/nas
       - ENABLE_TEST_SPEC_FIXTURES=false
       - GMS_TEST_HARNESS=false
+      - GMS_DISABLE_PROVISIONAL_OVERDUE=${GMS_DISABLE_PROVISIONAL_OVERDUE:-true}
     depends_on:
       postgres:
         condition: service_healthy

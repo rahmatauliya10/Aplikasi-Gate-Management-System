@@ -8,6 +8,18 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import * as fs from 'fs';
+
+jest.mock('fs', () => {
+  const original = jest.requireActual('fs');
+  return {
+    ...original,
+    existsSync: jest.fn((...args: any[]) => original.existsSync(...args)),
+    readdirSync: jest.fn((...args: any[]) => original.readdirSync(...args)),
+    unlinkSync: jest.fn((...args: any[]) => original.unlinkSync(...args)),
+  };
+});
+
 
 describe('AttachmentsService', () => {
   let service: AttachmentsService;
@@ -17,6 +29,7 @@ describe('AttachmentsService', () => {
     attachment: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       delete: jest.fn(),
     },
     transaction: {
@@ -201,5 +214,84 @@ describe('AttachmentsService', () => {
         {} as any,
       ),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  describe('reconcileAttachmentStorage', () => {
+    it('should identify orphan files and missing records without deleting when dryRun is true', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([
+        {
+          id: 'att-1',
+          transactionId: 'tx-1',
+          filePath: 'photo1.jpg',
+          fileName: 'photo1.jpg',
+          sha256: 'hash1',
+          size: 100,
+        },
+        {
+          id: 'att-2',
+          transactionId: 'tx-2',
+          filePath: 'qc/missing.jpg',
+          fileName: 'missing.jpg',
+          sha256: 'hash2',
+          size: 200,
+        },
+      ]);
+
+      (fs.existsSync as jest.Mock).mockImplementation((p: any) => {
+        if (p.toString().includes('missing.jpg')) return false;
+        return true;
+      });
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          {
+            name: 'photo1.jpg',
+            isFile: () => true,
+            isDirectory: () => false,
+          },
+          {
+            name: 'orphan.jpg',
+            isFile: () => true,
+            isDirectory: () => false,
+          },
+        ] as any;
+      });
+      (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+
+      const result = await service.reconcileAttachmentStorage({ dryRun: true });
+
+      expect(result.success).toBe(true);
+      expect(result.dryRun).toBe(true);
+      expect(result.orphanFilesCount).toBe(1);
+      expect(result.orphanFiles).toContain('orphan.jpg');
+      expect(result.cleanedOrphanFilesCount).toBe(0);
+      expect(result.missingRecordsCount).toBe(1);
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('should delete orphan files when removeOrphans is true', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          {
+            name: 'orphan.jpg',
+            isFile: () => true,
+            isDirectory: () => false,
+          },
+        ] as any;
+      });
+      (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+
+      const result = await service.reconcileAttachmentStorage({
+        removeOrphans: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.dryRun).toBe(false);
+      expect(result.orphanFilesCount).toBe(1);
+      expect(result.cleanedOrphanFilesCount).toBe(1);
+      expect(fs.unlinkSync).toHaveBeenCalled();
+    });
   });
 });

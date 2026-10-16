@@ -22,6 +22,8 @@
     "db:drift:check": "node scripts/check-migration-drift.js",
     "test:drift": "node scripts/check-migration-drift.js",
     "db:backup:pre-deploy": "node scripts/run-predeploy-backup.js",
+    "storage:reconcile": "node scripts/reconcile-attachments.js",
+    "storage:reconcile:fix": "node scripts/reconcile-attachments.js --fix",
     "db:prepare:local": "npm run prisma:preflight && npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js && npx prisma generate",
     "db:prepare:prod": "npm run db:verify:checksums && npm run db:backup:pre-deploy && npm run prisma:preflight && npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js",
     "rebuild:local": "npm run db:prepare:local && npm run build",

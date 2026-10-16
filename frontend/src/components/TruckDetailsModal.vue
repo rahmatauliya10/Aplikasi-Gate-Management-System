@@ -292,7 +292,13 @@
                           </div>
                           <!-- Photo thumbnail if present -->
                           <div v-if="item.photoUrl" class="mt-2 flex items-center space-x-2">
-                            <img :src="item.photoUrl" alt="Foto Bukti" @click="activePreviewPhoto = item.photoUrl" class="w-12 h-12 object-cover rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:opacity-90 transition-opacity" />
+                            <AuthenticatedImage
+                              :src="item.photoUrl"
+                              alt="Foto Bukti"
+                              @click="activePreviewPhoto = $event || item.photoUrl"
+                              img-class="w-12 h-12 object-cover rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
+                              wrapper-class="w-12 h-12 shrink-0"
+                            />
                             <div class="text-[9px] text-slate-500 flex flex-col">
                               <span class="font-bold text-slate-700">Foto Bukti Terlampir</span>
                               <button type="button" @click="activePreviewPhoto = item.photoUrl" class="text-blue-600 hover:underline text-left">Klik untuk perbesar</button>
@@ -904,7 +910,7 @@
       </div>
 
       <!-- Image Container -->
-      <img :src="selectedPhoto" class="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain ring-1 ring-white/10" />
+      <AuthenticatedImage :src="selectedPhoto" class="max-w-full max-h-[85vh] rounded-2xl shadow-2xl object-contain ring-1 ring-white/10" />
     </div>
   </transition>
 
@@ -1644,12 +1650,17 @@
       </transition>
 
     <!-- Photo Preview Modal -->
-    <div v-if="activePreviewPhoto" class="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" @click="activePreviewPhoto = null">
+    <div v-if="activePreviewPhoto || selectedPhoto" class="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" @click="activePreviewPhoto = null; selectedPhoto = null">
       <div class="relative max-w-3xl max-h-[90vh] bg-white rounded-2xl overflow-hidden p-2 shadow-2xl" @click.stop>
-        <button @click="activePreviewPhoto = null" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900 transition-colors z-10">
+        <button @click="activePreviewPhoto = null; selectedPhoto = null" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900 transition-colors z-10">
           <span class="material-icons text-lg">close</span>
         </button>
-        <img :src="activePreviewPhoto" alt="Preview Foto Bukti" class="max-w-full max-h-[80vh] object-contain rounded-xl mx-auto" />
+        <AuthenticatedImage
+          :src="activePreviewPhoto || selectedPhoto"
+          alt="Preview Foto Bukti"
+          img-class="max-w-full max-h-[80vh] object-contain rounded-xl mx-auto shadow-sm"
+          wrapper-class="min-w-[280px] min-h-[220px]"
+        />
       </div>
     </div>
   </teleport>
@@ -1661,6 +1672,7 @@ import { getStatusLabel } from '../utils/statusLabel'
 import { defineProps, defineEmits, computed, ref, watch } from 'vue'
 import StatusBadge from './StatusBadge.vue'
 import ProcessTimerBadge from './ProcessTimerBadge.vue'
+import AuthenticatedImage from './AuthenticatedImage.vue'
 import { useAuthStore } from '../stores/authStore'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'

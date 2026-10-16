@@ -314,4 +314,134 @@ export class AttachmentsService {
     const stream = fs.createReadStream(fullPhysicalPath);
     stream.pipe(res);
   }
+
+  /**
+   * Reconciles physical files in uploads against database Attachment records.
+   * Detects:
+   * 1. Missing physical files: DB records pointing to files that do not exist on disk.
+   * 2. Orphan physical files: Files on disk not referenced by any active DB Attachment record.
+   * If removeOrphans is true (or dryRun is false), orphan physical files are removed.
+   */
+  async reconcileAttachmentStorage(
+    options: { dryRun?: boolean; removeOrphans?: boolean } = {},
+  ) {
+    const isDryRun = options.dryRun ?? (options.removeOrphans ? false : true);
+    const resolvedUploadDir = path.resolve(this.baseUploadDir);
+
+    // 1. Fetch all active attachment records from database
+    const activeAttachments = await this.prisma.attachment.findMany({
+      where: { isCurrent: true },
+      select: {
+        id: true,
+        transactionId: true,
+        filePath: true,
+        fileName: true,
+        sha256: true,
+        size: true,
+      },
+    });
+
+    const activeDbPathsSet = new Set<string>();
+    const missingRecords: Array<{
+      id: string;
+      transactionId: string;
+      filePath: string;
+    }> = [];
+
+    for (const att of activeAttachments) {
+      const rawPath = att.filePath || att.fileName;
+      if (!rawPath) {
+        missingRecords.push({
+          id: att.id,
+          transactionId: att.transactionId,
+          filePath: '',
+        });
+        continue;
+      }
+
+      const cleanRelPath = rawPath
+        .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
+        .replace(/^[/\\]+/, '')
+        .replace(/\\/g, '/');
+
+      activeDbPathsSet.add(cleanRelPath.toLowerCase());
+
+      const fullPhysicalPath = path.resolve(resolvedUploadDir, cleanRelPath);
+      const relFromUpload = path.relative(resolvedUploadDir, fullPhysicalPath);
+      const isInsideUpload =
+        !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
+
+      if (!isInsideUpload || !fs.existsSync(fullPhysicalPath)) {
+        missingRecords.push({
+          id: att.id,
+          transactionId: att.transactionId,
+          filePath: cleanRelPath,
+        });
+      }
+    }
+
+    // 2. Scan physical files on disk recursively
+    const scannedPhysicalFiles: string[] = [];
+    if (fs.existsSync(resolvedUploadDir)) {
+      const traverse = (currentDir: string) => {
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(currentDir, entry.name);
+          if (entry.isDirectory()) {
+            // Skip quarantine directory from orphan cleanup
+            if (entry.name !== 'quarantine') {
+              traverse(fullPath);
+            }
+          } else if (entry.isFile()) {
+            const relPath = path
+              .relative(resolvedUploadDir, fullPath)
+              .replace(/\\/g, '/');
+            scannedPhysicalFiles.push(relPath);
+          }
+        }
+      };
+      traverse(resolvedUploadDir);
+    }
+
+    // 3. Find orphan physical files (files on disk with zero active attachment record in DB)
+    const orphanFiles: string[] = [];
+    const cleanedOrphanFiles: string[] = [];
+
+    for (const relPath of scannedPhysicalFiles) {
+      if (!activeDbPathsSet.has(relPath.toLowerCase())) {
+        orphanFiles.push(relPath);
+        if (!isDryRun) {
+          const fullPath = path.resolve(resolvedUploadDir, relPath);
+          try {
+            if (fs.existsSync(fullPath)) {
+              fs.unlinkSync(fullPath);
+              cleanedOrphanFiles.push(relPath);
+            }
+          } catch (unlinkErr: any) {
+            this.logger.error(
+              `Gagal menghapus berkas yatim ${relPath}: ${unlinkErr.message}`,
+            );
+          }
+        }
+      }
+    }
+
+    this.logger.log(
+      `[Storage Reconciliation] Scanned ${scannedPhysicalFiles.length} files, ${activeAttachments.length} DB records. Found ${orphanFiles.length} orphan(s), ${missingRecords.length} missing file(s). Cleaned: ${cleanedOrphanFiles.length} (DryRun: ${isDryRun})`,
+    );
+
+    return {
+      success: true,
+      timestamp: new Date().toISOString(),
+      dryRun: isDryRun,
+      scannedFilesCount: scannedPhysicalFiles.length,
+      activeAttachmentsCount: activeAttachments.length,
+      orphanFilesCount: orphanFiles.length,
+      orphanFiles,
+      cleanedOrphanFilesCount: cleanedOrphanFiles.length,
+      cleanedOrphanFiles,
+      missingRecordsCount: missingRecords.length,
+      missingRecords,
+    };
+  }
 }

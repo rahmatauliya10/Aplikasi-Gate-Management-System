@@ -643,11 +643,12 @@
                   </div>
 
                   <div v-else class="flex items-center space-x-3 bg-white p-2 rounded-lg border border-rose-200">
-                    <img
+                    <AuthenticatedImage
                       :src="checklistAnswers[item.code].photoUrl"
                       alt="Bukti Foto"
-                      @click="previewPhotoModalUrl = checklistAnswers[item.code].photoUrl"
-                      class="w-12 h-12 object-cover rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
+                      @click="previewPhotoModalUrl = $event || checklistAnswers[item.code].photoUrl"
+                      img-class="w-12 h-12 object-cover rounded-lg border border-slate-200 shadow-sm cursor-pointer hover:opacity-90 transition-opacity"
+                      wrapper-class="w-12 h-12 shrink-0"
                     />
                     <div class="flex-1 text-[10px]">
                       <span class="font-bold text-emerald-700 flex items-center gap-1">
@@ -790,8 +791,17 @@
                   Catatan: "{{ defect.notes }}"
                 </p>
                 <div v-if="defect.photoUrl" class="mt-2 flex items-center space-x-2">
-                  <img :src="defect.photoUrl" alt="Foto Temuan" @click="previewPhotoModalUrl = defect.photoUrl" class="w-12 h-12 object-cover rounded border border-slate-200 cursor-pointer" />
-                  <span class="text-[10px] text-slate-500">Foto bukti terlampir</span>
+                  <AuthenticatedImage
+                    :src="defect.photoUrl"
+                    alt="Foto Temuan"
+                    @click="previewPhotoModalUrl = $event || defect.photoUrl"
+                    img-class="w-12 h-12 object-cover rounded border border-slate-200 cursor-pointer hover:opacity-90 transition-opacity"
+                    wrapper-class="w-12 h-12 shrink-0"
+                  />
+                  <div class="text-[9px] text-slate-500 flex flex-col">
+                    <span class="font-bold text-slate-700">Foto bukti terlampir</span>
+                    <button type="button" @click="previewPhotoModalUrl = defect.photoUrl" class="text-blue-600 hover:underline text-left">Klik untuk perbesar</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -924,7 +934,12 @@
         <button @click="previewPhotoModalUrl = null" class="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-900/70 text-white flex items-center justify-center hover:bg-slate-900 transition-colors z-10">
           <span class="material-icons text-lg">close</span>
         </button>
-        <img :src="previewPhotoModalUrl" alt="Foto Bukti" class="max-w-full max-h-[80vh] object-contain rounded-xl mx-auto" />
+        <AuthenticatedImage
+          :src="previewPhotoModalUrl"
+          alt="Foto Bukti"
+          img-class="max-w-full max-h-[80vh] object-contain rounded-xl mx-auto shadow-sm"
+          wrapper-class="min-w-[280px] min-h-[220px]"
+        />
       </div>
     </div>
   </div>
@@ -942,6 +957,7 @@ import { useConfirm } from '../composables/useConfirm'
 import StatusBadge from '../components/StatusBadge.vue'
 import StepTimeline from '../components/StepTimeline.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import AuthenticatedImage from '../components/AuthenticatedImage.vue'
 import Pagination from '../components/Pagination.vue'
 import { getStatusLabel } from '../utils/statusLabel'
 import { useUnsavedWarning } from '../composables/useUnsavedWarning'
