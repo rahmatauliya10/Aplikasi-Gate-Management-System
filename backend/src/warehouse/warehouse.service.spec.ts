@@ -485,6 +485,10 @@ describe('WarehouseService Revisioning (P1-01)', () => {
           code,
           result: code === 'DOOR_SEAL_GOOD' ? 'NOT_OK' : 'OK',
           notes: code === 'DOOR_SEAL_GOOD' ? 'Segel pintu putus' : undefined,
+          photoUrl:
+            code === 'DOOR_SEAL_GOOD'
+              ? 'data:image/png;base64,sealphotook'
+              : undefined,
         })),
       };
 

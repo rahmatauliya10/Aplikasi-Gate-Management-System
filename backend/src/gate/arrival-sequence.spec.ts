@@ -1,3 +1,4 @@
+import { InternalServerErrorException } from '@nestjs/common';
 import { GateService } from './gate.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -139,20 +140,14 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
     expect(result3.data.dailySequence).toBe(3);
   });
 
-  it('3. should gracefully fallback to count if atomic counter fails', async () => {
+  it('3. should gracefully fail-closed if atomic counter fails', async () => {
     const mockTxClient = {
       $executeRaw: jest.fn().mockResolvedValue(1),
       dailyArrivalCounter: {
         upsert: jest.fn().mockRejectedValue(new Error('Counter lock timeout')),
       },
       transaction: {
-        count: jest.fn().mockResolvedValue(5),
         findFirst: jest.fn().mockResolvedValue(null),
-        create: jest
-          .fn()
-          .mockImplementation(({ data }) =>
-            Promise.resolve({ id: 'tx-fallback', ...data }),
-          ),
       },
     };
 
@@ -165,18 +160,18 @@ describe('Daily Arrival Sequence Number Unit Tests', () => {
       role: 'SECURITY',
     } as any;
 
-    const result = await service.checkIn(
-      {
-        plateNumber: 'N 8888 BB',
-        driverName: 'Pak Dani',
-        driverPhone: '08123333444',
-        vendorName: 'PT Maju Bersama',
-        vehicleType: 'TRUCK_TRAILER',
-        processType: 'GBB',
-      },
-      user,
-    );
-
-    expect(result.data.dailySequence).toBe(6);
+    await expect(
+      service.checkIn(
+        {
+          plateNumber: 'N 8888 BB',
+          driverName: 'Pak Dani',
+          driverPhone: '08123333444',
+          vendorName: 'PT Maju Bersama',
+          vehicleType: 'TRUCK_TRAILER',
+          processType: 'GBB',
+        },
+        user,
+      ),
+    ).rejects.toThrow(InternalServerErrorException);
   });
 });

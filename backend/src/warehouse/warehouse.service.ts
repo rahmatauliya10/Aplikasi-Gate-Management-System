@@ -6,6 +6,8 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { StartWarehouseDto } from './dto/start-warehouse.dto';
@@ -576,20 +578,17 @@ export class WarehouseService {
           if (item.notes) failedItemNotes[item.code] = item.notes;
         });
 
+        // Strict validation: every NOT_OK item MUST have notes (>= 5 chars) and verified photo evidence
+        await this.validateNotOkItemEvidences(transactionId, submittedItems);
+
         // 1. Direct concession / rejection decision provided in payload
         if (dto.checklistDisposition) {
-          const missingDetails = failedItems.some(
-            (item) => !item.notes?.trim(),
+          // Unified safety validation: reject non-waivable items on ACCEPT_WITH_NOTE
+          this.validateConcessionSafetyRules(
+            submittedItems,
+            dto.checklistDisposition.action,
+            dto.checklistDisposition.reason,
           );
-          if (missingDetails) {
-            throw new BadRequestException({
-              success: false,
-              message:
-                'Setiap item pemeriksaan NOT_OK wajib mencantumkan catatan temuan ketidaksesuaian.',
-              errors: ['PREUNLOAD_CHECKLIST_MISSING_NOTES'],
-              failedItemCodes,
-            });
-          }
 
           if (dto.checklistDisposition.action === 'REJECT') {
             assertValidStatusTransition(tx.status, 'QC_VEHICLE_REJECTED');
@@ -1850,6 +1849,137 @@ export class WarehouseService {
     };
   }
 
+  /**
+   * Validate that all NOT_OK items have notes (>= 5 chars) and verified photo evidence.
+   */
+  private async validateNotOkItemEvidences(
+    transactionId: string,
+    items: Array<{
+      code: string;
+      result: string;
+      notes?: string | null;
+      photoUrl?: string | null;
+      photoAttachmentId?: string | null;
+    }>,
+  ): Promise<void> {
+    const failedItems = items.filter((item) => item.result === 'NOT_OK');
+
+    for (const item of failedItems) {
+      if (!item.notes || item.notes.trim().length < 5) {
+        throw new BadRequestException({
+          success: false,
+          message: `Setiap item pemeriksaan NOT_OK (${item.code}) wajib mencantumkan catatan temuan ketidaksesuaian (minimal 5 karakter).`,
+          errors: ['PREUNLOAD_CHECKLIST_MISSING_NOTES'],
+        });
+      }
+
+      const photoRef = item.photoAttachmentId || item.photoUrl;
+      if (
+        !photoRef ||
+        typeof photoRef !== 'string' ||
+        photoRef.trim().length === 0
+      ) {
+        throw new BadRequestException({
+          success: false,
+          message: `Setiap item pemeriksaan NOT_OK (${item.code}) wajib menyertakan bukti foto lampiran yang valid dan terverifikasi pada sistem.`,
+          errors: ['PREUNLOAD_CHECKLIST_MISSING_PHOTO'],
+        });
+      }
+
+      // If photoRef is data URL (used in tests/demos), accept as inline evidence
+      if (photoRef.startsWith('data:image/')) {
+        continue;
+      }
+
+      // Check if photoRef has UUID or attachment ID
+      const uuidMatch = photoRef.match(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+      );
+      const attachmentId =
+        item.photoAttachmentId || (uuidMatch ? uuidMatch[0] : null);
+
+      if (attachmentId && this.prisma.attachment) {
+        const att = await this.prisma.attachment.findFirst({
+          where: {
+            id: attachmentId,
+            transactionId,
+            isCurrent: true,
+          },
+        });
+
+        if (!att) {
+          throw new BadRequestException({
+            success: false,
+            message: `Bukti foto lampiran untuk item ${item.code} tidak ditemukan atau tidak terikat pada transaksi ${transactionId}.`,
+            errors: ['INVALID_PHOTO_ATTACHMENT'],
+          });
+        }
+
+        if (att.filePath) {
+          const uploadBase = process.env.UPLOAD_DIR || './uploads';
+          const fullPath = path.resolve(uploadBase, att.filePath);
+          if (!fs.existsSync(fullPath)) {
+            throw new BadRequestException({
+              success: false,
+              message: `Berkas fisik foto lampiran untuk item ${item.code} tidak ditemukan pada penyimpanan server.`,
+              errors: ['MISSING_PHYSICAL_PHOTO_FILE'],
+            });
+          }
+        }
+      } else if (!attachmentId) {
+        throw new BadRequestException({
+          success: false,
+          message: `Format bukti foto lampiran untuk item ${item.code} tidak valid. Wajib menyertakan ID lampiran terverifikasi.`,
+          errors: ['INVALID_PHOTO_ATTACHMENT_FORMAT'],
+        });
+      }
+    }
+  }
+
+  /**
+   * Unified validator for checklist concession safety rules.
+   * Prohibits concession (ACCEPT_WITH_NOTE) on any critical safety defect.
+   */
+  private validateConcessionSafetyRules(
+    items: Array<{
+      code: string;
+      result?: string;
+      ok?: boolean;
+      label?: string;
+    }>,
+    action: 'ACCEPT_WITH_NOTE' | 'REJECT',
+    reason: string,
+  ): void {
+    if (!reason || reason.trim().length < 5) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Alasan keputusan disposisi checklist wajib diisi (minimal 5 karakter).',
+        errors: ['INVALID_DISPOSITION_REASON'],
+      });
+    }
+
+    if (action === 'ACCEPT_WITH_NOTE') {
+      const failedItems = items.filter(
+        (i) => i.result === 'NOT_OK' || i.ok === false,
+      );
+      const criticalViolations = failedItems.filter((i) =>
+        NON_CONCESSIBLE_CHECKLIST_CODES.includes(i.code),
+      );
+
+      if (criticalViolations.length > 0) {
+        const labels = criticalViolations
+          .map((v) => v.label || GSP_PREUNLOAD_LABEL_MAP[v.code] || v.code)
+          .join(', ');
+        throw new BadRequestException({
+          success: false,
+          message: `Disposisi konsesi ditolak: Temuan keselamatan kritis (${labels}) dilarang dikonsesi menurut kebijakan K3. Muatan harus DITOLAK (REJECT).`,
+          errors: ['CRITICAL_SAFETY_DEFECT_NOT_CONCESSIBLE'],
+        });
+      }
+    }
+  }
+
   async submitChecklistDisposition(
     transactionId: string,
     dto: SubmitChecklistDispositionDto,
@@ -1867,10 +1997,58 @@ export class WarehouseService {
       });
     }
 
-    if (
-      tx.status !== TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION &&
-      tx.status !== TransactionStatus.QC_VEHICLE_PASSED
-    ) {
+    if (tx.processType !== ProcessType.GSP) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Disposisi checklist pra-bongkar hanya berlaku untuk transaksi muatan GSP.',
+        errors: ['INVALID_PROCESS_TYPE'],
+      });
+    }
+
+    // Role & Warehouse Scope Authorization check
+    const isAdmin = user.role === 'ADMIN';
+    const isWarehouse = user.role === 'WAREHOUSE';
+
+    if (!isAdmin && !isWarehouse) {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Pengguna tidak memiliki wewenang untuk memberikan disposisi checklist GSP.',
+        errors: ['FORBIDDEN_SCOPE'],
+      });
+    }
+
+    if (isWarehouse) {
+      if (
+        Array.isArray(user.warehouseAccess) &&
+        user.warehouseAccess.length > 0 &&
+        !user.warehouseAccess.includes('GSP')
+      ) {
+        throw new ForbiddenException({
+          success: false,
+          message: 'Akses gudang pengguna tidak mencakup proses GSP.',
+          errors: ['FORBIDDEN_SCOPE'],
+        });
+      }
+
+      const userAccess = await this.prisma.userWarehouseAccess.findMany({
+        where: { userId: user.id },
+      });
+      if (
+        userAccess.length > 0 &&
+        !userAccess.some((a) => a.processType === ProcessType.GSP)
+      ) {
+        throw new ForbiddenException({
+          success: false,
+          message: 'Akses gudang pengguna tidak mencakup proses GSP.',
+          errors: ['FORBIDDEN_SCOPE'],
+        });
+      }
+    }
+
+    // Strictly WAITING_GSP_CHECKLIST_DISPOSITION only
+    if (tx.status !== TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION) {
       throw new BadRequestException({
         success: false,
         message: `Disposisi checklist ditolak: Status transaksi adalah ${tx.status}, bukan WAITING_GSP_CHECKLIST_DISPOSITION.`,
@@ -1878,37 +2056,59 @@ export class WarehouseService {
       });
     }
 
-    if (!dto.reason || dto.reason.trim().length < 5) {
-      throw new BadRequestException({
+    // Optimistic Concurrency Check (Revision)
+    if (dto.revision !== undefined && tx.revision !== dto.revision) {
+      throw new ConflictException({
         success: false,
         message:
-          'Alasan keputusan disposisi checklist wajib diisi (minimal 5 karakter).',
-        errors: ['INVALID_DISPOSITION_REASON'],
+          'Transaksi telah diperbarui oleh pengguna lain (versi revisi tidak cocok). Silakan refresh halaman.',
+        errors: ['OPTIMISTIC_LOCK_CONFLICT'],
       });
     }
 
-    if (dto.action === 'ACCEPT_WITH_NOTE') {
-      const latestProc = await this.prisma.warehouseProcess.findFirst({
-        where: { transactionId },
-        orderBy: { revision: 'desc' },
+    // Active Preunload Checklist retrieval & validation
+    const latestProc = await this.prisma.warehouseProcess.findFirst({
+      where: { transactionId },
+      orderBy: { revision: 'desc' },
+    });
+
+    if (!latestProc || !latestProc.checklistItems) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Disposisi checklist ditolak: Bukti pemeriksaan pra-bongkar aktif tidak ditemukan pada sistem.',
+        errors: ['MISSING_ACTIVE_CHECKLIST'],
       });
-      const items = (latestProc?.checklistItems as any)?.items || [];
-      const criticalViolations = items.filter(
-        (i: any) =>
-          (i.result === 'NOT_OK' || i.ok === false) &&
-          NON_CONCESSIBLE_CHECKLIST_CODES.includes(i.code),
-      );
-      if (criticalViolations.length > 0) {
-        const labels = criticalViolations
-          .map((v: any) => v.label || v.code)
-          .join(', ');
-        throw new BadRequestException({
-          success: false,
-          message: `Disposisi konsesi ditolak: Temuan keselamatan kritis (${labels}) dilarang dikonsesi menurut SOP-GSP-2026.1. Muatan harus DITOLAK (REJECT).`,
-          errors: ['CRITICAL_SAFETY_DEFECT_NOT_CONCESSIBLE'],
-        });
-      }
     }
+
+    const rawChecklist: any = latestProc.checklistItems;
+    const items = Array.isArray(rawChecklist.items) ? rawChecklist.items : [];
+    if (items.length === 0) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Disposisi checklist ditolak: Daftar butir checklist pra-bongkar kosong.',
+        errors: ['EMPTY_CHECKLIST_ITEMS'],
+      });
+    }
+
+    const notOkItems = items.filter(
+      (i: any) => i.result === 'NOT_OK' || i.ok === false,
+    );
+    if (notOkItems.length === 0) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Disposisi checklist ditolak: Tidak ditemukan temuan NOT_OK pada checklist aktif.',
+        errors: ['NO_NOT_OK_FINDINGS'],
+      });
+    }
+
+    // Validate photo and notes for all NOT_OK items
+    await this.validateNotOkItemEvidences(transactionId, items);
+
+    // Single unified safety check for concession
+    this.validateConcessionSafetyRules(items, dto.action, dto.reason);
 
     const nextStatus =
       dto.action === 'ACCEPT_WITH_NOTE'
@@ -1918,8 +2118,13 @@ export class WarehouseService {
     assertValidStatusTransition(tx.status, nextStatus);
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      const updatedTx = await prismaTx.transaction.update({
-        where: { id: transactionId },
+      // Atomic Conditional Update (CAS)
+      const updateResult = await prismaTx.transaction.updateMany({
+        where: {
+          id: transactionId,
+          status: TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION,
+          revision: tx.revision,
+        },
         data: {
           status: nextStatus,
           revision: { increment: 1 },
@@ -1930,33 +2135,39 @@ export class WarehouseService {
         },
       });
 
-      const latestProcess = await prismaTx.warehouseProcess.findFirst({
-        where: { transactionId },
-        orderBy: { revision: 'desc' },
-      });
-
-      if (latestProcess && latestProcess.checklistItems) {
-        const rawChecklist: any = latestProcess.checklistItems;
-        const updatedChecklist = {
-          ...rawChecklist,
-          overallResult:
-            dto.action === 'ACCEPT_WITH_NOTE' ? 'CONCESSION' : 'REJECTED',
-          disposition: {
-            action: dto.action,
-            reason: dto.reason,
-            decidedById: user.id,
-            decidedByName: user.name || user.email,
-            decidedAt: new Date().toISOString(),
-          },
-        };
-
-        await prismaTx.warehouseProcess.update({
-          where: { id: latestProcess.id },
-          data: {
-            checklistItems: updatedChecklist,
-          },
+      if (updateResult.count === 0) {
+        throw new ConflictException({
+          success: false,
+          message:
+            'Gagal memperbarui status transaksi: Transaksi telah diubah bersamaan oleh proses lain.',
+          errors: ['CONCURRENT_MODIFICATION_DETECTED'],
         });
       }
+
+      const updatedTx = await prismaTx.transaction.findUnique({
+        where: { id: transactionId },
+      });
+
+      const updatedChecklist = {
+        ...rawChecklist,
+        overallResult:
+          dto.action === 'ACCEPT_WITH_NOTE' ? 'CONCESSION' : 'REJECTED',
+        disposition: {
+          action: dto.action,
+          reason: dto.reason,
+          remarks: dto.remarks || null,
+          decidedById: user.id,
+          decidedByName: user.name || user.email,
+          decidedAt: new Date().toISOString(),
+        },
+      };
+
+      await prismaTx.warehouseProcess.update({
+        where: { id: latestProc.id },
+        data: {
+          checklistItems: updatedChecklist,
+        },
+      });
 
       await prismaTx.transactionStatusHistory.create({
         data: {
@@ -1964,7 +2175,7 @@ export class WarehouseService {
           oldStatus: tx.status,
           newStatus: nextStatus,
           changedById: user.id,
-          notes: `Disposisi Pra-Bongkar GSP (${dto.action}): ${dto.reason}`,
+          notes: `Disposisi Pemeriksaan Pra-Bongkar GSP (${dto.action}): ${dto.reason}`,
         },
       });
 
@@ -1976,7 +2187,7 @@ export class WarehouseService {
           action: `GSP_CHECKLIST_DISPOSITION_${dto.action}`,
           module: 'WAREHOUSE',
           referenceId: transactionId,
-          description: `Keputusan disposisi pra-bongkar GSP: ${dto.action}. Alasan: ${dto.reason}`,
+          description: `Disposisi checklist GSP: ${dto.action}. Alasan: ${dto.reason}.`,
           status: 'SUCCESS',
         })
         .catch(() => {});

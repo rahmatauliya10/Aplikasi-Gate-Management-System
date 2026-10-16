@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -11,9 +12,23 @@ describe('Pending Transaction Reminders Unit Tests', () => {
   let authScopeService: AuthorizationScopeService;
 
   beforeEach(() => {
+    const userReminderStore = new Map<string, any>();
     mockPrisma = {
       transaction: {
         findMany: jest.fn(),
+      },
+      userReminderState: {
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          return Promise.resolve(userReminderStore.get(where.userId) || null);
+        }),
+        upsert: jest.fn().mockImplementation(({ where, create, update }) => {
+          const existing = userReminderStore.get(where.userId);
+          const val = existing
+            ? { ...existing, ...update, updatedAt: new Date() }
+            : { userId: where.userId, ...create, updatedAt: new Date() };
+          userReminderStore.set(where.userId, val);
+          return Promise.resolve(val);
+        }),
       },
       $executeRawUnsafe: jest.fn().mockResolvedValue(1),
       $queryRawUnsafe: jest.fn().mockResolvedValue([]),
@@ -343,5 +358,41 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     ]);
     expect(readAllRes.success).toBe(true);
     expect(readAllRes.data.count).toBe(2);
+  });
+
+  it('7. should validate snooze duration boundaries (1 to 1440 minutes)', async () => {
+    const userId = 'operator-test-user';
+    const reminderId = 'rem-test-01';
+
+    await expect(service.snoozeReminder(userId, reminderId, 0)).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(
+      service.snoozeReminder(userId, reminderId, 1441),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.snoozeReminder(userId, reminderId, -10),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('8. should reject empty reminderId', async () => {
+    const userId = 'operator-test-user';
+    await expect(service.snoozeReminder(userId, '', 30)).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.markReminderRead(userId, '  ')).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('9. should fail-closed if PostgreSQL persistence fails', async () => {
+    const userId = 'operator-test-user';
+    mockPrisma.userReminderState.upsert.mockRejectedValueOnce(
+      new Error('PostgreSQL connection dropped'),
+    );
+
+    await expect(
+      service.snoozeReminder(userId, 'rem-fail-test', 30),
+    ).rejects.toThrow('PostgreSQL connection dropped');
   });
 });

@@ -25,7 +25,6 @@ export interface UserReminderState {
 @Injectable()
 export class TransactionsService implements OnModuleInit {
   private readonly logger = new Logger(TransactionsService.name);
-  private readonly userReminderStates = new Map<string, UserReminderState>();
 
   constructor(
     private prisma: PrismaService,
@@ -42,60 +41,40 @@ export class TransactionsService implements OnModuleInit {
   private async getUserReminderState(
     userId: string,
   ): Promise<UserReminderState> {
-    if (this.userReminderStates.has(userId)) {
-      return this.userReminderStates.get(userId)!;
-    }
-    try {
-      const record = await (this.prisma as any).userReminderState.findUnique({
-        where: { userId },
-      });
-      if (record) {
-        const state: UserReminderState = {
-          snoozedReminders: record.snoozedReminders || {},
-          readReminders: Array.isArray(record.readReminders)
-            ? record.readReminders
-            : [],
-        };
-        this.userReminderStates.set(userId, state);
-        return state;
-      }
-    } catch (err: any) {
-      this.logger.warn(
-        `Failed reading user_reminder_states for ${userId}: ${err.message}`,
-      );
+    const record = await (this.prisma as any).userReminderState.findUnique({
+      where: { userId },
+    });
+    if (record) {
+      return {
+        snoozedReminders: (record.snoozedReminders as Record<string, number>) || {},
+        readReminders: Array.isArray(record.readReminders)
+          ? (record.readReminders as string[])
+          : [],
+      };
     }
 
-    const defaultState: UserReminderState = {
+    return {
       snoozedReminders: {},
       readReminders: [],
     };
-    this.userReminderStates.set(userId, defaultState);
-    return defaultState;
   }
 
   private async saveUserReminderState(
     userId: string,
     state: UserReminderState,
   ): Promise<void> {
-    this.userReminderStates.set(userId, state);
-    try {
-      await (this.prisma as any).userReminderState.upsert({
-        where: { userId },
-        create: {
-          userId,
-          snoozedReminders: state.snoozedReminders as any,
-          readReminders: state.readReminders as any,
-        },
-        update: {
-          snoozedReminders: state.snoozedReminders as any,
-          readReminders: state.readReminders as any,
-        },
-      });
-    } catch (err: any) {
-      this.logger.warn(
-        `Failed persisting user_reminder_states for ${userId}: ${err.message}`,
-      );
-    }
+    await (this.prisma as any).userReminderState.upsert({
+      where: { userId },
+      create: {
+        userId,
+        snoozedReminders: state.snoozedReminders as any,
+        readReminders: state.readReminders as any,
+      },
+      update: {
+        snoozedReminders: state.snoozedReminders as any,
+        readReminders: state.readReminders as any,
+      },
+    });
   }
 
   async snoozeReminder(
@@ -103,49 +82,83 @@ export class TransactionsService implements OnModuleInit {
     reminderId: string,
     durationMinutes = 30,
   ) {
+    if (!reminderId || typeof reminderId !== 'string' || reminderId.trim().length === 0) {
+      throw new BadRequestException('ID Pengingat wajib diisi.');
+    }
+    if (typeof durationMinutes !== 'number' || durationMinutes <= 0 || durationMinutes > 1440) {
+      throw new BadRequestException(
+        'Durasi tunda (snooze) tidak valid (wajib antara 1 hingga 1440 menit).',
+      );
+    }
+
     const state = await this.getUserReminderState(userId);
     const expireAt = Date.now() + durationMinutes * 60 * 1000;
-    state.snoozedReminders[reminderId] = expireAt;
+    state.snoozedReminders[reminderId.trim()] = expireAt;
     await this.saveUserReminderState(userId, state);
+
     return {
       success: true,
       message: `Pengingat berhasil ditunda selama ${durationMinutes} menit untuk pengguna ini.`,
-      data: { reminderId, expireAt, snoozedForMinutes: durationMinutes },
+      data: { reminderId: reminderId.trim(), expireAt, snoozedForMinutes: durationMinutes },
     };
   }
 
   async unsnoozeReminder(userId: string, reminderId: string) {
+    if (!reminderId || typeof reminderId !== 'string' || reminderId.trim().length === 0) {
+      throw new BadRequestException('ID Pengingat wajib diisi.');
+    }
+
     const state = await this.getUserReminderState(userId);
-    delete state.snoozedReminders[reminderId];
+    delete state.snoozedReminders[reminderId.trim()];
     await this.saveUserReminderState(userId, state);
+
     return {
       success: true,
       message: 'Penundaan pengingat berhasil dibatalkan.',
-      data: { reminderId },
+      data: { reminderId: reminderId.trim() },
     };
   }
 
   async markReminderRead(userId: string, reminderId: string) {
+    if (!reminderId || typeof reminderId !== 'string' || reminderId.trim().length === 0) {
+      throw new BadRequestException('ID Pengingat wajib diisi.');
+    }
+
+    const cleanId = reminderId.trim();
     const state = await this.getUserReminderState(userId);
-    if (!state.readReminders.includes(reminderId)) {
-      state.readReminders.push(reminderId);
+    if (!state.readReminders.includes(cleanId)) {
+      state.readReminders.push(cleanId);
       await this.saveUserReminderState(userId, state);
     }
+
     return {
       success: true,
       message: 'Status baca pengingat berhasil disimpan.',
-      data: { reminderId },
+      data: { reminderId: cleanId },
     };
   }
 
   async markAllRemindersRead(userId: string, reminderIds: string[]) {
+    if (!Array.isArray(reminderIds) || reminderIds.length === 0) {
+      throw new BadRequestException('Daftar ID Pengingat wajib diberikan.');
+    }
+
     const state = await this.getUserReminderState(userId);
+    let changed = false;
     for (const id of reminderIds) {
-      if (!state.readReminders.includes(id)) {
-        state.readReminders.push(id);
+      if (typeof id === 'string' && id.trim().length > 0) {
+        const cleanId = id.trim();
+        if (!state.readReminders.includes(cleanId)) {
+          state.readReminders.push(cleanId);
+          changed = true;
+        }
       }
     }
-    await this.saveUserReminderState(userId, state);
+
+    if (changed) {
+      await this.saveUserReminderState(userId, state);
+    }
+
     return {
       success: true,
       message: 'Seluruh pengingat berhasil ditandai telah dibaca.',

@@ -28,6 +28,10 @@ export class PreUnloadChecklistItemDto {
   @IsOptional()
   @IsString()
   photoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  photoAttachmentId?: string;
 }
 
 export class GspChecklistDispositionDto {

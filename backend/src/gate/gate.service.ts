@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -77,44 +78,30 @@ export class GateService {
             // Fallback for non-postgres database environments in testing
           }
 
-          // Atomic daily arrival sequence counter for plant day (WIB)
+          // Atomic daily arrival sequence counter for plant day (WIB) - Strictly Fail-Closed
           const plantDay = getPlantDay();
-          let dailySequence: number | null = null;
+          let dailySequence: number;
           try {
-            if (tx.dailyArrivalCounter) {
-              const arrivalCounter = await tx.dailyArrivalCounter.upsert({
-                where: { dateKey: plantDay.dateKey },
-                create: { dateKey: plantDay.dateKey, lastSeq: 1 },
-                update: { lastSeq: { increment: 1 } },
-              });
-              dailySequence = arrivalCounter.lastSeq;
-            } else {
-              const count = await tx.transaction.count({
-                where: {
-                  createdAt: {
-                    gte: plantDay.start,
-                    lt: plantDay.end,
-                  },
-                },
-              });
-              dailySequence = count + 1;
+            if (!tx.dailyArrivalCounter) {
+              throw new Error('dailyArrivalCounter repository is unavailable in current Prisma transaction context');
             }
-          } catch (counterErr) {
-            this.logger.warn(
-              `Failed to allocate atomic dailyArrivalCounter: ${counterErr.message}. Fallback to count.`,
-            );
-            const count = await tx.transaction.count({
-              where: {
-                createdAt: {
-                  gte: plantDay.start,
-                  lt: plantDay.end,
-                },
-              },
+            const arrivalCounter = await tx.dailyArrivalCounter.upsert({
+              where: { dateKey: plantDay.dateKey },
+              create: { dateKey: plantDay.dateKey, lastSeq: 1 },
+              update: { lastSeq: { increment: 1 } },
             });
-            dailySequence = count + 1;
+            dailySequence = arrivalCounter.lastSeq;
+          } catch (counterErr: any) {
+            this.logger.error(
+              `Failed to allocate atomic dailyArrivalCounter for ${plantDay.dateKey}: ${counterErr.message}. Aborting transaction fail-closed.`,
+              counterErr.stack,
+            );
+            throw new InternalServerErrorException(
+              'Gagal mengalokasikan nomor urut kedatangan harian secara atomik. Transaksi pendaftaran dibatalkan secara aman.',
+            );
           }
 
-          const sequenceStr = (dailySequence || 1).toString().padStart(4, '0');
+          const sequenceStr = dailySequence.toString().padStart(4, '0');
           const transactionNumber = `GMS-${plantDay.dateKey}-${sequenceStr}`;
 
           const activeTransaction = await tx.transaction.findFirst({

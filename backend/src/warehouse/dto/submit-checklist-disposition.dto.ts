@@ -1,5 +1,5 @@
-import { IsIn, IsNotEmpty, IsString, MinLength } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsIn, IsNotEmpty, IsString, MinLength, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SubmitChecklistDispositionDto {
   @ApiProperty({
@@ -21,4 +21,20 @@ export class SubmitChecklistDispositionDto {
   @IsNotEmpty()
   @MinLength(5, { message: 'reason minimal 5 karakter' })
   reason: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Expected transaction revision for optimistic concurrency check',
+    example: 1,
+  })
+  @IsOptional()
+  revision?: number;
+
+  @ApiPropertyOptional({
+    description: 'Catatan tambahan pengawasan gudang',
+    example: 'Kondisi fisik telah dicek ulang oleh supervisor',
+  })
+  @IsOptional()
+  @IsString()
+  remarks?: string;
 }
