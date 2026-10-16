@@ -17,6 +17,19 @@ export interface StageSlaConfig {
 }
 
 /**
+ * Operational Governance metadata regarding SLA thresholds.
+ * SLA thresholds default to provisional working numbers (20-120 mins).
+ * Process owner sign-off is required for official status.
+ * If GMS_DISABLE_PROVISIONAL_OVERDUE is 'true', unapproved stages will not assert OVERDUE.
+ */
+export const OFFICIAL_SLA_GOVERNANCE_STATUS = {
+  status: 'PROVISIONAL_WORKING_THRESHOLDS',
+  isOfficiallyApproved: false,
+  governanceNote:
+    'SLA bawaan berstatus provisional operasional. Ambang batas resmi mengutamakan GMS_STAGE_SLA_JSON atau persetujuan pemilik proses.',
+};
+
+/**
  * Approved default SLA limits per stage (in minutes).
  * Only stages with officially agreed operational SLAs are listed here.
  * If a status is not listed here and no env override exists, SLA is undefined (null),
@@ -81,6 +94,14 @@ export function getStageSlaMinutes(
     } catch {
       // Ignore JSON parse errors, fall back to approved defaults
     }
+  }
+
+  // If provisional SLAs are disabled via environment without explicit approved JSON, return null
+  if (
+    process.env.GMS_DISABLE_PROVISIONAL_OVERDUE === 'true' &&
+    !process.env.GMS_STAGE_SLA_JSON
+  ) {
+    return null;
   }
 
   // Check process-specific approved SLA

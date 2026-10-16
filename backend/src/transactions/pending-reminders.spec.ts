@@ -31,7 +31,9 @@ describe('Pending Transaction Reminders Unit Tests', () => {
         }),
       },
       $executeRawUnsafe: jest.fn().mockResolvedValue(1),
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRawUnsafe: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn().mockImplementation((cb) => cb(mockPrisma)),
     };
     mockActivityLogs = {
       logAction: jest.fn().mockResolvedValue({}),
@@ -394,5 +396,73 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     await expect(
       service.snoozeReminder(userId, 'rem-fail-test', 30),
     ).rejects.toThrow('PostgreSQL connection dropped');
+  });
+
+  it('10. should safely handle concurrent parallel mutations without lost updates', async () => {
+    const userA = 'operator-parallel-A';
+    const userB = 'operator-parallel-B';
+
+    // Parallel snoozes across different users and same user
+    const [resA1, resA2, resB1] = await Promise.all([
+      service.snoozeReminder(userA, 'rem-A-01', 15),
+      service.snoozeReminder(userA, 'rem-A-02', 45),
+      service.snoozeReminder(userB, 'rem-B-01', 30),
+    ]);
+
+    expect(resA1.success).toBe(true);
+    expect(resA2.success).toBe(true);
+    expect(resB1.success).toBe(true);
+
+    // Verify user A has both reminders preserved without being overwritten
+    const stateA = await (service as any).getUserReminderState(userA);
+    expect(stateA.snoozedReminders['rem-A-01']).toBeDefined();
+    expect(stateA.snoozedReminders['rem-A-02']).toBeDefined();
+
+    // Verify user B state is isolated
+    const stateB = await (service as any).getUserReminderState(userB);
+    expect(stateB.snoozedReminders['rem-B-01']).toBeDefined();
+    expect(stateB.snoozedReminders['rem-A-01']).toBeUndefined();
+  });
+
+  it('11. should respect GMS_DISABLE_PROVISIONAL_OVERDUE when provisional SLA must not assert OVERDUE', async () => {
+    process.env.GMS_DISABLE_PROVISIONAL_OVERDUE = 'true';
+    delete process.env.GMS_STAGE_SLA_JSON;
+
+    try {
+      const twoHoursAgo = new Date(Date.now() - 120 * 60 * 1000);
+      const mockTxs = [
+        {
+          id: 'tx-prov-overdue',
+          transactionNumber: 'GMS-20261015-0099',
+          plateNumber: 'L 9999 LL',
+          dailySequence: 99,
+          processType: 'GBJ',
+          status: 'QC_VEHICLE_PENDING',
+          createdAt: twoHoursAgo,
+          updatedAt: twoHoursAgo,
+          statusHistory: [{ changedAt: twoHoursAgo }],
+        },
+      ];
+
+      mockPrisma.transaction.findMany.mockResolvedValueOnce(mockTxs);
+
+      const qcUser: JwtPayloadUser = {
+        id: 'qc-prov-1',
+        email: 'qc@gms.local',
+        role: 'QC',
+        warehouseAccess: ['GBJ'],
+      } as any;
+
+      const res = await service.getPendingReminders(qcUser);
+      const item = res.data.reminders[0];
+
+      // When provisional SLA is disabled, status remains NEED_ACTION instead of asserted OVERDUE
+      expect(item.category).toBe('NEED_ACTION');
+      expect(item.isOverdue).toBe(false);
+      expect(item.slaMinutes).toBeNull();
+      expect(res.data.summary.overdueCount).toBe(0);
+    } finally {
+      delete process.env.GMS_DISABLE_PROVISIONAL_OVERDUE;
+    }
   });
 });

@@ -1,3 +1,15 @@
+import * as fs from 'fs';
+
+jest.mock('fs', () => {
+  const actualFs = jest.requireActual('fs');
+  return {
+    ...actualFs,
+    existsSync: jest.fn().mockReturnValue(true),
+    writeFileSync: jest.fn(),
+    unlinkSync: jest.fn(),
+    mkdirSync: jest.fn(),
+  };
+});
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { WarehouseService } from './warehouse.service';
@@ -87,8 +99,22 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         findMany: jest.fn(),
       },
       attachment: {
-        findFirst: jest.fn(),
-        findMany: jest.fn(),
+        findFirst: jest.fn().mockImplementation(({ where }: any) => {
+          if (where?.id) {
+            return Promise.resolve({
+              id: where.id,
+              transactionId: where.transactionId || 'tx-chk-disposition-1',
+              filePath: 'checklist-evidence/test.png',
+              isCurrent: true,
+            });
+          }
+          return Promise.resolve(null);
+        }),
+        findMany: jest.fn().mockResolvedValue([]),
+        create: jest.fn().mockResolvedValue({
+          id: 'att-mock-created-1',
+          filePath: 'checklist-evidence/test.png',
+        }),
       },
     };
 
@@ -96,7 +122,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       logAction: jest.fn().mockResolvedValue({}),
       logActionStrict: jest
         .fn()
-        .mockImplementation((dto) => mockActivityLogsService.logAction(dto)),
+        .mockImplementation((dto, prismaTx) =>
+          prismaTx !== undefined
+            ? mockActivityLogsService.logAction(dto, prismaTx)
+            : mockActivityLogsService.logAction(dto),
+        ),
     };
 
     mockAuthScopeService = {
@@ -1989,7 +2019,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         }));
       };
 
-      const mockChecklistTx = {
+      const createFreshMockChecklistTx = () => ({
         id: 'tx-chk-disposition-1',
         status: TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION,
         processType: ProcessType.GSP,
@@ -2023,7 +2053,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
           },
         ],
-      };
+      });
+
+      let mockChecklistTx: ReturnType<typeof createFreshMockChecklistTx>;
+
+      beforeEach(() => {
+        mockChecklistTx = createFreshMockChecklistTx();
+      });
 
       it('permits ACCEPT_WITH_NOTE concession: transitions to WAREHOUSE_IN_PROGRESS and records concession metadata', async () => {
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
@@ -2621,6 +2657,171 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             mockUser,
           ),
         ).rejects.toThrow('wajib tepat 9 item kanonikal');
+      });
+
+      it('P0: fail-closed photo persistence - rejects if filesystem write fails', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        // Simulate disk write failure (e.g. disk full / EACCES)
+        (fs.writeFileSync as jest.Mock).mockImplementationOnce(() => {
+          throw new Error('ENOSPC: no space left on device');
+        });
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Gagal tulis disk',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('Gagal menyimpan berkas bukti foto ke server');
+      });
+
+      it('P0: fail-closed photo persistence - rejects and cleans up file if attachment DB record fails', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        // Attachment DB create rejects
+        mockPrismaService.attachment.create.mockRejectedValueOnce(
+          new Error('DB connection drop during attachment insert'),
+        );
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Gagal insert DB',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('Gagal mencatat data lampiran bukti foto');
+      });
+
+      it('P0: de-duplication - reuses existing attachment when identical sha256 photo is already stored', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        // Existing attachment with identical sha256
+        mockPrismaService.attachment.findFirst.mockResolvedValueOnce({
+          id: 'att-existing-sha256-1',
+          transactionId: 'tx-chk-disposition-1',
+          filePath: 'checklist-evidence/existing.png',
+        });
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findUnique: jest.fn().mockResolvedValue({
+              ...mockChecklistTx,
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            }),
+          },
+          warehouseProcess: {
+            update: jest.fn().mockResolvedValue({}),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        const res = await warehouseService.submitChecklistDisposition(
+          'tx-chk-disposition-1',
+          {
+            action: 'ACCEPT_WITH_NOTE',
+            reason: 'Diterima dengan foto reuse',
+            revision: 4,
+          },
+          mockUser,
+        );
+
+        expect(res.success).toBe(true);
+        // create should NOT be called because deduplication found existing attachment
+        expect(mockPrismaService.attachment.create).not.toHaveBeenCalled();
+        // verify photoAttachmentId is saved to checklist
+        const updateCall =
+          mockTxClient.warehouseProcess.update.mock.calls[0][0];
+        const savedItems = updateCall.data.checklistItems.items;
+        const failedItem = savedItems.find(
+          (i: any) => i.code === 'CLEAN_VEHICLE',
+        );
+        expect(failedItem.photoAttachmentId).toBe('att-existing-sha256-1');
+        expect(failedItem.photoUrl).toBe(
+          '/api/attachments/att-existing-sha256-1/download',
+        );
+      });
+
+      it('H-02: atomic audit log - uses prismaTx inside transaction and fails whole transaction if audit fails', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          mockChecklistTx.warehouseProcesses[0],
+        );
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findUnique: jest.fn().mockResolvedValue({
+              ...mockChecklistTx,
+              status: TransactionStatus.WAREHOUSE_IN_PROGRESS,
+            }),
+          },
+          warehouseProcess: {
+            update: jest.fn().mockResolvedValue({}),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+        };
+
+        mockActivityLogsService.logActionStrict.mockRejectedValueOnce(
+          new Error('Audit log DB failure inside transaction'),
+        );
+
+        mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Audit log fail test',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('Audit log DB failure inside transaction');
+
+        // Audit was invoked with prismaTx client for atomicity
+        expect(mockActivityLogsService.logActionStrict).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'GSP_CHECKLIST_DISPOSITION_ACCEPT_WITH_NOTE',
+          }),
+          mockTxClient,
+        );
       });
     });
   });

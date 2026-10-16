@@ -1,3 +1,15 @@
+import * as fs from 'fs';
+
+jest.mock('fs', () => {
+  const actualFs = jest.requireActual('fs');
+  return {
+    ...actualFs,
+    existsSync: jest.fn().mockReturnValue(true),
+    writeFileSync: jest.fn(),
+    unlinkSync: jest.fn(),
+    mkdirSync: jest.fn(),
+  };
+});
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { WarehouseService } from './warehouse.service';
@@ -39,13 +51,35 @@ describe('WarehouseService Revisioning (P1-01)', () => {
         role: 'WAREHOUSE_OPERATOR',
       }),
     },
+    attachment: {
+      findFirst: jest.fn().mockImplementation(({ where }: any) => {
+        if (where?.id) {
+          return Promise.resolve({
+            id: where.id,
+            transactionId: where.transactionId || 'tx-gsp-chk-1',
+            filePath: 'checklist-evidence/test.png',
+            isCurrent: true,
+          });
+        }
+        return Promise.resolve(null);
+      }),
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockResolvedValue({
+        id: 'att-mock-created-1',
+        filePath: 'checklist-evidence/test.png',
+      }),
+    },
   };
 
   const mockActivityLogsService = {
     logAction: jest.fn().mockResolvedValue({}),
     logActionStrict: jest
       .fn()
-      .mockImplementation((data) => mockActivityLogsService.logAction(data)),
+      .mockImplementation((data, prismaTx) =>
+        prismaTx !== undefined
+          ? mockActivityLogsService.logAction(data, prismaTx)
+          : mockActivityLogsService.logAction(data),
+      ),
   };
 
   const mockAuthScopeService = {
@@ -480,7 +514,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
     });
 
     describe('P1 Reliable Failed-Checklist Audit Acknowledgment', () => {
-      const canonicalChecklistWithNotOk = {
+      const createCanonicalChecklistWithNotOk = () => ({
         items: GSP_PREUNLOAD_CODES.map((code) => ({
           code,
           result: code === 'DOOR_SEAL_GOOD' ? 'NOT_OK' : 'OK',
@@ -490,7 +524,15 @@ describe('WarehouseService Revisioning (P1-01)', () => {
               ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
               : undefined,
         })),
-      };
+      });
+
+      let canonicalChecklistWithNotOk: ReturnType<
+        typeof createCanonicalChecklistWithNotOk
+      >;
+
+      beforeEach(() => {
+        canonicalChecklistWithNotOk = createCanonicalChecklistWithNotOk();
+      });
 
       const createValidGspSolarTx = () => ({
         id: 'tx-gsp-chk-1',

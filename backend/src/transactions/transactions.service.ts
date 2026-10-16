@@ -60,11 +60,42 @@ export class TransactionsService implements OnModuleInit {
     };
   }
 
+  private userMutationQueues = new Map<string, Promise<any>>();
+
   private async mutateUserReminderState(
     userId: string,
     mutator: (state: UserReminderState) => void,
   ): Promise<UserReminderState> {
+    const prevPromise =
+      this.userMutationQueues.get(userId) || Promise.resolve();
+    const nextPromise = prevPromise
+      .catch(() => {})
+      .then(() => this.executeMutateUserReminderState(userId, mutator));
+
+    this.userMutationQueues.set(userId, nextPromise);
+
+    try {
+      return await nextPromise;
+    } finally {
+      if (this.userMutationQueues.get(userId) === nextPromise) {
+        this.userMutationQueues.delete(userId);
+      }
+    }
+  }
+
+  private async executeMutateUserReminderState(
+    userId: string,
+    mutator: (state: UserReminderState) => void,
+  ): Promise<UserReminderState> {
     const execute = async (prismaClient: any) => {
+      if (typeof prismaClient.$executeRaw === 'function') {
+        try {
+          await prismaClient.$executeRaw`SELECT "user_id" FROM "user_reminder_states" WHERE "user_id" = ${userId} FOR UPDATE`;
+        } catch {
+          // Fallback if table doesn't exist yet or mocked in unit test
+        }
+      }
+
       const record = await prismaClient.userReminderState.findUnique({
         where: { userId },
       });
@@ -99,13 +130,37 @@ export class TransactionsService implements OnModuleInit {
       return state;
     };
 
-    if (typeof (this.prisma as any).$transaction === 'function') {
-      return await (this.prisma as any).$transaction(async (prismaTx: any) => {
-        return execute(prismaTx);
-      });
-    } else {
-      return execute(this.prisma);
+    const maxRetries = 3;
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      attempt++;
+      try {
+        if (typeof (this.prisma as any).$transaction === 'function') {
+          return await (this.prisma as any).$transaction(
+            async (prismaTx: any) => {
+              return execute(prismaTx);
+            },
+            {
+              isolationLevel: 'Serializable',
+            },
+          );
+        } else {
+          return await execute(this.prisma);
+        }
+      } catch (err: any) {
+        const isConflict =
+          err?.code === 'P2034' ||
+          err?.message?.includes('could not serialize') ||
+          err?.message?.includes('deadlock') ||
+          err?.message?.includes('conflict');
+        if (isConflict && attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+          continue;
+        }
+        throw err;
+      }
     }
+    return execute(this.prisma);
   }
 
   async snoozeReminder(
