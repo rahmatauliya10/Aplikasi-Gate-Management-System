@@ -8,6 +8,7 @@ import {
   UseInterceptors,
   UploadedFile,
   Res,
+  Req,
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -38,8 +39,21 @@ export class AttachmentsController {
     summary:
       'Reconcile physical storage files against active database attachment records and clean orphan files',
   })
-  reconcileStorage(@Body() dto?: ReconcileAttachmentDto) {
-    return this.attachmentsService.reconcileAttachmentStorage(dto);
+  reconcileStorage(
+    @Body() dto?: ReconcileAttachmentDto,
+    @CurrentUser() user?: JwtPayloadUser,
+    @Req() req?: any,
+  ) {
+    const rawIp =
+      req?.headers?.['x-forwarded-for'] ||
+      req?.socket?.remoteAddress ||
+      '127.0.0.1';
+    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    return this.attachmentsService.reconcileAttachmentStorage(
+      dto,
+      user,
+      ipAddress,
+    );
   }
 
   @Post('upload/:transactionId')

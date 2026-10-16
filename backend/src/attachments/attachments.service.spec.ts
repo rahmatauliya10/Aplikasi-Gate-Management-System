@@ -17,6 +17,10 @@ jest.mock('fs', () => {
     existsSync: jest.fn((...args: any[]) => original.existsSync(...args)),
     readdirSync: jest.fn((...args: any[]) => original.readdirSync(...args)),
     unlinkSync: jest.fn((...args: any[]) => original.unlinkSync(...args)),
+    statSync: jest.fn((...args: any[]) => ({
+      mtimeMs: 0,
+      size: 1024,
+    })),
   };
 });
 
@@ -225,6 +229,8 @@ describe('AttachmentsService', () => {
           fileName: 'photo1.jpg',
           sha256: 'hash1',
           size: 100,
+          isCurrent: true,
+          revision: 1,
         },
         {
           id: 'att-2',
@@ -233,6 +239,8 @@ describe('AttachmentsService', () => {
           fileName: 'missing.jpg',
           sha256: 'hash2',
           size: 200,
+          isCurrent: true,
+          revision: 1,
         },
       ]);
 
@@ -267,7 +275,71 @@ describe('AttachmentsService', () => {
       expect(fs.unlinkSync).not.toHaveBeenCalled();
     });
 
-    it('should delete orphan files when removeOrphans is true', async () => {
+    it('should protect historical attachment records (isCurrent: false) from orphan classification', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([
+        {
+          id: 'att-historical',
+          transactionId: 'tx-old',
+          filePath: 'historical-v1.jpg',
+          fileName: 'historical-v1.jpg',
+          isCurrent: false,
+          revision: 1,
+        },
+      ]);
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          {
+            name: 'historical-v1.jpg',
+            isFile: () => true,
+            isDirectory: () => false,
+          },
+        ] as any;
+      });
+
+      const result = await service.reconcileAttachmentStorage({
+        removeOrphans: true,
+      });
+
+      expect(result.orphanFilesCount).toBe(0);
+      expect(result.cleanedOrphanFilesCount).toBe(0);
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('should protect recent files within safety grace period from orphan deletion', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          {
+            name: 'in-flight-upload.jpg',
+            isFile: () => true,
+            isDirectory: () => false,
+          },
+        ] as any;
+      });
+
+      // Mock recent file modified 5 minutes ago
+      (fs.statSync as jest.Mock).mockReturnValue({
+        mtimeMs: Date.now() - 5 * 60 * 1000,
+        size: 5000,
+      });
+
+      const result = await service.reconcileAttachmentStorage({
+        removeOrphans: true,
+        gracePeriodMinutes: 1440, // 24 hours
+      });
+
+      expect(result.filesInGracePeriodCount).toBe(1);
+      expect(result.filesInGracePeriod).toContain('in-flight-upload.jpg');
+      expect(result.orphanFilesCount).toBe(0);
+      expect(result.cleanedOrphanFilesCount).toBe(0);
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('should delete orphan files and log activity when removeOrphans is true and exceeds grace period', async () => {
       mockPrismaService.attachment.findMany.mockResolvedValue([]);
 
       (fs.existsSync as jest.Mock).mockReturnValue(true);
@@ -280,17 +352,37 @@ describe('AttachmentsService', () => {
           },
         ] as any;
       });
+      (fs.statSync as jest.Mock).mockReturnValue({
+        mtimeMs: Date.now() - 48 * 60 * 60 * 1000, // 48 hours old
+        size: 2048,
+      });
       (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
 
-      const result = await service.reconcileAttachmentStorage({
-        removeOrphans: true,
-      });
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+      const result = await service.reconcileAttachmentStorage(
+        { removeOrphans: true },
+        adminUser,
+        '192.168.1.10',
+      );
 
       expect(result.success).toBe(true);
       expect(result.dryRun).toBe(false);
       expect(result.orphanFilesCount).toBe(1);
       expect(result.cleanedOrphanFilesCount).toBe(1);
+      expect(result.freedBytes).toBe(2048);
       expect(fs.unlinkSync).toHaveBeenCalled();
+      expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'usr-admin-1',
+          action: 'ATTACHMENT_RECONCILE_PURGE',
+          module: 'ATTACHMENTS',
+          status: 'SUCCESS',
+        }),
+      );
     });
   });
 });

@@ -13,7 +13,9 @@ describe('Attachment Storage Reconciliation Script Contract', () => {
     expect(content).toContain('PrismaClient');
     expect(content).toContain('--fix');
     expect(content).toContain('--dry-run');
+    expect(content).toContain('--grace-period=');
     expect(content).toContain('quarantine');
+    expect(content).toContain('filesInGracePeriod');
     expect(content).toContain('cleanedOrphanFiles');
   });
 });

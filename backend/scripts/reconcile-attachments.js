@@ -38,10 +38,16 @@ async function main() {
     fs.mkdirSync(baseUploadDir, { recursive: true });
   }
 
+  const gracePeriodArg = args.find((a) => a.startsWith('--grace-period='));
+  const gracePeriodMinutes = gracePeriodArg
+    ? parseInt(gracePeriodArg.split('=')[1], 10) || 1440
+    : 1440;
+  const gracePeriodMs = gracePeriodMinutes * 60 * 1000;
+  const now = Date.now();
+
   try {
-    // 1. Fetch active attachment records
-    const activeAttachments = await prisma.attachment.findMany({
-      where: { isCurrent: true },
+    // 1. Fetch ALL attachment records (active + historical revisions)
+    const allAttachments = await prisma.attachment.findMany({
       select: {
         id: true,
         transactionId: true,
@@ -49,35 +55,71 @@ async function main() {
         fileName: true,
         sha256: true,
         size: true,
+        isCurrent: true,
+        revision: true,
       },
     });
 
-    console.log(`Loaded ${activeAttachments.length} active Attachment records from database.`);
+    console.log(`Loaded ${allAttachments.length} total Attachment records (active & historical) from database.`);
 
-    const activeDbPathsSet = new Set();
+    // Defensively fetch other models referencing files
+    let correctionsWithEvidence = [];
+    try {
+      if (prisma.transactionCorrection) {
+        correctionsWithEvidence = await prisma.transactionCorrection.findMany({
+          where: { evidenceUrl: { not: null } },
+          select: { id: true, evidenceUrl: true },
+        });
+      }
+    } catch (_) {}
+
+    let issuesWithScreenshot = [];
+    try {
+      if (prisma.systemIssue) {
+        issuesWithScreenshot = await prisma.systemIssue.findMany({
+          where: { screenshotUrl: { not: null } },
+          select: { id: true, screenshotUrl: true },
+        });
+      }
+    } catch (_) {}
+
+    const protectedDbPathsSet = new Set();
     const missingRecords = [];
 
-    for (const att of activeAttachments) {
-      const rawPath = att.filePath || att.fileName;
-      if (!rawPath) {
-        missingRecords.push({ id: att.id, transactionId: att.transactionId, filePath: '' });
-        continue;
-      }
-
-      const cleanRelPath = rawPath
+    const normalizeRel = (rawPath) => {
+      if (!rawPath) return '';
+      return rawPath
         .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
         .replace(/^[/\\]+/, '')
         .replace(/\\/g, '/');
+    };
 
-      activeDbPathsSet.add(cleanRelPath.toLowerCase());
+    for (const att of allAttachments) {
+      const cleanRelPath = normalizeRel(att.filePath || att.fileName);
+      if (!cleanRelPath) {
+        missingRecords.push({ id: att.id, transactionId: att.transactionId, filePath: '', isCurrent: att.isCurrent, revision: att.revision });
+        continue;
+      }
+
+      protectedDbPathsSet.add(cleanRelPath.toLowerCase());
 
       const fullPhysicalPath = path.resolve(baseUploadDir, cleanRelPath);
       const relFromUpload = path.relative(baseUploadDir, fullPhysicalPath);
       const isInsideUpload = !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
 
       if (!isInsideUpload || !fs.existsSync(fullPhysicalPath)) {
-        missingRecords.push({ id: att.id, transactionId: att.transactionId, filePath: cleanRelPath });
+        missingRecords.push({ id: att.id, transactionId: att.transactionId, filePath: cleanRelPath, isCurrent: att.isCurrent, revision: att.revision });
       }
+    }
+
+    for (const corr of correctionsWithEvidence) {
+      const clean = normalizeRel(corr.evidenceUrl);
+      if (clean) protectedDbPathsSet.add(clean.toLowerCase());
+    }
+
+    for (const issue of issuesWithScreenshot) {
+      const clean = normalizeRel(issue.screenshotUrl);
+      if (clean) protectedDbPathsSet.add(clean.toLowerCase());
     }
 
     // 2. Scan physical files on disk recursively
@@ -101,42 +143,56 @@ async function main() {
     traverse(baseUploadDir);
     console.log(`Found ${scannedPhysicalFiles.length} physical files on disk (excluding quarantine).`);
 
-    // 3. Find orphan physical files
+    // 3. Find orphan physical files with safety grace period check
     const orphanFiles = [];
+    const filesInGracePeriod = [];
     const cleanedOrphanFiles = [];
+    let freedBytes = 0;
 
     for (const relPath of scannedPhysicalFiles) {
-      if (!activeDbPathsSet.has(relPath.toLowerCase())) {
-        orphanFiles.push(relPath);
-        if (!isDryRun) {
-          const fullPath = path.resolve(baseUploadDir, relPath);
-          try {
-            if (fs.existsSync(fullPath)) {
+      if (!protectedDbPathsSet.has(relPath.toLowerCase())) {
+        const fullPath = path.resolve(baseUploadDir, relPath);
+        try {
+          const stats = fs.statSync(fullPath);
+          const ageMs = now - stats.mtimeMs;
+          if (ageMs < gracePeriodMs) {
+            filesInGracePeriod.push(relPath);
+            continue;
+          }
+
+          orphanFiles.push(relPath);
+          if (!isDryRun) {
+            const relCheck = path.relative(baseUploadDir, fullPath);
+            if (!relCheck.startsWith('..') && !path.isAbsolute(relCheck) && fs.existsSync(fullPath)) {
+              const fileSize = stats.size;
               fs.unlinkSync(fullPath);
               cleanedOrphanFiles.push(relPath);
+              freedBytes += fileSize;
+              console.log(`🗑️ Removed orphan: ${relPath} (${fileSize} bytes)`);
             }
-          } catch (unlinkErr) {
-            console.error(`⚠️ Failed to remove orphan file ${relPath}: ${unlinkErr.message}`);
           }
+        } catch (statErr) {
+          console.warn(`⚠️ Stat warning for ${relPath}: ${statErr.message}`);
         }
       }
     }
 
     // 4. Report results
     console.log('\n--- Reconciliation Summary ---');
-    console.log(`Active DB Records : ${activeAttachments.length}`);
-    console.log(`Physical Files    : ${scannedPhysicalFiles.length}`);
-    console.log(`Missing on Disk   : ${missingRecords.length}`);
+    console.log(`All DB Records     : ${allAttachments.length}`);
+    console.log(`Physical Files     : ${scannedPhysicalFiles.length}`);
+    console.log(`In Grace Period    : ${filesInGracePeriod.length} (<${gracePeriodMinutes}m)`);
+    console.log(`Missing on Disk    : ${missingRecords.length}`);
     if (missingRecords.length > 0) {
       console.log('Sample missing records (up to 5):');
-      missingRecords.slice(0, 5).forEach((m) => console.log(`  - ID: ${m.id}, TX: ${m.transactionId}, Path: ${m.filePath}`));
+      missingRecords.slice(0, 5).forEach((m) => console.log(`  - ID: ${m.id}, TX: ${m.transactionId}, Rev: ${m.revision}, Path: ${m.filePath}`));
     }
-    console.log(`Orphan Files      : ${orphanFiles.length}`);
+    console.log(`Orphan Files       : ${orphanFiles.length}`);
     if (orphanFiles.length > 0) {
       console.log('Sample orphan files (up to 5):');
       orphanFiles.slice(0, 5).forEach((o) => console.log(`  - ${o}`));
     }
-    console.log(`Cleaned Orphans   : ${cleanedOrphanFiles.length}`);
+    console.log(`Cleaned Orphans    : ${cleanedOrphanFiles.length} (${freedBytes} bytes freed)`);
     console.log('='.repeat(70));
     console.log(`Status: ${missingRecords.length === 0 && (orphanFiles.length === 0 || cleanedOrphanFiles.length === orphanFiles.length) ? '✅ HEALTHY' : '⚠️ ACTION RECOMMENDED'}\n`);
   } catch (error) {

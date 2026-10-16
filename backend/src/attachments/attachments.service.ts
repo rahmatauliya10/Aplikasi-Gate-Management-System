@@ -319,18 +319,28 @@ export class AttachmentsService {
    * Reconciles physical files in uploads against database Attachment records.
    * Detects:
    * 1. Missing physical files: DB records pointing to files that do not exist on disk.
-   * 2. Orphan physical files: Files on disk not referenced by any active DB Attachment record.
-   * If removeOrphans is true (or dryRun is false), orphan physical files are removed.
+   * 2. Orphan physical files: Files on disk not referenced by ANY DB record (active or historical)
+   *    and whose modification age exceeds the safety grace period.
+   * If removeOrphans is true (and dryRun is false), orphan physical files are removed safely.
    */
   async reconcileAttachmentStorage(
-    options: { dryRun?: boolean; removeOrphans?: boolean } = {},
+    options: {
+      dryRun?: boolean;
+      removeOrphans?: boolean;
+      gracePeriodMinutes?: number;
+      reason?: string;
+    } = {},
+    user?: JwtPayloadUser,
+    ipAddress?: string,
   ) {
     const isDryRun = options.dryRun ?? (options.removeOrphans ? false : true);
+    const gracePeriodMinutes = options.gracePeriodMinutes ?? 1440; // 24 hours default
+    const gracePeriodMs = gracePeriodMinutes * 60 * 1000;
+    const now = Date.now();
     const resolvedUploadDir = path.resolve(this.baseUploadDir);
 
-    // 1. Fetch all active attachment records from database
-    const activeAttachments = await this.prisma.attachment.findMany({
-      where: { isCurrent: true },
+    // 1. Fetch ALL attachment records from database (BOTH isCurrent: true and isCurrent: false)
+    const allAttachments = await this.prisma.attachment.findMany({
       select: {
         id: true,
         transactionId: true,
@@ -338,33 +348,72 @@ export class AttachmentsService {
         fileName: true,
         sha256: true,
         size: true,
+        isCurrent: true,
+        revision: true,
       },
     });
 
-    const activeDbPathsSet = new Set<string>();
+    // Defensively fetch other models referencing files in uploads
+    let correctionsWithEvidence: Array<{
+      id: string;
+      evidenceUrl: string | null;
+    }> = [];
+    try {
+      correctionsWithEvidence = await (
+        this.prisma as any
+      ).transactionCorrection.findMany({
+        where: { evidenceUrl: { not: null } },
+        select: { id: true, evidenceUrl: true },
+      });
+    } catch {
+      // Ignored if table not initialized
+    }
+
+    let issuesWithScreenshot: Array<{
+      id: string;
+      screenshotUrl: string | null;
+    }> = [];
+    try {
+      issuesWithScreenshot = await (this.prisma as any).systemIssue.findMany({
+        where: { screenshotUrl: { not: null } },
+        select: { id: true, screenshotUrl: true },
+      });
+    } catch {
+      // Ignored if table not initialized
+    }
+
+    const protectedDbPathsSet = new Set<string>();
     const missingRecords: Array<{
       id: string;
       transactionId: string;
       filePath: string;
+      isCurrent: boolean;
+      revision: number;
     }> = [];
 
-    for (const att of activeAttachments) {
-      const rawPath = att.filePath || att.fileName;
-      if (!rawPath) {
+    const normalizeRel = (rawPath: string | null | undefined): string => {
+      if (!rawPath) return '';
+      return rawPath
+        .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
+        .replace(/^[/\\]+/, '')
+        .replace(/\\/g, '/');
+    };
+
+    // Index all Attachment records (active + historical)
+    for (const att of allAttachments) {
+      const cleanRelPath = normalizeRel(att.filePath || att.fileName);
+      if (!cleanRelPath) {
         missingRecords.push({
           id: att.id,
           transactionId: att.transactionId,
           filePath: '',
+          isCurrent: att.isCurrent,
+          revision: att.revision,
         });
         continue;
       }
 
-      const cleanRelPath = rawPath
-        .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
-        .replace(/^[/\\]+/, '')
-        .replace(/\\/g, '/');
-
-      activeDbPathsSet.add(cleanRelPath.toLowerCase());
+      protectedDbPathsSet.add(cleanRelPath.toLowerCase());
 
       const fullPhysicalPath = path.resolve(resolvedUploadDir, cleanRelPath);
       const relFromUpload = path.relative(resolvedUploadDir, fullPhysicalPath);
@@ -376,8 +425,22 @@ export class AttachmentsService {
           id: att.id,
           transactionId: att.transactionId,
           filePath: cleanRelPath,
+          isCurrent: att.isCurrent,
+          revision: att.revision,
         });
       }
+    }
+
+    // Index TransactionCorrection evidence
+    for (const corr of correctionsWithEvidence) {
+      const clean = normalizeRel(corr.evidenceUrl);
+      if (clean) protectedDbPathsSet.add(clean.toLowerCase());
+    }
+
+    // Index SystemIssue screenshot
+    for (const issue of issuesWithScreenshot) {
+      const clean = normalizeRel(issue.screenshotUrl);
+      if (clean) protectedDbPathsSet.add(clean.toLowerCase());
     }
 
     // 2. Scan physical files on disk recursively
@@ -403,43 +466,99 @@ export class AttachmentsService {
       traverse(resolvedUploadDir);
     }
 
-    // 3. Find orphan physical files (files on disk with zero active attachment record in DB)
+    // 3. Find orphan physical files (files on disk not in protected set AND older than grace period)
     const orphanFiles: string[] = [];
+    const filesInGracePeriod: string[] = [];
     const cleanedOrphanFiles: string[] = [];
+    let freedBytes = 0;
 
     for (const relPath of scannedPhysicalFiles) {
-      if (!activeDbPathsSet.has(relPath.toLowerCase())) {
-        orphanFiles.push(relPath);
-        if (!isDryRun) {
-          const fullPath = path.resolve(resolvedUploadDir, relPath);
-          try {
-            if (fs.existsSync(fullPath)) {
+      if (!protectedDbPathsSet.has(relPath.toLowerCase())) {
+        const fullPath = path.resolve(resolvedUploadDir, relPath);
+        try {
+          const stats = fs.statSync(fullPath);
+          const ageMs = now - stats.mtimeMs;
+          if (ageMs < gracePeriodMs) {
+            // File is within safety grace period (recent upload/in-flight), DO NOT touch
+            filesInGracePeriod.push(relPath);
+            continue;
+          }
+
+          orphanFiles.push(relPath);
+
+          if (!isDryRun) {
+            const relCheck = path.relative(resolvedUploadDir, fullPath);
+            if (
+              !relCheck.startsWith('..') &&
+              !path.isAbsolute(relCheck) &&
+              fs.existsSync(fullPath)
+            ) {
+              const fileSize = stats.size;
               fs.unlinkSync(fullPath);
               cleanedOrphanFiles.push(relPath);
+              freedBytes += fileSize;
+              this.logger.log(
+                `[Storage Cleanup] Purged orphan file: ${relPath} (${fileSize} bytes)`,
+              );
             }
-          } catch (unlinkErr: any) {
-            this.logger.error(
-              `Gagal menghapus berkas yatim ${relPath}: ${unlinkErr.message}`,
-            );
           }
+        } catch (statErr: any) {
+          this.logger.warn(
+            `Could not stat file ${relPath}: ${statErr.message}`,
+          );
         }
       }
     }
 
+    // 4. Structured Activity Logging
+    try {
+      if (user?.id) {
+        await this.activityLogsService.logAction({
+          userId: user.id,
+          action: isDryRun
+            ? 'ATTACHMENT_RECONCILE_AUDIT'
+            : 'ATTACHMENT_RECONCILE_PURGE',
+          module: 'ATTACHMENTS',
+          referenceId: `reconcile-${Date.now()}`,
+          description: `Storage reconciliation executed. Mode: ${
+            isDryRun ? 'DRY_RUN' : 'LIVE_CLEANUP'
+          }, Scanned: ${scannedPhysicalFiles.length}, Protected DB records: ${
+            allAttachments.length
+          }, In Grace Period (<${gracePeriodMinutes}m): ${
+            filesInGracePeriod.length
+          }, Orphans: ${orphanFiles.length}, Cleaned: ${
+            cleanedOrphanFiles.length
+          } (${freedBytes} bytes freed), Missing: ${
+            missingRecords.length
+          }. Reason: ${options.reason || 'Manual Admin Maintenance'}`,
+          status: 'SUCCESS',
+          ipAddress,
+        });
+      }
+    } catch (logErr: any) {
+      this.logger.warn(
+        `Failed to record activity log for reconciliation: ${logErr.message}`,
+      );
+    }
+
     this.logger.log(
-      `[Storage Reconciliation] Scanned ${scannedPhysicalFiles.length} files, ${activeAttachments.length} DB records. Found ${orphanFiles.length} orphan(s), ${missingRecords.length} missing file(s). Cleaned: ${cleanedOrphanFiles.length} (DryRun: ${isDryRun})`,
+      `[Storage Reconciliation] Scanned ${scannedPhysicalFiles.length} files, ${allAttachments.length} DB records. In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}, Cleaned: ${cleanedOrphanFiles.length} (Freed: ${freedBytes}B, DryRun: ${isDryRun})`,
     );
 
     return {
       success: true,
       timestamp: new Date().toISOString(),
       dryRun: isDryRun,
+      gracePeriodMinutes,
       scannedFilesCount: scannedPhysicalFiles.length,
-      activeAttachmentsCount: activeAttachments.length,
+      allAttachmentsCount: allAttachments.length,
+      filesInGracePeriodCount: filesInGracePeriod.length,
+      filesInGracePeriod,
       orphanFilesCount: orphanFiles.length,
       orphanFiles,
       cleanedOrphanFilesCount: cleanedOrphanFiles.length,
       cleanedOrphanFiles,
+      freedBytes,
       missingRecordsCount: missingRecords.length,
       missingRecords,
     };
