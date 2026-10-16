@@ -2504,7 +2504,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           mockChecklistTx,
         );
         // DB access list returns empty array
-        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([]);
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce(
+          [],
+        );
 
         await expect(
           warehouseService.submitChecklistDisposition(
@@ -2556,7 +2558,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
             mockUser,
           ),
-        ).rejects.toThrow('Ukuran berkas foto bukti item CLEAN_VEHICLE terlalu kecil');
+        ).rejects.toThrow(
+          'Ukuran berkas foto bukti item CLEAN_VEHICLE terlalu kecil',
+        );
       });
 
       it('P1-01: strictly rejects disposition if expected revision is missing or mismatched', async () => {
@@ -2588,7 +2592,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
                 items: [
-                  { code: 'CLEAN_VEHICLE', result: 'NOT_OK', notes: 'Hanya 1 item' },
+                  {
+                    code: 'CLEAN_VEHICLE',
+                    result: 'NOT_OK',
+                    notes: 'Hanya 1 item',
+                  },
                 ],
               },
             },
