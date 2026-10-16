@@ -83,7 +83,9 @@ export class GateService {
           let dailySequence: number;
           try {
             if (!tx.dailyArrivalCounter) {
-              throw new Error('dailyArrivalCounter repository is unavailable in current Prisma transaction context');
+              throw new Error(
+                'dailyArrivalCounter repository is unavailable in current Prisma transaction context',
+              );
             }
             const arrivalCounter = await tx.dailyArrivalCounter.upsert({
               where: { dateKey: plantDay.dateKey },

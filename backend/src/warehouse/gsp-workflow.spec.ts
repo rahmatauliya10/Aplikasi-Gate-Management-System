@@ -2353,12 +2353,18 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           ...mockChecklistTx,
           status: TransactionStatus.QC_VEHICLE_PASSED,
         };
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(passedTx);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          passedTx,
+        );
 
         await expect(
           warehouseService.submitChecklistDisposition(
             'tx-passed-1',
-            { action: 'ACCEPT_WITH_NOTE', reason: 'Alasan disposisi', revision: 4 },
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Alasan disposisi',
+              revision: 4,
+            },
             mockUser,
           ),
         ).rejects.toThrow('bukan WAITING_GSP_CHECKLIST_DISPOSITION');
@@ -2385,7 +2391,9 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             },
           ],
         };
-        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(noPhotoTx);
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          noPhotoTx,
+        );
         mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
           noPhotoTx.warehouseProcesses[0],
         );
@@ -2393,7 +2401,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         await expect(
           warehouseService.submitChecklistDisposition(
             'tx-chk-disposition-1',
-            { action: 'ACCEPT_WITH_NOTE', reason: 'Disposisi dengan catatan', revision: 4 },
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Disposisi dengan catatan',
+              revision: 4,
+            },
             mockUser,
           ),
         ).rejects.toThrow('wajib menyertakan bukti foto lampiran');

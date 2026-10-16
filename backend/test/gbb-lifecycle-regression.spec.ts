@@ -57,7 +57,11 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
       create: jest.fn(),
     },
     dailyArrivalCounter: {
-      upsert: jest.fn().mockImplementation(() => Promise.resolve({ dateKey: '20261016', lastSeq: 1 })),
+      upsert: jest
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve({ dateKey: '20261016', lastSeq: 1 }),
+        ),
     },
     $executeRaw: jest.fn().mockResolvedValue(1),
   };

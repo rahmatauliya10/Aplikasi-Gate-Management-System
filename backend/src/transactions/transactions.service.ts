@@ -46,7 +46,8 @@ export class TransactionsService implements OnModuleInit {
     });
     if (record) {
       return {
-        snoozedReminders: (record.snoozedReminders as Record<string, number>) || {},
+        snoozedReminders:
+          (record.snoozedReminders as Record<string, number>) || {},
         readReminders: Array.isArray(record.readReminders)
           ? (record.readReminders as string[])
           : [],
@@ -82,10 +83,18 @@ export class TransactionsService implements OnModuleInit {
     reminderId: string,
     durationMinutes = 30,
   ) {
-    if (!reminderId || typeof reminderId !== 'string' || reminderId.trim().length === 0) {
+    if (
+      !reminderId ||
+      typeof reminderId !== 'string' ||
+      reminderId.trim().length === 0
+    ) {
       throw new BadRequestException('ID Pengingat wajib diisi.');
     }
-    if (typeof durationMinutes !== 'number' || durationMinutes <= 0 || durationMinutes > 1440) {
+    if (
+      typeof durationMinutes !== 'number' ||
+      durationMinutes <= 0 ||
+      durationMinutes > 1440
+    ) {
       throw new BadRequestException(
         'Durasi tunda (snooze) tidak valid (wajib antara 1 hingga 1440 menit).',
       );
@@ -99,12 +108,20 @@ export class TransactionsService implements OnModuleInit {
     return {
       success: true,
       message: `Pengingat berhasil ditunda selama ${durationMinutes} menit untuk pengguna ini.`,
-      data: { reminderId: reminderId.trim(), expireAt, snoozedForMinutes: durationMinutes },
+      data: {
+        reminderId: reminderId.trim(),
+        expireAt,
+        snoozedForMinutes: durationMinutes,
+      },
     };
   }
 
   async unsnoozeReminder(userId: string, reminderId: string) {
-    if (!reminderId || typeof reminderId !== 'string' || reminderId.trim().length === 0) {
+    if (
+      !reminderId ||
+      typeof reminderId !== 'string' ||
+      reminderId.trim().length === 0
+    ) {
       throw new BadRequestException('ID Pengingat wajib diisi.');
     }
 
@@ -120,7 +137,11 @@ export class TransactionsService implements OnModuleInit {
   }
 
   async markReminderRead(userId: string, reminderId: string) {
-    if (!reminderId || typeof reminderId !== 'string' || reminderId.trim().length === 0) {
+    if (
+      !reminderId ||
+      typeof reminderId !== 'string' ||
+      reminderId.trim().length === 0
+    ) {
       throw new BadRequestException('ID Pengingat wajib diisi.');
     }
 

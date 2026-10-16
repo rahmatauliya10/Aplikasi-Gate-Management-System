@@ -1,4 +1,10 @@
-import { IsIn, IsNotEmpty, IsString, MinLength, IsOptional } from 'class-validator';
+import {
+  IsIn,
+  IsNotEmpty,
+  IsString,
+  MinLength,
+  IsOptional,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SubmitChecklistDispositionDto {
