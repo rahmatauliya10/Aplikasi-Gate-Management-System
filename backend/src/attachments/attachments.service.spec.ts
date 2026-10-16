@@ -7,6 +7,7 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import * as fs from 'fs';
 
@@ -38,6 +39,12 @@ describe('AttachmentsService', () => {
     transaction: {
       findFirst: jest.fn(),
     },
+    transactionCorrection: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
+    systemIssue: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   const mockActivityLogsService = {
@@ -62,6 +69,8 @@ describe('AttachmentsService', () => {
     }).compile();
 
     service = module.get<AttachmentsService>(AttachmentsService);
+    mockPrismaService.transactionCorrection.findMany.mockResolvedValue([]);
+    mockPrismaService.systemIssue.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -339,7 +348,7 @@ describe('AttachmentsService', () => {
       expect(fs.unlinkSync).not.toHaveBeenCalled();
     });
 
-    it('should delete orphan files and log activity when removeOrphans is true and exceeds grace period', async () => {
+    it('should delete orphan files and log activity ONLY when BOTH removeOrphans is true and dryRun is false (Dual Affirmation)', async () => {
       mockPrismaService.attachment.findMany.mockResolvedValue([]);
 
       (fs.existsSync as jest.Mock).mockReturnValue(true);
@@ -364,7 +373,7 @@ describe('AttachmentsService', () => {
         email: 'admin@gms.local',
       };
       const result = await service.reconcileAttachmentStorage(
-        { removeOrphans: true },
+        { removeOrphans: true, dryRun: false },
         adminUser,
         '192.168.1.10',
       );
@@ -383,6 +392,119 @@ describe('AttachmentsService', () => {
           status: 'SUCCESS',
         }),
       );
+    });
+
+    it('should NOT delete files when dryRun is false but removeOrphans is false (Dual Affirmation)', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          { name: 'orphan.jpg', isFile: () => true, isDirectory: () => false },
+        ] as any;
+      });
+      (fs.statSync as jest.Mock).mockReturnValue({
+        mtimeMs: Date.now() - 48 * 60 * 60 * 1000,
+        size: 2048,
+      });
+      (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+      const result = await service.reconcileAttachmentStorage(
+        { dryRun: false, removeOrphans: false },
+        adminUser,
+      );
+
+      expect(result.dryRun).toBe(true);
+      expect(result.orphanFilesCount).toBe(1);
+      expect(result.cleanedOrphanFilesCount).toBe(0);
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('should NOT delete files when removeOrphans is true but dryRun is omitted (Dual Affirmation)', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          { name: 'orphan.jpg', isFile: () => true, isDirectory: () => false },
+        ] as any;
+      });
+      (fs.statSync as jest.Mock).mockReturnValue({
+        mtimeMs: Date.now() - 48 * 60 * 60 * 1000,
+        size: 2048,
+      });
+      (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+      const result = await service.reconcileAttachmentStorage(
+        { removeOrphans: true }, // dryRun not explicitly set to false
+        adminUser,
+      );
+
+      expect(result.dryRun).toBe(true);
+      expect(result.orphanFilesCount).toBe(1);
+      expect(result.cleanedOrphanFilesCount).toBe(0);
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+    });
+
+    it('should reject live cleanup if caller is unauthenticated (Fail-Closed)', async () => {
+      await expect(
+        service.reconcileAttachmentStorage({
+          removeOrphans: true,
+          dryRun: false,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should abort live cleanup and throw InternalServerErrorException if reference query fails (Fail-Closed)', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+      mockPrismaService.transactionCorrection.findMany.mockRejectedValueOnce(
+        new Error('DB Connection Timeout'),
+      );
+
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+      await expect(
+        service.reconcileAttachmentStorage(
+          { removeOrphans: true, dryRun: false },
+          adminUser,
+        ),
+      ).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('should abort live cleanup if writing ActivityLog fails (Fail-Closed Audit Trail)', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+      mockPrismaService.transactionCorrection.findMany.mockResolvedValue([]);
+      mockPrismaService.systemIssue.findMany.mockResolvedValue([]);
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => []);
+
+      mockActivityLogsService.logAction.mockRejectedValueOnce(
+        new Error('Audit log table disk full'),
+      );
+
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+      await expect(
+        service.reconcileAttachmentStorage(
+          { removeOrphans: true, dryRun: false },
+          adminUser,
+        ),
+      ).rejects.toThrow(InternalServerErrorException);
     });
   });
 });

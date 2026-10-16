@@ -10,7 +10,7 @@ import {
 export class ReconcileAttachmentDto {
   @ApiPropertyOptional({
     description:
-      'Jika true, hanya melakukan simulasi deteksi berkas yatim tanpa penghapusan fisik.',
+      'Wajib diset false secara eksplisit bersamaan dengan removeOrphans: true untuk mengizinkan penghapusan fisik. Default: true (Simulasi aman).',
     default: true,
   })
   @IsOptional()
@@ -19,7 +19,7 @@ export class ReconcileAttachmentDto {
 
   @ApiPropertyOptional({
     description:
-      'Jika true dan dryRun false, berkas yatim di disk akan dihapus secara fisik.',
+      'Wajib diset true secara eksplisit bersamaan dengan dryRun: false untuk mengizinkan penghapusan fisik. Jika salah satu kondisi tidak terpenuhi, sistem berjalan dalam mode simulasi (Fail-Closed).',
     default: false,
   })
   @IsOptional()

@@ -23,18 +23,24 @@ const prisma = new PrismaClient();
 async function main() {
   const args = process.argv.slice(2);
   const isFix = args.includes('--fix') || args.includes('--remove-orphans');
-  const isDryRun = !isFix || args.includes('--dry-run');
+  const hasDryRunArg = args.includes('--dry-run');
+  const isDeletionPermitted = isFix && !hasDryRunArg;
+  const isDryRun = !isDeletionPermitted;
 
   console.log('='.repeat(70));
   console.log('📦 GMS Attachment Storage & Database Reconciliation');
-  console.log(`Mode: ${isDryRun ? '🔍 DRY RUN (Simulation only)' : '🧹 LIVE FIX (Orphan cleanup active)'}`);
+  console.log(
+    `Mode: ${isDryRun ? '🔍 DRY RUN (Simulation only)' : '🧹 LIVE FIX (Orphan cleanup active)'}`,
+  );
   console.log('='.repeat(70));
 
   const baseUploadDir = path.resolve(process.env.UPLOAD_DIR || './uploads');
   console.log(`Scanning uploads directory: ${baseUploadDir}`);
 
   if (!fs.existsSync(baseUploadDir)) {
-    console.log(`Directory ${baseUploadDir} does not exist. Creating if needed.`);
+    console.log(
+      `Directory ${baseUploadDir} does not exist. Creating if needed.`,
+    );
     fs.mkdirSync(baseUploadDir, { recursive: true });
   }
 
@@ -60,9 +66,11 @@ async function main() {
       },
     });
 
-    console.log(`Loaded ${allAttachments.length} total Attachment records (active & historical) from database.`);
+    console.log(
+      `Loaded ${allAttachments.length} total Attachment records (active & historical) from database.`,
+    );
 
-    // Defensively fetch other models referencing files
+    // Defensively fetch other models referencing files (Fail-Closed on live cleanup)
     let correctionsWithEvidence = [];
     try {
       if (prisma.transactionCorrection) {
@@ -71,7 +79,17 @@ async function main() {
           select: { id: true, evidenceUrl: true },
         });
       }
-    } catch (_) {}
+    } catch (corrErr) {
+      console.error(
+        `❌ Failed to query transaction corrections: ${corrErr.message}`,
+      );
+      if (isDeletionPermitted) {
+        console.error(
+          '🛑 ABORTING: Cannot perform physical cleanup when reference queries fail (Fail-Closed).',
+        );
+        process.exit(1);
+      }
+    }
 
     let issuesWithScreenshot = [];
     try {
@@ -81,7 +99,15 @@ async function main() {
           select: { id: true, screenshotUrl: true },
         });
       }
-    } catch (_) {}
+    } catch (issueErr) {
+      console.error(`❌ Failed to query system issues: ${issueErr.message}`);
+      if (isDeletionPermitted) {
+        console.error(
+          '🛑 ABORTING: Cannot perform physical cleanup when reference queries fail (Fail-Closed).',
+        );
+        process.exit(1);
+      }
+    }
 
     const protectedDbPathsSet = new Set();
     const missingRecords = [];
@@ -97,7 +123,13 @@ async function main() {
     for (const att of allAttachments) {
       const cleanRelPath = normalizeRel(att.filePath || att.fileName);
       if (!cleanRelPath) {
-        missingRecords.push({ id: att.id, transactionId: att.transactionId, filePath: '', isCurrent: att.isCurrent, revision: att.revision });
+        missingRecords.push({
+          id: att.id,
+          transactionId: att.transactionId,
+          filePath: '',
+          isCurrent: att.isCurrent,
+          revision: att.revision,
+        });
         continue;
       }
 
@@ -105,10 +137,17 @@ async function main() {
 
       const fullPhysicalPath = path.resolve(baseUploadDir, cleanRelPath);
       const relFromUpload = path.relative(baseUploadDir, fullPhysicalPath);
-      const isInsideUpload = !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
+      const isInsideUpload =
+        !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
 
       if (!isInsideUpload || !fs.existsSync(fullPhysicalPath)) {
-        missingRecords.push({ id: att.id, transactionId: att.transactionId, filePath: cleanRelPath, isCurrent: att.isCurrent, revision: att.revision });
+        missingRecords.push({
+          id: att.id,
+          transactionId: att.transactionId,
+          filePath: cleanRelPath,
+          isCurrent: att.isCurrent,
+          revision: att.revision,
+        });
       }
     }
 
@@ -134,14 +173,18 @@ async function main() {
             traverse(fullPath);
           }
         } else if (entry.isFile()) {
-          const relPath = path.relative(baseUploadDir, fullPath).replace(/\\/g, '/');
+          const relPath = path
+            .relative(baseUploadDir, fullPath)
+            .replace(/\\/g, '/');
           scannedPhysicalFiles.push(relPath);
         }
       }
     };
 
     traverse(baseUploadDir);
-    console.log(`Found ${scannedPhysicalFiles.length} physical files on disk (excluding quarantine).`);
+    console.log(
+      `Found ${scannedPhysicalFiles.length} physical files on disk (excluding quarantine).`,
+    );
 
     // 3. Find orphan physical files with safety grace period check
     const orphanFiles = [];
@@ -161,9 +204,13 @@ async function main() {
           }
 
           orphanFiles.push(relPath);
-          if (!isDryRun) {
+          if (isDeletionPermitted) {
             const relCheck = path.relative(baseUploadDir, fullPath);
-            if (!relCheck.startsWith('..') && !path.isAbsolute(relCheck) && fs.existsSync(fullPath)) {
+            if (
+              !relCheck.startsWith('..') &&
+              !path.isAbsolute(relCheck) &&
+              fs.existsSync(fullPath)
+            ) {
               const fileSize = stats.size;
               fs.unlinkSync(fullPath);
               cleanedOrphanFiles.push(relPath);
@@ -177,24 +224,62 @@ async function main() {
       }
     }
 
+    if (isDeletionPermitted) {
+      console.log('Writing mandatory audit log to database...');
+      try {
+        await prisma.activityLog.create({
+          data: {
+            userName: 'CLI_ADMIN_OPERATOR',
+            role: 'ADMIN',
+            action: 'ATTACHMENT_RECONCILE_PURGE_CLI',
+            module: 'ATTACHMENTS',
+            referenceId: `cli-reconcile-${Date.now()}`,
+            description: `CLI storage reconciliation executed with --fix. Scanned: ${scannedPhysicalFiles.length}, Protected records: ${allAttachments.length}, Orphans purged: ${cleanedOrphanFiles.length} (${freedBytes} bytes freed), In Grace Period: ${filesInGracePeriod.length}.`,
+            status: 'SUCCESS',
+          },
+        });
+        console.log('✅ ActivityLog record written successfully.');
+      } catch (logErr) {
+        console.error(
+          `❌ CRITICAL: Failed to write audit log to database: ${logErr.message}`,
+        );
+        console.error(
+          '🛑 Audit trail failure prevents claiming successful maintenance operation.',
+        );
+        process.exit(1);
+      }
+    }
+
     // 4. Report results
     console.log('\n--- Reconciliation Summary ---');
     console.log(`All DB Records     : ${allAttachments.length}`);
     console.log(`Physical Files     : ${scannedPhysicalFiles.length}`);
-    console.log(`In Grace Period    : ${filesInGracePeriod.length} (<${gracePeriodMinutes}m)`);
+    console.log(
+      `In Grace Period    : ${filesInGracePeriod.length} (<${gracePeriodMinutes}m)`,
+    );
     console.log(`Missing on Disk    : ${missingRecords.length}`);
     if (missingRecords.length > 0) {
       console.log('Sample missing records (up to 5):');
-      missingRecords.slice(0, 5).forEach((m) => console.log(`  - ID: ${m.id}, TX: ${m.transactionId}, Rev: ${m.revision}, Path: ${m.filePath}`));
+      missingRecords
+        .slice(0, 5)
+        .forEach((m) =>
+          console.log(
+            `  - ID: ${m.id}, TX: ${m.transactionId}, Rev: ${m.revision}, Path: ${m.filePath}`,
+          ),
+        );
     }
     console.log(`Orphan Files       : ${orphanFiles.length}`);
     if (orphanFiles.length > 0) {
       console.log('Sample orphan files (up to 5):');
       orphanFiles.slice(0, 5).forEach((o) => console.log(`  - ${o}`));
     }
-    console.log(`Cleaned Orphans    : ${cleanedOrphanFiles.length} (${freedBytes} bytes freed)`);
+    console.log(
+      `Cleaned Orphans    : ${cleanedOrphanFiles.length} (${freedBytes} bytes freed)`,
+    );
     console.log('='.repeat(70));
-    console.log(`Status: ${missingRecords.length === 0 && (orphanFiles.length === 0 || cleanedOrphanFiles.length === orphanFiles.length) ? '✅ HEALTHY' : '⚠️ ACTION RECOMMENDED'}\n`);
+    console.log(
+      `Status: ${missingRecords.length === 0 && (orphanFiles.length === 0 || cleanedOrphanFiles.length === orphanFiles.length) ? '✅ HEALTHY' : '⚠️ ACTION RECOMMENDED'}\n`,
+    );
   } catch (error) {
     console.error('❌ Reconciliation failed with error:', error);
     process.exit(1);

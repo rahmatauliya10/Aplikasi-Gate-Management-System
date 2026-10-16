@@ -14,6 +14,8 @@ describe('Attachment Storage Reconciliation Script Contract', () => {
     expect(content).toContain('--fix');
     expect(content).toContain('--dry-run');
     expect(content).toContain('--grace-period=');
+    expect(content).toContain('isDeletionPermitted');
+    expect(content).toContain('ATTACHMENT_RECONCILE_PURGE_CLI');
     expect(content).toContain('quarantine');
     expect(content).toContain('filesInGracePeriod');
     expect(content).toContain('cleanedOrphanFiles');

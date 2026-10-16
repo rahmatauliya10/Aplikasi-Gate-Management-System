@@ -333,7 +333,22 @@ export class AttachmentsService {
     user?: JwtPayloadUser,
     ipAddress?: string,
   ) {
-    const isDryRun = options.dryRun ?? (options.removeOrphans ? false : true);
+    // DUAL EXPLICIT AFFIRMATION RULE (Strict Fail-Closed):
+    // Physical deletion of ANY file is strictly forbidden unless BOTH conditions are explicitly met:
+    // 1. dryRun === false (caller explicitly disabled simulation)
+    // 2. removeOrphans === true (caller explicitly confirmed physical deletion)
+    // In ALL other combinations (e.g. dryRun: false with removeOrphans: false, or undefined/null),
+    // isDeletionPermitted is FALSE and isDryRun is TRUE.
+    const isDeletionPermitted =
+      options.dryRun === false && options.removeOrphans === true;
+    const isDryRun = !isDeletionPermitted;
+
+    if (isDeletionPermitted && !user?.id) {
+      throw new ForbiddenException(
+        'Penghapusan fisik berkas memerlukan otentikasi administrator yang sah.',
+      );
+    }
+
     const gracePeriodMinutes = options.gracePeriodMinutes ?? 1440; // 24 hours default
     const gracePeriodMs = gracePeriodMinutes * 60 * 1000;
     const now = Date.now();
@@ -353,7 +368,7 @@ export class AttachmentsService {
       },
     });
 
-    // Defensively fetch other models referencing files in uploads
+    // Defensively fetch other models referencing files in uploads (Fail-Closed on live cleanup)
     let correctionsWithEvidence: Array<{
       id: string;
       evidenceUrl: string | null;
@@ -365,8 +380,16 @@ export class AttachmentsService {
         where: { evidenceUrl: { not: null } },
         select: { id: true, evidenceUrl: true },
       });
-    } catch {
-      // Ignored if table not initialized
+    } catch (corrErr: any) {
+      this.logger.error(
+        `Failed to query transaction corrections for file protection: ${corrErr.message}`,
+        corrErr.stack,
+      );
+      if (isDeletionPermitted) {
+        throw new InternalServerErrorException(
+          'Rekonsiliasi dibatalkan demi keamanan integritas: Gagal memverifikasi referensi koreksi transaksi (Fail-Closed).',
+        );
+      }
     }
 
     let issuesWithScreenshot: Array<{
@@ -378,8 +401,16 @@ export class AttachmentsService {
         where: { screenshotUrl: { not: null } },
         select: { id: true, screenshotUrl: true },
       });
-    } catch {
-      // Ignored if table not initialized
+    } catch (issueErr: any) {
+      this.logger.error(
+        `Failed to query system issues for file protection: ${issueErr.message}`,
+        issueErr.stack,
+      );
+      if (isDeletionPermitted) {
+        throw new InternalServerErrorException(
+          'Rekonsiliasi dibatalkan demi keamanan integritas: Gagal memverifikasi referensi kendala sistem (Fail-Closed).',
+        );
+      }
     }
 
     const protectedDbPathsSet = new Set<string>();
@@ -486,7 +517,7 @@ export class AttachmentsService {
 
           orphanFiles.push(relPath);
 
-          if (!isDryRun) {
+          if (isDeletionPermitted) {
             const relCheck = path.relative(resolvedUploadDir, fullPath);
             if (
               !relCheck.startsWith('..') &&
@@ -510,18 +541,18 @@ export class AttachmentsService {
       }
     }
 
-    // 4. Structured Activity Logging
-    try {
-      if (user?.id) {
+    // 4. Structured Activity Logging (Mandatory Fail-Closed for Live Purge)
+    if (user?.id) {
+      try {
         await this.activityLogsService.logAction({
           userId: user.id,
-          action: isDryRun
-            ? 'ATTACHMENT_RECONCILE_AUDIT'
-            : 'ATTACHMENT_RECONCILE_PURGE',
+          action: isDeletionPermitted
+            ? 'ATTACHMENT_RECONCILE_PURGE'
+            : 'ATTACHMENT_RECONCILE_AUDIT',
           module: 'ATTACHMENTS',
           referenceId: `reconcile-${Date.now()}`,
           description: `Storage reconciliation executed. Mode: ${
-            isDryRun ? 'DRY_RUN' : 'LIVE_CLEANUP'
+            isDeletionPermitted ? 'LIVE_CLEANUP' : 'DRY_RUN'
           }, Scanned: ${scannedPhysicalFiles.length}, Protected DB records: ${
             allAttachments.length
           }, In Grace Period (<${gracePeriodMinutes}m): ${
@@ -534,11 +565,17 @@ export class AttachmentsService {
           status: 'SUCCESS',
           ipAddress,
         });
+      } catch (logErr: any) {
+        this.logger.error(
+          `Failed to record activity log for reconciliation: ${logErr.message}`,
+          logErr.stack,
+        );
+        if (isDeletionPermitted) {
+          throw new InternalServerErrorException(
+            'Gagal mencatat jejak audit (ActivityLog) untuk operasi pembersihan berkas. Operasi dibatalkan demi kepatuhan integritas data.',
+          );
+        }
       }
-    } catch (logErr: any) {
-      this.logger.warn(
-        `Failed to record activity log for reconciliation: ${logErr.message}`,
-      );
     }
 
     this.logger.log(
