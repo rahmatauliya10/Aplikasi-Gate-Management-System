@@ -60,22 +60,52 @@ export class TransactionsService implements OnModuleInit {
     };
   }
 
-  private async saveUserReminderState(
+  private async mutateUserReminderState(
     userId: string,
-    state: UserReminderState,
-  ): Promise<void> {
-    await (this.prisma as any).userReminderState.upsert({
-      where: { userId },
-      create: {
-        userId,
-        snoozedReminders: state.snoozedReminders as any,
-        readReminders: state.readReminders as any,
-      },
-      update: {
-        snoozedReminders: state.snoozedReminders as any,
-        readReminders: state.readReminders as any,
-      },
-    });
+    mutator: (state: UserReminderState) => void,
+  ): Promise<UserReminderState> {
+    const execute = async (prismaClient: any) => {
+      const record = await prismaClient.userReminderState.findUnique({
+        where: { userId },
+      });
+      const state: UserReminderState = record
+        ? {
+            snoozedReminders:
+              (record.snoozedReminders as Record<string, number>) || {},
+            readReminders: Array.isArray(record.readReminders)
+              ? (record.readReminders as string[])
+              : [],
+          }
+        : {
+            snoozedReminders: {},
+            readReminders: [],
+          };
+
+      mutator(state);
+
+      await prismaClient.userReminderState.upsert({
+        where: { userId },
+        create: {
+          userId,
+          snoozedReminders: state.snoozedReminders as any,
+          readReminders: state.readReminders as any,
+        },
+        update: {
+          snoozedReminders: state.snoozedReminders as any,
+          readReminders: state.readReminders as any,
+        },
+      });
+
+      return state;
+    };
+
+    if (typeof (this.prisma as any).$transaction === 'function') {
+      return await (this.prisma as any).$transaction(async (prismaTx: any) => {
+        return execute(prismaTx);
+      });
+    } else {
+      return execute(this.prisma);
+    }
   }
 
   async snoozeReminder(
@@ -100,10 +130,10 @@ export class TransactionsService implements OnModuleInit {
       );
     }
 
-    const state = await this.getUserReminderState(userId);
     const expireAt = Date.now() + durationMinutes * 60 * 1000;
-    state.snoozedReminders[reminderId.trim()] = expireAt;
-    await this.saveUserReminderState(userId, state);
+    await this.mutateUserReminderState(userId, (state) => {
+      state.snoozedReminders[reminderId.trim()] = expireAt;
+    });
 
     return {
       success: true,
@@ -125,9 +155,9 @@ export class TransactionsService implements OnModuleInit {
       throw new BadRequestException('ID Pengingat wajib diisi.');
     }
 
-    const state = await this.getUserReminderState(userId);
-    delete state.snoozedReminders[reminderId.trim()];
-    await this.saveUserReminderState(userId, state);
+    await this.mutateUserReminderState(userId, (state) => {
+      delete state.snoozedReminders[reminderId.trim()];
+    });
 
     return {
       success: true,
@@ -146,11 +176,11 @@ export class TransactionsService implements OnModuleInit {
     }
 
     const cleanId = reminderId.trim();
-    const state = await this.getUserReminderState(userId);
-    if (!state.readReminders.includes(cleanId)) {
-      state.readReminders.push(cleanId);
-      await this.saveUserReminderState(userId, state);
-    }
+    await this.mutateUserReminderState(userId, (state) => {
+      if (!state.readReminders.includes(cleanId)) {
+        state.readReminders.push(cleanId);
+      }
+    });
 
     return {
       success: true,
@@ -164,21 +194,16 @@ export class TransactionsService implements OnModuleInit {
       throw new BadRequestException('Daftar ID Pengingat wajib diberikan.');
     }
 
-    const state = await this.getUserReminderState(userId);
-    let changed = false;
-    for (const id of reminderIds) {
-      if (typeof id === 'string' && id.trim().length > 0) {
-        const cleanId = id.trim();
-        if (!state.readReminders.includes(cleanId)) {
-          state.readReminders.push(cleanId);
-          changed = true;
+    await this.mutateUserReminderState(userId, (state) => {
+      for (const id of reminderIds) {
+        if (typeof id === 'string' && id.trim().length > 0) {
+          const cleanId = id.trim();
+          if (!state.readReminders.includes(cleanId)) {
+            state.readReminders.push(cleanId);
+          }
         }
       }
-    }
-
-    if (changed) {
-      await this.saveUserReminderState(userId, state);
-    }
+    });
 
     return {
       success: true,

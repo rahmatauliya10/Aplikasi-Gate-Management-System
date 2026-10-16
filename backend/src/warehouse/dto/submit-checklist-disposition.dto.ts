@@ -4,6 +4,8 @@ import {
   IsString,
   MinLength,
   IsOptional,
+  IsInt,
+  Min,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -28,13 +30,15 @@ export class SubmitChecklistDispositionDto {
   @MinLength(5, { message: 'reason minimal 5 karakter' })
   reason: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description:
       'Expected transaction revision for optimistic concurrency check',
     example: 1,
   })
-  @IsOptional()
-  revision?: number;
+  @IsNotEmpty({ message: 'revision wajib disertakan untuk kontrol konkurensi' })
+  @IsInt({ message: 'revision harus berupa bilangan bulat' })
+  @Min(0, { message: 'revision tidak boleh bernilai negatif' })
+  revision: number;
 
   @ApiPropertyOptional({
     description: 'Catatan tambahan pengawasan gudang',

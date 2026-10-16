@@ -17,7 +17,12 @@ import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import {
   GSP_PREUNLOAD_CANONICAL_ITEMS,
   GSP_PREUNLOAD_VERSION,
+  GSP_PREUNLOAD_CODES,
+  GSP_PREUNLOAD_LABEL_MAP,
 } from './constants/gsp-preunload-checklist';
+
+const VALID_PNG_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
 const validGspChecklist = {
   items: GSP_PREUNLOAD_CANONICAL_ITEMS.map((item) => ({
@@ -1348,7 +1353,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
                   code: item.code,
                   result: 'NOT_OK' as const,
                   notes: 'Segel pintu rusak dan terputus',
-                  photoUrl: 'data:image/png;base64,sealbroken',
+                  photoUrl: VALID_PNG_DATA_URL,
                 }
               : item,
           ),
@@ -1963,6 +1968,27 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
     });
 
     describe('GSP Pre-Unloading Checklist Concession & Disposition (GSP-CHECKLIST-CONCESSION-2026)', () => {
+      const VALID_PNG_DATA_URL =
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+      const createCanonical9PreunloadItems = (
+        notOkCode?: string,
+        notOkNotes = 'Temuan ketidaksesuaian pra-bongkar',
+        photoUrl: string | null = VALID_PNG_DATA_URL,
+      ) => {
+        return GSP_PREUNLOAD_CODES.map((code) => ({
+          code,
+          result: code === notOkCode ? ('NOT_OK' as const) : ('OK' as const),
+          label: GSP_PREUNLOAD_LABEL_MAP[code] || code,
+          ...(code === notOkCode
+            ? {
+                notes: notOkNotes,
+                photoUrl: photoUrl ?? undefined,
+              }
+            : {}),
+        }));
+      };
+
       const mockChecklistTx = {
         id: 'tx-chk-disposition-1',
         status: TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION,
@@ -1987,16 +2013,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             id: 'wp-chk-1',
             status: 'IN_PROGRESS',
             revision: 1,
+            isCurrent: true,
             checklistItems: {
               version: 'GSP-PREUNLOAD-2026.1',
-              items: [
-                {
-                  code: 'CLEAN_VEHICLE',
-                  result: 'NOT_OK',
-                  notes: 'Bak kotor',
-                  photoUrl: 'data:image/png;base64,abc',
-                },
-              ],
+              items: createCanonical9PreunloadItems(
+                'CLEAN_VEHICLE',
+                'Bak kotor',
+              ),
             },
           },
         ],
@@ -2165,17 +2188,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             {
               id: 'wp-crit-1',
               revision: 1,
+              isCurrent: true,
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
-                items: [
-                  {
-                    code: 'NO_PEST_OR_ANIMAL_TRACE',
-                    label: 'Hama / binatang',
-                    result: 'NOT_OK',
-                    notes: 'Ditemukan hama / binatang di armada',
-                    photoUrl: 'data:image/png;base64,pest',
-                  },
-                ],
+                items: createCanonical9PreunloadItems(
+                  'NO_PEST_OR_ANIMAL_TRACE',
+                  'Ditemukan hama / binatang di armada',
+                ),
               },
             },
           ],
@@ -2210,17 +2229,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             {
               id: 'wp-leak-1',
               revision: 1,
+              isCurrent: true,
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
-                items: [
-                  {
-                    code: 'VEHICLE_NO_LEAK_GOOD',
-                    label: 'Kendaraan tidak bocor',
-                    result: 'NOT_OK',
-                    notes: 'Tangki armada mengalami kebocoran tetes',
-                    photoUrl: 'data:image/png;base64,leak',
-                  },
-                ],
+                items: createCanonical9PreunloadItems(
+                  'VEHICLE_NO_LEAK_GOOD',
+                  'Tangki armada mengalami kebocoran tetes',
+                ),
               },
             },
           ],
@@ -2253,17 +2268,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             {
               id: 'wp-seal-1',
               revision: 1,
+              isCurrent: true,
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
-                items: [
-                  {
-                    code: 'DOOR_SEAL_GOOD',
-                    label: 'Seal pintu baik',
-                    result: 'NOT_OK',
-                    notes: 'Segel pintu putus sebelum pembongkaran',
-                    photoUrl: 'data:image/png;base64,seal',
-                  },
-                ],
+                items: createCanonical9PreunloadItems(
+                  'DOOR_SEAL_GOOD',
+                  'Segel pintu putus sebelum pembongkaran',
+                ),
               },
             },
           ],
@@ -2296,17 +2307,13 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             {
               id: 'wp-coa-1',
               revision: 1,
+              isCurrent: true,
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
-                items: [
-                  {
-                    code: 'COA_MATCHES_BATCH',
-                    label: 'CoA sesuai batch',
-                    result: 'NOT_OK',
-                    notes: 'Nomor batch CoA tidak cocok dengan fisik',
-                    photoUrl: 'data:image/png;base64,coa',
-                  },
-                ],
+                items: createCanonical9PreunloadItems(
+                  'COA_MATCHES_BATCH',
+                  'Nomor batch CoA tidak cocok dengan fisik',
+                ),
               },
             },
           ],
@@ -2377,16 +2384,14 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             {
               id: 'wp-nophoto-1',
               revision: 1,
+              isCurrent: true,
               checklistItems: {
                 version: 'GSP-PREUNLOAD-2026.1',
-                items: [
-                  {
-                    code: 'CLEAN_VEHICLE',
-                    result: 'NOT_OK',
-                    notes: 'Bak kotor berdebu tebal',
-                    // photoUrl missing
-                  },
-                ],
+                items: createCanonical9PreunloadItems(
+                  'CLEAN_VEHICLE',
+                  'Bak kotor berdebu tebal',
+                  null,
+                ),
               },
             },
           ],
@@ -2445,7 +2450,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
                         code: i.code,
                         result: 'NOT_OK' as const,
                         notes: 'Tangki armada bocor',
-                        photoUrl: 'data:image/png;base64,leak',
+                        photoUrl: VALID_PNG_DATA_URL,
                       }
                     : i,
                 ),
@@ -2458,6 +2463,156 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
             mockUser,
           ),
         ).rejects.toThrow('dilarang dikonsesi menurut kebijakan K3');
+      });
+
+      it('P0-01: strictly blocks disposition if WAREHOUSE user has NO GSP access in database', async () => {
+        const warehouseUserNoGsp: JwtPayloadUser = {
+          id: 'user-wh-nogsp',
+          role: 'WAREHOUSE',
+          email: 'wh-gbb@gms.local',
+        } as unknown as JwtPayloadUser;
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        // DB access list is empty or only has GBB/GBJ (no GSP)
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
+          { processType: ProcessType.GBB },
+        ]);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Diterima oleh operator gudang non-GSP',
+              revision: 4,
+            },
+            warehouseUserNoGsp,
+          ),
+        ).rejects.toThrow('Akses gudang pengguna tidak mencakup proses GSP.');
+      });
+
+      it('P0-01: strictly blocks disposition if WAREHOUSE user has empty access list in database (fail-closed)', async () => {
+        const warehouseUserEmpty: JwtPayloadUser = {
+          id: 'user-wh-empty',
+          role: 'WAREHOUSE',
+          email: 'wh-empty@gms.local',
+        } as unknown as JwtPayloadUser;
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+        // DB access list returns empty array
+        mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([]);
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Diterima oleh operator gudang tanpa scope',
+              revision: 4,
+            },
+            warehouseUserEmpty,
+          ),
+        ).rejects.toThrow('Akses gudang pengguna tidak mencakup proses GSP.');
+      });
+
+      it('P0-02: strictly rejects disposition if NOT_OK photo is a fake string or invalid magic bytes', async () => {
+        const fakePhotoTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-fakephoto-1',
+              revision: 1,
+              isCurrent: true,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: createCanonical9PreunloadItems(
+                  'CLEAN_VEHICLE',
+                  'Bak kotor berdebu',
+                  'data:image/png;base64,fake', // invalid base64 / length < 64 bytes
+                ),
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          fakePhotoTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          fakePhotoTx.warehouseProcesses[0],
+        );
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Diterima dengan foto palsu',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('Ukuran berkas foto bukti item CLEAN_VEHICLE terlalu kecil');
+      });
+
+      it('P1-01: strictly rejects disposition if expected revision is missing or mismatched', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          mockChecklistTx,
+        );
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Revisi salah',
+              revision: 999, // Mismatched (tx.revision is 4)
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('versi revisi tidak cocok');
+      });
+
+      it('P1-02: strictly rejects disposition if pre-unload checklist has missing or malformed canonical items', async () => {
+        const malformedTx = {
+          ...mockChecklistTx,
+          warehouseProcesses: [
+            {
+              id: 'wp-malformed-1',
+              revision: 1,
+              isCurrent: true,
+              checklistItems: {
+                version: 'GSP-PREUNLOAD-2026.1',
+                items: [
+                  { code: 'CLEAN_VEHICLE', result: 'NOT_OK', notes: 'Hanya 1 item' },
+                ],
+              },
+            },
+          ],
+        };
+
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
+          malformedTx,
+        );
+        mockPrismaService.warehouseProcess.findFirst.mockResolvedValueOnce(
+          malformedTx.warehouseProcesses[0],
+        );
+
+        await expect(
+          warehouseService.submitChecklistDisposition(
+            'tx-chk-disposition-1',
+            {
+              action: 'ACCEPT_WITH_NOTE',
+              reason: 'Checklist tidak lengkap 9 item',
+              revision: 4,
+            },
+            mockUser,
+          ),
+        ).rejects.toThrow('wajib tepat 9 item kanonikal');
       });
     });
   });

@@ -487,7 +487,7 @@ describe('WarehouseService Revisioning (P1-01)', () => {
           notes: code === 'DOOR_SEAL_GOOD' ? 'Segel pintu putus' : undefined,
           photoUrl:
             code === 'DOOR_SEAL_GOOD'
-              ? 'data:image/png;base64,sealphotook'
+              ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
               : undefined,
         })),
       };

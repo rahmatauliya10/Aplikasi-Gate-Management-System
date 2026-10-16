@@ -1886,8 +1886,110 @@ export class WarehouseService {
         });
       }
 
-      // If photoRef is data URL (used in tests/demos), accept as inline evidence
+      // If photoRef is data URL, validate format, decode base64, validate magic bytes and size, and persist as attachment
       if (photoRef.startsWith('data:image/')) {
+        const matches = photoRef.match(
+          /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/,
+        );
+        if (!matches || !matches[2]) {
+          throw new BadRequestException({
+            success: false,
+            message: `Format data URI bukti foto item ${item.code} tidak valid atau rusak.`,
+            errors: ['INVALID_PHOTO_DATA_URI_FORMAT'],
+          });
+        }
+
+        let buffer: Buffer;
+        try {
+          buffer = Buffer.from(matches[2], 'base64');
+        } catch {
+          throw new BadRequestException({
+            success: false,
+            message: `Decoding data base64 foto item ${item.code} gagal.`,
+            errors: ['INVALID_PHOTO_BASE64_DECODING'],
+          });
+        }
+
+        // Validate buffer size: min 64 bytes (prevent mock/fake strings), max 10MB
+        if (buffer.length < 64) {
+          throw new BadRequestException({
+            success: false,
+            message: `Ukuran berkas foto bukti item ${item.code} terlalu kecil (${buffer.length} bytes, minimum 64 bytes). Bukti foto tidak valid.`,
+            errors: ['INVALID_PHOTO_FILE_SIZE_TOO_SMALL'],
+          });
+        }
+        if (buffer.length > 10 * 1024 * 1024) {
+          throw new BadRequestException({
+            success: false,
+            message: `Ukuran berkas foto bukti item ${item.code} melebihi batas maksimum 10MB.`,
+            errors: ['PHOTO_FILE_SIZE_EXCEEDED'],
+          });
+        }
+
+        // Validate magic bytes
+        const isPng =
+          buffer.length >= 8 &&
+          buffer[0] === 0x89 &&
+          buffer[1] === 0x50 &&
+          buffer[2] === 0x4e &&
+          buffer[3] === 0x47 &&
+          buffer[4] === 0x0d &&
+          buffer[5] === 0x0a &&
+          buffer[6] === 0x1a &&
+          buffer[7] === 0x0a;
+        const isJpeg =
+          buffer.length >= 3 &&
+          buffer[0] === 0xff &&
+          buffer[1] === 0xd8 &&
+          buffer[2] === 0xff;
+        const isWebp =
+          buffer.length >= 12 &&
+          buffer.toString('ascii', 0, 4) === 'RIFF' &&
+          buffer.toString('ascii', 8, 12) === 'WEBP';
+
+        if (!isPng && !isJpeg && !isWebp) {
+          throw new BadRequestException({
+            success: false,
+            message: `Format biner foto item ${item.code} tidak sesuai dengan header gambar yang valid (PNG, JPEG, WebP).`,
+            errors: ['INVALID_PHOTO_MAGIC_BYTES'],
+          });
+        }
+
+        // Persist to filesystem and database attachment if available
+        const uploadBase = process.env.UPLOAD_DIR || './uploads';
+        const evidenceDir = path.resolve(uploadBase, 'checklist-evidence');
+        try {
+          if (!fs.existsSync(evidenceDir)) {
+            fs.mkdirSync(evidenceDir, { recursive: true });
+          }
+          const ext = isPng ? 'png' : isJpeg ? 'jpg' : 'webp';
+          const fileName = `${transactionId}_${item.code}_${Date.now()}.${ext}`;
+          const fullPath = path.join(evidenceDir, fileName);
+          fs.writeFileSync(fullPath, buffer);
+
+          if (this.prisma.attachment?.create) {
+            const att = await this.prisma.attachment.create({
+              data: {
+                transactionId,
+                module: 'WAREHOUSE',
+                attachmentType: 'PHOTO',
+                originalName: `${item.code}_evidence.${ext}`,
+                fileName,
+                filePath: path.relative(uploadBase, fullPath),
+                mimeType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
+                size: buffer.length,
+                description: `Bukti foto temuan pra-bongkar GSP ${item.code}`,
+                isCurrent: true,
+              },
+            });
+            item.photoAttachmentId = att.id;
+          }
+        } catch (storageErr: any) {
+          this.logger?.warn?.(
+            `Checklist photo persistence warning: ${storageErr?.message}`,
+          );
+        }
+
         continue;
       }
 
@@ -2020,25 +2122,8 @@ export class WarehouseService {
     }
 
     if (isWarehouse) {
-      if (
-        Array.isArray(user.warehouseAccess) &&
-        user.warehouseAccess.length > 0 &&
-        !user.warehouseAccess.includes('GSP')
-      ) {
-        throw new ForbiddenException({
-          success: false,
-          message: 'Akses gudang pengguna tidak mencakup proses GSP.',
-          errors: ['FORBIDDEN_SCOPE'],
-        });
-      }
-
-      const userAccess = await this.prisma.userWarehouseAccess.findMany({
-        where: { userId: user.id },
-      });
-      if (
-        userAccess.length > 0 &&
-        !userAccess.some((a) => a.processType === ProcessType.GSP)
-      ) {
+      const allowedAccess = await this.getWarehouseAccess(user);
+      if (!allowedAccess.includes(ProcessType.GSP)) {
         throw new ForbiddenException({
           success: false,
           message: 'Akses gudang pengguna tidak mencakup proses GSP.',
@@ -2056,8 +2141,16 @@ export class WarehouseService {
       });
     }
 
-    // Optimistic Concurrency Check (Revision)
-    if (dto.revision !== undefined && tx.revision !== dto.revision) {
+    // Optimistic Concurrency Check (Revision) - Mandatory
+    if (dto.revision === undefined || dto.revision === null) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Revisi transaksi wajib disertakan untuk kontrol konkurensi.',
+        errors: ['MISSING_TRANSACTION_REVISION'],
+      });
+    }
+
+    if (tx.revision !== dto.revision) {
       throw new ConflictException({
         success: false,
         message:
@@ -2066,9 +2159,12 @@ export class WarehouseService {
       });
     }
 
-    // Active Preunload Checklist retrieval & validation
+    // Active Preunload Checklist retrieval & validation (strictly isCurrent: true)
     const latestProc = await this.prisma.warehouseProcess.findFirst({
-      where: { transactionId },
+      where: {
+        transactionId,
+        isCurrent: true,
+      },
       orderBy: { revision: 'desc' },
     });
 
@@ -2089,6 +2185,26 @@ export class WarehouseService {
         message:
           'Disposisi checklist ditolak: Daftar butir checklist pra-bongkar kosong.',
         errors: ['EMPTY_CHECKLIST_ITEMS'],
+      });
+    }
+
+    // Canonical 9 Items validation for disposition
+    const submittedCodes = items.map((i: any) => i.code);
+    const uniqueCodes = new Set(submittedCodes);
+    const hasUnknownCodes = submittedCodes.some(
+      (code: string) => !GSP_PREUNLOAD_CODES.includes(code),
+    );
+    const hasDuplicates = uniqueCodes.size !== submittedCodes.length;
+    const isMissingCodes =
+      submittedCodes.length !== 9 ||
+      GSP_PREUNLOAD_CODES.some((c) => !uniqueCodes.has(c));
+
+    if (hasUnknownCodes || hasDuplicates || isMissingCodes) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Disposisi checklist ditolak: Struktur checklist pra-bongkar aktif tidak valid (wajib tepat 9 item kanonikal).',
+        errors: ['INVALID_PREUNLOAD_CHECKLIST_STRUCTURE'],
       });
     }
 
@@ -2179,8 +2295,8 @@ export class WarehouseService {
         },
       });
 
-      await this.activityLogsService
-        .logAction({
+      if (typeof this.activityLogsService.logActionStrict === 'function') {
+        await this.activityLogsService.logActionStrict({
           userId: user.id,
           userName: user.name || user.email,
           role: user.role,
@@ -2189,8 +2305,23 @@ export class WarehouseService {
           referenceId: transactionId,
           description: `Disposisi checklist GSP: ${dto.action}. Alasan: ${dto.reason}.`,
           status: 'SUCCESS',
-        })
-        .catch(() => {});
+        });
+      } else {
+        await this.activityLogsService.logAction(
+          {
+            userId: user.id,
+            userName: user.name || user.email,
+            role: user.role,
+            action: `GSP_CHECKLIST_DISPOSITION_${dto.action}`,
+            module: 'WAREHOUSE',
+            referenceId: transactionId,
+            description: `Disposisi checklist GSP: ${dto.action}. Alasan: ${dto.reason}.`,
+            status: 'SUCCESS',
+          },
+          undefined,
+          { requireDb: true },
+        );
+      }
 
       return updatedTx;
     });
