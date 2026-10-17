@@ -17,7 +17,6 @@ const REOPEN_ALLOWED_TARGETS = {
     'REGISTERED',
     'QC_VEHICLE_PENDING',
     'QC_VEHICLE_PASSED',
-    'INCOMING_CHECK_PENDING',
   ],
   GBJ: [
     'REGISTERED',
@@ -26,8 +25,11 @@ const REOPEN_ALLOWED_TARGETS = {
   ]
 }
 
-function getAllowedReopenTargets(processType) {
+function getAllowedReopenTargets(processType, commodity) {
   const norm = (processType || 'GBB').toUpperCase()
+  if (norm === 'GSP' && commodity && String(commodity).toLowerCase().includes('solar')) {
+    return ['REGISTERED', 'PA_NOT_REQUIRED']
+  }
   return REOPEN_ALLOWED_TARGETS[norm] || REOPEN_ALLOWED_TARGETS.GBB
 }
 
@@ -39,11 +41,25 @@ describe('Frontend REOPEN Matrix Contract', () => {
     expect(targets).toHaveLength(4)
   })
 
-  it('should include Incoming QC stage for GSP process type', () => {
-    const targets = getAllowedReopenTargets('GSP')
-    expect(targets).toContain('INCOMING_CHECK_PENDING')
+  it('should EXCLUDE Incoming QC stage for non-exempt GSP process type', () => {
+    const targets = getAllowedReopenTargets('GSP', 'Batubara')
+    expect(targets).not.toContain('INCOMING_CHECK_PENDING')
     expect(targets).toContain('QC_VEHICLE_PASSED')
-    expect(targets).toHaveLength(4)
+    expect(targets).toHaveLength(3)
+    expect(targets).toEqual([
+      'REGISTERED',
+      'QC_VEHICLE_PENDING',
+      'QC_VEHICLE_PASSED',
+    ])
+  })
+
+  it('should NEVER include QC_VEHICLE_PASSED for Solar GSP and MUST use PA_NOT_REQUIRED', () => {
+    const targets = getAllowedReopenTargets('GSP', 'Solar')
+    expect(targets).not.toContain('QC_VEHICLE_PASSED')
+    expect(targets).not.toContain('QC_VEHICLE_PENDING')
+    expect(targets).not.toContain('INCOMING_CHECK_PENDING')
+    expect(targets).toContain('PA_NOT_REQUIRED')
+    expect(targets).toEqual(['REGISTERED', 'PA_NOT_REQUIRED'])
   })
 
   it('should EXCLUDE Incoming QC stage for GBJ process type', () => {

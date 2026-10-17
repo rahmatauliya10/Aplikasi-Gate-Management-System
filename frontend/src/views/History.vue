@@ -303,6 +303,9 @@
                     <!-- Badges Column -->
                     <div class="flex flex-col space-y-1 min-w-0 flex-1">
                       <div class="flex items-center space-x-1 flex-wrap gap-y-1">
+                        <span v-if="truck.dailySequence" class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200 shrink-0">
+                          #{{ String(truck.dailySequence).padStart(3, '0') }}
+                        </span>
                         <span class="px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider border shrink-0" :style="getProcessBadgeStyle(truck)">
                           {{ getProcessType(truck) }}
                         </span>

@@ -170,6 +170,10 @@ export const useAuthStore = defineStore('auth', {
       import('../services/api').then(({ default: api }) => {
         delete api.defaults.headers.common['Authorization']
       }).catch(() => {})
+
+      import('../composables/useAuthenticatedPhoto').then(({ clearAuthenticatedBlobCache }) => {
+        clearAuthenticatedBlobCache()
+      }).catch(() => {})
     },
     
     setToken(token) {

@@ -60,14 +60,15 @@
           </div>
         </div>
 
+        <!-- Pending Transaction Reminder Bell -->
+        <PendingReminderBell />
+
         <!-- Notifications -->
         <div class="relative">
-          <button @click="showActivityLog = true; notificationStore.markAsRead()" class="relative w-12 h-12 flex items-center justify-center rounded-2xl bg-white border border-slate-100 text-slate-500 hover:text-[#A0006D] hover:shadow-lg transition-all duration-300 active:scale-90 group">
-            <span class="material-icons text-2xl group-hover:animate-bounce">notifications_none</span>
+          <button @click="showActivityLog = true; notificationStore.markAsRead()" class="relative w-12 h-12 flex items-center justify-center rounded-2xl bg-white border border-slate-100 text-slate-500 hover:text-[#A0006D] hover:shadow-lg transition-all duration-300 active:scale-90 group" title="Log Aktivitas Sistem">
+            <span class="material-icons text-2xl group-hover:animate-bounce">history</span>
             <span v-if="notificationStore.unreadCount > 0" class="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#A0006D] text-[9px] font-bold text-white border-2 border-white shadow-sm">{{ notificationStore.unreadCount > 9 ? '9+' : notificationStore.unreadCount }}</span>
           </button>
-          
-          <!-- Activity Log Drawer component will replace the dropdown -->
         </div>
 
         <!-- Profile (Glass Style) -->
@@ -211,6 +212,7 @@
       </main>
     </div>
     <ActivityLogDrawer :is-open="showActivityLog" @update:isOpen="showActivityLog = $event" @close="showActivityLog = false" />
+    <LoginPendingReminderModal />
   </div>
 </template>
 
@@ -222,6 +224,8 @@ import { useAuthStore } from '../stores/authStore'
 import ProfileDropdown from '../components/ProfileDropdown.vue'
 import ActivityLogDrawer from '../components/ActivityLogDrawer.vue'
 import RunningTextBanner from '../components/RunningTextBanner.vue'
+import PendingReminderBell from '../components/PendingReminderBell.vue'
+import LoginPendingReminderModal from '../components/LoginPendingReminderModal.vue'
 import { plantClockParts, PLANT_TIME_ZONE } from '../utils/displayTime'
 
 const router = useRouter()

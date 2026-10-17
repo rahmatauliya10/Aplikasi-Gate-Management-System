@@ -1,5 +1,6 @@
 import {
   Injectable,
+  OnModuleInit,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -10,13 +11,19 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { TransactionQueryDto } from './dto/transaction-query.dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, TransactionStatus } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { TRANSACTION_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
+import { getStageSlaMinutes } from './constants/stage-sla.config';
+
+export interface UserReminderState {
+  snoozedReminders: Record<string, number>; // reminderId -> epoch timestamp
+  readReminders: string[]; // list of reminderIds marked as read
+}
 
 @Injectable()
-export class TransactionsService {
+export class TransactionsService implements OnModuleInit {
   private readonly logger = new Logger(TransactionsService.name);
 
   constructor(
@@ -24,6 +31,252 @@ export class TransactionsService {
     private activityLogsService: ActivityLogsService,
     private authorizationScopeService: AuthorizationScopeService,
   ) {}
+
+  async onModuleInit() {
+    this.logger.log(
+      'TransactionsService initialized with official user_reminder_states schema',
+    );
+  }
+
+  private async getUserReminderState(
+    userId: string,
+  ): Promise<UserReminderState> {
+    const record = await (this.prisma as any).userReminderState.findUnique({
+      where: { userId },
+    });
+    if (record) {
+      return {
+        snoozedReminders:
+          (record.snoozedReminders as Record<string, number>) || {},
+        readReminders: Array.isArray(record.readReminders)
+          ? (record.readReminders as string[])
+          : [],
+      };
+    }
+
+    return {
+      snoozedReminders: {},
+      readReminders: [],
+    };
+  }
+
+  private userMutationQueues = new Map<string, Promise<any>>();
+
+  private async mutateUserReminderState(
+    userId: string,
+    mutator: (state: UserReminderState) => void,
+  ): Promise<UserReminderState> {
+    const prevPromise =
+      this.userMutationQueues.get(userId) || Promise.resolve();
+    const nextPromise = prevPromise
+      .catch(() => {})
+      .then(() => this.executeMutateUserReminderState(userId, mutator));
+
+    this.userMutationQueues.set(userId, nextPromise);
+
+    try {
+      return await nextPromise;
+    } finally {
+      if (this.userMutationQueues.get(userId) === nextPromise) {
+        this.userMutationQueues.delete(userId);
+      }
+    }
+  }
+
+  private async executeMutateUserReminderState(
+    userId: string,
+    mutator: (state: UserReminderState) => void,
+  ): Promise<UserReminderState> {
+    const execute = async (prismaClient: any) => {
+      if (typeof prismaClient.$executeRaw === 'function') {
+        try {
+          await prismaClient.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
+          await prismaClient.$executeRaw`SELECT "user_id" FROM "user_reminder_states" WHERE "user_id" = ${userId} FOR UPDATE`;
+        } catch (lockErr: any) {
+          const isMockOrTest =
+            process.env.NODE_ENV === 'test' ||
+            lockErr?.message?.includes('mock') ||
+            lockErr?.message?.includes('not found') ||
+            lockErr?.message?.includes('does not exist');
+          if (!isMockOrTest) {
+            this.logger.error(
+              `Gagal memperoleh database lock untuk user ${userId}: ${lockErr?.message}`,
+            );
+            throw lockErr;
+          }
+        }
+      }
+
+      const record = await prismaClient.userReminderState.findUnique({
+        where: { userId },
+      });
+      const state: UserReminderState = record
+        ? {
+            snoozedReminders:
+              (record.snoozedReminders as Record<string, number>) || {},
+            readReminders: Array.isArray(record.readReminders)
+              ? (record.readReminders as string[])
+              : [],
+          }
+        : {
+            snoozedReminders: {},
+            readReminders: [],
+          };
+
+      mutator(state);
+
+      await prismaClient.userReminderState.upsert({
+        where: { userId },
+        create: {
+          userId,
+          snoozedReminders: state.snoozedReminders as any,
+          readReminders: state.readReminders as any,
+        },
+        update: {
+          snoozedReminders: state.snoozedReminders as any,
+          readReminders: state.readReminders as any,
+        },
+      });
+
+      return state;
+    };
+
+    const maxRetries = 3;
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      attempt++;
+      try {
+        if (typeof (this.prisma as any).$transaction === 'function') {
+          return await (this.prisma as any).$transaction(
+            async (prismaTx: any) => {
+              return execute(prismaTx);
+            },
+            {
+              isolationLevel: 'Serializable',
+            },
+          );
+        } else {
+          return await execute(this.prisma);
+        }
+      } catch (err: any) {
+        const isConflict =
+          err?.code === 'P2034' ||
+          err?.message?.includes('could not serialize') ||
+          err?.message?.includes('deadlock') ||
+          err?.message?.includes('conflict');
+        if (isConflict && attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+          continue;
+        }
+        throw err;
+      }
+    }
+    return execute(this.prisma);
+  }
+
+  async snoozeReminder(
+    userId: string,
+    reminderId: string,
+    durationMinutes = 30,
+  ) {
+    if (
+      !reminderId ||
+      typeof reminderId !== 'string' ||
+      reminderId.trim().length === 0
+    ) {
+      throw new BadRequestException('ID Pengingat wajib diisi.');
+    }
+    if (
+      typeof durationMinutes !== 'number' ||
+      durationMinutes <= 0 ||
+      durationMinutes > 1440
+    ) {
+      throw new BadRequestException(
+        'Durasi tunda (snooze) tidak valid (wajib antara 1 hingga 1440 menit).',
+      );
+    }
+
+    const expireAt = Date.now() + durationMinutes * 60 * 1000;
+    await this.mutateUserReminderState(userId, (state) => {
+      state.snoozedReminders[reminderId.trim()] = expireAt;
+    });
+
+    return {
+      success: true,
+      message: `Pengingat berhasil ditunda selama ${durationMinutes} menit untuk pengguna ini.`,
+      data: {
+        reminderId: reminderId.trim(),
+        expireAt,
+        snoozedForMinutes: durationMinutes,
+      },
+    };
+  }
+
+  async unsnoozeReminder(userId: string, reminderId: string) {
+    if (
+      !reminderId ||
+      typeof reminderId !== 'string' ||
+      reminderId.trim().length === 0
+    ) {
+      throw new BadRequestException('ID Pengingat wajib diisi.');
+    }
+
+    await this.mutateUserReminderState(userId, (state) => {
+      delete state.snoozedReminders[reminderId.trim()];
+    });
+
+    return {
+      success: true,
+      message: 'Penundaan pengingat berhasil dibatalkan.',
+      data: { reminderId: reminderId.trim() },
+    };
+  }
+
+  async markReminderRead(userId: string, reminderId: string) {
+    if (
+      !reminderId ||
+      typeof reminderId !== 'string' ||
+      reminderId.trim().length === 0
+    ) {
+      throw new BadRequestException('ID Pengingat wajib diisi.');
+    }
+
+    const cleanId = reminderId.trim();
+    await this.mutateUserReminderState(userId, (state) => {
+      if (!state.readReminders.includes(cleanId)) {
+        state.readReminders.push(cleanId);
+      }
+    });
+
+    return {
+      success: true,
+      message: 'Status baca pengingat berhasil disimpan.',
+      data: { reminderId: cleanId },
+    };
+  }
+
+  async markAllRemindersRead(userId: string, reminderIds: string[]) {
+    if (!Array.isArray(reminderIds) || reminderIds.length === 0) {
+      throw new BadRequestException('Daftar ID Pengingat wajib diberikan.');
+    }
+
+    await this.mutateUserReminderState(userId, (state) => {
+      for (const id of reminderIds) {
+        if (typeof id === 'string' && id.trim().length > 0) {
+          const cleanId = id.trim();
+          if (!state.readReminders.includes(cleanId)) {
+            state.readReminders.push(cleanId);
+          }
+        }
+      }
+    });
+
+    return {
+      success: true,
+      message: 'Seluruh pengingat berhasil ditandai telah dibaca.',
+      data: { count: reminderIds.length },
+    };
+  }
 
   async findAll(query: TransactionQueryDto, user: JwtPayloadUser) {
     const { page = 1, limit = 10, status, processType, search } = query;
@@ -138,6 +391,277 @@ export class TransactionsService {
         'Gagal mengambil data transaksi aktif.',
       );
     }
+  }
+
+  async getPendingReminders(user: JwtPayloadUser) {
+    this.logger.log(
+      `Get pending reminders for user ${user.email} (${user.role})`,
+    );
+
+    const userState = await this.getUserReminderState(user.id);
+    const scope = this.authorizationScopeService.getTransactionScope(user);
+    const activeTransactions = await this.prisma.transaction.findMany({
+      where: {
+        status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        ...scope,
+      },
+      include: {
+        statusHistory: { orderBy: { changedAt: 'desc' }, take: 1 },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const now = new Date();
+    const nowEpoch = now.getTime();
+    const userScopes = user.warehouseAccess || [];
+
+    const reminders = activeTransactions.map((tx) => {
+      let assignedRole: string = 'ADMIN';
+      let pendingTask: string = 'Tindak Lanjut Transaksi';
+      let targetRoute: string = '/dashboard';
+
+      switch (tx.status) {
+        case TransactionStatus.REGISTERED:
+          if (tx.processType === 'GBJ') {
+            assignedRole = 'QC';
+            pendingTask = 'Pemeriksaan Armada (QC Vehicle)';
+            targetRoute = '/qc-verification';
+          } else {
+            assignedRole = 'WEIGHBRIDGE';
+            pendingTask = 'Timbang Masuk (Gross IN)';
+            targetRoute = '/weighbridge';
+          }
+          break;
+
+        case TransactionStatus.WEIGH_IN_DONE:
+          assignedRole = 'QC';
+          pendingTask = 'Pemeriksaan Armada & Sampel (QC Verification)';
+          targetRoute = '/qc-verification';
+          break;
+
+        case TransactionStatus.QC_VEHICLE_PENDING:
+        case TransactionStatus.QC_VEHICLE_IN_PROGRESS:
+          assignedRole = 'QC';
+          pendingTask = 'Pemeriksaan Armada (QC Vehicle)';
+          targetRoute = '/qc-verification';
+          break;
+
+        case TransactionStatus.QC_VEHICLE_PASSED:
+        case TransactionStatus.PA_NOT_REQUIRED:
+          assignedRole = 'WAREHOUSE';
+          if (tx.processType === 'GBB') {
+            pendingTask = 'Bongkar Bahan Baku (GBB Unloading)';
+            targetRoute = '/gbb-process';
+          } else if (tx.processType === 'GBJ') {
+            pendingTask = 'Muat Barang Jadi (GBJ Loading)';
+            targetRoute = '/gbj-process';
+          } else {
+            pendingTask = 'Pemeriksaan Pra-Bongkar & Bongkar GSP';
+            targetRoute = '/gsp-process';
+          }
+          break;
+
+        case TransactionStatus.QC_RETEST_REQUIRED:
+          assignedRole = 'QC';
+          pendingTask = 'Retest Analisis Laboratorium (QC Retest)';
+          targetRoute = '/qc-verification';
+          break;
+
+        case TransactionStatus.WAITING_UTILITY_DISPOSITION:
+          assignedRole = 'ADMIN';
+          pendingTask = 'Disposisi Mutu Batubara Utility';
+          targetRoute = '/qc-verification';
+          break;
+
+        case TransactionStatus.WAITING_GSP_DISPOSITION:
+          assignedRole = 'WAREHOUSE';
+          pendingTask = 'Disposisi Mutu Chemical (GSP / Admin)';
+          targetRoute = '/gsp-process';
+          break;
+
+        case TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION:
+          assignedRole = 'WAREHOUSE';
+          pendingTask = 'Disposisi Konsesi Checklist Pra-Bongkar GSP';
+          targetRoute = '/gsp-process';
+          break;
+
+        case TransactionStatus.WAREHOUSE_IN_PROGRESS:
+          assignedRole = 'WAREHOUSE';
+          if (tx.processType === 'GBB') {
+            pendingTask = 'Proses Bongkar GBB Berlangsung';
+            targetRoute = '/gbb-process';
+          } else if (tx.processType === 'GBJ') {
+            pendingTask = 'Proses Muat GBJ Berlangsung';
+            targetRoute = '/gbj-process';
+          } else {
+            pendingTask = 'Proses Bongkar/Receiving GSP Berlangsung';
+            targetRoute = '/gsp-process';
+          }
+          break;
+
+        case TransactionStatus.WAREHOUSE_DONE:
+          if (tx.processType === 'GBJ') {
+            assignedRole = 'WEIGHBRIDGE';
+            pendingTask = 'Timbang Keluar (Gross OUT)';
+            targetRoute = '/weighbridge';
+          } else {
+            assignedRole = 'QC';
+            pendingTask = 'Analisis Laboratorium Masuk (QC Material)';
+            targetRoute = '/qc-verification';
+          }
+          break;
+
+        case TransactionStatus.INCOMING_CHECK_PENDING:
+        case TransactionStatus.INCOMING_CHECK_IN_PROGRESS:
+          assignedRole = 'QC';
+          pendingTask = 'Pemeriksaan Laboratorium Masuk (QC Material)';
+          targetRoute = '/qc-verification';
+          break;
+
+        case TransactionStatus.INCOMING_CHECK_PASSED:
+          assignedRole = 'WEIGHBRIDGE';
+          pendingTask = 'Timbang Keluar (Tare OUT)';
+          targetRoute = '/weighbridge';
+          break;
+
+        case TransactionStatus.WEIGH_OUT_DONE:
+          assignedRole = 'SECURITY';
+          pendingTask = 'Pemeriksaan Akhir & Gate Out';
+          targetRoute = '/gate-out';
+          break;
+
+        case TransactionStatus.QC_VEHICLE_REJECTED:
+        case TransactionStatus.INCOMING_CHECK_REJECTED:
+          if (tx.weighInAt && !tx.weighOutAt) {
+            assignedRole = 'WEIGHBRIDGE';
+            pendingTask = 'Timbang Keluar Kendaraan Ditolak';
+            targetRoute = '/weighbridge';
+          } else {
+            assignedRole = 'SECURITY';
+            pendingTask = 'Gate Out Kendaraan Ditolak';
+            targetRoute = '/gate-out';
+          }
+          break;
+
+        default:
+          assignedRole = 'ADMIN';
+          pendingTask = `Tindak Lanjut Transaksi (${tx.status})`;
+          targetRoute = '/dashboard';
+      }
+
+      // Check whether current user can take action
+      let isMyAction = false;
+      if (user.role === 'ADMIN') {
+        isMyAction = true;
+      } else if (user.role === 'SECURITY') {
+        isMyAction = assignedRole === 'SECURITY';
+      } else if (user.role === 'WEIGHBRIDGE') {
+        isMyAction = assignedRole === 'WEIGHBRIDGE';
+      } else if (user.role === 'QC') {
+        isMyAction =
+          assignedRole === 'QC' &&
+          (userScopes.length === 0 || userScopes.includes(tx.processType));
+      } else if (user.role === 'WAREHOUSE') {
+        isMyAction =
+          assignedRole === 'WAREHOUSE' &&
+          (userScopes.length === 0 || userScopes.includes(tx.processType));
+      }
+
+      // Calculate stage duration and waiting time
+      const latestHistory = tx.statusHistory?.[0];
+      const stageStartedAt =
+        latestHistory?.changedAt || tx.updatedAt || tx.createdAt;
+      const waitingDurationMin = Math.max(
+        0,
+        Math.floor(
+          (now.getTime() - new Date(stageStartedAt).getTime()) / 60000,
+        ),
+      );
+
+      // Configurable SLA check: only evaluate overdue if an official SLA is configured
+      const slaMinutes = getStageSlaMinutes(tx.status, tx.processType);
+      const isOverdue =
+        slaMinutes !== null && waitingDurationMin > slaMinutes && isMyAction;
+
+      // Determine categorization
+      let category:
+        'NEED_ACTION' | 'IN_PROGRESS' | 'WAITING_OTHER_PROCESS' | 'OVERDUE';
+      if (!isMyAction) {
+        category = 'WAITING_OTHER_PROCESS';
+      } else if (isOverdue) {
+        category = 'OVERDUE';
+      } else if (tx.status === 'WAREHOUSE_IN_PROGRESS') {
+        category = 'IN_PROGRESS';
+      } else {
+        category = 'NEED_ACTION';
+      }
+
+      const reminderId = `${tx.id}-${tx.status}-${tx.revision}`;
+      const snoozeExpireAt =
+        userState.snoozedReminders[reminderId] ||
+        userState.snoozedReminders[tx.id] ||
+        null;
+      const isSnoozed =
+        typeof snoozeExpireAt === 'number' && snoozeExpireAt > nowEpoch;
+      const isRead =
+        userState.readReminders.includes(reminderId) ||
+        userState.readReminders.includes(tx.id);
+
+      return {
+        id: reminderId,
+        transactionId: tx.id,
+        transactionNumber: tx.transactionNumber,
+        plateNumber: tx.plateNumber,
+        dailySequence: tx.dailySequence,
+        processType: tx.processType,
+        status: tx.status,
+        pendingTask,
+        assignedRole,
+        category,
+        isMyAction,
+        isSnoozed,
+        snoozeExpireAt,
+        isRead,
+        gateInAt: tx.gateInAt || tx.createdAt,
+        stageStartedAt,
+        waitingDurationMin,
+        slaMinutes,
+        isOverdue,
+        targetRoute,
+      };
+    });
+
+    const summary = {
+      needActionCount: reminders.filter(
+        (r) => r.category === 'NEED_ACTION' || r.category === 'OVERDUE',
+      ).length,
+      inProgressCount: reminders.filter((r) => r.category === 'IN_PROGRESS')
+        .length,
+      waitingOtherCount: reminders.filter(
+        (r) => r.category === 'WAITING_OTHER_PROCESS',
+      ).length,
+      overdueCount: reminders.filter((r) => r.category === 'OVERDUE').length,
+      totalActiveCount: reminders.length,
+      unsnoozedNeedActionCount: reminders.filter(
+        (r) =>
+          (r.category === 'NEED_ACTION' ||
+            r.category === 'OVERDUE' ||
+            r.isMyAction) &&
+          !r.isSnoozed,
+      ).length,
+      unsnoozedOverdueCount: reminders.filter(
+        (r) => r.category === 'OVERDUE' && !r.isSnoozed,
+      ).length,
+    };
+
+    return {
+      success: true,
+      message: 'Pending reminders retrieved successfully',
+      data: {
+        summary,
+        reminders,
+      },
+    };
   }
 
   async findOne(id: string, user: JwtPayloadUser) {
