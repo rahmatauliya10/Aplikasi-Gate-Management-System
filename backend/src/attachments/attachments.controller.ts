@@ -56,6 +56,28 @@ export class AttachmentsController {
     );
   }
 
+  @Post('reconcile/restore/:executionId')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Restore quarantined orphan files back to active storage',
+  })
+  restoreQuarantine(
+    @Param('executionId') executionId: string,
+    @CurrentUser() user: JwtPayloadUser,
+    @Req() req?: any,
+  ) {
+    const rawIp =
+      req?.headers?.['x-forwarded-for'] ||
+      req?.socket?.remoteAddress ||
+      '127.0.0.1';
+    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    return this.attachmentsService.restoreQuarantinedFiles(
+      executionId,
+      user,
+      ipAddress,
+    );
+  }
+
   @Post('upload/:transactionId')
   @Roles('ADMIN', 'SECURITY', 'WAREHOUSE', 'QC')
   @UseGuards(AttachmentUploadAccessGuard)

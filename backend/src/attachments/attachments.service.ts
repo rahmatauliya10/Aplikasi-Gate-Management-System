@@ -327,6 +327,7 @@ export class AttachmentsService {
     options: {
       dryRun?: boolean;
       removeOrphans?: boolean;
+      quarantineOrphans?: boolean;
       gracePeriodMinutes?: number;
       reason?: string;
     } = {},
@@ -334,14 +335,15 @@ export class AttachmentsService {
     ipAddress?: string,
   ) {
     // DUAL EXPLICIT AFFIRMATION RULE (Strict Fail-Closed):
-    // Physical deletion of ANY file is strictly forbidden unless BOTH conditions are explicitly met:
+    // Physical deletion or quarantine of ANY file is strictly forbidden unless BOTH conditions are explicitly met:
     // 1. dryRun === false (caller explicitly disabled simulation)
-    // 2. removeOrphans === true (caller explicitly confirmed physical deletion)
+    // 2. removeOrphans === true (caller explicitly confirmed physical deletion/quarantine)
     // In ALL other combinations (e.g. dryRun: false with removeOrphans: false, or undefined/null),
     // isDeletionPermitted is FALSE and isDryRun is TRUE.
     const isDeletionPermitted =
       options.dryRun === false && options.removeOrphans === true;
     const isDryRun = !isDeletionPermitted;
+    const useQuarantine = options.quarantineOrphans !== false;
 
     if (isDeletionPermitted && !user?.id) {
       throw new ForbiddenException(
@@ -474,7 +476,7 @@ export class AttachmentsService {
       if (clean) protectedDbPathsSet.add(clean.toLowerCase());
     }
 
-    // 2. Scan physical files on disk recursively
+    // 2. Scan physical files on disk recursively (excluding quarantine directories)
     const scannedPhysicalFiles: string[] = [];
     if (fs.existsSync(resolvedUploadDir)) {
       const traverse = (currentDir: string) => {
@@ -482,8 +484,8 @@ export class AttachmentsService {
         for (const entry of entries) {
           const fullPath = path.join(currentDir, entry.name);
           if (entry.isDirectory()) {
-            // Skip quarantine directory from orphan cleanup
-            if (entry.name !== 'quarantine') {
+            // Skip quarantine directories from orphan candidate scanning
+            if (entry.name !== 'quarantine' && entry.name !== '.quarantine') {
               traverse(fullPath);
             }
           } else if (entry.isFile()) {
@@ -497,11 +499,14 @@ export class AttachmentsService {
       traverse(resolvedUploadDir);
     }
 
-    // 3. Find orphan physical files (files on disk not in protected set AND older than grace period)
+    // 3. Find candidate orphan physical files (files on disk not in protected set AND older than grace period)
     const orphanFiles: string[] = [];
     const filesInGracePeriod: string[] = [];
-    const cleanedOrphanFiles: string[] = [];
-    let freedBytes = 0;
+    const candidateOrphans: Array<{
+      relPath: string;
+      fullPath: string;
+      size: number;
+    }> = [];
 
     for (const relPath of scannedPhysicalFiles) {
       if (!protectedDbPathsSet.has(relPath.toLowerCase())) {
@@ -516,23 +521,11 @@ export class AttachmentsService {
           }
 
           orphanFiles.push(relPath);
-
-          if (isDeletionPermitted) {
-            const relCheck = path.relative(resolvedUploadDir, fullPath);
-            if (
-              !relCheck.startsWith('..') &&
-              !path.isAbsolute(relCheck) &&
-              fs.existsSync(fullPath)
-            ) {
-              const fileSize = stats.size;
-              fs.unlinkSync(fullPath);
-              cleanedOrphanFiles.push(relPath);
-              freedBytes += fileSize;
-              this.logger.log(
-                `[Storage Cleanup] Purged orphan file: ${relPath} (${fileSize} bytes)`,
-              );
-            }
-          }
+          candidateOrphans.push({
+            relPath,
+            fullPath,
+            size: stats.size,
+          });
         } catch (statErr: any) {
           this.logger.warn(
             `Could not stat file ${relPath}: ${statErr.message}`,
@@ -541,51 +534,171 @@ export class AttachmentsService {
       }
     }
 
-    // 4. Structured Activity Logging (Mandatory Fail-Closed for Live Purge)
-    if (user?.id) {
+    const executionId = `reconcile-${now}-${Math.random().toString(36).substring(2, 7)}`;
+
+    // 4A. MANDATORY INTENT AUDIT LOGGING (Strict Fail-Closed BEFORE touching files)
+    if (isDeletionPermitted) {
       try {
-        await this.activityLogsService.logAction({
-          userId: user.id,
-          action: isDeletionPermitted
-            ? 'ATTACHMENT_RECONCILE_PURGE'
-            : 'ATTACHMENT_RECONCILE_AUDIT',
+        await this.activityLogsService.logActionStrict({
+          userId: user!.id,
+          action: 'ATTACHMENT_RECONCILE_INTENT',
           module: 'ATTACHMENTS',
-          referenceId: `reconcile-${Date.now()}`,
-          description: `Storage reconciliation executed. Mode: ${
-            isDeletionPermitted ? 'LIVE_CLEANUP' : 'DRY_RUN'
-          }, Scanned: ${scannedPhysicalFiles.length}, Protected DB records: ${
-            allAttachments.length
-          }, In Grace Period (<${gracePeriodMinutes}m): ${
-            filesInGracePeriod.length
-          }, Orphans: ${orphanFiles.length}, Cleaned: ${
-            cleanedOrphanFiles.length
-          } (${freedBytes} bytes freed), Missing: ${
-            missingRecords.length
-          }. Reason: ${options.reason || 'Manual Admin Maintenance'}`,
+          referenceId: executionId,
+          description: {
+            executionId,
+            mode: useQuarantine ? 'QUARANTINE' : 'PERMANENT_PURGE',
+            scannedFilesCount: scannedPhysicalFiles.length,
+            protectedDbRecordsCount: allAttachments.length,
+            inGracePeriodCount: filesInGracePeriod.length,
+            plannedOrphansCount: candidateOrphans.length,
+            plannedOrphanFiles: candidateOrphans
+              .slice(0, 50)
+              .map((c) => c.relPath),
+            reason: options.reason || 'Manual Admin Maintenance',
+          },
           status: 'SUCCESS',
           ipAddress,
         });
+      } catch (intentErr: any) {
+        this.logger.error(
+          `[Fail-Closed Audit Trail] Gagal mencatat ATTACHMENT_RECONCILE_INTENT ke database: ${intentErr.message}`,
+          intentErr.stack,
+        );
+        throw new InternalServerErrorException(
+          'Operasi pembersihan dibatalkan demi integritas data (Fail-Closed): Gagal mencatat niat audit (ActivityLog Intent) ke database sebelum memodifikasi berkas.',
+        );
+      }
+    }
+
+    // 4B. EXECUTE QUARANTINE OR PURGE (Only executed after intent audit is committed)
+    const cleanedOrphanFiles: string[] = [];
+    const quarantinedFiles: string[] = [];
+    let freedBytes = 0;
+
+    if (isDeletionPermitted) {
+      const quarantineBaseDir = path.resolve(
+        resolvedUploadDir,
+        'quarantine',
+        executionId,
+      );
+
+      for (const candidate of candidateOrphans) {
+        const { relPath, fullPath, size } = candidate;
+        try {
+          if (!fs.existsSync(fullPath)) {
+            this.logger.warn(
+              `File ${relPath} disappeared before cleanup, skipping.`,
+            );
+            continue;
+          }
+
+          const statCheck = fs.statSync(fullPath);
+          if (typeof statCheck.isFile === 'function' && !statCheck.isFile()) {
+            this.logger.warn(
+              `Path ${relPath} is no longer a regular file, skipping.`,
+            );
+            continue;
+          }
+
+          const relCheck = path.relative(resolvedUploadDir, fullPath);
+          if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
+            this.logger.warn(
+              `Path traversal check prevented processing ${relPath}`,
+            );
+            continue;
+          }
+
+          if (useQuarantine) {
+            const destPath = path.resolve(quarantineBaseDir, relPath);
+            const destDir = path.dirname(destPath);
+            if (!fs.existsSync(destDir)) {
+              fs.mkdirSync(destDir, { recursive: true });
+            }
+            fs.renameSync(fullPath, destPath);
+            quarantinedFiles.push(relPath);
+            cleanedOrphanFiles.push(relPath);
+            freedBytes += size;
+            this.logger.log(
+              `[Storage Cleanup] Quarantined orphan file: ${relPath} -> ${destPath}`,
+            );
+          } else {
+            fs.unlinkSync(fullPath);
+            cleanedOrphanFiles.push(relPath);
+            freedBytes += size;
+            this.logger.log(
+              `[Storage Cleanup] Purged orphan file: ${relPath} (${size} bytes)`,
+            );
+          }
+        } catch (cleanupErr: any) {
+          this.logger.error(
+            `Failed to process orphan file ${relPath}: ${cleanupErr.message}`,
+            cleanupErr.stack,
+          );
+        }
+      }
+    }
+
+    // 4C. STRUCTURED OUTCOME ACTIVITY LOGGING
+    if (user?.id) {
+      try {
+        if (isDeletionPermitted) {
+          await this.activityLogsService.logActionStrict({
+            userId: user.id,
+            action: 'ATTACHMENT_RECONCILE_PURGE',
+            module: 'ATTACHMENTS',
+            referenceId: executionId,
+            description: {
+              executionId,
+              mode: useQuarantine ? 'QUARANTINE' : 'PERMANENT_PURGE',
+              quarantineDirectory: useQuarantine
+                ? `quarantine/${executionId}`
+                : null,
+              scannedFilesCount: scannedPhysicalFiles.length,
+              protectedDbRecordsCount: allAttachments.length,
+              inGracePeriodCount: filesInGracePeriod.length,
+              orphansDetectedCount: orphanFiles.length,
+              cleanedOrphansCount: cleanedOrphanFiles.length,
+              quarantinedFilesCount: quarantinedFiles.length,
+              freedBytes,
+              reason: options.reason || 'Manual Admin Maintenance',
+            },
+            status: 'SUCCESS',
+            ipAddress,
+          });
+        } else {
+          await this.activityLogsService.logAction({
+            userId: user.id,
+            action: 'ATTACHMENT_RECONCILE_AUDIT',
+            module: 'ATTACHMENTS',
+            referenceId: executionId,
+            description: `Storage reconciliation simulation executed (DRY_RUN). Scanned: ${scannedPhysicalFiles.length}, Protected records: ${allAttachments.length}, In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}. Reason: ${options.reason || 'Manual Admin Maintenance'}`,
+            status: 'SUCCESS',
+            ipAddress,
+          });
+        }
       } catch (logErr: any) {
         this.logger.error(
-          `Failed to record activity log for reconciliation: ${logErr.message}`,
+          `Failed to record activity log outcome for reconciliation: ${logErr.message}`,
           logErr.stack,
         );
         if (isDeletionPermitted) {
           throw new InternalServerErrorException(
-            'Gagal mencatat jejak audit (ActivityLog) untuk operasi pembersihan berkas. Operasi dibatalkan demi kepatuhan integritas data.',
+            'Gagal mencatat jejak audit hasil (ActivityLog Outcome) untuk operasi pembersihan berkas.',
           );
         }
       }
     }
 
     this.logger.log(
-      `[Storage Reconciliation] Scanned ${scannedPhysicalFiles.length} files, ${allAttachments.length} DB records. In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}, Cleaned: ${cleanedOrphanFiles.length} (Freed: ${freedBytes}B, DryRun: ${isDryRun})`,
+      `[Storage Reconciliation] Scanned ${scannedPhysicalFiles.length} files, ${allAttachments.length} DB records. In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}, Cleaned: ${cleanedOrphanFiles.length} (Quarantined: ${quarantinedFiles.length}, Freed: ${freedBytes}B, DryRun: ${isDryRun})`,
     );
 
     return {
       success: true,
       timestamp: new Date().toISOString(),
+      executionId,
       dryRun: isDryRun,
+      quarantine: useQuarantine,
       gracePeriodMinutes,
       scannedFilesCount: scannedPhysicalFiles.length,
       allAttachmentsCount: allAttachments.length,
@@ -595,9 +708,94 @@ export class AttachmentsService {
       orphanFiles,
       cleanedOrphanFilesCount: cleanedOrphanFiles.length,
       cleanedOrphanFiles,
+      quarantinedFilesCount: quarantinedFiles.length,
+      quarantinedFiles,
       freedBytes,
       missingRecordsCount: missingRecords.length,
       missingRecords,
+    };
+  }
+
+  /**
+   * Restores files from quarantine back to active storage directory.
+   */
+  async restoreQuarantinedFiles(
+    executionId: string,
+    user: JwtPayloadUser,
+    ipAddress?: string,
+  ) {
+    if (!user?.id) {
+      throw new ForbiddenException(
+        'Pemulihan berkas karantina memerlukan otentikasi administrator.',
+      );
+    }
+
+    // Sanitize executionId to avoid directory traversal
+    const safeExecId = path.basename(executionId);
+    const resolvedUploadDir = path.resolve(this.baseUploadDir);
+    const quarantineTargetDir = path.resolve(
+      resolvedUploadDir,
+      'quarantine',
+      safeExecId,
+    );
+
+    if (!fs.existsSync(quarantineTargetDir)) {
+      throw new NotFoundException(
+        `Direktori karantina untuk eksekusi ${safeExecId} tidak ditemukan.`,
+      );
+    }
+
+    const restoredFiles: string[] = [];
+
+    const traverseAndRestore = (currentDir: string) => {
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullSourcePath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          traverseAndRestore(fullSourcePath);
+        } else if (entry.isFile()) {
+          const relFromQuarantine = path
+            .relative(quarantineTargetDir, fullSourcePath)
+            .replace(/\\/g, '/');
+          const destPath = path.resolve(resolvedUploadDir, relFromQuarantine);
+          const destDir = path.dirname(destPath);
+          if (!fs.existsSync(destDir)) {
+            fs.mkdirSync(destDir, { recursive: true });
+          }
+          fs.renameSync(fullSourcePath, destPath);
+          restoredFiles.push(relFromQuarantine);
+        }
+      }
+    };
+
+    traverseAndRestore(quarantineTargetDir);
+
+    // Audit restore action
+    try {
+      await this.activityLogsService.logActionStrict({
+        userId: user.id,
+        action: 'ATTACHMENT_RECONCILE_RESTORE',
+        module: 'ATTACHMENTS',
+        referenceId: safeExecId,
+        description: {
+          executionId: safeExecId,
+          restoredFilesCount: restoredFiles.length,
+          restoredFiles,
+        },
+        status: 'SUCCESS',
+        ipAddress,
+      });
+    } catch (auditErr: any) {
+      this.logger.warn(
+        `Failed to log restore audit for ${safeExecId}: ${auditErr.message}`,
+      );
+    }
+
+    return {
+      success: true,
+      executionId: safeExecId,
+      restoredFilesCount: restoredFiles.length,
+      restoredFiles,
     };
   }
 }

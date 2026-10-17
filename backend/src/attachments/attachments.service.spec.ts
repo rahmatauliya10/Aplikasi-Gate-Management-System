@@ -18,9 +18,13 @@ jest.mock('fs', () => {
     existsSync: jest.fn((...args: any[]) => original.existsSync(...args)),
     readdirSync: jest.fn((...args: any[]) => original.readdirSync(...args)),
     unlinkSync: jest.fn((...args: any[]) => original.unlinkSync(...args)),
+    renameSync: jest.fn((...args: any[]) => original.renameSync(...args)),
+    mkdirSync: jest.fn((...args: any[]) => original.mkdirSync(...args)),
     statSync: jest.fn((...args: any[]) => ({
       mtimeMs: 0,
       size: 1024,
+      isFile: () => true,
+      isDirectory: () => false,
     })),
   };
 });
@@ -49,6 +53,7 @@ describe('AttachmentsService', () => {
 
   const mockActivityLogsService = {
     logAction: jest.fn(),
+    logActionStrict: jest.fn(),
   };
 
   const mockAuthorizationScopeService = {
@@ -71,6 +76,10 @@ describe('AttachmentsService', () => {
     service = module.get<AttachmentsService>(AttachmentsService);
     mockPrismaService.transactionCorrection.findMany.mockResolvedValue([]);
     mockPrismaService.systemIssue.findMany.mockResolvedValue([]);
+    mockActivityLogsService.logAction.mockResolvedValue({ id: 'log-1' });
+    mockActivityLogsService.logActionStrict.mockResolvedValue({
+      id: 'log-strict-1',
+    });
   });
 
   afterEach(() => {
@@ -348,7 +357,7 @@ describe('AttachmentsService', () => {
       expect(fs.unlinkSync).not.toHaveBeenCalled();
     });
 
-    it('should delete orphan files and log activity ONLY when BOTH removeOrphans is true and dryRun is false (Dual Affirmation)', async () => {
+    it('should move orphan files to quarantine and log both INTENT and PURGE via logActionStrict by default (Two-Stage Quarantine)', async () => {
       mockPrismaService.attachment.findMany.mockResolvedValue([]);
 
       (fs.existsSync as jest.Mock).mockReturnValue(true);
@@ -364,8 +373,10 @@ describe('AttachmentsService', () => {
       (fs.statSync as jest.Mock).mockReturnValue({
         mtimeMs: Date.now() - 48 * 60 * 60 * 1000, // 48 hours old
         size: 2048,
+        isFile: () => true,
+        isDirectory: () => false,
       });
-      (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+      (fs.renameSync as jest.Mock).mockImplementation(() => {});
 
       const adminUser = {
         id: 'usr-admin-1',
@@ -380,11 +391,24 @@ describe('AttachmentsService', () => {
 
       expect(result.success).toBe(true);
       expect(result.dryRun).toBe(false);
+      expect(result.quarantine).toBe(true);
       expect(result.orphanFilesCount).toBe(1);
       expect(result.cleanedOrphanFilesCount).toBe(1);
+      expect(result.quarantinedFilesCount).toBe(1);
       expect(result.freedBytes).toBe(2048);
-      expect(fs.unlinkSync).toHaveBeenCalled();
-      expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+      expect(fs.renameSync).toHaveBeenCalled();
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+
+      // Verify INTENT was recorded strictly first, then PURGE
+      expect(mockActivityLogsService.logActionStrict).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'usr-admin-1',
+          action: 'ATTACHMENT_RECONCILE_INTENT',
+          module: 'ATTACHMENTS',
+          status: 'SUCCESS',
+        }),
+      );
+      expect(mockActivityLogsService.logActionStrict).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: 'usr-admin-1',
           action: 'ATTACHMENT_RECONCILE_PURGE',
@@ -394,7 +418,7 @@ describe('AttachmentsService', () => {
       );
     });
 
-    it('should NOT delete files when dryRun is false but removeOrphans is false (Dual Affirmation)', async () => {
+    it('should permanently unlink orphan files when quarantineOrphans is explicitly false', async () => {
       mockPrismaService.attachment.findMany.mockResolvedValue([]);
       (fs.existsSync as jest.Mock).mockReturnValue(true);
       (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
@@ -405,8 +429,78 @@ describe('AttachmentsService', () => {
       (fs.statSync as jest.Mock).mockReturnValue({
         mtimeMs: Date.now() - 48 * 60 * 60 * 1000,
         size: 2048,
+        isFile: () => true,
+        isDirectory: () => false,
       });
       (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+      const result = await service.reconcileAttachmentStorage(
+        { removeOrphans: true, dryRun: false, quarantineOrphans: false },
+        adminUser,
+      );
+
+      expect(result.quarantine).toBe(false);
+      expect(result.cleanedOrphanFilesCount).toBe(1);
+      expect(fs.unlinkSync).toHaveBeenCalled();
+      expect(fs.renameSync).not.toHaveBeenCalled();
+    });
+
+    it('should restore quarantined files back to active storage directory', async () => {
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          {
+            name: 'orphan.jpg',
+            isFile: () => true,
+            isDirectory: () => false,
+          },
+        ] as any;
+      });
+      (fs.renameSync as jest.Mock).mockImplementation(() => {});
+
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+      const result = await service.restoreQuarantinedFiles(
+        'reconcile-run-123',
+        adminUser,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.restoredFilesCount).toBe(1);
+      expect(fs.renameSync).toHaveBeenCalled();
+      expect(mockActivityLogsService.logActionStrict).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'usr-admin-1',
+          action: 'ATTACHMENT_RECONCILE_RESTORE',
+          referenceId: 'reconcile-run-123',
+        }),
+      );
+    });
+
+    it('should NOT delete or quarantine files when dryRun is false but removeOrphans is false (Dual Affirmation)', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
+        return [
+          { name: 'orphan.jpg', isFile: () => true, isDirectory: () => false },
+        ] as any;
+      });
+      (fs.statSync as jest.Mock).mockReturnValue({
+        mtimeMs: Date.now() - 48 * 60 * 60 * 1000,
+        size: 2048,
+        isFile: () => true,
+        isDirectory: () => false,
+      });
+      (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+      (fs.renameSync as jest.Mock).mockImplementation(() => {});
 
       const adminUser = {
         id: 'usr-admin-1',
@@ -422,9 +516,10 @@ describe('AttachmentsService', () => {
       expect(result.orphanFilesCount).toBe(1);
       expect(result.cleanedOrphanFilesCount).toBe(0);
       expect(fs.unlinkSync).not.toHaveBeenCalled();
+      expect(fs.renameSync).not.toHaveBeenCalled();
     });
 
-    it('should NOT delete files when removeOrphans is true but dryRun is omitted (Dual Affirmation)', async () => {
+    it('should NOT delete or quarantine files when removeOrphans is true but dryRun is omitted (Dual Affirmation)', async () => {
       mockPrismaService.attachment.findMany.mockResolvedValue([]);
       (fs.existsSync as jest.Mock).mockReturnValue(true);
       (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => {
@@ -435,8 +530,11 @@ describe('AttachmentsService', () => {
       (fs.statSync as jest.Mock).mockReturnValue({
         mtimeMs: Date.now() - 48 * 60 * 60 * 1000,
         size: 2048,
+        isFile: () => true,
+        isDirectory: () => false,
       });
       (fs.unlinkSync as jest.Mock).mockImplementation(() => {});
+      (fs.renameSync as jest.Mock).mockImplementation(() => {});
 
       const adminUser = {
         id: 'usr-admin-1',
@@ -452,6 +550,7 @@ describe('AttachmentsService', () => {
       expect(result.orphanFilesCount).toBe(1);
       expect(result.cleanedOrphanFilesCount).toBe(0);
       expect(fs.unlinkSync).not.toHaveBeenCalled();
+      expect(fs.renameSync).not.toHaveBeenCalled();
     });
 
     it('should reject live cleanup if caller is unauthenticated (Fail-Closed)', async () => {
@@ -482,16 +581,35 @@ describe('AttachmentsService', () => {
       ).rejects.toThrow(InternalServerErrorException);
     });
 
-    it('should abort live cleanup if writing ActivityLog fails (Fail-Closed Audit Trail)', async () => {
+    it('should abort live cleanup and leave files 100% untouched if ATTACHMENT_RECONCILE_INTENT audit fails (Zero-Touch Fail-Closed)', async () => {
       mockPrismaService.attachment.findMany.mockResolvedValue([]);
       mockPrismaService.transactionCorrection.findMany.mockResolvedValue([]);
       mockPrismaService.systemIssue.findMany.mockResolvedValue([]);
 
       (fs.existsSync as jest.Mock).mockReturnValue(true);
-      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => []);
+      // REAL ORPHAN FILES PRESENT IN DIRECTORY
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => [
+        {
+          name: 'critical-doc-1.pdf',
+          isFile: () => true,
+          isDirectory: () => false,
+        },
+        {
+          name: 'critical-doc-2.jpg',
+          isFile: () => true,
+          isDirectory: () => false,
+        },
+      ]);
+      (fs.statSync as jest.Mock).mockReturnValue({
+        mtimeMs: Date.now() - 48 * 60 * 60 * 1000,
+        size: 5120,
+        isFile: () => true,
+        isDirectory: () => false,
+      });
 
-      mockActivityLogsService.logAction.mockRejectedValueOnce(
-        new Error('Audit log table disk full'),
+      // Strict intent audit fails (e.g. database error)
+      mockActivityLogsService.logActionStrict.mockRejectedValueOnce(
+        new Error('Audit database out of disk space'),
       );
 
       const adminUser = {
@@ -499,6 +617,51 @@ describe('AttachmentsService', () => {
         role: 'ADMIN',
         email: 'admin@gms.local',
       };
+
+      await expect(
+        service.reconcileAttachmentStorage(
+          { removeOrphans: true, dryRun: false },
+          adminUser,
+        ),
+      ).rejects.toThrow(InternalServerErrorException);
+
+      // ZERO-TOUCH PROOF: Neither unlink nor rename was called on disk!
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
+      expect(fs.renameSync).not.toHaveBeenCalled();
+    });
+
+    it('should abort if outcome audit fails after cleanup', async () => {
+      mockPrismaService.attachment.findMany.mockResolvedValue([]);
+      mockPrismaService.transactionCorrection.findMany.mockResolvedValue([]);
+      mockPrismaService.systemIssue.findMany.mockResolvedValue([]);
+
+      (fs.existsSync as jest.Mock).mockReturnValue(true);
+      (fs.readdirSync as jest.Mock).mockImplementation((_dir: any) => [
+        {
+          name: 'orphan.jpg',
+          isFile: () => true,
+          isDirectory: () => false,
+        },
+      ]);
+      (fs.statSync as jest.Mock).mockReturnValue({
+        mtimeMs: Date.now() - 48 * 60 * 60 * 1000,
+        size: 1024,
+        isFile: () => true,
+        isDirectory: () => false,
+      });
+      (fs.renameSync as jest.Mock).mockImplementation(() => {});
+
+      // First call (intent) succeeds, second call (outcome) fails
+      mockActivityLogsService.logActionStrict
+        .mockResolvedValueOnce({ id: 'intent-log-1' })
+        .mockRejectedValueOnce(new Error('Audit outcome table error'));
+
+      const adminUser = {
+        id: 'usr-admin-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      };
+
       await expect(
         service.reconcileAttachmentStorage(
           { removeOrphans: true, dryRun: false },

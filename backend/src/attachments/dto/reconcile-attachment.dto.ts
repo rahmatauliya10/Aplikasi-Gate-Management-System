@@ -19,12 +19,21 @@ export class ReconcileAttachmentDto {
 
   @ApiPropertyOptional({
     description:
-      'Wajib diset true secara eksplisit bersamaan dengan dryRun: false untuk mengizinkan penghapusan fisik. Jika salah satu kondisi tidak terpenuhi, sistem berjalan dalam mode simulasi (Fail-Closed).',
+      'Wajib diset true secara eksplisit bersamaan dengan dryRun: false untuk mengizinkan penghapusan/karantina fisik. Jika salah satu kondisi tidak terpenuhi, sistem berjalan dalam mode simulasi (Fail-Closed).',
     default: false,
   })
   @IsOptional()
   @IsBoolean()
   removeOrphans?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Jika true (default), berkas yatim dipindahkan ke direktori karantina yang dapat dipulihkan (quarantine/<executionId>/) sebelum penghapusan permanen. Jika false, berkas dihapus langsung setelah audit intent.',
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  quarantineOrphans?: boolean;
 
   @ApiPropertyOptional({
     description:
