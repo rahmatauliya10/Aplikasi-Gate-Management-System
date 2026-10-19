@@ -17,24 +17,24 @@
             </div>
             <div>
               <div class="flex items-center space-x-2">
-                <h2 class="text-lg sm:text-xl font-black text-[#4A8BDF] tracking-tight font-mono">{{ truck.plateNumber }}</h2>
+                <h2 class="text-lg sm:text-xl font-black text-[#4A8BDF] tracking-tight font-mono">{{ currentTruck.plateNumber }}</h2>
                 <span class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
-                  :class="truck.processType === 'GBB' ? 'bg-pink-50 text-[#A0006D] border border-pink-200' : truck.processType === 'GBJ' ? 'bg-indigo-50 text-indigo-600 border border-indigo-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'">
-                  {{ truck.processType }}
+                  :class="currentTruck.processType === 'GBB' ? 'bg-pink-50 text-[#A0006D] border border-pink-200' : currentTruck.processType === 'GBJ' ? 'bg-indigo-50 text-indigo-600 border border-indigo-200' : 'bg-emerald-50 text-emerald-600 border border-emerald-200'">
+                  {{ currentTruck.processType }}
                 </span>
-                <StatusBadge :status="truck.status" :process-type="truck.processType" />
+                <StatusBadge :status="currentTruck.status" :process-type="currentTruck.processType" />
                 <ProcessTimerBadge
                   :start-time="activeStageStartTime"
-                  :end-time="truck.completedAt || truck.cancelledAt"
+                  :end-time="currentTruck.completedAt || currentTruck.cancelledAt"
                   :sla-minutes="60"
                   label="Durasi"
                   :compact="true"
                 />
               </div>
               <div class="flex items-center space-x-1.5 mt-0.5">
-                <span class="text-[10px] font-bold text-slate-500">{{ truck.driverName }}</span>
+                <span class="text-[10px] font-bold text-slate-500">{{ currentTruck.driverName }}</span>
                 <span class="w-1 h-1 rounded-full bg-slate-300"></span>
-                <span class="text-[10px] font-bold text-slate-400">{{ truck.vehicleType || 'N/A' }}</span>
+                <span class="text-[10px] font-bold text-slate-400">{{ currentTruck.vehicleType || 'N/A' }}</span>
               </div>
             </div>
           </div>
@@ -45,7 +45,7 @@
               <span class="material-icons text-sm text-rose-600">picture_as_pdf</span>
               <span>Cetak PDF</span>
             </button>
-            <button v-if="isAdmin && (truck.status === 'COMPLETED' || truck.status === 'CANCELLED' || truck.status === 'IN_PROGRESS')" @click="openCorrectionModal"
+            <button v-if="isAdmin && isTerminalTransaction" @click="openCorrectionModal"
               class="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 flex items-center space-x-1.5 transition-all shadow-sm active:scale-95">
               <span class="material-icons text-sm text-amber-600">edit_note</span>
               <span>Koreksi Admin</span>
@@ -80,15 +80,15 @@
               </div>
 
               <!-- Cargo Items -->
-              <div v-if="truck.cargoItems && truck.cargoItems.length > 0" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+              <div v-if="currentTruck.cargoItems && currentTruck.cargoItems.length > 0" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                 <div class="px-4 py-2 flex items-center space-x-2 border-b border-slate-50 bg-slate-50/50">
                   <span class="material-icons text-amber-500 text-[14px]">inventory_2</span>
                   <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Cargo Manifest</h3>
-                  <span class="ml-auto text-[9px] font-black text-slate-400">{{ truck.cargoItems.length }} item(s)</span>
+                  <span class="ml-auto text-[9px] font-black text-slate-400">{{ currentTruck.cargoItems.length }} item(s)</span>
                 </div>
                 <div class="p-3">
                   <div class="flex flex-wrap gap-1.5">
-                    <span v-for="(item, idx) in truck.cargoItems" :key="idx"
+                    <span v-for="(item, idx) in currentTruck.cargoItems" :key="idx"
                       class="inline-flex items-center px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-100 text-[11px] font-bold text-amber-800">
                       <span class="material-icons text-[12px] mr-1 text-amber-500">package_2</span>
                       {{ item.name || item }}
@@ -361,7 +361,7 @@
               <!-- ================= GBB / GBJ SECTIONS ================= -->
               <template v-else>
                 <!-- 1. Initial QC Sampling Card / SAMPLING PARAMETERS (For GBB) -->
-                <div v-if="truck.processType === 'GBB' && initialSamplingDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm space-y-2 p-3">
+                <div v-if="currentTruck.processType === 'GBB' && initialSamplingDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm space-y-2 p-3">
                   <div class="flex items-center justify-between border-b border-slate-50 pb-2">
                     <div class="flex items-center space-x-2">
                       <span class="material-icons text-indigo-500 text-[14px]">biotech</span>
@@ -406,7 +406,7 @@
                 </div>
 
                 <!-- 2. Quality Analysis (QC Lab) Card (For GBB) -->
-                <div v-if="truck.processType === 'GBB' && qcLabDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div v-if="currentTruck.processType === 'GBB' && qcLabDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                   <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
                     <div class="flex items-center space-x-2">
                       <span class="material-icons text-blue-500 text-[14px]">science</span>
@@ -439,7 +439,7 @@
                 </div>
 
                 <!-- 3. QC Vehicle Card (For GBJ) -->
-                <div v-if="truck.processType === 'GBJ' && qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div v-if="currentTruck.processType === 'GBJ' && qcDetails" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                   <div class="px-4 py-2 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
                     <div class="flex items-center space-x-2">
                       <span class="material-icons text-indigo-500 text-[14px]">local_shipping</span>
@@ -460,7 +460,7 @@
                 </div>
 
                 <!-- Incoming Checklist Results for GBJ -->
-                <div v-if="truck.processType === 'GBJ' && (parsedChecklist || isWarehouseRejection)" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div v-if="currentTruck.processType === 'GBJ' && (parsedChecklist || isWarehouseRejection)" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                   <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50"
                        :style="checklistStatusInfo.headerStyle">
                     <div class="flex items-center space-x-2">
@@ -496,7 +496,7 @@
                 </div>
 
                 <!-- GBJ Warehouse Loading & Delivery Checklist -->
-                <div v-if="truck.processType === 'GBJ' && gbjDeliveryData" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
+                <div v-if="currentTruck.processType === 'GBJ' && gbjDeliveryData" class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
                   <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50 bg-indigo-50/40">
                     <div class="flex items-center space-x-2">
                       <span class="material-icons text-indigo-600 text-[15px]">fact_check</span>
@@ -528,7 +528,7 @@
                       </div>
                       <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
                         <span class="text-[8px] font-black text-slate-400 uppercase tracking-wider block mb-0.5">Surat Jalan (SJ)</span>
-                        <span class="font-bold text-slate-800 font-mono">{{ truck.suratJalanNumber || gbjDeliveryData.suratJalanNumber || '-' }}</span>
+                        <span class="font-bold text-slate-800 font-mono">{{ currentTruck.suratJalanNumber || gbjDeliveryData.suratJalanNumber || '-' }}</span>
                       </div>
                     </div>
 
@@ -615,36 +615,36 @@
                 <div class="p-3.5 space-y-3">
                   <!-- 1. Weighing Inputs Grid (GROSS IN & TARE OUT) -->
                   <div class="grid grid-cols-2 gap-3">
-                    <template v-if="truck.processType === 'GBB' || truck.processType === 'GSP'">
+                    <template v-if="currentTruck.processType === 'GBB' || currentTruck.processType === 'GSP'">
                       <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
                         <div>
                           <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">GROSS (IN)</span>
                           <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossInVal) }}</div>
                         </div>
-                        <span v-if="props.truck.weighInBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
+                        <span v-if="currentTruck.weighInBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ currentTruck.weighInBy.name }}</span>
                       </div>
                       <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
                         <div>
                           <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">TARE (OUT)</span>
                           <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareOutVal) }}</div>
                         </div>
-                        <span v-if="props.truck.weighOutBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
+                        <span v-if="currentTruck.weighOutBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ currentTruck.weighOutBy.name }}</span>
                       </div>
                     </template>
-                    <template v-else-if="truck.processType === 'GBJ'">
+                    <template v-else-if="currentTruck.processType === 'GBJ'">
                       <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
                         <div>
                           <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">TARE (IN)</span>
                           <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(tareInVal) }}</div>
                         </div>
-                        <span v-if="props.truck.weighInBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighInBy.name }}</span>
+                        <span v-if="currentTruck.weighInBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ currentTruck.weighInBy.name }}</span>
                       </div>
                       <div class="p-3 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex flex-col justify-between">
                         <div>
                           <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">GROSS (OUT)</span>
                           <div class="text-xl font-black text-slate-900 font-mono tracking-tight">{{ formatWeightCustom(grossOutVal) }}</div>
                         </div>
-                        <span v-if="props.truck.weighOutBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ props.truck.weighOutBy.name }}</span>
+                        <span v-if="currentTruck.weighOutBy?.name" class="text-[9px] font-bold text-slate-400 block mt-2">PIC: [TIMBANGAN] {{ currentTruck.weighOutBy.name }}</span>
                       </div>
                     </template>
                   </div>
@@ -662,7 +662,7 @@
                         <span class="text-[9px] font-black text-amber-700/80 uppercase tracking-widest block mb-1">WAREHOUSE REALIZATION</span>
                         <div class="text-xl font-black text-amber-800 font-mono tracking-tight">{{ formattedRealizationDisplay }}</div>
                       </div>
-                      <span v-if="currentTruck.warehouseEndBy?.name || currentTruck.warehouseStartBy?.name || props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name" class="text-[9px] font-bold text-amber-700/80 block mt-2">PIC: [GUDANG] {{ currentTruck.warehouseEndBy?.name || currentTruck.warehouseStartBy?.name || props.truck.warehouseEndBy?.name || props.truck.warehouseStartBy?.name }}</span>
+                      <span v-if="currentTruck.warehouseEndBy?.name || currentTruck.warehouseStartBy?.name" class="text-[9px] font-bold text-amber-700/80 block mt-2">PIC: [GUDANG] {{ currentTruck.warehouseEndBy?.name || currentTruck.warehouseStartBy?.name }}</span>
                     </div>
                   </div>
 
@@ -845,9 +845,9 @@
                 <!-- Status Transition Details -->
                 <div v-if="item.eventType === 'STATUS_TRANSITION' || (item.oldStatus && item.newStatus)" class="flex items-center gap-2 text-[10px] font-mono bg-blue-50/60 p-2 rounded border border-blue-100">
                   <span class="text-slate-500 font-bold">Transisi Status:</span>
-                  <span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{{ getStatusLabel(item.oldStatus, truck?.processType) || 'NONE' }}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">{{ getStatusLabel(item.oldStatus, currentTruck?.processType) || 'NONE' }}</span>
                   <span class="material-icons text-xs text-blue-600">arrow_forward</span>
-                  <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white font-bold">{{ getStatusLabel(item.newStatus, truck?.processType) }}</span>
+                  <span class="px-1.5 py-0.5 rounded bg-blue-600 text-white font-bold">{{ getStatusLabel(item.newStatus, currentTruck?.processType) }}</span>
                 </div>
 
                 <!-- Field Level Diff if single item -->
@@ -872,7 +872,7 @@
 
         <!-- Footer (Compact) -->
         <div class="px-4 py-2.5 flex justify-between shrink-0" style="background: #FAFBFF; border-top: 1px solid #E8EEF7;">
-          <button v-if="authStore.isAdmin && !props.truck?.isVoided && props.truck?.status !== 'COMPLETED'"
+          <button v-if="authStore.isAdmin && canVoidCurrentTransaction"
             @click="openVoidModal"
             title="Mengeluarkan transaksi dari operasional tanpa menghapus data historis (Void / Soft-Delete)"
             class="group relative overflow-hidden flex items-center space-x-1.5 px-4 py-2 rounded-lg transition-all duration-300 hover:shadow-md active:scale-[0.97]"
@@ -921,7 +921,7 @@
             <div class="flex items-center justify-between border-b border-slate-100 pb-3">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-amber-600">edit_note</span>
-                <h3 class="text-base font-black text-slate-800">Koreksi Log Operasi (Admin & Auditor)</h3>
+                <h3 class="text-base font-black text-slate-800">Koreksi Log Operasi (Admin)</h3>
               </div>
               <button @click="showCorrectionModal = false" class="text-slate-400 hover:text-slate-600 transition-colors">
                 <span class="material-icons">close</span>
@@ -942,7 +942,7 @@
               </div>
               <p class="font-medium text-slate-700">{{ occConflictError }}</p>
               <div class="flex justify-end pt-1">
-                <button @click="fetchCorrectionHistory; showCorrectionModal = false" type="button" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-sm">
+                <button @click="refreshAfterConflict" type="button" class="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-sm">
                   <span class="material-icons text-[14px]">refresh</span> Refresh Data
                 </button>
               </div>
@@ -1036,15 +1036,20 @@
               <div>
                 <label class="block font-bold text-slate-700 mb-1 text-[11px] uppercase tracking-wider">Lampiran Bukti Dokumen <span class="text-slate-400 font-normal">(Opsional)</span></label>
                 <div class="flex flex-col gap-2">
-                  <input v-model="correctionForm.evidenceUrl" type="text" placeholder="URL dokumen / hasil upload otomatis..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all font-mono text-xs" />
+                  <input v-model="correctionForm.evidenceUrl" type="url" placeholder="Reference URL legacy (bukan bukti fisik terverifikasi)" class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white transition-all font-mono text-xs" />
+                  <p class="text-[10px] text-slate-500">Bukti fisik resmi harus diunggah sebagai attachment agar ownership dan checksum dapat diverifikasi server.</p>
                   <div class="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-200">
                     <span class="text-[11px] font-bold text-slate-600 flex items-center gap-1">
-                      <span class="material-icons text-sm text-amber-600">upload_file</span> Pilih Bukti Fisik / Foto:
+                      <span class="material-icons text-sm text-amber-600">upload_file</span> Unggah Bukti Fisik / Foto:
                     </span>
-                    <input type="file" @change="handleEvidenceUpload" class="text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer" accept="image/*,.pdf" />
+                    <input type="file" @change="handleEvidenceUpload" :disabled="evidenceUploadLoading" class="text-[10px] file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[10px] file:font-bold file:bg-amber-100 file:text-amber-800 hover:file:bg-amber-200 cursor-pointer disabled:opacity-50" accept="image/jpeg,image/png,application/pdf" />
                   </div>
-                  <span v-if="correctionForm.evidencePhoto" class="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
-                    ✓ File terlampir: {{ correctionForm.evidencePhoto }}
+                  <span v-if="evidenceUploadLoading" class="text-[10px] font-bold text-amber-700 flex items-center gap-1">Mengunggah dan memverifikasi attachment...</span>
+                  <span v-if="evidenceUploadError" class="text-[10px] font-bold text-red-700 flex items-center gap-1">
+                    {{ evidenceUploadError }}
+                  </span>
+                  <span v-if="correctionForm.evidencePhoto && correctionForm.evidenceAttachmentId" class="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                    ✓ File terlampir: {{ correctionForm.evidencePhoto }} (ID: {{ correctionForm.evidenceAttachmentId }})
                   </span>
                 </div>
               </div>
@@ -1098,24 +1103,24 @@
                   <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                     <!-- Input 1: Gross Weight -->
                     <div class="space-y-1">
-                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Gross Weight (kg) [Source IN]</label>
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Gross Weight (kg) [Source {{ weightRecordTypes.gross }}]</label>
                       <div class="relative">
                         <input v-model.number="correctionForm.grossWeight" type="number"
                           class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          :class="Number(correctionForm.grossWeight) !== Number(props.truck?.grossWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                          :class="Number(correctionForm.grossWeight) !== Number(currentTruck?.grossWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
-                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.grossWeight || 0 }} kg</span>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentTruck?.grossWeight || 0 }} kg</span>
                     </div>
 
                     <!-- Input 2: Tare Weight -->
                     <div class="space-y-1">
-                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Tare Weight (kg) [Source OUT]</label>
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Tare Weight (kg) [Source {{ weightRecordTypes.tare }}]</label>
                       <div class="relative">
                         <input v-model.number="correctionForm.tareWeight" type="number"
                           class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          :class="Number(correctionForm.tareWeight) !== Number(props.truck?.tareWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                          :class="Number(correctionForm.tareWeight) !== Number(currentTruck?.tareWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
-                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.tareWeight || 0 }} kg</span>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentTruck?.tareWeight || 0 }} kg</span>
                     </div>
 
                     <!-- Input 3: Warehouse Realization -->
@@ -1124,9 +1129,9 @@
                       <div class="relative">
                         <input v-model.number="correctionForm.actualWeight" type="number"
                           class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          :class="Number(correctionForm.actualWeight) !== Number(props.truck?.actualWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                          :class="Number(correctionForm.actualWeight) !== Number(currentTruck?.actualWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
-                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ props.truck?.actualWeight || 0 }} kg</span>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentTruck?.actualWeight || 0 }} kg</span>
                     </div>
                   </div>
 
@@ -1148,7 +1153,7 @@
                           <span>{{ Math.max(0, (Number(correctionForm.grossWeight) || 0) - (Number(correctionForm.tareWeight) || 0)).toLocaleString() }}</span>
                           <span class="text-xs font-bold text-slate-500">kg</span>
                         </div>
-                        <div class="text-[10px] text-slate-400 font-semibold font-mono">Original Net: {{ (props.truck?.netWeight || 0).toLocaleString() }} kg</div>
+                        <div class="text-[10px] text-slate-400 font-semibold font-mono">Original Net: {{ (currentTruck?.netWeight || 0).toLocaleString() }} kg</div>
                       </div>
 
                       <!-- Box 2: Warehouse Realization & Deviasi -->
@@ -1170,45 +1175,49 @@
                 <div v-if="activeCorrectionTab === 'IDENTITY'" class="space-y-3 animate-fade">
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
+                      <label class="block font-bold text-slate-700 mb-1 text-[11px]">Nomor Polisi</label>
+                      <input v-model="correctionForm.plateNumber" type="text" placeholder="B 1234 ABC..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono uppercase" :class="correctionForm.plateNumber !== (currentTruck?.plateNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    </div>
+                    <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Nama Supir / PIC</label>
-                      <input v-model="correctionForm.driverName" type="text" placeholder="Nama supir..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.driverName !== (props.truck?.driverName || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.driverName" type="text" placeholder="Nama supir..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.driverName !== (t.driverName || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Vendor / Ekspedisi</label>
-                      <input v-model="correctionForm.vendorName" type="text" placeholder="Nama perusahaan vendor..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.vendorName" type="text" placeholder="Nama perusahaan vendor..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vendorName !== (currentTruck?.vendorName || currentTruck?.vendor || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                   </div>
 
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Jenis Kendaraan / Armada</label>
-                      <input v-model="correctionForm.vehicleType" type="text" placeholder="Tronton / Wingbox / dll..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vehicleType !== (props.truck?.vehicleType || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.vehicleType" type="text" placeholder="Tronton / Wingbox / dll..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.vehicleType !== (currentTruck?.vehicleType || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. HP Supir / Driver Phone</label>
-                      <input v-model="correctionForm.driverPhone" type="text" placeholder="08123456789..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.driverPhone !== (props.truck?.driverPhone || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.driverPhone" type="text" placeholder="08123456789..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.driverPhone !== (currentTruck?.driverPhone || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                   </div>
 
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. Surat Jalan / Delivery Note (SJ)</label>
-                      <input v-model="correctionForm.suratJalanNumber" type="text" placeholder="Nomor surat jalan..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.suratJalanNumber !== (props.truck?.suratJalanNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.suratJalanNumber" type="text" placeholder="Nomor surat jalan..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.suratJalanNumber !== (currentTruck?.suratJalanNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Logistics PO / No. PO</label>
-                      <input v-model="correctionForm.poNumber" type="text" placeholder="Nomor PO..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.poNumber !== (props.truck?.poNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.poNumber" type="text" placeholder="Nomor PO..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.poNumber !== (currentTruck?.poNumber || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                   </div>
 
                   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Permit Card / No. VMS</label>
-                      <input v-model="correctionForm.permitCardNumber" type="text" placeholder="Nomor Permit Card / VMS..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.permitCardNumber !== (props.truck?.permitCardNumber || props.truck?.permitCard || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.permitCardNumber" type="text" placeholder="Nomor Permit Card / VMS..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.permitCardNumber !== (currentTruck?.permitCardNumber || currentTruck?.permitCard || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">No. KTP / ID Number</label>
-                      <input v-model="correctionForm.guestIdNumber" type="text" placeholder="Nomor KTP / Guest ID..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.guestIdNumber !== (props.truck?.guestIdNumber || props.truck?.guestId || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.guestIdNumber" type="text" placeholder="Nomor KTP / Guest ID..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-mono" :class="correctionForm.guestIdNumber !== (currentTruck?.guestIdNumber || currentTruck?.guestId || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                   </div>
                 </div>
@@ -1636,7 +1645,7 @@
               </div>
 
               <div class="flex items-center justify-between pt-2 border-t border-slate-100">
-                <span class="text-[10px] font-mono text-slate-400">OCC Rev: #{{ props.truck?.revision || 1 }}</span>
+                <span class="text-[10px] font-mono text-slate-400">OCC Rev: #{{ currentTruck?.revision || 1 }}</span>
                 <div class="flex space-x-2">
                   <button type="button" @click="showVoidModal = false" class="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">Batal</button>
                   <button type="submit" :disabled="voidLoading || !voidForm.reasonCode || voidForm.reason.trim().length < 5"
@@ -1678,7 +1687,6 @@ import AuthenticatedImage from './AuthenticatedImage.vue'
 import { useAuthStore } from '../stores/authStore'
 import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
-import { useConfirm } from '../composables/useConfirm'
 import truckService from '../services/truckService'
 import qcService from '../services/qcService'
 import { evaluatePaExemption, getAllowedReopenTargets, getReopenMatrix } from '../services/reopenPolicy'
@@ -1691,7 +1699,7 @@ const props = defineProps({
   truck: { type: Object, default: () => ({}) },
   size: { type: String, default: 'normal' }
 })
-const emit = defineEmits(['close', 'deleted'])
+const emit = defineEmits(['close', 'corrected', 'voided'])
 const close = () => emit('close')
 
 const detailedTruck = ref(null)
@@ -1700,6 +1708,26 @@ const loadingDetails = ref(false)
 const activePreviewPhoto = ref(null)
 
 const currentTruck = computed(() => detailedTruck.value || props.truck || {})
+
+const latestByTestRound = (records = []) => {
+  if (!Array.isArray(records) || records.length === 0) return null
+  const ordered = [...records].sort((a, b) => {
+    const roundDiff = Number(b?.testRound || 0) - Number(a?.testRound || 0)
+    if (roundDiff !== 0) return roundDiff
+    return String(b?.id || '').localeCompare(String(a?.id || ''))
+  })
+  return ordered[0] || null
+}
+
+const selectDisplayRecord = (records = []) => {
+  if (!Array.isArray(records) || records.length === 0) return null
+  const current = records.find(record => record?.isCurrent === true)
+  if (current) return current
+  if (records.some(record => Object.prototype.hasOwnProperty.call(record || {}, 'isCurrent'))) {
+    return null
+  }
+  return records.length === 1 ? records[0] : null
+}
 
 const downloadReceiptPDF = () => {
   if (currentTruck.value) {
@@ -1710,8 +1738,6 @@ const downloadReceiptPDF = () => {
 const authStore = useAuthStore()
 const truckStore = useTruckStore()
 const settingsStore = useSettingsStore()
-const { confirm } = useConfirm()
-
 const selectedPhoto = ref(null)
 
 const isAdmin = computed(() => {
@@ -1734,8 +1760,34 @@ const isWarehouse = computed(() => {
   return role === 'WAREHOUSE'
 })
 
+const isTerminalTransaction = computed(() =>
+  ['COMPLETED', 'CANCELLED'].includes(currentTruck.value?.status),
+)
+
+// The backend permits administrative void only for non-COMPLETED, non-voided rows.
+// Keep this derived from the fresh detail snapshot so stale parent props cannot re-enable it.
+const canVoidCurrentTransaction = computed(() => {
+  const transaction = currentTruck.value
+  return Boolean(
+    transaction?.id &&
+    !transaction.isVoided &&
+    transaction.status &&
+    transaction.status !== 'COMPLETED',
+  )
+})
+
+const weightRecordTypes = computed(() => getWeightRecordTypes(currentTruck.value?.processType))
+
+const refreshAfterConflict = async () => {
+  showCorrectionModal.value = false
+  occConflictError.value = null
+  detailedTruck.value = null
+  await fetchTruckDetails()
+  await fetchCorrectionHistory()
+}
+
 const activeStageStartTime = computed(() => {
-  const t = props.truck
+  const t = currentTruck.value
   if (!t) return null
   const status = t.status || ''
 
@@ -1769,6 +1821,9 @@ const attributionData = ref(null)
 const showVoidModal = ref(false)
 const voidLoading = ref(false)
 const voidError = ref(null)
+const evidenceUploadLoading = ref(false)
+const evidenceUploadError = ref(null)
+const detailRequestSequence = ref(0)
 const voidForm = ref({
   reasonCode: '',
   reason: ''
@@ -1783,10 +1838,22 @@ const normalizeQcResult = (val) => {
   return 'APPROVED'
 }
 
+// Current-only relation queries are the normal production contract. The
+// legacy fallback is allowed only when a fixture has no isCurrent metadata.
+const selectCurrentRecord = (records = []) => {
+  if (!Array.isArray(records) || records.length === 0) return null
+  const explicitlyCurrent = records.filter(record => record?.isCurrent === true)
+  if (explicitlyCurrent.length > 0) return explicitlyCurrent[0]
+  if (records.some(record => Object.prototype.hasOwnProperty.call(record || {}, 'isCurrent'))) {
+    return null
+  }
+  return records.length === 1 ? records[0] : null
+}
+
 const imOriginal = computed(() => {
-  const checks = props.truck?.incomingMaterialChecks || []
-  const imCheck = checks.find(c => c.isCurrent !== false) || checks[0] || {}
-  const fallback = props.truck?.qcDetails || {}
+  const checks = currentTruck.value?.incomingMaterialChecks || []
+  const imCheck = selectCurrentRecord(checks) || {}
+  const fallback = currentTruck.value?.qcDetails || {}
   const rawRes = imCheck.result || fallback.status || 'APPROVED'
   return {
     id: imCheck.id || undefined,
@@ -1803,9 +1870,9 @@ const imOriginal = computed(() => {
 })
 
 const qcvOriginal = computed(() => {
-  const checks = props.truck?.qcVehicleChecks || []
-  const qcvCheck = checks.find(c => c.isCurrent !== false) || checks[0] || {}
-  const fallback = props.truck?.qcDetails || {}
+  const checks = currentTruck.value?.qcVehicleChecks || []
+  const qcvCheck = selectCurrentRecord(checks) || {}
+  const fallback = currentTruck.value?.qcDetails || {}
   const rawRes = qcvCheck.result || 'APPROVED'
   const normChecklist = normalizeChecklistItems(qcvCheck.checklistItems)
   const checklistItemsList = normChecklist.items.length > 0 ? normChecklist.items : (parsedChecklist.value?.items || [])
@@ -1876,8 +1943,8 @@ const qcvOriginal = computed(() => {
 })
 
 const whOriginal = computed(() => {
-  const procs = props.truck?.warehouseProcesses || []
-  const whProcess = procs.find(p => p.isCurrent !== false) || procs[0] || {}
+  const procs = currentTruck.value?.warehouseProcesses || []
+  const whProcess = selectCurrentRecord(procs) || {}
   const rawCond = whProcess.condition || 'GOOD'
   let normalizedCond = 'GOOD'
   if (rawCond === 'DAMAGED') normalizedCond = 'DAMAGED'
@@ -1896,6 +1963,7 @@ const reopenMatrixLoading = ref(false)
 const correctionForm = ref({
   action: 'CORRECT_DATA',
   reopenTargetStatus: '',
+  plateNumber: '',
   driverName: '',
   driverPhone: '',
   suratJalanNumber: '',
@@ -1904,10 +1972,10 @@ const correctionForm = ref({
   grossWeight: null,
   tareWeight: null,
   actualWeight: null,
-  status: 'COMPLETED',
   reasonCategory: '',
   remark: '',
   evidenceUrl: '',
+  evidenceAttachmentId: '',
   evidencePhoto: null,
   imResult: 'APPROVED',
   imMoisture: 0,
@@ -1947,11 +2015,11 @@ const correctionForm = ref({
 })
 
 const currentProcessType = computed(() => {
-  return (currentTruck.value?.processType || props.truck?.processType || 'GBB').toUpperCase()
+  return (currentTruck.value?.processType || 'GBB').toUpperCase()
 })
 
 const paExemption = computed(() => {
-  const t = currentTruck.value || props.truck || {}
+  const t = currentTruck.value || {}
   return evaluatePaExemption(t.productCatalog, {
     productCatalogId: t.productCatalogId,
     processType: t.processType,
@@ -2005,47 +2073,57 @@ watch(allowedReopenTargets, (targets) => {
   }
 })
 
-const handleEvidenceUpload = (event) => {
-  const file = event.target.files[0]
+const handleEvidenceUpload = async (event) => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
   if (!file) return
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    if (file.type.startsWith('image/')) {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        let width = img.width
-        let height = img.height
-        const MAX_SIZE = 800
-        if (width > height && width > MAX_SIZE) {
-          height *= MAX_SIZE / width
-          width = MAX_SIZE
-        } else if (height > MAX_SIZE) {
-          width *= MAX_SIZE / height
-          height = MAX_SIZE
-        }
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0, width, height)
-        correctionForm.value.evidenceUrl = canvas.toDataURL('image/jpeg', 0.7)
-        correctionForm.value.evidencePhoto = file.name
-      }
-      img.src = e.target.result
-    } else {
-      correctionForm.value.evidenceUrl = e.target.result
-      correctionForm.value.evidencePhoto = file.name
-    }
+
+  const transactionId = currentTruck.value?.id
+  if (!transactionId) {
+    evidenceUploadError.value = 'ID transaksi tidak tersedia; lampiran tidak dapat diunggah.'
+    return
   }
-  reader.readAsDataURL(file)
+
+  const allowedTypes = new Set(['image/jpeg', 'image/png', 'application/pdf'])
+  if (!allowedTypes.has(file.type)) {
+    evidenceUploadError.value = 'Format lampiran harus JPEG, PNG, atau PDF.'
+    return
+  }
+
+  evidenceUploadLoading.value = true
+  evidenceUploadError.value = null
+  correctionForm.value.evidenceAttachmentId = ''
+  correctionForm.value.evidencePhoto = null
+
+  try {
+    const response = await truckService.uploadAttachment(transactionId, file, {
+      module: 'general',
+      description: 'Bukti koreksi Operation Log',
+    })
+    const payload = response?.data?.data || response?.data || response
+    const attachment = payload?.data || payload
+    const attachmentId = attachment?.id || payload?.attachmentId
+
+    if (!attachmentId) {
+      throw new Error('Respons upload tidak memuat ID attachment yang tervalidasi.')
+    }
+
+    correctionForm.value.evidenceAttachmentId = String(attachmentId)
+    correctionForm.value.evidencePhoto = file.name
+  } catch (err) {
+    evidenceUploadError.value = err?.response?.data?.message || err?.message || 'Gagal mengunggah lampiran bukti.'
+  } finally {
+    evidenceUploadLoading.value = false
+  }
 }
 
 const fetchCorrectionHistory = async () => {
-  if (!props.truck?.id) return
+  const transactionId = currentTruck.value?.id
+  if (!transactionId) return
   historyLoading.value = true
   historyError.value = null
   try {
-    const res = await truckService.getAuditHistory(props.truck.id)
+    const res = await truckService.getAuditHistory(transactionId)
     const resData = res?.data || res
     timelineData.value = resData?.timeline || []
     auditHistory.value = resData?.data || []
@@ -2064,58 +2142,78 @@ const correctionCount = computed(() => {
   if (Array.isArray(auditHistory.value) && auditHistory.value.length > 0) {
     return auditHistory.value.length
   }
-  if (Array.isArray(props.truck?.corrections)) {
-    return props.truck.corrections.length
+  const transaction = currentTruck.value
+  if (Array.isArray(transaction?.corrections)) {
+    return transaction.corrections.length
   }
-  if (typeof props.truck?.correctionCount === 'number') {
-    return props.truck.correctionCount
+  if (typeof transaction?.correctionCount === 'number') {
+    return transaction.correctionCount
   }
-  if (typeof props.truck?._count?.corrections === 'number') {
-    return props.truck._count.corrections
+  if (typeof transaction?._count?.corrections === 'number') {
+    return transaction._count.corrections
   }
   return 0
 })
 
 const fetchTruckDetails = async () => {
-  if (!props.truck?.id) return
+  const transactionId = props.truck?.id
+  if (!transactionId) return
+
+  const requestId = ++detailRequestSequence.value
   loadingDetails.value = true
   try {
-    const res = await truckService.getById(props.truck.id)
-    detailedTruck.value = res.data?.data || res.data || res
-  } catch (err) {
-    console.warn('Gagal memuat detail transaksi:', err)
-  } finally {
-    loadingDetails.value = false
-  }
+    const res = await truckService.getById(transactionId)
+    const detail = res.data?.data || res.data || res
+    if (requestId !== detailRequestSequence.value || String(props.truck?.id) !== String(transactionId)) return
+    if (!detail?.id || !Number.isInteger(Number(detail.revision)) || Number(detail.revision) < 1) {
+      detailedTruck.value = null
+      gspPaRounds.value = []
+      return
+    }
+    detailedTruck.value = detail
 
-  const pType = detailedTruck.value?.processType || props.truck?.processType
-  if (pType === 'GSP') {
-    try {
-      const paRes = await qcService.getProductAnalysisHistory(props.truck.id)
-      gspPaRounds.value = paRes.data?.data || paRes.data || []
-    } catch (err) {
-      console.warn('Gagal memuat riwayat PA:', err)
+    const pType = detail?.processType
+    if (pType === 'GSP') {
+      try {
+        const paRes = await qcService.getProductAnalysisHistory(transactionId)
+        if (requestId !== detailRequestSequence.value || String(props.truck?.id) !== String(transactionId)) return
+        gspPaRounds.value = paRes.data?.data || paRes.data || []
+      } catch (err) {
+        if (requestId === detailRequestSequence.value) {
+          console.warn('Gagal memuat riwayat PA:', err)
+          gspPaRounds.value = []
+        }
+      }
+    } else {
       gspPaRounds.value = []
     }
-  } else {
-    gspPaRounds.value = []
+  } catch (err) {
+    if (requestId === detailRequestSequence.value) {
+      console.warn('Gagal memuat detail transaksi:', err)
+      detailedTruck.value = null
+      gspPaRounds.value = []
+    }
+  } finally {
+    if (requestId === detailRequestSequence.value) loadingDetails.value = false
   }
 }
 
 watch(() => props.isOpen, (newVal) => {
   if (newVal) {
-    fetchCorrectionHistory()
-    fetchTruckDetails()
+    detailedTruck.value = null
+    fetchTruckDetails().then(() => fetchCorrectionHistory())
   } else {
     detailedTruck.value = null
     gspPaRounds.value = []
+    detailRequestSequence.value += 1
   }
 }, { immediate: true })
 
 watch(() => props.truck?.id, (newId) => {
   if (newId && props.isOpen) {
-    fetchCorrectionHistory()
-    fetchTruckDetails()
+    detailedTruck.value = null
+    detailRequestSequence.value += 1
+    fetchTruckDetails().then(() => fetchCorrectionHistory())
   }
 })
 
@@ -2134,24 +2232,26 @@ const openCorrectionModal = () => {
   const qcv = qcvOriginal.value
   const wh = whOriginal.value
 
+  const t = currentTruck.value || {}
   correctionForm.value = {
     action: 'CORRECT_DATA',
     reopenTargetStatus: '',
-    driverName: props.truck?.driverName || '',
-    driverPhone: props.truck?.driverPhone || '',
-    suratJalanNumber: props.truck?.suratJalanNumber || '',
-    vendorName: props.truck?.vendorName || props.truck?.vendor || '',
-    vehicleType: props.truck?.vehicleType || '',
-    poNumber: props.truck?.poNumber || '',
-    permitCardNumber: props.truck?.permitCardNumber || props.truck?.permitCard || '',
-    guestIdNumber: props.truck?.guestIdNumber || props.truck?.guestId || '',
-    grossWeight: props.truck?.grossWeight || null,
-    tareWeight: props.truck?.tareWeight || null,
-    actualWeight: props.truck?.actualWeight !== undefined && props.truck?.actualWeight !== null ? props.truck.actualWeight : ((props.truck?.warehouseProcesses || []).find(p => p.isCurrent !== false)?.actualWeight || null),
-    status: props.truck?.status || 'COMPLETED',
+    plateNumber: t.plateNumber || '',
+    driverName: t.driverName || '',
+    driverPhone: t.driverPhone || '',
+    suratJalanNumber: t.suratJalanNumber || '',
+    vendorName: t.vendorName || t.vendor || '',
+    vehicleType: t.vehicleType || '',
+    poNumber: t.poNumber || '',
+    permitCardNumber: t.permitCardNumber || t.permitCard || '',
+    guestIdNumber: t.guestIdNumber || t.guestId || '',
+    grossWeight: t.grossWeight || null,
+    tareWeight: t.tareWeight || null,
+    actualWeight: t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (selectCurrentRecord(t.warehouseProcesses || [])?.actualWeight || null),
     reasonCategory: '',
     remark: '',
     evidenceUrl: '',
+    evidenceAttachmentId: '',
     evidencePhoto: null,
     imResult: im.result,
     imMoisture: im.moisture,
@@ -2192,11 +2292,24 @@ const openCorrectionModal = () => {
   activeCorrectionTab.value = 'WEIGHBRIDGE'
   correctionError.value = null
   occConflictError.value = null
+  evidenceUploadError.value = null
   showSensitiveConfirm.value = false
   showCorrectionModal.value = true
 }
 
 const submitCorrection = () => {
+  if (!currentTruck.value?.id || !Number.isInteger(Number(currentTruck.value?.revision)) || Number(currentTruck.value.revision) < 1) {
+    correctionError.value = 'Detail transaksi terbaru belum siap. Segarkan detail sebelum melakukan koreksi.'
+    return
+  }
+  if (evidenceUploadLoading.value) {
+    correctionError.value = 'Tunggu hingga unggahan lampiran selesai sebelum menyimpan koreksi.'
+    return
+  }
+  if (correctionForm.value.evidenceUrl?.trim().toLowerCase().startsWith('data:')) {
+    correctionError.value = 'Data URI tidak dapat digunakan sebagai bukti resmi. Unggah attachment terverifikasi.'
+    return
+  }
   if (!correctionForm.value.reasonCategory) {
     correctionError.value = 'Kategori / Alasan koreksi wajib dipilih.'
     return
@@ -2207,9 +2320,8 @@ const submitCorrection = () => {
   }
 
   // Check for sensitive changes (status change or huge weight deviation)
-  const statusChanged = correctionForm.value.status !== props.truck?.status
-  const grossDiff = Math.abs((Number(correctionForm.value.grossWeight) || 0) - (Number(props.truck?.grossWeight) || 0))
-  if ((statusChanged || grossDiff >= 1000) && !showSensitiveConfirm.value) {
+  const grossDiff = Math.abs((Number(correctionForm.value.grossWeight) || 0) - (Number(currentTruck.value?.grossWeight) || 0))
+  if (grossDiff >= 1000 && !showSensitiveConfirm.value) {
     showSensitiveConfirm.value = true
     return
   }
@@ -2229,64 +2341,74 @@ const executeCorrectionSubmission = async () => {
   }
 
   try {
+    const t = currentTruck.value || {}
+    if (!t.id || !Number.isInteger(Number(t.revision)) || Number(t.revision) < 1) {
+      correctionError.value = 'Revision transaksi terbaru tidak tersedia. Segarkan detail sebelum melakukan koreksi.'
+      correctionLoading.value = false
+      return
+    }
     const items = []
-    if (correctionForm.value.driverName !== undefined && correctionForm.value.driverName !== (props.truck?.driverName || '')) {
+    if (correctionForm.value.plateNumber !== undefined && correctionForm.value.plateNumber !== (t.plateNumber || '')) {
+      items.push({ targetModule: 'TRANSACTION', fieldName: 'plateNumber', newValue: String(correctionForm.value.plateNumber).trim() })
+    }
+    if (correctionForm.value.driverName !== undefined && correctionForm.value.driverName !== (t.driverName || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'driverName', newValue: String(correctionForm.value.driverName) })
     }
-    if (correctionForm.value.driverPhone !== undefined && correctionForm.value.driverPhone !== (props.truck?.driverPhone || '')) {
+    if (correctionForm.value.driverPhone !== undefined && correctionForm.value.driverPhone !== (t.driverPhone || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'driverPhone', newValue: String(correctionForm.value.driverPhone) })
     }
-    if (correctionForm.value.suratJalanNumber !== undefined && correctionForm.value.suratJalanNumber !== (props.truck?.suratJalanNumber || '')) {
+    if (correctionForm.value.suratJalanNumber !== undefined && correctionForm.value.suratJalanNumber !== (t.suratJalanNumber || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'suratJalanNumber', newValue: String(correctionForm.value.suratJalanNumber) })
     }
-    if (correctionForm.value.vendorName !== undefined && correctionForm.value.vendorName !== (props.truck?.vendorName || props.truck?.vendor || '')) {
+    if (correctionForm.value.vendorName !== undefined && correctionForm.value.vendorName !== (t.vendorName || t.vendor || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'vendorName', newValue: String(correctionForm.value.vendorName) })
     }
-    if (correctionForm.value.vehicleType !== undefined && correctionForm.value.vehicleType !== (props.truck?.vehicleType || '')) {
+    if (correctionForm.value.vehicleType !== undefined && correctionForm.value.vehicleType !== (t.vehicleType || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'vehicleType', newValue: String(correctionForm.value.vehicleType) })
     }
-    if (correctionForm.value.poNumber !== undefined && correctionForm.value.poNumber !== (props.truck?.poNumber || '')) {
+    if (correctionForm.value.poNumber !== undefined && correctionForm.value.poNumber !== (t.poNumber || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'poNumber', newValue: String(correctionForm.value.poNumber) })
     }
-    if (correctionForm.value.permitCardNumber !== undefined && correctionForm.value.permitCardNumber !== (props.truck?.permitCardNumber || props.truck?.permitCard || '')) {
+    if (correctionForm.value.permitCardNumber !== undefined && correctionForm.value.permitCardNumber !== (t.permitCardNumber || t.permitCard || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'permitCardNumber', newValue: String(correctionForm.value.permitCardNumber) })
     }
-    if (correctionForm.value.guestIdNumber !== undefined && correctionForm.value.guestIdNumber !== (props.truck?.guestIdNumber || props.truck?.guestId || '')) {
+    if (correctionForm.value.guestIdNumber !== undefined && correctionForm.value.guestIdNumber !== (t.guestIdNumber || t.guestId || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'guestIdNumber', newValue: String(correctionForm.value.guestIdNumber) })
     }
 
-    if (correctionForm.value.grossWeight !== null && Number(correctionForm.value.grossWeight) !== Number(props.truck?.grossWeight)) {
-      const wbRecs = props.truck?.weighbridgeRecords || []
-      const inRec = wbRecs.find(r => r.type === 'IN' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'IN') || wbRecs[0]
-      if (inRec) {
-        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: inRec.id, fieldName: 'weight', newValue: Number(correctionForm.value.grossWeight) })
+    const wbRecs = t.weighbridgeRecords || []
+    const weightRecordTypes = getWeightRecordTypes(t.processType)
+    const grossRecord = wbRecs.find(record => record.type === weightRecordTypes.gross && record.isCurrent === true)
+    const tareRecord = wbRecs.find(record => record.type === weightRecordTypes.tare && record.isCurrent === true)
+
+    if (correctionForm.value.grossWeight !== null && Number(correctionForm.value.grossWeight) !== Number(t.grossWeight)) {
+      if (grossRecord?.id) {
+        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: grossRecord.id, fieldName: 'weight', newValue: Number(correctionForm.value.grossWeight) })
       } else {
         items.push({ targetModule: 'TRANSACTION', fieldName: 'grossWeight', newValue: Number(correctionForm.value.grossWeight) })
       }
     }
 
-    if (correctionForm.value.tareWeight !== null && Number(correctionForm.value.tareWeight) !== Number(props.truck?.tareWeight)) {
-      const wbRecs = props.truck?.weighbridgeRecords || []
-      const outRec = wbRecs.find(r => r.type === 'OUT' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'OUT')
-      const inRec = wbRecs.find(r => r.type === 'IN' && r.isCurrent !== false) || wbRecs.find(r => r.type === 'IN')
-      if (outRec && outRec.id !== inRec?.id) {
-        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: outRec.id, fieldName: 'weight', newValue: Number(correctionForm.value.tareWeight) })
+    if (correctionForm.value.tareWeight !== null && Number(correctionForm.value.tareWeight) !== Number(t.tareWeight)) {
+      if (tareRecord?.id) {
+        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: tareRecord.id, fieldName: 'weight', newValue: Number(correctionForm.value.tareWeight) })
       } else {
         items.push({ targetModule: 'TRANSACTION', fieldName: 'tareWeight', newValue: Number(correctionForm.value.tareWeight) })
       }
     }
 
-    if (correctionForm.value.actualWeight !== null && Number(correctionForm.value.actualWeight) !== Number(props.truck?.actualWeight)) {
-      const whProc = props.truck?.warehouseProcesses?.[0]
-      if (whProc) {
+    if (correctionForm.value.actualWeight !== null && Number(correctionForm.value.actualWeight) !== Number(t.actualWeight)) {
+      const whProc = selectCurrentRecord(t.warehouseProcesses || [])
+      if (whProc?.id) {
         items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProc.id, fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
+      } else {
+        items.push({ targetModule: 'TRANSACTION', fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
       }
-      items.push({ targetModule: 'TRANSACTION', fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
     }
 
     // QC Vehicle mapping — use current revision record for both compare and targetRecordId
-    const qcvChecks = props.truck?.qcVehicleChecks || []
-    const qcvRec = qcvChecks.find(c => c.isCurrent !== false) || qcvChecks[0]
+    const qcvChecks = t.qcVehicleChecks || []
+    const qcvRec = selectCurrentRecord(qcvChecks)
     if (qcvRec) {
       if (correctionForm.value.qcvResult !== undefined && correctionForm.value.qcvResult !== qcvOriginal.value.result) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'result', newValue: correctionForm.value.qcvResult })
@@ -2312,15 +2434,15 @@ const executeCorrectionSubmission = async () => {
       }
 
       // Build canonical checklistItems JSON preserving { initialMoisture, items } shape (P0-03 fix)
-      const checklistPayload = buildChecklistPayload(correctionForm.value)
-      if (hasChecklistChanged(qcvOriginal.value._checklistEntries, qcvOriginal.value.moisture, checklistPayload)) {
+      const checklistPayload = buildChecklistPayload(correctionForm.value, qcvRec.checklistItems)
+      if (hasChecklistChanged(qcvOriginal.value._checklistEntries, qcvOriginal.value.moisture, checklistPayload, qcvRec.checklistItems)) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: checklistPayload })
       }
     }
 
     // Incoming Material mapping — use current revision record
-    const imChecks = props.truck?.incomingMaterialChecks || []
-    const imRec = imChecks.find(c => c.isCurrent !== false) || imChecks[0]
+    const imChecks = t.incomingMaterialChecks || []
+    const imRec = selectCurrentRecord(imChecks)
     if (imRec) {
       if (correctionForm.value.imResult !== undefined && correctionForm.value.imResult !== imOriginal.value.result) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'result', newValue: correctionForm.value.imResult })
@@ -2349,8 +2471,8 @@ const executeCorrectionSubmission = async () => {
     }
 
     // Warehouse Process mapping — use current revision record
-    const whProcs = props.truck?.warehouseProcesses || []
-    const whProcRec = whProcs.find(p => p.isCurrent !== false) || whProcs[0]
+    const whProcs = t.warehouseProcesses || []
+    const whProcRec = selectCurrentRecord(whProcs)
     if (whProcRec) {
       if (correctionForm.value.whCondition !== undefined && correctionForm.value.whCondition !== whOriginal.value.condition) {
         items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'condition', newValue: correctionForm.value.whCondition })
@@ -2362,9 +2484,9 @@ const executeCorrectionSubmission = async () => {
 
     let action = 'CORRECT_DATA'
     let reopenTargetStatus = undefined
-    if (correctionForm.value.isReopen || correctionForm.value.action === 'REOPEN_WORKFLOW' || correctionForm.value.status === 'REOPEN_WORKFLOW') {
+    if (correctionForm.value.action === 'REOPEN_WORKFLOW') {
       action = 'REOPEN_WORKFLOW'
-      reopenTargetStatus = correctionForm.value.reopenTargetStatus || correctionForm.value.targetStatus
+      reopenTargetStatus = correctionForm.value.reopenTargetStatus
       if (!reopenTargetStatus) {
         correctionError.value = 'Target stage/status untuk REOPEN_WORKFLOW wajib dipilih secara eksplisit.'
         correctionLoading.value = false
@@ -2384,13 +2506,14 @@ const executeCorrectionSubmission = async () => {
       reasonCode: correctionForm.value.reasonCategory,
       remark: correctionForm.value.remark.trim(),
       evidenceUrl: correctionForm.value.evidenceUrl?.trim() || undefined,
-      expectedRevision: props.truck?.revision || 1,
+      evidenceAttachmentId: correctionForm.value.evidenceAttachmentId || undefined,
+      expectedRevision: Number(t.revision),
       items: action === 'REOPEN_WORKFLOW' ? undefined : items
     }
 
     let res = null
     try {
-      res = await truckStore.correctOperationLogTruck(props.truck.id, payload)
+      res = await truckStore.correctOperationLogTruck(t.id, payload)
     } catch (apiErr) {
       const status = apiErr?.response?.status
       const msg = apiErr?.response?.data?.message || apiErr?.message || ''
@@ -2402,16 +2525,17 @@ const executeCorrectionSubmission = async () => {
       throw apiErr
     }
 
-    // Instantly update props.truck so top cards (Identity, QC Lab, Sampling, Checklist, Tonnage Analytics) update live on screen
-    const updatedRecord = res?.data?.updatedTx || res?.data || res
-    if (updatedRecord && typeof updatedRecord === 'object') {
-      Object.assign(props.truck, updatedRecord)
+    const updatedRecord = res?.updatedTx || res?.data?.updatedTx || res?.data || res
+    if (!updatedRecord?.id) {
+      throw new Error('Respons koreksi tidak memuat transaksi terbaru.')
     }
 
+    detailedTruck.value = updatedRecord
     showCorrectionModal.value = false
     showSensitiveConfirm.value = false
     await fetchCorrectionHistory()
-    await truckStore.fetchTrucks()
+    await fetchTruckDetails()
+    emit('corrected', updatedRecord)
   } catch (err) {
     correctionError.value = err.gmsMessage || err.response?.data?.message || err.message || 'Gagal menyimpan koreksi (Transaksi dibatalkan secara atomik / fail-closed).'
   } finally {
@@ -2429,6 +2553,10 @@ const openVoidModal = () => {
 }
 
 const executeVoidSubmission = async () => {
+  if (!canVoidCurrentTransaction.value) {
+    voidError.value = 'Transaksi terbaru tidak memenuhi kebijakan Void atau detail belum tersinkron.'
+    return
+  }
   if (!voidForm.value.reasonCode || voidForm.value.reason.trim().length < 5) {
     voidError.value = 'Kode alasan dan penjelasan detail (minimal 5 karakter) wajib diisi.'
     return
@@ -2436,19 +2564,24 @@ const executeVoidSubmission = async () => {
   voidLoading.value = true
   voidError.value = null
   try {
+    const t = currentTruck.value || {}
     const payload = {
       reasonCode: voidForm.value.reasonCode,
       reason: voidForm.value.reason.trim(),
-      expectedRevision: props.truck?.revision || 1
+      expectedRevision: t.revision
     }
-    const updatedRecord = await truckStore.voidTruck(props.truck.id, payload)
-    if (updatedRecord && typeof updatedRecord === 'object') {
-      Object.assign(props.truck, updatedRecord)
+    if (!t.id || !Number.isInteger(Number(t.revision)) || Number(t.revision) < 1) {
+      voidError.value = 'Revision transaksi terbaru tidak tersedia. Segarkan detail sebelum melakukan void.'
+      return
     }
+    payload.expectedRevision = Number(t.revision)
+    const updatedRecord = await truckStore.voidTruck(t.id, payload)
     showVoidModal.value = false
+    detailedTruck.value = updatedRecord || { ...t, status: 'CANCELLED', isVoided: true }
+    await fetchTruckDetails()
     await fetchCorrectionHistory()
-    await truckStore.fetchTrucks()
-    emit('deleted', props.truck.id)
+    const latest = currentTruck.value?.id === t.id ? currentTruck.value : updatedRecord
+    emit('voided', latest || { ...t, status: 'CANCELLED', isVoided: true })
     close()
   } catch (err) {
     voidError.value = err.gmsMessage || err.response?.data?.message || err.message || 'Gagal membatalkan transaksi (Void).'
@@ -2458,14 +2591,14 @@ const executeVoidSubmission = async () => {
 }
 
 const gbjDeliveryData = computed(() => {
-  const t = currentTruck.value || props.truck || {}
+  const t = currentTruck.value || {}
   if (t.deliveryChecklist) {
     if (typeof t.deliveryChecklist === 'string') {
       try { return JSON.parse(t.deliveryChecklist) } catch { return null }
     }
     return t.deliveryChecklist
   }
-  const wh = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  const wh = selectDisplayRecord(t.warehouseProcesses)
   if (wh?.checklistItems) {
     if (typeof wh.checklistItems === 'string') {
       try { return JSON.parse(wh.checklistItems) } catch { return null }
@@ -2518,52 +2651,53 @@ const gbjDocumentItems = computed(() => {
 })
 
 const identityFields = computed(() => {
-  const permitCardVal = props.truck?.permitCardNumber || props.truck?.permitCard
-  const guestIdVal = props.truck?.guestIdNumber || props.truck?.guestId
+  const t = currentTruck.value || {}
+  const permitCardVal = t.permitCardNumber || t.permitCard
+  const guestIdVal = t.guestIdNumber || t.guestId
 
   const fields = []
 
-  const seqVal = props.truck?.dailySequence != null
-    ? `#${String(props.truck.dailySequence).padStart(3, '0')}`
+  const seqVal = t.dailySequence != null
+    ? `#${String(t.dailySequence).padStart(3, '0')}`
     : null
   if (seqVal) {
     fields.push({ label: 'No. Urut Kedatangan', value: seqVal, highlight: true })
   }
 
   fields.push(
-    { label: 'Driver Name', value: props.truck?.driverName },
-    { label: 'Carrier Vendor', value: props.truck?.vendorName || props.truck?.vendor },
-    { label: 'Vehicle Type', value: props.truck?.vehicleType },
-    { label: 'Process Type', value: props.truck?.processType === 'GBB' ? 'Raw Material (Unloading)' : props.truck?.processType === 'GBJ' ? 'Finished Goods (Loading)' : props.truck?.processType === 'GSP' ? 'Sparepart Warehouse' : props.truck?.processType },
+    { label: 'Driver Name', value: t.driverName },
+    { label: 'Carrier Vendor', value: t.vendorName || t.vendor },
+    { label: 'Vehicle Type', value: t.vehicleType },
+    { label: 'Process Type', value: t.processType === 'GBB' ? 'Raw Material (Unloading)' : t.processType === 'GBJ' ? 'Finished Goods (Loading)' : t.processType === 'GSP' ? 'Sparepart Warehouse' : t.processType },
   )
 
-  if (props.truck?.processType === 'GBJ' && gbjProductTypes.value.length > 0) {
+  if (t.processType === 'GBJ' && gbjProductTypes.value.length > 0) {
     fields.push({ label: 'Finished Goods', value: gbjProductTypes.value.join(' & '), highlight: true })
   }
 
-  if (props.truck?.driverPhone || true) fields.push({ label: 'Driver Phone', value: props.truck?.driverPhone, highlight: true })
-  if (props.truck?.suratJalanNumber || true) fields.push({ label: 'Delivery Note (SJ)', value: props.truck?.suratJalanNumber, highlight: true })
-  if (props.truck?.poNumber || true) fields.push({ label: 'Logistics PO', value: props.truck?.poNumber, highlight: true })
+  if (t.driverPhone || true) fields.push({ label: 'Driver Phone', value: t.driverPhone, highlight: true })
+  if (t.suratJalanNumber || true) fields.push({ label: 'Delivery Note (SJ)', value: t.suratJalanNumber, highlight: true })
+  if (t.poNumber || true) fields.push({ label: 'Logistics PO', value: t.poNumber, highlight: true })
   if (permitCardVal || true) fields.push({ label: 'Permit Card / VMS', value: permitCardVal })
-  if (guestIdVal || true) fields.push({ label: `${props.truck?.idType || 'ID'} Number`, value: guestIdVal })
+  if (guestIdVal || true) fields.push({ label: `${t.idType || 'ID'} Number`, value: guestIdVal })
 
-  if (props.truck?.guestCount && props.truck.guestCount > 1) fields.push({ label: 'Guest Count', value: `${props.truck.guestCount} persons` })
-  if (props.truck?.securityName) fields.push({ label: 'Security Officer', value: props.truck.securityName })
-  if (props.truck?.remarks) {
-    const isChecklist = props.truck.remarks.includes('Sampling:') || props.truck.remarks.includes('Checklist:')
+  if (t.guestCount && t.guestCount > 1) fields.push({ label: 'Guest Count', value: `${t.guestCount} persons` })
+  if (t.securityName) fields.push({ label: 'Security Officer', value: t.securityName })
+  if (t.remarks) {
+    const isChecklist = t.remarks.includes('Sampling:') || t.remarks.includes('Checklist:')
     if (!isChecklist) {
-      fields.push({ label: 'Remarks', value: props.truck.remarks })
+      fields.push({ label: 'Remarks', value: t.remarks })
     }
   }
   return fields
 })
 
 const isInitialSamplingRejected = computed(() => {
-  if (!props.truck) return false;
-  const t = props.truck;
+  const t = currentTruck.value
+  if (!t) return false
   if (t.status === 'QC_VEHICLE_REJECTED') return true;
   if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
-    const check = t.qcVehicleChecks[0];
+    const check = selectDisplayRecord(t.qcVehicleChecks);
     if (check.result === 'REJECT' || check.result === 'REJECTED') return true;
   }
   if (t.qcSamplingDetails?.status === 'REJECTED' || t.qcSamplingDetails?.status === 'REJECT') return true;
@@ -2609,15 +2743,14 @@ const extractMoistureValue = (target) => {
     }
   }
 
-  // 3. qcVehicleChecks / incomingMaterialChecks on truck object
-  if (target.incomingMaterialChecks && target.incomingMaterialChecks.length > 0) {
-    const im = target.incomingMaterialChecks[0];
-    if (im.moisture !== undefined && im.moisture !== null) return Number(im.moisture);
-  }
-  if (target.qcVehicleChecks && target.qcVehicleChecks.length > 0) {
-    const qv = target.qcVehicleChecks[0];
-    const val = extractMoistureValue(qv);
-    if (val !== null && !isNaN(val)) return val;
+  // 3. qcVehicleChecks / incomingMaterialChecks on the current detail object
+  const im = selectDisplayRecord(target.incomingMaterialChecks)
+  if (im?.moisture !== undefined && im.moisture !== null) return Number(im.moisture)
+
+  const qv = selectDisplayRecord(target.qcVehicleChecks)
+  if (qv) {
+    const val = extractMoistureValue(qv)
+    if (val !== null && !isNaN(val)) return val
   }
   if (target.qcDetails) {
     if (target.qcDetails.kadarAir !== undefined && target.qcDetails.kadarAir !== null) return Number(target.qcDetails.kadarAir);
@@ -2629,8 +2762,8 @@ const extractMoistureValue = (target) => {
 }
 
 const initialSamplingDetails = computed(() => {
-  if (!props.truck) return null;
-  const t = props.truck;
+  const t = currentTruck.value
+  if (!t) return null
   if (t.processType !== 'GBB' && t.processType !== 'GSP') return null;
 
   let pic = 'QC Inspector'
@@ -2641,7 +2774,7 @@ const initialSamplingDetails = computed(() => {
   let moisture = null
 
   if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
-    const check = t.qcVehicleChecks[0];
+    const check = selectDisplayRecord(t.qcVehicleChecks);
     pic = check.checkedBy?.name || check.inspector || 'QC Inspector'
     status = check.result === 'PASS' || check.result === 'APPROVED' ? 'APPROVED' : check.result === 'REJECT' || check.result === 'REJECTED' ? 'REJECTED' : check.result || 'APPROVED'
     note = check.notes || check.notesStr || ''
@@ -2678,7 +2811,7 @@ const initialSamplingMetrics = computed(() => {
   const odorPass = d.bau === 'PASS' || d.bau === 'Normal' || d.bau === 'COMPLIANT' || d.bau === 'OK'
   const visualPass = d.visual === 'PASS' || d.visual === 'Normal' || d.visual === 'COMPLIANT' || d.visual === 'OK'
 
-  const extractedM = d.moisture !== null && d.moisture !== undefined ? Number(d.moisture) : extractMoistureValue(props.truck)
+  const extractedM = d.moisture !== null && d.moisture !== undefined ? Number(d.moisture) : extractMoistureValue(currentTruck.value)
   const moistureVal = (extractedM !== undefined && extractedM !== null && !isNaN(extractedM)) ? `${Number(extractedM).toFixed(2)}%` : '0.00%'
 
   return [
@@ -2689,8 +2822,8 @@ const initialSamplingMetrics = computed(() => {
 })
 
 const qcLabDetails = computed(() => {
-  if (!props.truck) return null;
-  const t = props.truck;
+  const t = currentTruck.value
+  if (!t) return null
   if (t.processType !== 'GBB' && t.processType !== 'GSP') return null;
 
   if (isInitialSamplingRejected.value) {
@@ -2698,7 +2831,7 @@ const qcLabDetails = computed(() => {
   }
 
   if (t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0) {
-    const check = t.incomingMaterialChecks[0];
+    const check = selectDisplayRecord(t.incomingMaterialChecks);
     return {
       pic: check.checkedBy?.name || 'QC Lab Inspector',
       status: check.result,
@@ -2720,11 +2853,11 @@ const qcLabDetails = computed(() => {
 });
 
 const qcDetails = computed(() => {
-  const sourceDetails = props.truck?.qcDetails;
+  const sourceDetails = currentTruck.value?.qcDetails;
   let relationDetails = null;
 
-  if (props.truck?.incomingMaterialChecks && props.truck.incomingMaterialChecks.length > 0) {
-    const check = props.truck.incomingMaterialChecks[0];
+  if (currentTruck.value?.incomingMaterialChecks && currentTruck.value.incomingMaterialChecks.length > 0) {
+    const check = selectDisplayRecord(currentTruck.value.incomingMaterialChecks);
     relationDetails = {
       pic: check.checkedBy?.name || 'QC Inspector',
       status: check.result,
@@ -2737,8 +2870,8 @@ const qcDetails = computed(() => {
       bijiOK: check.goodBeanPercentage !== undefined && check.goodBeanPercentage !== null ? check.goodBeanPercentage : 0
     };
   }
-  else if (props.truck?.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
-    const check = props.truck.qcVehicleChecks[0];
+  else if (currentTruck.value?.qcVehicleChecks && currentTruck.value.qcVehicleChecks.length > 0) {
+    const check = selectDisplayRecord(currentTruck.value.qcVehicleChecks);
     relationDetails = {
       pic: check.checkedBy?.name || 'QC Inspector',
       status: check.result,
@@ -2765,8 +2898,8 @@ const qcDetails = computed(() => {
 });
 
 const isWarehouseRejection = computed(() => {
-  if (!props.truck) return false
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return false
   const isGbbOrGsp = t.processType === 'GBB' || t.processType === 'GSP'
   const qcStart = t.timestamps?.qcStartAt || t.qcStartAt || null
   const hasReject = t.incomingMaterialChecks?.some(c => c.result === 'REJECT') ||
@@ -2777,20 +2910,8 @@ const isWarehouseRejection = computed(() => {
 
 const qcPicLabel = computed(() => {
   if (!qcDetails.value || !qcDetails.value.pic) return ''
-  const dept = props.truck?.processType === 'GBJ' ? 'QC VEHICLE' : 'LAB QC'
+  const dept = currentTruck.value?.processType === 'GBJ' ? 'QC VEHICLE' : 'LAB QC'
   return `[${dept}] ${qcDetails.value.pic}`
-})
-
-const checklistPicLabel = computed(() => {
-  if (!props.truck) return ''
-  if (isWarehouseRejection.value) {
-    return `[GUDANG] ${qcDetails.value?.pic || 'Admin'}`
-  }
-  const opName = props.truck.warehouseEndBy?.name ||
-                 props.truck.warehouseStartBy?.name ||
-                 props.truck.warehouseProcesses?.[0]?.endBy?.name ||
-                 'Staff Gudang'
-  return `[GUDANG] ${opName}`
 })
 
 const qcMetrics = computed(() => {
@@ -2798,7 +2919,7 @@ const qcMetrics = computed(() => {
   if (isWarehouseRejection.value) return metrics
   const details = qcDetails.value
   if (!details) return metrics
-  if (props.truck?.processType === 'GBJ') return metrics // Empty for GBJ since it uses the detailed checklist below
+  if (currentTruck.value?.processType === 'GBJ') return metrics // Empty for GBJ since it uses the detailed checklist below
   if (details.bau) metrics.push({ label: 'Odor', value: details.bau })
   if (details.warna) metrics.push({ label: 'Color', value: details.warna })
   if (details.kadarAir !== null && details.kadarAir !== undefined) metrics.push({ label: 'Moisture', value: details.kadarAir + '%' })
@@ -2806,8 +2927,8 @@ const qcMetrics = computed(() => {
   if (details.bijiOK !== null && details.bijiOK !== undefined) metrics.push({ label: 'Good Beans', value: details.bijiOK + '%' })
 
   // If it's a vehicle check (GBJ)
-  if (props.truck?.processType === 'GBJ' && props.truck.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
-    const check = props.truck.qcVehicleChecks[0];
+  if (currentTruck.value?.processType === 'GBJ' && currentTruck.value.qcVehicleChecks && currentTruck.value.qcVehicleChecks.length > 0) {
+    const check = selectDisplayRecord(currentTruck.value.qcVehicleChecks);
     if (check.vehicleCleanliness) metrics.push({ label: 'Cleanliness', value: check.vehicleCleanliness })
     if (check.vehicleOdor) metrics.push({ label: 'Odor', value: check.vehicleOdor })
     if (check.pestEvidence) metrics.push({ label: 'Pest Evidence', value: check.pestEvidence })
@@ -2820,11 +2941,12 @@ const qcMetrics = computed(() => {
 
 // Parse remarks string into structured checklist/sampling data
 const parsedChecklist = computed(() => {
-  if (!props.truck) return null
+  const t = currentTruck.value
+  if (!t) return null
 
   // If GBJ, populate checklist from qcVehicleChecks
-  if (props.truck.processType === 'GBJ' && props.truck.qcVehicleChecks && props.truck.qcVehicleChecks.length > 0) {
-    const check = props.truck.qcVehicleChecks[0];
+  if (t.processType === 'GBJ' && t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
+    const check = selectDisplayRecord(currentTruck.value.qcVehicleChecks);
     const norm = normalizeChecklistItems(check.checklistItems);
     let items = norm.items;
 
@@ -2861,7 +2983,8 @@ const parsedChecklist = computed(() => {
     }
   }
 
-  const remarksStr = props.truck.remarks || props.truck.compiledChecklist || props.truck.warehouseProcesses?.[0]?.remarks || ''
+  const warehouseProcess = selectDisplayRecord(t.warehouseProcesses)
+  const remarksStr = t.remarks || t.compiledChecklist || warehouseProcess?.remarks || ''
   if (!remarksStr || (!remarksStr.includes('Sampling:') && !remarksStr.includes('Checklist:'))) return null
 
   const hasIssue = remarksStr.includes('DITERIMA DENGAN CATATAN') || remarksStr.includes('NON-COMPLIANT') || remarksStr.includes('NOT OK')
@@ -2983,8 +3106,8 @@ const getWeightVal = (val) => {
 }
 
 const grossInVal = computed(() => {
-  if (!props.truck) return null
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return null
   const types = getWeightRecordTypes(t.processType)
   if (types.gross !== 'IN') return null
   let val = getWeightVal(t.weights?.gross)
@@ -2994,8 +3117,8 @@ const grossInVal = computed(() => {
 })
 
 const tareOutVal = computed(() => {
-  if (!props.truck) return null
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return null
   const types = getWeightRecordTypes(t.processType)
   if (types.tare !== 'OUT') return null
   let val = getWeightVal(t.weights?.tare)
@@ -3005,8 +3128,8 @@ const tareOutVal = computed(() => {
 })
 
 const tareInVal = computed(() => {
-  if (!props.truck) return null
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return null
   const types = getWeightRecordTypes(t.processType)
   if (types.tare !== 'IN') return null
   let val = getWeightVal(t.weights?.tare)
@@ -3016,8 +3139,8 @@ const tareInVal = computed(() => {
 })
 
 const grossOutVal = computed(() => {
-  if (!props.truck) return null
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return null
   const types = getWeightRecordTypes(t.processType)
   if (types.gross !== 'OUT') return null
   let val = getWeightVal(t.weights?.gross)
@@ -3027,8 +3150,8 @@ const grossOutVal = computed(() => {
 })
 
 const isRejected = computed(() => {
-  if (!props.truck) return false
-  const t = props.truck
+  const t = currentTruck.value
+  if (!t) return false
   return t.status === 'INCOMING_CHECK_REJECTED' ||
          t.status === 'QC_VEHICLE_REJECTED' ||
          t.incomingMaterialChecks?.some(c => c.result === 'REJECT') ||
@@ -3046,7 +3169,7 @@ const warehouseRealization = computed(() => {
     if (t.receivedQuantity !== undefined && t.receivedQuantity !== null && t.receivedQuantity !== '') {
       return Number(t.receivedQuantity)
     }
-    const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+    const whProcess = selectDisplayRecord(t.warehouseProcesses)
     if (whProcess?.receivedQuantity !== undefined && whProcess?.receivedQuantity !== null && whProcess?.receivedQuantity !== '') {
       return Number(whProcess.receivedQuantity)
     }
@@ -3059,19 +3182,19 @@ const warehouseRealization = computed(() => {
 })
 
 const isGspProcess = computed(() => {
-  const p = currentTruck.value?.processType || props.truck?.processType
+  const p = currentTruck.value?.processType
   return p === 'GSP'
 })
 
 const gspCommodityName = computed(() => {
-  const t = currentTruck.value || props.truck || {}
+  const t = currentTruck.value || {}
   return (t.cargoSubType || t.cargoType || t.productCatalog?.name || '').toLowerCase()
 })
 
 const gspReceiptUnit = computed(() => {
-  const t = currentTruck.value || props.truck || {}
+  const t = currentTruck.value || {}
   if (t.receiptUnit) return String(t.receiptUnit).toUpperCase()
-  const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  const whProcess = selectDisplayRecord(t.warehouseProcesses)
   if (whProcess?.receivedUnit) return String(whProcess.receivedUnit).toUpperCase()
   if (!isGspProcess.value) return 'KG'
   const name = gspCommodityName.value
@@ -3235,20 +3358,6 @@ const shouldShowAlert = computed(() => {
   return netWeightVarianceObj.value ? netWeightVarianceObj.value.triggerAlert : true
 })
 
-const badgeStyle = computed(() => {
-  const status = statusTonnage.value
-  if (status === 'OK') {
-    return 'background: linear-gradient(135deg, #10B981, #059669); box-shadow: 0 2px 8px rgba(16,185,129,0.25);'
-  }
-  if (status === 'PENDING' || status === 'UOM_DIFFERENT') {
-    return 'background: linear-gradient(135deg, #64748B, #475569); box-shadow: 0 2px 8px rgba(100,116,139,0.25);'
-  }
-  if (status === 'ERROR DATA') {
-    return 'background: linear-gradient(135deg, #EF4444, #B91C1C); box-shadow: 0 2px 8px rgba(239,68,68,0.25);'
-  }
-  return 'background: linear-gradient(135deg, #F59E0B, #D97706); box-shadow: 0 2px 8px rgba(245,158,11,0.25);'
-})
-
 const hasWeightData = computed(() => {
   const gIn = grossInVal.value
   const tIn = tareInVal.value
@@ -3259,11 +3368,11 @@ const hasWeightData = computed(() => {
 })
 
 const getTimestampVal = (key) => {
-  return currentTruck.value?.timestamps?.[key] || currentTruck.value?.[key] || props.truck?.timestamps?.[key] || props.truck?.[key] || null;
+  return currentTruck.value?.timestamps?.[key] || currentTruck.value?.[key] || null;
 }
 
 const timestampRows = computed(() => {
-  const t = currentTruck.value || props.truck;
+  const t = currentTruck.value;
   const pType = t?.processType || 'GBB';
   const isSamplingRejected = t?.status === 'QC_VEHICLE_REJECTED';
 
@@ -3271,7 +3380,7 @@ const timestampRows = computed(() => {
     return [
       { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
       { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-      { label: 'QC Vehicle', value: t?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+      { label: 'QC Vehicle', value: selectDisplayRecord(t?.qcVehicleChecks)?.completedAt || getTimestampVal('qcStartAt') },
       { label: 'GBJ Loading', value: isSamplingRejected ? null : (getTimestampVal('warehouseEndAt') || getTimestampVal('warehouseStartAt')) },
       { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
       { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
@@ -3280,7 +3389,8 @@ const timestampRows = computed(() => {
 
   if (pType === 'GSP') {
     const isSolar = isSolarCommodity.value;
-    const paTime = isSolar ? 'PA EXEMPT' : (gspPaRounds.value?.[0]?.testedAt || getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt'));
+    const latestPaRound = latestByTestRound(gspPaRounds.value)
+    const paTime = isSolar ? 'PA EXEMPT' : (latestPaRound?.testedAt || getTimestampVal('qcEndAt') || getTimestampVal('qcStartAt'));
 
     // Disposisi Mutu jika OOS (atau NOT APPLICABLE jika compliant/tidak ada OOS)
     const isDispApplicable = hasGspDisposition.value || t?.status === 'WAITING_GSP_DISPOSITION' || t?.status === 'WAITING_UTILITY_DISPOSITION';
@@ -3289,7 +3399,7 @@ const timestampRows = computed(() => {
     const dispVal = isDispApplicable ? (dispTime || getTimestampVal('updatedAt')) : 'NOT APPLICABLE';
 
     // Checklist Pra-Bongkar (9 parameter)
-    const whProcess = t?.warehouseProcesses?.find(p => p.isCurrent !== false) || t?.warehouseProcesses?.[0];
+    const whProcess = selectDisplayRecord(t?.warehouseProcesses);
     const checklistTime = whProcess?.startAt || whProcess?.startedAt || getTimestampVal('warehouseStartAt') || null;
 
     // Disposisi Pra-Bongkar (jika ada NOT OK atau disposisi checklist)
@@ -3324,9 +3434,9 @@ const timestampRows = computed(() => {
   return [
     { label: 'Gate Entry', value: getTimestampVal('gateInAt') },
     { label: 'Weigh In', value: getTimestampVal('weighInAt') },
-    { label: 'QC Sampling', value: t?.qcVehicleChecks?.[0]?.completedAt || getTimestampVal('qcStartAt') },
+    { label: 'QC Sampling', value: selectDisplayRecord(t?.qcVehicleChecks)?.completedAt || getTimestampVal('qcStartAt') },
     { label: unloadLabel, value: isSamplingRejected ? null : (getTimestampVal('warehouseStartAt') || getTimestampVal('warehouseEndAt')) },
-    { label: 'QC Lab Check', value: isSamplingRejected ? null : (t?.incomingMaterialChecks?.[0]?.completedAt || (t?.status?.startsWith('INCOMING_CHECK') ? getTimestampVal('qcEndAt') : null)) },
+    { label: 'QC Lab Check', value: isSamplingRejected ? null : (selectDisplayRecord(t?.incomingMaterialChecks)?.completedAt || (t?.status?.startsWith('INCOMING_CHECK') ? getTimestampVal('qcEndAt') : null)) },
     { label: 'Weigh Out', value: getTimestampVal('weighOutAt') },
     { label: 'Dispatched', value: getTimestampVal('gateOutAt') }
   ]
@@ -3442,7 +3552,7 @@ const hasChecklistDisposition = computed(() => {
 const gspPreUnloadMeta = computed(() => {
   const t = currentTruck.value
   if (!t || t.processType !== 'GSP') return {}
-  const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  const whProcess = selectDisplayRecord(t.warehouseProcesses)
   const rawChecklist = whProcess?.checklistItems || t.preUnloadChecklist
   const inspector = whProcess?.startBy?.name || whProcess?.startedBy?.name || rawChecklist?.inspectedBy?.name || t.warehouseStartBy?.name || 'Tim Gudang GSP'
   const inspectedAt = whProcess?.startAt || whProcess?.startedAt || rawChecklist?.inspectedAt || t.warehouseStartAt
@@ -3452,7 +3562,7 @@ const gspPreUnloadMeta = computed(() => {
 const gspPreUnloadItems = computed(() => {
   const t = currentTruck.value
   if (!t || t.processType !== 'GSP') return []
-  const whProcess = t.warehouseProcesses?.find(p => p.isCurrent !== false) || t.warehouseProcesses?.[0]
+  const whProcess = selectDisplayRecord(t.warehouseProcesses)
   const rawChecklist = whProcess?.checklistItems || t.preUnloadChecklist
   if (!rawChecklist) return []
 
@@ -3499,8 +3609,8 @@ const gspPreUnloadStatus = computed(() => {
 
 const latestDisposedPa = computed(() => {
   if (!gspPaRounds.value || gspPaRounds.value.length === 0) return null
-  const withDisp = [...gspPaRounds.value].filter(r => r.dispositionAction).sort((a, b) => (b.testRound || 0) - (a.testRound || 0))
-  return withDisp[0] || null
+  const withDisp = gspPaRounds.value.filter(r => r.dispositionAction)
+  return latestByTestRound(withDisp)
 })
 
 const hasGspDisposition = computed(() => {

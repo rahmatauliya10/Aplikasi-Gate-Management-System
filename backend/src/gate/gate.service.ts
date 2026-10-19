@@ -74,8 +74,17 @@ export class GateService {
           // Database-level concurrency lock on unspaced raw plate number hash
           try {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${rawPlate}))`;
-          } catch (e) {
-            // Fallback for non-postgres database environments in testing
+          } catch (e: any) {
+            // Fail closed in production; fallback only for unit tests
+            if (process.env.NODE_ENV !== 'test') {
+              this.logger.error(
+                `Advisory lock failed for plate ${rawPlate}: ${e.message}. Aborting fail-closed.`,
+                e.stack,
+              );
+              throw new InternalServerErrorException(
+                'Penguncian plate number gagal; pendaftaran dibatalkan secara fail-closed.',
+              );
+            }
           }
 
           // Atomic daily arrival sequence counter for plant day (WIB) - Strictly Fail-Closed
@@ -260,6 +269,7 @@ export class GateService {
               transactionNumber,
               dailySequence,
               plateNumber: normalizedPlate,
+              plateNumberNormalized: rawPlate,
               driverName: dto.driverName,
               driverPhone: dto.driverPhone,
               vendorName: dto.vendorName,
@@ -323,7 +333,7 @@ export class GateService {
       action: 'GATE_CHECK_IN',
       module: 'GATE',
       referenceId: transaction.id,
-      description: `Vehicle ${dto.plateNumber} checked in`,
+      description: `Vehicle ${normalizedPlate} checked in`,
       status: 'SUCCESS',
     });
 

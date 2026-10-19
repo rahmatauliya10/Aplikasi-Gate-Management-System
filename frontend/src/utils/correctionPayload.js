@@ -49,40 +49,95 @@ export function getChecklistEntries(raw) {
 }
 
 /**
- * Builds canonical checklistItems payload object from correction form values.
- * Shape: { initialMoisture: number, items: ChecklistEntry[] }
+ * Parses the persisted checklist shape without discarding unknown metadata.
  */
-export function buildChecklistPayload(formValues) {
-  const checklistEntries = [
-    { label: 'Vehicle Cleanliness', ok: formValues.qcvCleanliness === 'PASS', photo: formValues.qcvCleanlinessPhoto || null },
-    { label: 'Door Seal Intact', ok: formValues.qcvSeal === 'PASS', photo: formValues.qcvSealPhoto || null },
-    { label: 'Odor/Smell Check', ok: formValues.qcvOdorCheck === 'PASS', photo: formValues.qcvOdorCheckPhoto || null },
-    { label: 'Arrangement', ok: formValues.qcvArrangement === 'PASS', photo: formValues.qcvArrangementPhoto || null },
-    { label: 'Pest/Animal Control', ok: formValues.qcvPest === 'PASS', photo: formValues.qcvPestPhoto || null },
-    { label: 'Foreign Objects', ok: formValues.qcvForeignObjects === 'PASS', photo: formValues.qcvForeignObjectsPhoto || null },
-    { label: 'Packaging Integrity', ok: formValues.qcvPackaging === 'PASS', photo: formValues.qcvPackagingPhoto || null },
-    { label: 'CoA Validation', ok: formValues.qcvCoa === 'PASS', photo: formValues.qcvCoaPhoto || null },
-    { label: 'Quantity Verification', ok: formValues.qcvQuantity === 'PASS', photo: formValues.qcvQuantityPhoto || null },
-    { label: 'Leakage & Condition', ok: formValues.qcvLeakage === 'PASS', photo: formValues.qcvLeakagePhoto || null },
+function parseChecklist(raw) {
+  if (!raw) return null
+
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+
+  return raw
+}
+
+/**
+ * Builds canonical checklistItems payload object from correction form values.
+ * Known fields are updated from the form while unknown top-level and item
+ * metadata is carried forward from the persisted checklist where possible.
+ */
+export function buildChecklistPayload(formValues, originalRaw = null) {
+  const parsedOriginal = parseChecklist(originalRaw)
+  const originalItems = Array.isArray(parsedOriginal)
+    ? parsedOriginal
+    : (parsedOriginal && typeof parsedOriginal === 'object' && Array.isArray(parsedOriginal.items)
+      ? parsedOriginal.items
+      : [])
+  const originalByLabel = new Map(
+    originalItems
+      .filter(item => item && typeof item === 'object' && item.label)
+      .map(item => [String(item.label).toLowerCase(), item]),
+  )
+
+  const definitions = [
+    ['Vehicle Cleanliness', 'qcvCleanliness', 'qcvCleanlinessPhoto'],
+    ['Door Seal Intact', 'qcvSeal', 'qcvSealPhoto'],
+    ['Odor/Smell Check', 'qcvOdorCheck', 'qcvOdorCheckPhoto'],
+    ['Arrangement', 'qcvArrangement', 'qcvArrangementPhoto'],
+    ['Pest/Animal Control', 'qcvPest', 'qcvPestPhoto'],
+    ['Foreign Objects', 'qcvForeignObjects', 'qcvForeignObjectsPhoto'],
+    ['Packaging Integrity', 'qcvPackaging', 'qcvPackagingPhoto'],
+    ['CoA Validation', 'qcvCoa', 'qcvCoaPhoto'],
+    ['Quantity Verification', 'qcvQuantity', 'qcvQuantityPhoto'],
+    ['Leakage & Condition', 'qcvLeakage', 'qcvLeakagePhoto'],
   ]
 
+  const checklistEntries = definitions.map(([label, valueKey, photoKey]) => ({
+    ...(originalByLabel.get(label.toLowerCase()) || {}),
+    label,
+    ok: formValues[valueKey] === 'PASS',
+    photo: formValues[photoKey] || null,
+  }))
+  const knownLabels = new Set(definitions.map(([label]) => label.toLowerCase()))
+  const unknownEntries = originalItems.filter(item => {
+    const label = item && typeof item === 'object' ? String(item.label || '').toLowerCase() : ''
+    return !knownLabels.has(label)
+  })
+
+  const metadata = parsedOriginal && typeof parsedOriginal === 'object' && !Array.isArray(parsedOriginal)
+    ? Object.fromEntries(Object.entries(parsedOriginal).filter(([key]) => !['initialMoisture', 'items'].includes(key)))
+    : {}
+
   return {
+    ...metadata,
     initialMoisture: Number(formValues.qcvMoisture) || 0,
-    items: checklistEntries,
+    items: [...checklistEntries, ...unknownEntries],
   }
 }
 
 /**
  * Compares original checklist state with new payload to detect if any checklist values changed.
  */
-export function hasChecklistChanged(originalEntries, originalMoisture, newPayload) {
-  const originalPayload = {
-    initialMoisture: Number(originalMoisture) || 0,
-    items: (originalEntries || []).map(e => ({
+export function hasChecklistChanged(originalEntries, originalMoisture, newPayload, originalRaw = null) {
+  const parsedOriginal = parseChecklist(originalRaw)
+  const originalItems = originalRaw
+    ? (Array.isArray(parsedOriginal) ? parsedOriginal : parsedOriginal?.items || [])
+    : (originalEntries || []).map(e => ({
       label: e.label,
       ok: Boolean(e.ok),
       photo: e.photo || null
     }))
+  const metadata = parsedOriginal && typeof parsedOriginal === 'object' && !Array.isArray(parsedOriginal)
+    ? Object.fromEntries(Object.entries(parsedOriginal).filter(([key]) => !['initialMoisture', 'items'].includes(key)))
+    : {}
+  const originalPayload = {
+    ...metadata,
+    initialMoisture: Number(originalRaw ? parsedOriginal?.initialMoisture : originalMoisture) || 0,
+    items: originalItems,
   }
 
   return JSON.stringify(originalPayload) !== JSON.stringify(newPayload)

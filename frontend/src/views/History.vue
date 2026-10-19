@@ -628,7 +628,7 @@
     </div>
 
     <!-- Main Detail Modal Overlay -->
-    <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" @deleted="handleTruckDeleted" />
+    <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" @voided="handleTruckVoided" @corrected="handleTruckCorrected" />
   </div>
 </template>
 
@@ -718,13 +718,47 @@ const toggleSelectAll = () => {
   ]
 }
 
-const handleTruckDeleted = (id) => {
-  rawCompletedTrucks.value = rawCompletedTrucks.value.filter(
-    (truck) => String(truck.id) !== String(id),
+const handleTruckVoided = (updatedTruck) => {
+  if (!updatedTruck?.id) return
+
+  const index = rawCompletedTrucks.value.findIndex(
+    (truck) => String(truck.id) === String(updatedTruck.id),
   )
-  selectedTruckIds.value = selectedTruckIds.value.filter(
-    (selectedId) => String(selectedId) !== String(id),
+
+  if (index !== -1) {
+    rawCompletedTrucks.value[index] = {
+      ...rawCompletedTrucks.value[index],
+      ...updatedTruck,
+      status: updatedTruck.status || 'CANCELLED',
+      isVoided: updatedTruck.isVoided ?? true,
+    }
+  }
+
+  selectedTruck.value = {
+    ...selectedTruck.value,
+    ...updatedTruck,
+    status: updatedTruck.status || 'CANCELLED',
+    isVoided: updatedTruck.isVoided ?? true,
+  }
+
+  fetchHistory()
+}
+
+const handleTruckCorrected = (updatedTruck) => {
+  if (!updatedTruck?.id) return
+  const index = rawCompletedTrucks.value.findIndex(
+    (truck) => String(truck.id) === String(updatedTruck.id),
   )
+  if (index !== -1) {
+    rawCompletedTrucks.value[index] = {
+      ...rawCompletedTrucks.value[index],
+      ...updatedTruck,
+    }
+  }
+  selectedTruck.value = {
+    ...selectedTruck.value,
+    ...updatedTruck,
+  }
   fetchHistory()
 }
 

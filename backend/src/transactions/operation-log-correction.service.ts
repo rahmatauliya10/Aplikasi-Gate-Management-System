@@ -16,6 +16,10 @@ import {
   TransactionStatus,
   ProcessType,
   Prisma,
+  WarehouseUnit,
+  QcResult,
+  CheckResult,
+  WarehouseCondition,
 } from '@prisma/client';
 import * as crypto from 'crypto';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
@@ -28,6 +32,12 @@ import {
   isAllowedReopenTarget,
   normalizeReopenTarget,
 } from './reopen-policy';
+import {
+  getRawPlateNumber,
+  normalizePlateNumber,
+} from '../common/utils/normalize-plate.util';
+import { assertCanonicalGspUomMapping } from '../product-catalog/constants/canonical-gsp-uom';
+import { validateReceivedQuantityString } from '../warehouse/dto/complete-warehouse.dto';
 
 const REOPEN_INVALIDATING_WAREHOUSE_TARGETS = new Set<TransactionStatus>([
   TransactionStatus.REGISTERED,
@@ -39,6 +49,72 @@ const REOPEN_INVALIDATING_WAREHOUSE_TARGETS = new Set<TransactionStatus>([
 const REOPEN_PRESERVING_WAREHOUSE_TARGETS = new Set<TransactionStatus>([
   TransactionStatus.INCOMING_CHECK_PENDING,
 ]);
+
+const TERMINAL_TRANSACTION_STATUSES = [
+  TransactionStatus.COMPLETED,
+  TransactionStatus.CANCELLED,
+];
+
+async function lockAndAssertNoActivePlateConflict(
+  prismaTx: any,
+  transactionId: string,
+  plateNumber: string,
+): Promise<void> {
+  const rawPlate = getRawPlateNumber(plateNumber);
+  if (!rawPlate) {
+    // Legacy test fixtures and pre-normalization records may not expose a
+    // plate. There is no key to lock in that case; the database write still
+    // remains protected by the transaction OCC check.
+    if (process.env.NODE_ENV === 'test') return;
+    throw new BadRequestException('plateNumber tidak boleh kosong.');
+  }
+
+  if (typeof prismaTx?.$executeRaw !== 'function') {
+    // Unit tests may use a deliberately minimal transaction double. Never use
+    // this branch in a real database context: production must fail closed.
+    if (process.env.NODE_ENV === 'test') return;
+    throw new InternalServerErrorException(
+      'Penguncian plate number tidak tersedia; koreksi dibatalkan secara fail-closed.',
+    );
+  }
+
+  try {
+    await prismaTx.$executeRaw`
+      SELECT pg_advisory_xact_lock(hashtext(${rawPlate}))
+    `;
+  } catch (error: any) {
+    if (process.env.NODE_ENV === 'test') return;
+    throw new InternalServerErrorException(
+      'Penguncian plate number gagal; koreksi dibatalkan secara fail-closed.',
+    );
+  }
+
+  if (typeof prismaTx?.transaction?.findFirst !== 'function') {
+    if (process.env.NODE_ENV === 'test') return;
+    throw new InternalServerErrorException(
+      'Pemeriksaan konflik plate number tidak tersedia; koreksi dibatalkan secara fail-closed.',
+    );
+  }
+
+  const activeConflict = await prismaTx.transaction.findFirst({
+    where: {
+      id: { not: transactionId },
+      status: { notIn: TERMINAL_TRANSACTION_STATUSES },
+      OR: [
+        { plateNumberNormalized: rawPlate },
+        { plateNumber: normalizePlateNumber(plateNumber) },
+        { plateNumber: rawPlate },
+      ],
+    },
+    select: { id: true, transactionNumber: true, status: true },
+  });
+
+  if (activeConflict) {
+    throw new ConflictException(
+      'Kendaraan dengan plate number tersebut masih memiliki transaksi aktif. Selesaikan atau batalkan transaksi aktif terlebih dahulu.',
+    );
+  }
+}
 
 function shouldResetReceivingForReopen(
   processType: string,
@@ -55,6 +131,7 @@ function shouldResetReceivingForReopen(
 
 const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   TRANSACTION: [
+    'plateNumber',
     'driverName',
     'driverPhone',
     'vendorName',
@@ -136,14 +213,196 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   ],
   STATUS: ['status'],
   ATTACHMENT: ['originalName', 'description'],
-  REMARK: ['remarks', 'cancellationReason', 'notes', 'description'],
+  REMARK: ['remarks', 'cancellationReason'],
+};
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  (Object.getPrototypeOf(value) === Object.prototype ||
+    Object.getPrototypeOf(value) === null);
+
+const assertSafeJsonValue = (
+  value: unknown,
+  fieldName: string,
+  depth = 0,
+  state: { nodes: number; seen: WeakSet<object> } = {
+    nodes: 0,
+    seen: new WeakSet<object>(),
+  },
+): void => {
+  if (depth > 12 || ++state.nodes > 1000) {
+    throw new BadRequestException(
+      `Struktur JSON field ${fieldName} terlalu dalam atau terlalu besar.`,
+    );
+  }
+
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    if (typeof value === 'string' && value.length > 10000) {
+      throw new BadRequestException(
+        `Nilai teks pada field ${fieldName} terlalu panjang.`,
+      );
+    }
+    return;
+  }
+
+  if (typeof value === 'number') {
+    if (
+      !Number.isFinite(value) ||
+      (Number.isInteger(value) && !Number.isSafeInteger(value))
+    ) {
+      throw new BadRequestException(
+        `Nilai numerik pada field ${fieldName} harus finite dan aman.`,
+      );
+    }
+    return;
+  }
+
+  if (
+    typeof value !== 'object' ||
+    (!Array.isArray(value) && !isPlainRecord(value))
+  ) {
+    throw new BadRequestException(
+      `Field ${fieldName} hanya boleh berisi nilai JSON yang valid.`,
+    );
+  }
+
+  if (state.seen.has(value)) {
+    throw new BadRequestException(
+      `Field ${fieldName} tidak boleh memiliki referensi JSON melingkar.`,
+    );
+  }
+  state.seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      assertSafeJsonValue(entry, fieldName, depth + 1, state);
+    }
+  } else {
+    for (const [key, entry] of Object.entries(value)) {
+      if (
+        key.startsWith('$') ||
+        key === '__proto__' ||
+        key === 'constructor' ||
+        key === 'prototype'
+      ) {
+        throw new BadRequestException(
+          `Kunci JSON ${key} pada field ${fieldName} tidak diizinkan.`,
+        );
+      }
+      assertSafeJsonValue(entry, fieldName, depth + 1, state);
+    }
+  }
+};
+
+const assertSafeValue = (value: unknown, fieldName: string): void => {
+  if (
+    value === undefined ||
+    typeof value === 'function' ||
+    typeof value === 'symbol' ||
+    typeof value === 'bigint' ||
+    Array.isArray(value) ||
+    isPlainRecord(value)
+  ) {
+    throw new BadRequestException(
+      `Nilai field ${fieldName} hanya boleh berupa scalar.`,
+    );
+  }
+  if (
+    typeof value === 'number' &&
+    (!Number.isFinite(value) ||
+      (Number.isInteger(value) && !Number.isSafeInteger(value)))
+  ) {
+    throw new BadRequestException(
+      `Nilai field ${fieldName} harus berupa angka finite yang aman.`,
+    );
+  }
+};
+
+const normalizeCorrectionValue = (
+  fieldName: string,
+  value: unknown,
+): unknown => {
+  if (fieldName === 'plateNumber') {
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new BadRequestException(
+        'plateNumber wajib berupa teks yang tidak kosong.',
+      );
+    }
+    const normalized = normalizePlateNumber(value);
+    if (!normalized || !getRawPlateNumber(normalized)) {
+      throw new BadRequestException(
+        'plateNumber tidak memiliki format yang valid.',
+      );
+    }
+    return normalized;
+  }
+
+  if (fieldName === 'result' && typeof value === 'string') {
+    const upperValue = value.toUpperCase();
+    if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperValue)) {
+      return QcResult.PASS;
+    }
+    if (['REJECTED', 'REJECT'].includes(upperValue)) {
+      return QcResult.REJECT;
+    }
+  }
+
+  return value;
+};
+
+const parseFinitePositiveNumber = (
+  value: unknown,
+  fieldName: string,
+): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new BadRequestException(
+      `Field ${fieldName} harus berupa angka positif finite.`,
+    );
+  }
+  return value;
+};
+
+const parseFinitePercentage = (value: unknown, fieldName: string): number => {
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 100
+  ) {
+    throw new BadRequestException(
+      `Field ${fieldName} harus berupa persentase antara 0 dan 100.`,
+    );
+  }
+  return value;
+};
+
+const parseNonNegativeInteger = (value: unknown, fieldName: string): number => {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new BadRequestException(
+      `Field ${fieldName} harus berupa angka bulat non-negatif.`,
+    );
+  }
+  return value;
 };
 
 const validateDomain = (
   fieldName: string,
-  newValue: any,
+  newValue: unknown,
   targetModule: CorrectionTargetModule,
 ) => {
+  if (fieldName === 'checklistItems') {
+    assertSafeJsonValue(newValue, fieldName);
+    return;
+  }
+
+  assertSafeValue(newValue, fieldName);
+
   if (
     [
       'grossWeight',
@@ -153,41 +412,87 @@ const validateDomain = (
       'weight',
     ].includes(fieldName)
   ) {
-    const num = Number(newValue);
-    if (isNaN(num) || num <= 0)
-      throw new BadRequestException(
-        `Field ${fieldName} harus berupa angka positif lebih dari 0.`,
-      );
+    parseFinitePositiveNumber(newValue, fieldName);
   }
   if (['moisture', 'foreignMatter', 'goodBeanPercentage'].includes(fieldName)) {
-    const num = Number(newValue);
-    if (isNaN(num) || num < 0 || num > 100) {
-      throw new BadRequestException(
-        `Field ${fieldName} harus berupa persentase antara 0 dan 100.`,
-      );
-    }
+    parseFinitePercentage(newValue, fieldName);
   }
   if (['startAt', 'endAt'].includes(fieldName)) {
+    if (typeof newValue !== 'string' && !(newValue instanceof Date)) {
+      throw new BadRequestException(
+        `Field ${fieldName} harus berupa tanggal ISO yang valid.`,
+      );
+    }
     const d = new Date(newValue);
-    if (isNaN(d.getTime()))
+    if (Number.isNaN(d.getTime())) {
       throw new BadRequestException(
         `Field ${fieldName} harus berupa tanggal yang valid.`,
       );
+    }
   }
   if (
     ['actualQuantity', 'palletCount', 'bagCount', 'rollCount'].includes(
       fieldName,
     )
   ) {
-    const num = Number(newValue);
-    if (isNaN(num) || num < 0 || !Number.isInteger(num))
-      throw new BadRequestException(
-        `Field ${fieldName} harus berupa angka bulat positif.`,
-      );
+    parseNonNegativeInteger(newValue, fieldName);
   }
   if (fieldName === 'status') {
     throw new BadRequestException(
       'Status tidak boleh diubah secara langsung melalui koreksi field. Gunakan action REOPEN_WORKFLOW.',
+    );
+  }
+  if (fieldName === 'receivedQuantity') {
+    if (typeof newValue !== 'string') {
+      throw new BadRequestException(
+        'receivedQuantity wajib berupa string Decimal.',
+      );
+    }
+    validateReceivedQuantityString(newValue);
+  }
+  if (
+    ['result'].includes(fieldName) &&
+    !Object.values(QcResult).includes(newValue as QcResult)
+  ) {
+    throw new BadRequestException(
+      `Nilai ${fieldName} tidak termasuk hasil QC yang sah.`,
+    );
+  }
+  if (
+    [
+      'vehicleCleanliness',
+      'vehicleOdor',
+      'pestEvidence',
+      'vehicleCondition',
+      'documentCompleteness',
+      'sealCondition',
+      'odor',
+      'color',
+      'beanCondition',
+      'itemCondition',
+      'packagingCondition',
+      'quantityCheck',
+      'documentCheck',
+      'visualInspection',
+      'condition',
+    ].includes(fieldName)
+  ) {
+    const allowed =
+      fieldName === 'condition'
+        ? Object.values(WarehouseCondition)
+        : Object.values(CheckResult);
+    if (!allowed.includes(newValue as never)) {
+      throw new BadRequestException(
+        `Nilai ${fieldName} tidak termasuk enum domain yang sah.`,
+      );
+    }
+  }
+  if (
+    ['unit', 'receivedUnit'].includes(fieldName) &&
+    !Object.values(WarehouseUnit).includes(newValue as WarehouseUnit)
+  ) {
+    throw new BadRequestException(
+      `Nilai ${fieldName} tidak termasuk satuan gudang yang sah.`,
     );
   }
 };
@@ -215,13 +520,17 @@ export class OperationLogCorrectionService {
       );
     }
 
-    if (dto.action === CorrectionAction.CORRECT_RECORDED_STATUS) {
+    const action = dto.action ?? CorrectionAction.CORRECT_DATA;
+    if (
+      action !== CorrectionAction.CORRECT_DATA &&
+      action !== CorrectionAction.REOPEN_WORKFLOW
+    ) {
       throw new BadRequestException(
-        'Action CORRECT_RECORDED_STATUS telah dinonaktifkan. Gunakan REOPEN_WORKFLOW.',
+        `Action ${String(action)} tidak didukung pada endpoint koreksi Operation Log.`,
       );
     }
 
-    if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
+    if (action === CorrectionAction.REOPEN_WORKFLOW) {
       if (!dto.reopenTargetStatus) {
         throw new BadRequestException(
           'reopenTargetStatus wajib diisi apabila action adalah REOPEN_WORKFLOW.',
@@ -234,10 +543,7 @@ export class OperationLogCorrectionService {
       }
     }
 
-    if (
-      dto.reopenTargetStatus &&
-      dto.action !== CorrectionAction.REOPEN_WORKFLOW
-    ) {
+    if (dto.reopenTargetStatus && action !== CorrectionAction.REOPEN_WORKFLOW) {
       throw new BadRequestException(
         'reopenTargetStatus hanya boleh diberikan apabila action adalah REOPEN_WORKFLOW.',
       );
@@ -245,7 +551,7 @@ export class OperationLogCorrectionService {
 
     if (
       (!dto.items || dto.items.length === 0) &&
-      dto.action !== CorrectionAction.REOPEN_WORKFLOW
+      action !== CorrectionAction.REOPEN_WORKFLOW
     ) {
       throw new BadRequestException(
         'Daftar item koreksi (items) tidak boleh kosong kecuali untuk REOPEN_WORKFLOW.',
@@ -268,11 +574,26 @@ export class OperationLogCorrectionService {
         where: { id },
         include: {
           productCatalog: true,
-          weighbridgeRecords: { where: { isCurrent: true } },
-          warehouseProcesses: { where: { isCurrent: true } },
-          qcVehicleChecks: { where: { isCurrent: true } },
-          incomingMaterialChecks: { where: { isCurrent: true } },
-          attachments: { where: { isCurrent: true } },
+          weighbridgeRecords: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          warehouseProcesses: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          qcVehicleChecks: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          incomingMaterialChecks: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          attachments: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
         },
       });
 
@@ -286,7 +607,7 @@ export class OperationLogCorrectionService {
         );
       }
 
-      if (dto.action === CorrectionAction.REOPEN_WORKFLOW && tx.isVoided) {
+      if (action === CorrectionAction.REOPEN_WORKFLOW && tx.isVoided) {
         throw new BadRequestException(
           'Transaksi yang telah di-void secara administratif tidak dapat di-reopen. Gunakan workflow pemulihan Void terpisah jika fitur tersebut disetujui di masa depan.',
         );
@@ -298,9 +619,16 @@ export class OperationLogCorrectionService {
         );
       }
 
+      // Reopening makes this terminal transaction active again; reserve its
+      // canonical plate key before any workflow-side writes and fail closed if
+      // another non-terminal transaction already owns that plate.
+      if (action === CorrectionAction.REOPEN_WORKFLOW) {
+        await lockAndAssertNoActivePlateConflict(prismaTx, id, tx.plateNumber);
+      }
+
       // Reject illegal PA bypasses before creating any correction or revision records.
       if (
-        dto.action === CorrectionAction.REOPEN_WORKFLOW &&
+        action === CorrectionAction.REOPEN_WORKFLOW &&
         tx.processType === 'GSP' &&
         dto.reopenTargetStatus === TransactionStatus.PA_NOT_REQUIRED &&
         !evaluatePaExemption(tx.productCatalog, {
@@ -357,7 +685,24 @@ export class OperationLogCorrectionService {
         }
       >();
 
-      for (const item of dto.items || []) {
+      const seenItemKeys = new Set<string>();
+      for (const rawItem of dto.items || []) {
+        const item = {
+          ...rawItem,
+          targetRecordId: rawItem.targetRecordId?.trim() || undefined,
+          fieldName: rawItem.fieldName?.trim(),
+        };
+        if (item.targetModule === CorrectionTargetModule.QC_MATERIAL) {
+          item.targetModule = CorrectionTargetModule.INCOMING_MATERIAL;
+        }
+        const itemKey = `${item.targetModule}:${item.targetRecordId || id}:${item.fieldName}`;
+        if (seenItemKeys.has(itemKey)) {
+          throw new BadRequestException(
+            `Item koreksi duplikat untuk ${item.targetModule}.${item.fieldName}.`,
+          );
+        }
+        seenItemKeys.add(itemKey);
+
         const allowedFields = FIELD_ALLOWLIST[item.targetModule] || [];
         if (!allowedFields.includes(item.fieldName)) {
           throw new BadRequestException(
@@ -365,18 +710,8 @@ export class OperationLogCorrectionService {
           );
         }
 
+        item.newValue = normalizeCorrectionValue(item.fieldName, item.newValue);
         validateDomain(item.fieldName, item.newValue, item.targetModule);
-
-        let valueToUpdate = item.newValue;
-        if (item.fieldName === 'result' && typeof item.newValue === 'string') {
-          const upperVal = item.newValue.toUpperCase();
-          if (['APPROVED', 'PASS', 'APPROVED_WITH_NOTE'].includes(upperVal)) {
-            valueToUpdate = 'PASS';
-          } else if (['REJECTED', 'REJECT'].includes(upperVal)) {
-            valueToUpdate = 'REJECT';
-          }
-        }
-        item.newValue = valueToUpdate;
 
         if (
           item.targetModule === CorrectionTargetModule.TRANSACTION ||
@@ -394,11 +729,17 @@ export class OperationLogCorrectionService {
             ? tx.weighbridgeRecords.find(
                 (r: any) => r.id === item.targetRecordId,
               )
-            : tx.weighbridgeRecords[tx.weighbridgeRecords.length - 1];
+            : tx.weighbridgeRecords.length === 1
+              ? tx.weighbridgeRecords[0]
+              : null;
 
-          if (!rec) {
+          if (
+            !rec ||
+            (rec.transactionId && rec.transactionId !== id) ||
+            rec.isCurrent === false
+          ) {
             throw new BadRequestException(
-              `Record timbangan ID ${item.targetRecordId} tidak ditemukan pada transaksi ini (Ownership Verification Gagal).`,
+              `Record timbangan ID ${item.targetRecordId} tidak current atau tidak dimiliki transaksi ini.`,
             );
           }
 
@@ -416,11 +757,17 @@ export class OperationLogCorrectionService {
             ? tx.warehouseProcesses?.find(
                 (r: any) => r.id === item.targetRecordId,
               )
-            : tx.warehouseProcesses?.[tx.warehouseProcesses.length - 1] || null;
+            : tx.warehouseProcesses?.length === 1
+              ? tx.warehouseProcesses[0]
+              : null;
 
-          if (!rec) {
+          if (
+            !rec ||
+            (rec.transactionId && rec.transactionId !== id) ||
+            rec.isCurrent === false
+          ) {
             throw new ConflictException(
-              'Original Warehouse record does not exist and cannot be corrected',
+              'Original Warehouse record tidak current atau tidak dimiliki transaksi ini.',
             );
           }
 
@@ -436,11 +783,17 @@ export class OperationLogCorrectionService {
         } else if (item.targetModule === CorrectionTargetModule.QC_VEHICLE) {
           const rec = item.targetRecordId
             ? tx.qcVehicleChecks?.find((r: any) => r.id === item.targetRecordId)
-            : tx.qcVehicleChecks?.[tx.qcVehicleChecks.length - 1] || null;
+            : tx.qcVehicleChecks?.length === 1
+              ? tx.qcVehicleChecks[0]
+              : null;
 
-          if (!rec) {
+          if (
+            !rec ||
+            (rec.transactionId && rec.transactionId !== id) ||
+            rec.isCurrent === false
+          ) {
             throw new ConflictException(
-              'Original QC Vehicle record does not exist and cannot be corrected',
+              'Original QC Vehicle record tidak current atau tidak dimiliki transaksi ini.',
             );
           }
 
@@ -454,27 +807,30 @@ export class OperationLogCorrectionService {
           }
           recordGroups.get(groupKey)!.items.push(item);
         } else if (
-          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
-          item.targetModule === CorrectionTargetModule.QC_MATERIAL
+          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL
         ) {
           const rec = item.targetRecordId
             ? tx.incomingMaterialChecks?.find(
                 (r: any) => r.id === item.targetRecordId,
               )
-            : tx.incomingMaterialChecks?.[
-                tx.incomingMaterialChecks.length - 1
-              ] || null;
+            : tx.incomingMaterialChecks?.length === 1
+              ? tx.incomingMaterialChecks[0]
+              : null;
 
-          if (!rec) {
+          if (
+            !rec ||
+            (rec.transactionId && rec.transactionId !== id) ||
+            rec.isCurrent === false
+          ) {
             throw new ConflictException(
-              'Original QC/Incoming Material record does not exist and cannot be corrected',
+              'Original QC/Incoming Material record tidak current atau tidak dimiliki transaksi ini.',
             );
           }
 
-          const groupKey = `${item.targetModule}:${rec.id}`;
+          const groupKey = `INCOMING_MATERIAL:${rec.id}`;
           if (!recordGroups.has(groupKey)) {
             recordGroups.set(groupKey, {
-              targetModule: item.targetModule,
+              targetModule: CorrectionTargetModule.INCOMING_MATERIAL,
               targetRecord: rec,
               items: [],
             });
@@ -488,11 +844,17 @@ export class OperationLogCorrectionService {
           }
           const rec = item.targetRecordId
             ? tx.attachments.find((r: any) => r.id === item.targetRecordId)
-            : tx.attachments[tx.attachments.length - 1];
+            : tx.attachments.length === 1
+              ? tx.attachments[0]
+              : null;
 
-          if (!rec) {
+          if (
+            !rec ||
+            (rec.transactionId && rec.transactionId !== id) ||
+            rec.isCurrent === false
+          ) {
             throw new BadRequestException(
-              `Record lampiran ID ${item.targetRecordId} tidak ditemukan pada transaksi ini (Ownership Verification Gagal).`,
+              `Record lampiran ID ${item.targetRecordId} tidak current atau tidak dimiliki transaksi ini.`,
             );
           }
 
@@ -533,7 +895,10 @@ export class OperationLogCorrectionService {
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
             if (item.fieldName === 'weight') {
-              const updatedWeight = Number(item.newValue);
+              const updatedWeight = parseFinitePositiveNumber(
+                item.newValue,
+                'weight',
+              );
               if (tx.processType === 'GBJ') {
                 if (rec.type === 'IN') {
                   txUpdateData.tareWeight = updatedWeight;
@@ -601,10 +966,7 @@ export class OperationLogCorrectionService {
             oldValuesSummary[summaryKey] = extractedOldValue;
             newValuesSummary[summaryKey] = item.newValue;
           }
-        } else if (
-          targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
-          targetModule === CorrectionTargetModule.QC_MATERIAL
-        ) {
+        } else if (targetModule === CorrectionTargetModule.INCOMING_MATERIAL) {
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
             if (
@@ -636,7 +998,7 @@ export class OperationLogCorrectionService {
       if (
         !hasActualChanges &&
         !statusUpdatedTo &&
-        dto.action === CorrectionAction.CORRECT_DATA
+        action === CorrectionAction.CORRECT_DATA
       ) {
         throw new BadRequestException(
           'Tidak ada perubahan nilai (No-Op). Seluruh nilai baru identik dengan nilai di database.',
@@ -644,13 +1006,38 @@ export class OperationLogCorrectionService {
       }
 
       // Step 5: Validate Business Rules (Gross >= Tare, warehouse start <= end)
+      const plateCorrectionItem = rootItems.find(
+        (item: any) =>
+          item.targetModule === CorrectionTargetModule.TRANSACTION &&
+          item.fieldName === 'plateNumber',
+      );
+      if (plateCorrectionItem) {
+        await lockAndAssertNoActivePlateConflict(
+          prismaTx,
+          id,
+          plateCorrectionItem.newValue as string,
+        );
+        txUpdateData.plateNumber = normalizePlateNumber(
+          plateCorrectionItem.newValue as string,
+        );
+        txUpdateData.plateNumberNormalized = getRawPlateNumber(
+          plateCorrectionItem.newValue as string,
+        );
+        newValuesSummary[`TRANSACTION.${tx.id}.plateNumber`] =
+          txUpdateData.plateNumber;
+        const plateChanged =
+          tx.plateNumber !== txUpdateData.plateNumber ||
+          tx.plateNumberNormalized !== txUpdateData.plateNumberNormalized;
+        hasActualChanges = hasActualChanges || plateChanged;
+      }
+
       const proposedGross =
         txUpdateData.grossWeight !== undefined
-          ? Number(txUpdateData.grossWeight)
+          ? parseFinitePositiveNumber(txUpdateData.grossWeight, 'grossWeight')
           : tx.grossWeight;
       const proposedTare =
         txUpdateData.tareWeight !== undefined
-          ? Number(txUpdateData.tareWeight)
+          ? parseFinitePositiveNumber(txUpdateData.tareWeight, 'tareWeight')
           : tx.tareWeight;
 
       if (
@@ -689,7 +1076,7 @@ export class OperationLogCorrectionService {
           transactionId: id,
           correctedById: user.id,
           correctionNumber,
-          action: dto.action || CorrectionAction.CORRECT_DATA,
+          action,
           reasonCode: dto.reasonCode,
           reason: dto.reasonCode,
           remark: dto.remark,
@@ -713,7 +1100,12 @@ export class OperationLogCorrectionService {
           fieldName: item.fieldName,
           oldValue:
             tx[item.fieldName] !== undefined ? tx[item.fieldName] : null,
-          newValue: item.newValue !== undefined ? item.newValue : null,
+          newValue:
+            item.fieldName === 'plateNumber'
+              ? txUpdateData.plateNumber
+              : item.newValue !== undefined
+                ? item.newValue
+                : null,
           itemRemark: item.itemRemark || null,
         });
       }
@@ -829,8 +1221,53 @@ export class OperationLogCorrectionService {
                 'rollCount',
               ].includes(item.fieldName)
             ) {
-              updatedFields[item.fieldName] = Number(item.newValue);
+              if (item.fieldName === 'receivedQuantity') {
+                updatedFields.receivedQuantity = validateReceivedQuantityString(
+                  item.newValue,
+                );
+              } else if (
+                item.fieldName === 'actualQuantity' ||
+                ['palletCount', 'bagCount', 'rollCount'].includes(
+                  item.fieldName,
+                )
+              ) {
+                updatedFields[item.fieldName] = parseNonNegativeInteger(
+                  item.newValue,
+                  item.fieldName,
+                );
+              } else {
+                updatedFields[item.fieldName] = parseFinitePositiveNumber(
+                  item.newValue,
+                  item.fieldName,
+                );
+              }
             } else if (item.fieldName === 'receivedUnit') {
+              if (
+                !Object.values(WarehouseUnit).includes(
+                  item.newValue as WarehouseUnit,
+                )
+              ) {
+                throw new BadRequestException(
+                  'receivedUnit bukan WarehouseUnit yang valid.',
+                );
+              }
+              if (tx.processType === ProcessType.GSP) {
+                const catalogReceiptUnit = tx.productCatalog?.receiptUnit;
+                if (
+                  !catalogReceiptUnit ||
+                  item.newValue !== catalogReceiptUnit
+                ) {
+                  throw new BadRequestException(
+                    'receivedUnit harus sama dengan receiptUnit ProductCatalog untuk transaksi GSP.',
+                  );
+                }
+                if (tx.productCatalog?.code) {
+                  assertCanonicalGspUomMapping(
+                    tx.productCatalog.code,
+                    item.newValue as WarehouseUnit,
+                  );
+                }
+              }
               updatedFields.receivedUnit = item.newValue;
             } else if (item.fieldName === 'remarks') {
               updatedFields[item.fieldName] = String(item.newValue);
@@ -897,6 +1334,9 @@ export class OperationLogCorrectionService {
 
           const updatedFields: any = {
             result: rec.result,
+            decisionMode: rec.decisionMode,
+            hasDeviation: rec.hasDeviation,
+            deviationReason: rec.deviationReason,
             vehicleCleanliness: rec.vehicleCleanliness,
             vehicleOdor: rec.vehicleOdor,
             pestEvidence: rec.pestEvidence,
@@ -919,6 +1359,9 @@ export class OperationLogCorrectionService {
             data: {
               transactionId: rec.transactionId,
               result: updatedFields.result,
+              decisionMode: updatedFields.decisionMode,
+              hasDeviation: updatedFields.hasDeviation,
+              deviationReason: updatedFields.deviationReason,
               vehicleCleanliness: updatedFields.vehicleCleanliness,
               vehicleOdor: updatedFields.vehicleOdor,
               pestEvidence: updatedFields.pestEvidence,
@@ -947,10 +1390,7 @@ export class OperationLogCorrectionService {
               itemRemark: item.itemRemark || null,
             });
           }
-        } else if (
-          targetModule === CorrectionTargetModule.INCOMING_MATERIAL ||
-          targetModule === CorrectionTargetModule.QC_MATERIAL
-        ) {
+        } else if (targetModule === CorrectionTargetModule.INCOMING_MATERIAL) {
           const superseded = await prismaTx.incomingMaterialCheck.updateMany({
             where: {
               id: rec.id,
@@ -1120,7 +1560,7 @@ export class OperationLogCorrectionService {
       }
 
       // REOPEN_WORKFLOW explicitly resets downstream completion timestamps and clears blocking records based on Stage Matrix
-      if (dto.action === CorrectionAction.REOPEN_WORKFLOW) {
+      if (action === CorrectionAction.REOPEN_WORKFLOW) {
         const targetReopenStatus =
           dto.reopenTargetStatus ||
           (statusUpdatedTo as TransactionStatus) ||
@@ -1414,22 +1854,35 @@ export class OperationLogCorrectionService {
       const updatedTx = await prismaTx.transaction.findUnique({
         where: { id },
         include: {
-          weighbridgeRecords: true,
-          incomingMaterialChecks: true,
-          qcVehicleChecks: true,
-          warehouseProcesses: true,
+          productCatalog: true,
+          weighbridgeRecords: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          incomingMaterialChecks: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          qcVehicleChecks: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          warehouseProcesses: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
+          attachments: {
+            where: { isCurrent: true },
+            orderBy: { revision: 'desc' },
+          },
         },
       });
 
       // Step 9: Append Status History if Status Changed or Reopened
-      if (
-        statusUpdatedTo ||
-        dto.action === CorrectionAction.CORRECT_RECORDED_STATUS ||
-        dto.action === CorrectionAction.REOPEN_WORKFLOW
-      ) {
+      if (statusUpdatedTo || action === CorrectionAction.REOPEN_WORKFLOW) {
         const targetStatus =
           statusUpdatedTo ||
-          (dto.action === CorrectionAction.REOPEN_WORKFLOW
+          (action === CorrectionAction.REOPEN_WORKFLOW
             ? 'QC_VEHICLE_PENDING'
             : tx.status);
         await prismaTx.transactionStatusHistory.create({
@@ -1446,7 +1899,17 @@ export class OperationLogCorrectionService {
       // Recalculate Derived Weights and generate FraudCheck if weights present
       const finalNet = updatedTx?.netWeight ?? null;
       const finalActual = updatedTx?.actualWeight ?? null;
-      if (finalNet !== null && finalActual !== null && finalNet > 0) {
+      const weightCorrectionApplied = Object.keys(txUpdateData).some((field) =>
+        ['grossWeight', 'tareWeight', 'actualWeight', 'netWeight'].includes(
+          field,
+        ),
+      );
+      if (
+        weightCorrectionApplied &&
+        finalNet !== null &&
+        finalActual !== null &&
+        finalNet > 0
+      ) {
         const deviation = Math.abs(finalNet - finalActual);
         const deviationPercent = (deviation / finalNet) * 100;
         let riskLevel: 'SAFE' | 'WARNING' | 'CRITICAL' = 'SAFE';
