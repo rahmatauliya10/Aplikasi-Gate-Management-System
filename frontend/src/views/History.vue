@@ -655,8 +655,8 @@
       </div>
 
       <!-- Pagination -->
-      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="filteredAnalyzedTrucks.length > 0">
-        <Pagination :current-page="currentPage" :total-items="filteredAnalyzedTrucks.length" @update:current-page="currentPage = $event" />
+      <div class="relative z-20 bg-white/50 backdrop-blur-md" v-if="currentTotalItems > 0">
+        <Pagination :current-page="currentPage" :total-items="currentTotalItems" :items-per-page="10" @update:current-page="currentPage = $event" />
       </div>
     </div>
 
@@ -669,52 +669,17 @@
 import { formatPlantDate, formatPlantTime, formatPlantDateTime, plantDateKey } from '../utils/displayTime'
 import { getStatusLabel } from '../utils/statusLabel'
 import { ref, computed, onMounted, watch } from 'vue'
-import { useTruckStore } from '../stores/truckStore'
-import { useSettingsStore } from '../stores/settingsStore'
+import reportService from '../services/reportService'
 import truckService from '../services/truckService'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Pagination from '../components/Pagination.vue'
 import { useToast } from '../composables/useToast'
-import { generatePrintHTML, printTruckReport } from '../utils/pdfGenerator'
+import { printTruckReport } from '../utils/pdfGenerator'
 
 // Stores and Composables
-const truckStore = useTruckStore()
-const settingsStore = useSettingsStore()
 const toast = useToast()
-
-const rawCompletedTrucks = ref([])
-const handleTruckDeleted = (id) => {
-  rawCompletedTrucks.value = rawCompletedTrucks.value.filter(t => String(t.id) !== String(id))
-}
-const loading = ref(false)
-const errorMessage = ref(null)
-
-const fetchHistory = async () => {
-  loading.value = true
-  errorMessage.value = null
-  try {
-    // Fetch all historical transactions (COMPLETED, CANCELLED, REOPENED/ACTIVE) to ensure no operation log data is missing
-    const res = await truckService.getAll({ limit: 1000 })
-    rawCompletedTrucks.value = res.data?.data || res.data || []
-  } catch (err) {
-    // Don't show toast for password-change-required redirect (handled by interceptor)
-    const is403Redirect = err.response?.status === 403 && err.response?.data?.code === 'PASSWORD_CHANGE_REQUIRED'
-    if (!is403Redirect) {
-      console.warn('[History] Mount-time fetch failed:', err.message)
-      const msg = err.gmsMessage || err.response?.data?.message || 'Failed to load history data'
-      errorMessage.value = msg
-      toast.error(msg)
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(() => {
-  fetchHistory()
-})
 
 // Reactive View State
 const currentMode = ref('time')
@@ -732,6 +697,170 @@ const datePreset = ref('ALL')
 const startDate = ref('')
 const endDate = ref('')
 const sortBy = ref('gateInDesc')
+const currentPage = ref(1)
+const selectedTruckIds = ref([])
+const rawCompletedTrucks = ref([])
+const loading = ref(false)
+const errorMessage = ref(null)
+const requestSequence = ref(0)
+const serverMeta = ref({ page: 1, limit: 10, total: 0, totalPages: 0 })
+const serverSummary = ref({
+  avgTatMinutes: 0,
+  totalTonnageMetric: 0,
+  anomalyCount: 0,
+  majorBottleneck: null
+})
+
+const paginatedFilteredTrucks = computed(() => rawCompletedTrucks.value)
+const filteredAnalyzedTrucks = computed(() => rawCompletedTrucks.value)
+const currentTotalItems = computed(() => Number(serverMeta.value.total || 0))
+const avgTAT = computed(() => Number(serverSummary.value.avgTatMinutes || 0))
+const totalTonnage = computed(() => new Intl.NumberFormat('id-ID', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1
+}).format(Number(serverSummary.value.totalTonnageMetric || 0)))
+const anomalyCount = computed(() => Number(serverSummary.value.anomalyCount || 0))
+const majorBottleneck = computed(() => ({
+  waitingIn: 'Weigh In Scale Queue',
+  warehouse: 'Warehouse Unloading',
+  qc: 'Quality Control Lab',
+  waitingOut: 'Weigh Out Dispatch'
+}[serverSummary.value.majorBottleneck] || 'NO DELAYS'))
+
+const isAllSelected = computed(() => {
+  if (paginatedFilteredTrucks.value.length === 0) return false
+  return paginatedFilteredTrucks.value.every((truck) =>
+    selectedTruckIds.value.includes(truck.id),
+  )
+})
+
+const toggleSelectAll = () => {
+  const visibleTrucks = paginatedFilteredTrucks.value
+  if (isAllSelected.value) {
+    selectedTruckIds.value = selectedTruckIds.value.filter(
+      (id) => !visibleTrucks.some((truck) => truck.id === id),
+    )
+    return
+  }
+
+  selectedTruckIds.value = [
+    ...new Set([
+      ...selectedTruckIds.value,
+      ...visibleTrucks.map((truck) => truck.id),
+    ]),
+  ]
+}
+
+const handleTruckDeleted = (id) => {
+  rawCompletedTrucks.value = rawCompletedTrucks.value.filter(
+    (truck) => String(truck.id) !== String(id),
+  )
+  selectedTruckIds.value = selectedTruckIds.value.filter(
+    (selectedId) => String(selectedId) !== String(id),
+  )
+  fetchHistory()
+}
+
+const downloadBlob = (response, filename) => {
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+const exportServerReport = async (format) => {
+  try {
+    const response = await reportService.exportReport({
+      ...buildHistoryParams({ page: undefined, limit: undefined }),
+      format,
+    })
+    downloadBlob(
+      response,
+      `GMS_Operations_Report_${new Date().toISOString().slice(0, 10)}.${format}`,
+    )
+    toast.success(`${format.toUpperCase()} report generated and downloaded!`)
+  } catch (err) {
+    toast.error(err.gmsMessage || err.response?.data?.message || 'Export failed')
+  }
+}
+
+const exportData = () => exportServerReport('csv')
+const exportExcel = () => exportServerReport('xls')
+
+const getTransactionDetails = async (id) => {
+  const response = await truckService.getById(id)
+  return response.data?.data || response.data
+}
+
+const downloadSinglePDF = async (truck) => {
+  if (!truck?.id) {
+    toast.error('Transaction details are unavailable for PDF generation.')
+    return
+  }
+
+  try {
+    const details = await getTransactionDetails(truck.id)
+    if (!details) throw new Error('Transaction details are unavailable.')
+    printTruckReport(details)
+  } catch (err) {
+    toast.error(
+      err.gmsMessage ||
+        err.response?.data?.message ||
+        'Failed to load transaction details for PDF generation',
+    )
+  }
+}
+
+const downloadBulkPDF = async () => {
+  const ids = [...selectedTruckIds.value]
+  if (ids.length === 0) return
+
+  try {
+    const details = new Array(ids.length)
+    let nextIndex = 0
+    const worker = async () => {
+      while (true) {
+        const index = nextIndex++
+        if (index >= ids.length) return
+        details[index] = await getTransactionDetails(ids[index])
+      }
+    }
+    const workerCount = Math.min(4, ids.length)
+    await Promise.all(Array.from({ length: workerCount }, worker))
+
+    const printableDetails = details.filter(Boolean)
+    if (printableDetails.length !== ids.length) {
+      throw new Error('One or more selected transaction details are unavailable.')
+    }
+    printTruckReport(printableDetails)
+    selectedTruckIds.value = []
+  } catch (err) {
+    toast.error(
+      err.gmsMessage ||
+        err.response?.data?.message ||
+        'Failed to load selected transactions for PDF generation',
+    )
+  }
+}
+
+const buildHistoryParams = (extra = {}) => ({
+  page: currentPage.value,
+  limit: 10,
+  search: searchQuery.value.trim() || undefined,
+  status: statusFilter.value,
+  processType: destinationFilter.value === 'ALL' ? undefined : destinationFilter.value,
+  startDate: startDate.value || undefined,
+  endDate: endDate.value || undefined,
+  bottleneck: bottleneckFilter.value,
+  integrity: integrityFilter.value,
+  sort: sortBy.value,
+  ...extra
+})
 
 const applyDatePreset = (preset) => {
   datePreset.value = preset
@@ -756,88 +885,45 @@ const applyDatePreset = (preset) => {
   currentPage.value = 1
 }
 
+const fetchHistory = async () => {
+  const requestId = ++requestSequence.value
+  loading.value = true
+  errorMessage.value = null
+  try {
+    const response = await reportService.getHistory(buildHistoryParams())
+    if (requestId !== requestSequence.value) return
+    const payload = response.data || {}
+    rawCompletedTrucks.value = Array.isArray(payload.data) ? payload.data : []
+    serverMeta.value = payload.meta || serverMeta.value
+    serverSummary.value = payload.summary || serverSummary.value
+  } catch (err) {
+    if (requestId !== requestSequence.value) return
+    const is403Redirect = err.response?.status === 403 && err.response?.data?.code === 'PASSWORD_CHANGE_REQUIRED'
+    if (!is403Redirect) {
+      const msg = err.gmsMessage || err.response?.data?.message || 'Failed to load history data'
+      errorMessage.value = msg
+      toast.error(msg)
+    }
+  } finally {
+    if (requestId === requestSequence.value) loading.value = false
+  }
+}
+
+onMounted(fetchHistory)
+
+watch(
+  [searchQuery, statusFilter, destinationFilter, bottleneckFilter, integrityFilter, startDate, endDate, sortBy],
+  () => {
+    currentPage.value = 1
+    fetchHistory()
+  },
+  { flush: 'post' }
+)
+
+watch(currentPage, () => fetchHistory())
+
 const formatArrivalDateTime = (isoString) => {
   return { date: formatPlantDate(isoString), time: formatPlantTime(isoString) }
-}
-
-const extractMoistureValue = (target) => {
-  if (!target) return null;
-
-  // 1. Direct property check
-  if (target.moisture !== undefined && target.moisture !== null) return Number(target.moisture);
-  if (target.kadarAir !== undefined && target.kadarAir !== null) return Number(target.kadarAir);
-  if (target.initialMoisture !== undefined && target.initialMoisture !== null) return Number(target.initialMoisture);
-  if (target.moistureEst !== undefined && target.moistureEst !== null) return Number(target.moistureEst);
-
-  // 2. ChecklistItems array or object
-  const items = target.checklistItems;
-  if (Array.isArray(items)) {
-    const mItem = items.find(i => i && i.label && (
-      i.label.toLowerCase().includes('moisture') || 
-      i.label.toLowerCase().includes('kadar air') || 
-      i.label.toLowerCase().includes('estimasi')
-    ));
-    if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
-      return Number(mItem.value);
-    }
-  } else if (typeof items === 'object' && items !== null) {
-    if (items.initialMoisture !== undefined && items.initialMoisture !== null) return Number(items.initialMoisture);
-    if (items.moisture !== undefined && items.moisture !== null) return Number(items.moisture);
-    if (items.kadarAir !== undefined && items.kadarAir !== null) return Number(items.kadarAir);
-    if (Array.isArray(items.items)) {
-      const mItem = items.items.find(i => i && i.label && (
-        i.label.toLowerCase().includes('moisture') || 
-        i.label.toLowerCase().includes('kadar air') || 
-        i.label.toLowerCase().includes('estimasi')
-      ));
-      if (mItem && mItem.value !== undefined && mItem.value !== null && mItem.value !== '') {
-        return Number(mItem.value);
-      }
-    }
-  }
-
-  // 3. qcVehicleChecks / incomingMaterialChecks on truck object
-  if (target.incomingMaterialChecks && target.incomingMaterialChecks.length > 0) {
-    const im = target.incomingMaterialChecks[0];
-    if (im.moisture !== undefined && im.moisture !== null) return Number(im.moisture);
-  }
-  if (target.qcVehicleChecks && target.qcVehicleChecks.length > 0) {
-    const qv = target.qcVehicleChecks[0];
-    const val = extractMoistureValue(qv);
-    if (val !== null && !isNaN(val)) return val;
-  }
-  if (target.qcDetails) {
-    if (target.qcDetails.kadarAir !== undefined && target.qcDetails.kadarAir !== null) return Number(target.qcDetails.kadarAir);
-    if (target.qcDetails.moisture !== undefined && target.qcDetails.moisture !== null) return Number(target.qcDetails.moisture);
-    if (target.qcDetails.initialMoisture !== undefined && target.qcDetails.initialMoisture !== null) return Number(target.qcDetails.initialMoisture);
-  }
-
-  return null;
-}
-
-// Pagination State
-const currentPage = ref(1)
-
-// Selection State for Bulk Export/PDF
-const selectedTruckIds = ref([])
-
-const isAllSelected = computed(() => {
-  const visibleTrucks = paginatedFilteredTrucks.value
-  if (visibleTrucks.length === 0) return false
-  return visibleTrucks.every(t => selectedTruckIds.value.includes(t.id))
-})
-
-const toggleSelectAll = () => {
-  const visibleTrucks = paginatedFilteredTrucks.value
-  if (isAllSelected.value) {
-    selectedTruckIds.value = selectedTruckIds.value.filter(id => !visibleTrucks.some(t => t.id === id))
-  } else {
-    visibleTrucks.forEach(t => {
-      if (!selectedTruckIds.value.includes(t.id)) {
-        selectedTruckIds.value.push(t.id)
-      }
-    })
-  }
 }
 
 // Toggle row expansion
@@ -881,324 +967,7 @@ const getCorrectionCount = (truck) => {
   return 0
 }
 
-// Completed trucks sorted descending
-const completedTrucks = computed(() => {
-  const list = rawCompletedTrucks.value || []
-  return [...list].sort((a, b) => {
-    const dateA = new Date(a?.timestamps?.gateOutAt || a?.timestamps?.completedAt || a?.createdAt || 0)
-    const dateB = new Date(b?.timestamps?.gateOutAt || b?.timestamps?.completedAt || b?.createdAt || 0)
-    const timeA = isNaN(dateA.getTime()) ? 0 : dateA.getTime()
-    const timeB = isNaN(dateB.getTime()) ? 0 : dateB.getTime()
-    return timeB - timeA
-  })
-})
-
-// --- CORE DATA PROCESSING ---
-const analyzedTrucks = computed(() => {
-  return completedTrucks.value.map(truck => {
-    if (!truck) return null
-    const durations = calculateDurations(truck)
-    // Find bottleneck stage
-    const bottleneck = Object.keys(durations).reduce((a, b) => {
-      return (durations[a] > durations[b] && b !== 'total') ? a : b
-    }, 'waitingIn')
-    
-    const fraud = calculateFraudMetrics(truck)
-
-    // Map QC Details dynamically from incomingMaterialChecks / qcVehicleChecks
-    let qcDetails = null
-    if (truck.incomingMaterialChecks && truck.incomingMaterialChecks.length > 0) {
-      const im = truck.incomingMaterialChecks[0]
-      qcDetails = {
-        status: im.result,
-        note: im.notes || im.defectNotes || '',
-        kadarAir: extractMoistureValue(im) ?? extractMoistureValue(truck),
-        totalFM: im.foreignMatter,
-        bijiOK: im.beanCondition === 'PASS' || im.result === 'PASS' ? 100 : 0,
-        pic: im.checkedBy?.name || 'N/A'
-      }
-    } else if (truck.qcVehicleChecks && truck.qcVehicleChecks.length > 0) {
-      const qv = truck.qcVehicleChecks[0]
-      qcDetails = {
-        status: qv.result,
-        note: qv.notes || '',
-        kadarAir: extractMoistureValue(qv) ?? extractMoistureValue(truck),
-        totalFM: null,
-        bijiOK: null,
-        pic: qv.checkedBy?.name || 'N/A',
-        vehicleCleanliness: qv.vehicleCleanliness,
-        vehicleOdor: qv.vehicleOdor,
-        pestEvidence: qv.pestEvidence,
-        vehicleCondition: qv.vehicleCondition,
-        documentCompleteness: qv.documentCompleteness,
-        sealCondition: qv.sealCondition
-      }
-    }
-
-    // Fallback for permitCard mapping from permitCardNumber
-    const permitCard = truck.permitCard || truck.permitCardNumber
-
-    return { ...truck, durations, bottleneck, fraud, qcDetails, permitCard }
-  }).filter(Boolean)
-})
-
-// Multi-criteria filters + Date Range + Sorting
-const filteredAnalyzedTrucks = computed(() => {
-  const keyword = searchQuery.value.toLowerCase().trim()
-  
-  const filtered = analyzedTrucks.value.filter(truck => {
-    // 1. Text Search matching
-    const plate = getPlateNumber(truck).toLowerCase()
-    const driver = (truck.driverName || '').toLowerCase()
-    const vendor = getVendor(truck).toLowerCase()
-    const matchesKeyword = !keyword || plate.includes(keyword) || driver.includes(keyword) || vendor.includes(keyword)
-
-    // 2. Destination filter
-    const dest = getProcessType(truck)
-    const matchesDest = destinationFilter.value === 'ALL' || dest === destinationFilter.value
-
-    // 3. Bottleneck filter
-    const matchesBottleneck = bottleneckFilter.value === 'ALL' || 
-      (truck.bottleneck === bottleneckFilter.value && truck.durations[bottleneckFilter.value] > 15)
-
-    // 4. Integrity status filter
-    const matchesIntegrity = integrityFilter.value === 'ALL' || truck.fraud.status === integrityFilter.value
-
-    // 5. Operational Status filter (COMPLETED, CANCELLED, ACTIVE/REOPENED)
-    let matchesStatus = true
-    if (statusFilter.value === 'COMPLETED') matchesStatus = truck.status === 'COMPLETED'
-    else if (statusFilter.value === 'CANCELLED') matchesStatus = truck.status === 'CANCELLED'
-    else if (statusFilter.value === 'ACTIVE') matchesStatus = truck.status !== 'COMPLETED' && truck.status !== 'CANCELLED'
-
-    // 6. Date Range filter (Gate In Arrival Date)
-    let matchesDate = true
-    const arrTime = truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt
-    if (arrTime) {
-      const arrDateStr = plantDateKey(arrTime)
-      if (startDate.value && arrDateStr < startDate.value) matchesDate = false
-      if (endDate.value && arrDateStr > endDate.value) matchesDate = false
-    }
-
-    return matchesKeyword && matchesDest && matchesBottleneck && matchesIntegrity && matchesStatus && matchesDate
-  })
-
-  // Sorting logic
-  return filtered.sort((a, b) => {
-    const timeA = new Date(a.gateInAt || a.timestamps?.gateInAt || a.createdAt || 0).getTime()
-    const timeB = new Date(b.gateInAt || b.timestamps?.gateInAt || b.createdAt || 0).getTime()
-    
-    if (sortBy.value === 'gateInAsc') return timeA - timeB // Datang Terawal / Pertama (Oldest first)
-    if (sortBy.value === 'gateInDesc') return timeB - timeA // Datang Terbaru / Terakhir (Newest first)
-    if (sortBy.value === 'tatDesc') return (b.durations?.totalTat || 0) - (a.durations?.totalTat || 0)
-    if (sortBy.value === 'deviationDesc') return (b.fraud?.diffPercent || 0) - (a.fraud?.diffPercent || 0)
-    return timeB - timeA
-  })
-})
-
-// Total Pages computed
-const totalPages = computed(() => Math.ceil(filteredAnalyzedTrucks.value.length / 10) || 1)
-
-// Paginated view chunk
-const paginatedFilteredTrucks = computed(() => {
-  const start = (currentPage.value - 1) * 10
-  const end = start + 10
-  return filteredAnalyzedTrucks.value.slice(start, end)
-})
-
-// Watchers
-watch(filteredAnalyzedTrucks, () => {
-  if (currentPage.value > totalPages.value) {
-    currentPage.value = 1
-  }
-})
-watch([searchQuery, statusFilter, destinationFilter, bottleneckFilter, integrityFilter], () => {
-  currentPage.value = 1
-})
-
-// --- EXECUTIVE STATISTICS CALCULATORS ---
-const avgTAT = computed(() => {
-  if (completedTrucks.value.length === 0) return 55 // realistic fallback
-  const sum = analyzedTrucks.value.reduce((acc, t) => acc + (t.durations?.total || 0), 0)
-  return Math.round(sum / completedTrucks.value.length)
-})
-
-const totalTonnage = computed(() => {
-  if (completedTrucks.value.length === 0) return '0,0'
-  const sum = analyzedTrucks.value.reduce((acc, t) => acc + (t.fraud?.net || 0), 0)
-  return new Intl.NumberFormat('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(sum / 1000)
-})
-
-const anomalyCount = computed(() => {
-  return analyzedTrucks.value.filter(t => t.fraud?.status === 'CRITICAL' || t.fraud?.status === 'WARNING').length
-})
-
-const majorBottleneck = computed(() => {
-  if (completedTrucks.value.length === 0) return 'NO DELAYS'
-  const delays = { waitingIn: 0, warehouse: 0, qc: 0, waitingOut: 0 }
-  analyzedTrucks.value.forEach(t => {
-    if (t.bottleneck && t.durations[t.bottleneck] > 15) {
-      delays[t.bottleneck]++
-    }
-  })
-  const maxDelay = Object.keys(delays).reduce((a, b) => delays[a] > delays[b] ? a : b)
-  if (delays[maxDelay] === 0) return 'NO DELAYS'
-  const labels = { 
-    waitingIn: 'Weigh In Scale Queue', 
-    warehouse: 'Warehouse Unloading', 
-    qc: 'Quality Control Lab', 
-    waitingOut: 'Weigh Out Dispatch' 
-  }
-  return labels[maxDelay] || 'NO DELAYS'
-})
-
 // --- HELPERS ---
-const getWeightVal = (val) => {
-  if (val === undefined || val === null || val === '') return null
-  const num = Number(val)
-  if (isNaN(num)) return null
-  return num
-}
-
-const calculateFraudMetrics = (truck) => {
-  if (!truck) return { net: 0, roll: 0, diff: 0, ratioPercent: 0, deviationPercent: 0, direction: '=', status: 'PENDING' }
-  const area = truck.processType
-  
-  let grossIn = null
-  let tareOut = null
-  let tareIn = null
-  let grossOut = null
-
-  if (area === 'GBB' || area === 'GSP') {
-    grossIn = getWeightVal(truck.weights?.gross)
-    if (grossIn === null) grossIn = getWeightVal(truck.grossWeight)
-    if (grossIn === null) grossIn = getWeightVal(truck.weighInWeight)
-
-    tareOut = getWeightVal(truck.weights?.tare)
-    if (tareOut === null) tareOut = getWeightVal(truck.tareWeight)
-    if (tareOut === null) tareOut = getWeightVal(truck.weighOutWeight)
-  } else if (area === 'GBJ') {
-    tareIn = getWeightVal(truck.weights?.tare)
-    if (tareIn === null) tareIn = getWeightVal(truck.tareWeight)
-    if (tareIn === null) tareIn = getWeightVal(truck.weighInWeight)
-
-    grossOut = getWeightVal(truck.weights?.gross)
-    if (grossOut === null) grossOut = getWeightVal(truck.grossWeight)
-    if (grossOut === null) grossOut = getWeightVal(truck.weighOutWeight)
-  }
-
-  let roll = null
-  if (area === 'GBB') {
-    roll = truck.nettoTimbanganRoll !== undefined && truck.nettoTimbanganRoll !== null ? truck.nettoTimbanganRoll : (truck.weights?.nettoTimbanganRoll !== undefined && truck.weights?.nettoTimbanganRoll !== null ? truck.weights.nettoTimbanganRoll : (truck.actualWeight !== undefined && truck.actualWeight !== null ? truck.actualWeight : (truck.weights?.rollWeight !== undefined && truck.weights?.rollWeight !== null ? truck.weights.rollWeight : (truck.rollWeight !== undefined && truck.rollWeight !== null ? truck.rollWeight : null))))
-  } else if (area === 'GSP') {
-    roll = truck.jumlahNettoGSP !== undefined && truck.jumlahNettoGSP !== null ? truck.jumlahNettoGSP : (truck.weights?.jumlahNettoGSP !== undefined && truck.weights?.jumlahNettoGSP !== null ? truck.weights.jumlahNettoGSP : (truck.actualWeight !== undefined && truck.actualWeight !== null ? truck.actualWeight : (truck.weights?.rollWeight !== undefined && truck.weights?.rollWeight !== null ? truck.weights.rollWeight : (truck.rollWeight !== undefined && truck.rollWeight !== null ? truck.rollWeight : null))))
-  } else if (area === 'GBJ') {
-    roll = truck.nettoInstantCoffee !== undefined && truck.nettoInstantCoffee !== null ? truck.nettoInstantCoffee : (truck.weights?.nettoInstantCoffee !== undefined && truck.weights?.nettoInstantCoffee !== null ? truck.weights.nettoInstantCoffee : (truck.actualWeight !== undefined && truck.actualWeight !== null ? truck.actualWeight : (truck.weights?.rollWeight !== undefined && truck.weights?.rollWeight !== null ? truck.weights.rollWeight : (truck.rollWeight !== undefined && truck.rollWeight !== null ? truck.rollWeight : null))))
-  }
-
-  if (roll === null) roll = 0
-
-  const isRejected = truck.status === 'INCOMING_CHECK_REJECTED' || 
-                     truck.status === 'QC_VEHICLE_REJECTED' || 
-                     truck.incomingMaterialChecks?.some(c => c.result === 'REJECT') || 
-                     truck.qcVehicleChecks?.some(c => c.result === 'REJECT')
-
-  if (isRejected) {
-    let net = 0
-    if (area === 'GBB' || area === 'GSP') {
-      if (tareOut !== null && grossIn !== null) {
-        net = Math.max(0, grossIn - tareOut)
-      }
-    } else if (area === 'GBJ') {
-      if (grossOut !== null && tareIn !== null) {
-        net = Math.max(0, grossOut - tareIn)
-      }
-    }
-    return { net, roll: 0, diff: 0, ratioPercent: 100, deviationPercent: 0, direction: '=', status: 'SAFE' }
-  }
-
-  let net = 0
-  let isPending = false
-  let isError = false
-
-  if (area === 'GBB' || area === 'GSP') {
-    if (tareOut === null || tareOut === 0 || grossIn === null || grossIn === 0) {
-      isPending = true
-    } else if (tareOut > grossIn) {
-      isError = true
-    } else {
-      net = grossIn - tareOut
-      if (net <= 0) isError = true
-    }
-  } else if (area === 'GBJ') {
-    if (grossOut === null || grossOut === 0 || tareIn === null || tareIn === 0) {
-      isPending = true
-    } else if (tareIn > grossOut) {
-      isError = true
-    } else {
-      net = grossOut - tareIn
-      if (net <= 0) isError = true
-    }
-  } else {
-    isPending = true
-  }
-
-  if (isPending || roll === 0) {
-    return { net, roll, diff: 0, ratioPercent: 0, deviationPercent: null, direction: '=', status: 'PENDING' }
-  }
-
-  if (isError) {
-    return { net, roll, diff: 0, ratioPercent: 0, deviationPercent: null, direction: '=', status: 'ERROR DATA' }
-  }
-
-  const ratioPercent = (roll / net) * 100
-  const rawDiff = roll - net
-  const diff = Math.abs(rawDiff)
-  const deviationPercent = Math.abs(100 - ratioPercent)
-  const direction = rawDiff > 0 ? '+' : rawDiff < 0 ? '-' : '='
-
-  const netWeightVarianceObj = settingsStore.weightTolerances?.find(t => t.parameterName === 'Net Weight Variance')
-  const toleranceLimit = netWeightVarianceObj ? netWeightVarianceObj.toleranceValue : 2.0
-
-  let status = 'SAFE'
-  if (deviationPercent > toleranceLimit) {
-    status = 'CRITICAL'
-  } else if (deviationPercent > toleranceLimit / 2) {
-    status = 'WARNING'
-  }
-
-  return { net, roll, diff, ratioPercent, deviationPercent, direction, status }
-}
-
-const calculateDurations = (truck) => {
-  if (!truck) return { waitingIn: 0, warehouse: 0, qc: 0, waitingOut: 0, total: 0 }
-  const ts = truck.timestamps || {}
-  const getDiff = (s, e) => {
-    if (!s || !e) return 0
-    const dateS = new Date(s)
-    const dateE = new Date(e)
-    if (isNaN(dateS.getTime()) || isNaN(dateE.getTime())) return 0
-    return Math.round((dateE - dateS) / 60000)
-  }
-  
-  const gateIn = ts.gateInAt || ts.gate_in_at || truck.gateInAt || truck.createdAt
-  const weighIn = ts.weighInAt || ts.weigh_in_at || truck.weighInAt
-  const warehouseStart = ts.warehouseStartAt || ts.warehouse_start || truck.warehouseStartAt
-  const warehouseEnd = ts.warehouseEndAt || ts.warehouse_end || truck.warehouseEndAt
-  const qcStart = ts.qcVehicleStartAt || ts.incomingCheckStartAt || truck.qcStartAt || ts.qcVehicleEndAt || ts.incomingCheckEndAt || warehouseStart
-  const qcEnd = ts.qcVehicleEndAt || ts.incomingCheckEndAt || ts.incomingCheckAt || truck.qcEndAt || ts.qcVehicleStartAt || ts.incomingCheckStartAt || warehouseEnd
-  const weighOut = ts.weighOutAt || ts.weigh_out_at || truck.weighOutAt
-  const gateOut = ts.gateOutAt || ts.gate_out_at || truck.gateOutAt
-  
-  // Clean realistic times in mins
-  const waitingIn = Math.max(1, getDiff(gateIn, weighIn))
-  const warehouse = Math.max(1, getDiff(warehouseStart, warehouseEnd))
-  const qc = Math.max(1, getDiff(qcStart, qcEnd))
-  const waitingOut = Math.max(1, getDiff(warehouseEnd, weighOut))
-  const total = Math.max(5, getDiff(gateIn, gateOut))
-  
-  return { waitingIn, warehouse, qc, waitingOut, total }
-}
-
 const getPercentageWidth = (val, total) => {
   if (!total || isNaN(total) || isNaN(val)) return 0
   return Math.round((val / total) * 100)
@@ -1282,145 +1051,6 @@ const viewDetails = (truck) => {
   showDetailsModal.value = true
 }
 
-const exportData = () => {
-  toast.info('Exporting high-fidelity transaction data as CSV...')
-  
-  // Construct CSV String
-  const headers = ['TRX ID', 'Plate Number', 'Driver', 'Vendor', 'Destination', 'Gate In', 'Weigh In', 'Warehouse In/Out', 'QC In/Out', 'Weigh Out', 'Gate Out', 'Total TAT (m)', 'Net Weighbridge (kg)', 'Warehouse Scale (kg)', 'Deviation (%)', 'Verdict']
-  
-  const rows = filteredAnalyzedTrucks.value.map(t => [
-    t.id,
-    getPlateNumber(t),
-    t.driverName || '',
-    getVendor(t),
-    getProcessType(t),
-    t.gateInAt || t.timestamps?.gateInAt || t.createdAt || '',
-    t.weighInAt || t.timestamps?.weighInAt || '',
-    `${t.warehouseStartAt || t.timestamps?.warehouseStartAt || ''} - ${t.warehouseEndAt || t.timestamps?.warehouseEndAt || ''}`,
-    `${t.qcStartAt || t.timestamps?.qcVehicleStartAt || t.timestamps?.incomingCheckStartAt || ''} - ${t.qcEndAt || t.timestamps?.qcVehicleEndAt || t.timestamps?.incomingCheckEndAt || ''}`,
-    t.weighOutAt || t.timestamps?.weighOutAt || '',
-    t.gateOutAt || t.timestamps?.gateOutAt || '',
-    t.durations.total,
-    t.fraud.net,
-    t.fraud.roll,
-    t.fraud.deviationPercent !== null && t.fraud.deviationPercent !== undefined ? t.fraud.deviationPercent.toFixed(2) : '0.00',
-    t.fraud.status
-  ])
-  
-  const csvContent = [headers.join(','), ...rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))].join('\n')
-  
-  // Download CSV
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.setAttribute('href', url)
-  link.setAttribute('download', `GMS_Operations_Report_${new Date().toISOString().slice(0,10)}.csv`)
-  link.style.visibility = 'hidden'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  
-  toast.success('CSV Report generated and downloaded!')
-}
-
-const exportExcel = () => {
-  toast.info('Exporting transaction data as Excel...')
-  
-  const headers = ['TRX ID', 'Plate Number', 'Driver', 'Vendor', 'Destination', 'Gate In', 'Weigh In', 'Warehouse In/Out', 'QC In/Out', 'Weigh Out', 'Gate Out', 'Total TAT (m)', 'Net Weighbridge (kg)', 'Warehouse Scale (kg)', 'Deviation (%)', 'Verdict']
-  
-  const rows = filteredAnalyzedTrucks.value.map(t => [
-    t.id,
-    getPlateNumber(t),
-    t.driverName || '',
-    getVendor(t),
-    getProcessType(t),
-    t.gateInAt || t.timestamps?.gateInAt || t.createdAt || '',
-    t.weighInAt || t.timestamps?.weighInAt || '',
-    `${t.warehouseStartAt || t.timestamps?.warehouseStartAt || ''} - ${t.warehouseEndAt || t.timestamps?.warehouseEndAt || ''}`,
-    `${t.qcStartAt || t.timestamps?.qcVehicleStartAt || t.timestamps?.incomingCheckStartAt || ''} - ${t.qcEndAt || t.timestamps?.qcVehicleEndAt || t.timestamps?.incomingCheckEndAt || ''}`,
-    t.weighOutAt || t.timestamps?.weighOutAt || '',
-    t.gateOutAt || t.timestamps?.gateOutAt || '',
-    t.durations.total,
-    t.fraud.net,
-    t.fraud.roll,
-    t.fraud.deviationPercent !== null && t.fraud.deviationPercent !== undefined ? t.fraud.deviationPercent.toFixed(2) : '0.00',
-    t.fraud.status
-  ])
-
-  // Build styled HTML representation that Excel opens natively as a worksheet
-  let html = `
-    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-    <head>
-      <!--[if gte mso 9]>
-      <xml>
-        <x:ExcelWorkbook>
-          <x:ExcelWorksheets>
-            <x:ExcelWorksheet>
-              <x:Name>GMS Operations Report</x:Name>
-              <x:WorksheetOptions>
-                <x:DisplayGridlines/>
-              </x:WorksheetOptions>
-            </x:ExcelWorksheet>
-          </x:ExcelWorksheets>
-        </x:ExcelWorkbook>
-      </xml>
-      <![endif]-->
-      <style>
-        table { border-collapse: collapse; }
-        th { background-color: #4A8BDF; color: #ffffff; font-weight: bold; border: 1px solid #cbd5e1; padding: 8px; font-family: sans-serif; font-size: 11px; }
-        td { border: 1px solid #cbd5e1; padding: 6px; font-family: sans-serif; font-size: 11px; }
-      </style>
-    </head>
-    <body>
-      <table>
-        <thead>
-          <tr>
-  `
-  headers.forEach(h => {
-    html += `<th>${h}</th>`
-  })
-  html += `
-          </tr>
-        </thead>
-        <tbody>
-  `
-  rows.forEach(r => {
-    html += '<tr>'
-    r.forEach(cell => {
-      html += `<td>${String(cell)}</td>`
-    })
-    html += '</tr>'
-  })
-  html += `
-        </tbody>
-      </table>
-    </body>
-    </html>
-  `
-
-  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.setAttribute('href', url)
-  link.setAttribute('download', `GMS_Operations_Report_${new Date().toISOString().slice(0,10)}.xls`)
-  link.style.visibility = 'hidden'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  
-  toast.success('Excel Report generated and downloaded!')
-}
-
-const downloadSinglePDF = (truck) => {
-  printTruckReport(truck)
-}
-
-const downloadBulkPDF = () => {
-  if (selectedTruckIds.value.length === 0) return
-  const trucksToPrint = filteredAnalyzedTrucks.value.filter(t => selectedTruckIds.value.includes(t.id))
-  printTruckReport(trucksToPrint)
-  selectedTruckIds.value = []
-}
 </script>
 
 <style scoped>

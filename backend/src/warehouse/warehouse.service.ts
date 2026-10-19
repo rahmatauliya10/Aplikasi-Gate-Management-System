@@ -599,99 +599,16 @@ export class WarehouseService {
           );
 
           if (dto.checklistDisposition.action === 'REJECT') {
-            assertValidStatusTransition(tx.status, 'QC_VEHICLE_REJECTED');
-            let photoEvidencesResult: {
-              createdFiles: string[];
-              cleanupFiles: () => void;
-            } | null = null;
-            try {
-              const updated = await this.prisma.$transaction(
-                async (prismaTx) => {
-                  photoEvidencesResult = await this.validateNotOkItemEvidences(
-                    transactionId,
-                    submittedItems,
-                    1,
-                    prismaTx,
-                  );
-
-                  const updatedTx = await prismaTx.transaction.update({
-                    where: { id: transactionId },
-                    data: {
-                      status: TransactionStatus.QC_VEHICLE_REJECTED,
-                      revision: { increment: 1 },
-                    },
-                  });
-
-                  await prismaTx.warehouseProcess.create({
-                    data: {
-                      transactionId,
-                      revision: 1,
-                      processType: tx.processType,
-                      startAt: new Date(),
-                      startById: user.id,
-                      remarks:
-                        dto.remarks || 'Ditolak pada Pemeriksaan Pra-Bongkar',
-                      checklistItems: {
-                        version: GSP_PREUNLOAD_VERSION,
-                        overallResult: 'REJECTED',
-                        items: submittedItems.map((item) => ({
-                          code: item.code,
-                          label:
-                            GSP_PREUNLOAD_LABEL_MAP[item.code] || item.code,
-                          result: item.result,
-                          notes: item.notes || null,
-                          photoUrl: item.photoUrl || null,
-                          photoAttachmentId: item.photoAttachmentId || null,
-                        })),
-                        disposition: {
-                          action: 'REJECT',
-                          reason: dto.checklistDisposition!.reason,
-                          decidedById: user.id,
-                          decidedByName: user.name || user.email,
-                          decidedAt: new Date().toISOString(),
-                        },
-                      } as any,
-                    },
-                  });
-
-                  await prismaTx.transactionStatusHistory.create({
-                    data: {
-                      transactionId,
-                      oldStatus: tx.status,
-                      newStatus: TransactionStatus.QC_VEHICLE_REJECTED,
-                      changedById: user.id,
-                      notes: `Ditolak pada Pemeriksaan Pra-Bongkar GSP: ${dto.checklistDisposition!.reason}`,
-                    },
-                  });
-
-                  if (
-                    typeof this.activityLogsService.logActionStrict ===
-                    'function'
-                  ) {
-                    await this.activityLogsService.logActionStrict(
-                      {
-                        userId: user.id,
-                        userName: user.name || user.email,
-                        role: user.role,
-                        action: 'GSP_PREUNLOAD_CHECKLIST_REJECTED',
-                        module: 'WAREHOUSE',
-                        referenceId: transactionId,
-                        description: `Pemeriksaan pra-bongkar ditolak langsung: ${dto.checklistDisposition!.reason}`,
-                        status: 'SUCCESS',
-                      },
-                      prismaTx,
-                    );
-                  }
-
-                  return updatedTx;
-                },
-              );
-
-              return updated;
-            } catch (err) {
-              (photoEvidencesResult as any)?.cleanupFiles();
-              throw err;
-            }
+            // Rejection is deliberately handled by the disposition endpoint after
+            // the checklist has entered WAITING_GSP_CHECKLIST_DISPOSITION.
+            // This prevents a direct invalid state-machine transition and keeps
+            // the checklist revision/audit trail in one legal transition.
+            throw new BadRequestException({
+              success: false,
+              message:
+                'Penolakan checklist GSP wajib diawali pengajuan untuk keputusan (submit_checklist_for_decision), lalu diselesaikan melalui disposisi.',
+              errors: ['CHECKLIST_DISPOSITION_REQUIRED'],
+            });
           }
           // If action is ACCEPT_WITH_NOTE: continue to start warehouse with CONCESSION
         } else if (dto.process === 'submit_checklist_for_decision') {
@@ -720,15 +637,12 @@ export class WarehouseService {
           } | null = null;
           try {
             const updated = await this.prisma.$transaction(async (prismaTx) => {
-              photoEvidencesResult = await this.validateNotOkItemEvidences(
-                transactionId,
-                submittedItems,
-                1,
-                prismaTx,
-              );
-
-              const updatedTx = await prismaTx.transaction.update({
-                where: { id: transactionId },
+              const claimed = await prismaTx.transaction.updateMany({
+                where: {
+                  id: transactionId,
+                  status: tx.status,
+                  revision: tx.revision,
+                },
                 data: {
                   status: TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION,
                   revision: { increment: 1 },
@@ -737,10 +651,32 @@ export class WarehouseService {
                 },
               });
 
+              if (claimed.count !== 1) {
+                throw new ConflictException({
+                  success: false,
+                  message:
+                    'Transaksi telah diperbarui atau diproses secara bersamaan oleh pengguna lain (Concurrency Conflict).',
+                  errors: [],
+                });
+              }
+
+              const maxRevision = await prismaTx.warehouseProcess.aggregate({
+                where: { transactionId },
+                _max: { revision: true },
+              });
+              const nextRevision = (maxRevision._max.revision ?? 0) + 1;
+
+              photoEvidencesResult = await this.validateNotOkItemEvidences(
+                transactionId,
+                submittedItems,
+                nextRevision,
+                prismaTx,
+              );
+
               await prismaTx.warehouseProcess.create({
                 data: {
                   transactionId,
-                  revision: 1,
+                  revision: nextRevision,
                   processType: tx.processType,
                   startAt: new Date(),
                   startById: user.id,
@@ -807,7 +743,9 @@ export class WarehouseService {
                 );
               }
 
-              return updatedTx;
+              return prismaTx.transaction.findUnique({
+                where: { id: transactionId },
+              });
             });
 
             return updated;
@@ -1635,17 +1573,6 @@ export class WarehouseService {
       });
       const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
-      await prismaTx.incomingMaterialCheck.create({
-        data: {
-          transactionId,
-          revision: nextRevision,
-          result: dto.decision === 'passed' ? 'PASS' : 'REJECT',
-          notes: notesContent,
-          checkedById: user.id,
-          completedAt: new Date(),
-        },
-      });
-
       const claimed = await prismaTx.transaction.updateMany({
         where: {
           id: transactionId,
@@ -1657,7 +1584,7 @@ export class WarehouseService {
           status: nextStatus,
           qcEndAt: new Date(),
           remarks: dto.remarks
-            ? `${tx.remarks ? tx.remarks + ' | ' : ''}GSP Check: ${dto.remarks}`
+            ? `${tx.remarks ? tx.remarks + ' | ' : ''}Incoming Check: ${dto.remarks}`
             : tx.remarks,
         },
       });
@@ -1670,6 +1597,17 @@ export class WarehouseService {
           errors: [],
         });
       }
+
+      await prismaTx.incomingMaterialCheck.create({
+        data: {
+          transactionId,
+          revision: nextRevision,
+          result: dto.decision === 'passed' ? 'PASS' : 'REJECT',
+          notes: notesContent,
+          checkedById: user.id,
+          completedAt: new Date(),
+        },
+      });
 
       await prismaTx.transactionStatusHistory.create({
         data: {

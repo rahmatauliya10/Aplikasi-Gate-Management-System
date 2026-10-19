@@ -1,10 +1,50 @@
 import { ref, watch, onUnmounted, isRef, getCurrentInstance } from 'vue'
 import api from '../services/api'
+import {
+  getPhotoSessionEpoch,
+  invalidatePhotoSession,
+  onPhotoSessionInvalidated
+} from '../services/photoSession'
 
 // Global cache: cacheKey -> { blobUrl: string, refCount: number, fetchedAt: number }
 const blobCache = new Map()
 // Pending promises to deduplicate simultaneous requests for identical URLs
 const inFlightRequests = new Map()
+
+let removeSessionInvalidationListener = null
+
+function getCurrentSessionEpoch() {
+  return getPhotoSessionEpoch()
+}
+
+function ensureSessionInvalidationListener() {
+  if (removeSessionInvalidationListener) return
+
+  removeSessionInvalidationListener = onPhotoSessionInvalidated(() => {
+    abortInFlightRequests()
+
+    for (const [, entry] of blobCache.entries()) {
+      try {
+        window.URL.revokeObjectURL(entry.blobUrl)
+      } catch (e) {}
+    }
+
+    blobCache.clear()
+    inFlightRequests.clear()
+  })
+}
+
+function createSessionChangedError() {
+  return new Error('Sesi foto telah berubah; hasil permintaan lama dibatalkan.')
+}
+
+function abortInFlightRequests() {
+  for (const entry of inFlightRequests.values()) {
+    try {
+      entry.controller?.abort()
+    } catch (e) {}
+  }
+}
 
 const MAX_UNREFERENCED_CACHE = 15
 const MAX_TOTAL_CACHE = 30
@@ -70,6 +110,8 @@ export function normalizeAndValidatePhotoUrl(rawUrl) {
  * Deduplicates in-flight requests and caches Object URLs.
  */
 export async function fetchAuthenticatedBlob(rawUrl) {
+  ensureSessionInvalidationListener()
+
   const parsed = normalizeAndValidatePhotoUrl(rawUrl)
   if (!parsed) return null
 
@@ -87,27 +129,42 @@ export async function fetchAuthenticatedBlob(rawUrl) {
     return entry.blobUrl
   }
 
+  const requestEpoch = getCurrentSessionEpoch()
+
   // In-flight deduplication: return existing promise if identical URL is currently downloading
   if (inFlightRequests.has(cacheKey)) {
-    const blobUrl = await inFlightRequests.get(cacheKey)
+    const pending = inFlightRequests.get(cacheKey)
+    const blobUrl = await pending.promise
+    if (requestEpoch !== getCurrentSessionEpoch()) throw createSessionChangedError()
     if (blobCache.has(cacheKey)) {
       blobCache.get(cacheKey).refCount++
     }
     return blobUrl
   }
 
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null
+  const requestEntry = { controller, promise: null }
   const fetchPromise = (async () => {
+    let objectUrl = null
     try {
       const response = await api.get(parsed.fetchUrl, {
         responseType: 'blob',
         timeout: 15000,
+        ...(controller ? { signal: controller.signal } : {}),
       })
+
+      if (requestEpoch !== getCurrentSessionEpoch()) throw createSessionChangedError()
 
       const blob = response.data instanceof Blob
         ? response.data
         : new Blob([response.data], { type: response.headers?.['content-type'] || 'image/jpeg' })
 
-      const objectUrl = window.URL.createObjectURL(blob)
+      objectUrl = window.URL.createObjectURL(blob)
+      if (requestEpoch !== getCurrentSessionEpoch()) {
+        window.URL.revokeObjectURL(objectUrl)
+        objectUrl = null
+        throw createSessionChangedError()
+      }
 
       blobCache.set(cacheKey, {
         blobUrl: objectUrl,
@@ -118,11 +175,17 @@ export async function fetchAuthenticatedBlob(rawUrl) {
       pruneCache()
       return objectUrl
     } finally {
-      inFlightRequests.delete(cacheKey)
+      if (objectUrl && requestEpoch !== getCurrentSessionEpoch()) {
+        try { window.URL.revokeObjectURL(objectUrl) } catch (e) {}
+      }
+      if (inFlightRequests.get(cacheKey) === requestEntry) {
+        inFlightRequests.delete(cacheKey)
+      }
     }
   })()
+  requestEntry.promise = fetchPromise
 
-  inFlightRequests.set(cacheKey, fetchPromise)
+  inFlightRequests.set(cacheKey, requestEntry)
   return fetchPromise
 }
 
@@ -182,6 +245,8 @@ function pruneCache() {
  * Invoked on user logout and session expiration.
  */
 export function clearAuthenticatedBlobCache() {
+  invalidatePhotoSession()
+  abortInFlightRequests()
   for (const [, entry] of blobCache.entries()) {
     try {
       window.URL.revokeObjectURL(entry.blobUrl)

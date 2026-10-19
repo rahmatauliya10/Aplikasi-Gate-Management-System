@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -131,7 +131,7 @@ describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
         role: 'ADMIN',
         area: 'GENERAL',
       };
-      mockPrismaService.user.findFirst.mockResolvedValueOnce(targetUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(targetUser);
 
       const currentUser = {
         id: 'admin-usr-1',
@@ -159,7 +159,7 @@ describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
         area: 'UTILITY_INSPECTION',
         warehouseAccess: [{ processType: 'GSP' }],
       };
-      mockPrismaService.user.findFirst.mockResolvedValueOnce(targetUser);
+      mockPrismaService.user.findFirst.mockResolvedValue(targetUser);
       mockPrismaService.user.update.mockResolvedValueOnce({
         ...targetUser,
         area: 'UTILITY_DISPOSITION_AUTHORITY',
@@ -189,6 +189,7 @@ describe('UsersService (PR-05 Admin Lifecycle & Session Invariants)', () => {
           referenceId: 'operator-usr-2',
           status: 'SUCCESS',
         }),
+        expect.anything(),
       );
     });
   });

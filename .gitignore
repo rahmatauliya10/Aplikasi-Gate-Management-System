@@ -63,3 +63,5 @@ artifacts/screenshots_uat_20261005/
 artifacts/screenshots_uat_operator_20261014/
 backend/artifacts/
 docs/audit/
+.claude/
+

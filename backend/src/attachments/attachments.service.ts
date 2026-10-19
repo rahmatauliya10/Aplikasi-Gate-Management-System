@@ -248,7 +248,7 @@ export class AttachmentsService {
     res: Response,
   ) {
     const attachment = await this.prisma.attachment.findFirst({
-      where: { id: attachmentId, isCurrent: true },
+      where: { id: attachmentId },
       include: { transaction: true },
     });
 

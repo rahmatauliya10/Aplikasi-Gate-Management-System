@@ -26,6 +26,7 @@ jest.mock('fs', () => {
       isFile: () => true,
       isDirectory: () => false,
     })),
+    createReadStream: jest.fn(),
   };
 });
 
@@ -218,6 +219,56 @@ describe('AttachmentsService', () => {
     ).rejects.toThrow(NotFoundException);
   });
 
+  it('should allow downloading a superseded attachment by exact ID', async () => {
+    const historicalAttachment = {
+      id: 'att-historical-1',
+      transactionId: 'tx-1',
+      filePath: 'qc/historical.png',
+      sha256: null,
+      mimeType: 'image/png',
+      originalName: 'historical.png',
+      isCurrent: false,
+      transaction: { id: 'tx-1' },
+    };
+    mockPrismaService.attachment.findFirst.mockResolvedValueOnce(
+      historicalAttachment,
+    );
+    mockPrismaService.transaction.findFirst.mockResolvedValueOnce({
+      id: 'tx-1',
+    });
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    (fs.statSync as jest.Mock).mockReturnValue({
+      size: 4,
+      isFile: () => true,
+      isDirectory: () => false,
+    });
+    const response = {
+      setHeader: jest.fn(),
+      on: jest.fn().mockReturnThis(),
+      once: jest.fn().mockReturnThis(),
+      emit: jest.fn(),
+    };
+    const stream = fs.createReadStream as unknown as jest.Mock;
+    stream.mockImplementationOnce(() => {
+      const historicalStream = {
+        on: jest.fn().mockReturnThis(),
+        pipe: jest.fn(),
+      };
+      return historicalStream;
+    });
+
+    await service.downloadAttachment(
+      'att-historical-1',
+      { id: 'usr-1', role: 'ADMIN', email: 'admin@gms.local' } as any,
+      response as any,
+    );
+
+    expect(mockPrismaService.attachment.findFirst).toHaveBeenCalledWith({
+      where: { id: 'att-historical-1' },
+      include: { transaction: true },
+    });
+  });
+
   it('should throw ForbiddenException if user lacks transaction scope on download', async () => {
     mockPrismaService.attachment.findFirst.mockResolvedValue({
       id: 'att-1',
@@ -232,7 +283,10 @@ describe('AttachmentsService', () => {
       service.downloadAttachment(
         'att-1',
         { id: 'usr-wh', role: 'WAREHOUSE', email: 'wh@gms.local' },
-        {} as any,
+        {
+          setHeader: jest.fn(),
+          on: jest.fn().mockReturnThis(),
+        } as any,
       ),
     ).rejects.toThrow(ForbiddenException);
   });

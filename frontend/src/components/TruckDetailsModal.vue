@@ -995,13 +995,15 @@
                 <label class="block font-bold text-amber-900 text-[11px] uppercase tracking-wider">
                   Target Tahap REOPEN <span class="text-red-500">*</span>
                 </label>
-                <select v-model="correctionForm.reopenTargetStatus" class="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs shadow-2xs">
+                <select v-model="correctionForm.reopenTargetStatus" :disabled="reopenMatrixLoading || !!reopenMatrixError" class="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500 text-xs shadow-2xs disabled:cursor-not-allowed disabled:bg-slate-100">
                   <option value="" disabled>-- Pilih Target Tahap REOPEN (Wajib) --</option>
                   <option v-for="target in allowedReopenTargets" :key="target.value" :value="target.value">
                     {{ target.label }}
                   </option>
                 </select>
-                <p class="text-[10px] text-amber-800 font-medium">
+                <p v-if="reopenMatrixLoading" class="text-[10px] text-amber-800 font-medium">Memuat matriks target REOPEN...</p>
+                <p v-else-if="reopenMatrixError" class="text-[10px] text-red-700 font-medium">{{ reopenMatrixError }}</p>
+                <p v-else class="text-[10px] text-amber-800 font-medium">
                   * Matriks target REOPEN untuk tipe proses: <b class="uppercase">{{ currentProcessType }}</b>
                 </p>
               </div>
@@ -1679,6 +1681,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useConfirm } from '../composables/useConfirm'
 import truckService from '../services/truckService'
 import qcService from '../services/qcService'
+import { getAllowedReopenTargets, getReopenMatrix } from '../services/reopenPolicy'
 import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
 import { getWeightRecordTypes } from '../utils/weightHelpers'
 import { printTruckReport } from '../utils/pdfGenerator'
@@ -1886,6 +1889,10 @@ const whOriginal = computed(() => {
   }
 })
 
+const reopenMatrix = ref(null)
+const reopenMatrixError = ref(null)
+const reopenMatrixLoading = ref(false)
+
 const correctionForm = ref({
   action: 'CORRECT_DATA',
   reopenTargetStatus: '',
@@ -1949,40 +1956,48 @@ const isSolarCommodity = computed(() => {
   return cargo.includes('solar')
 })
 
+const reopenTargetLabels = {
+  REGISTERED: 'Registered (Registrasi Utama)',
+  QC_VEHICLE_PENDING: 'QC Vehicle Pending (Menunggu QC Kendaraan)',
+  QC_VEHICLE_PASSED: 'Warehouse Ready (Menunggu Start Gudang)',
+  PA_NOT_REQUIRED: 'Post-Weighin / PA Not Required (Siap Gudang)',
+  INCOMING_CHECK_PENDING: 'Incoming Check Pending (Menunggu QC Material)',
+}
+
 const allowedReopenTargets = computed(() => {
-  const processType = currentProcessType.value
-  if (processType === 'GSP') {
-    if (isSolarCommodity.value) {
-      return [
-        { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-        { value: 'PA_NOT_REQUIRED', label: '2. Post-Weighin / PA Not Required (Siap Gudang)' },
-      ]
-    }
-    return [
-      { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-      {
-        value: 'QC_VEHICLE_PENDING',
-        label: '2. QC Lab / Sampling Pending (Menunggu Product Analysis)',
-      },
-      { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
-    ]
+  return getAllowedReopenTargets(
+    reopenMatrix.value,
+    currentProcessType.value,
+    isSolarCommodity.value
+  ).map((value, index) => ({
+    value,
+    label: `${index + 1}. ${reopenTargetLabels[value] || value}`,
+  }))
+})
+
+const loadReopenMatrix = async () => {
+  reopenMatrixLoading.value = true
+  reopenMatrixError.value = null
+  try {
+    reopenMatrix.value = await getReopenMatrix()
+  } catch (err) {
+    reopenMatrix.value = null
+    reopenMatrixError.value = 'Matriks target REOPEN tidak dapat dimuat. Silakan coba lagi.'
+  } finally {
+    reopenMatrixLoading.value = false
   }
-  if (processType === 'GBJ') {
-    return [
-      { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-      {
-        value: 'QC_VEHICLE_PENDING',
-        label: '2. QC Vehicle Pending (Menunggu QC Kendaraan)',
-      },
-      { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
-    ]
+}
+
+watch(() => correctionForm.value.action, (action) => {
+  if (action === 'REOPEN_WORKFLOW' && !reopenMatrix.value && !reopenMatrixLoading.value) {
+    loadReopenMatrix()
   }
-  return [
-    { value: 'REGISTERED', label: '1. Registered (Registrasi Utama)' },
-    { value: 'QC_VEHICLE_PENDING', label: '2. QC Sampling Pending (Menunggu Sampling Awal)' },
-    { value: 'QC_VEHICLE_PASSED', label: '3. Warehouse Ready (Menunggu Start Gudang)' },
-    { value: 'INCOMING_CHECK_PENDING', label: '4. Incoming Check Pending (Menunggu QC Material)' },
-  ]
+})
+
+watch(allowedReopenTargets, (targets) => {
+  if (correctionForm.value.reopenTargetStatus && !targets.some((target) => target.value === correctionForm.value.reopenTargetStatus)) {
+    correctionForm.value.reopenTargetStatus = ''
+  }
 })
 
 const handleEvidenceUpload = (event) => {
@@ -2201,6 +2216,12 @@ const executeCorrectionSubmission = async () => {
   correctionLoading.value = true
   correctionError.value = null
   occConflictError.value = null
+
+  if (correctionForm.value.action === 'REOPEN_WORKFLOW' && (reopenMatrixError.value || !reopenMatrix.value)) {
+    correctionError.value = reopenMatrixError.value || 'Matriks target REOPEN belum tersedia.'
+    correctionLoading.value = false
+    return
+  }
 
   try {
     const items = []

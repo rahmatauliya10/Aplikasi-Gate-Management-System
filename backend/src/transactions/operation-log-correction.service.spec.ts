@@ -467,6 +467,75 @@ describe('OperationLogCorrectionService', () => {
     ).rejects.toThrow(BadRequestException);
   });
 
+  it('should preserve warehouse received quantity and unit during copy-on-write correction', async () => {
+    const receivedQuantity = { toString: () => '100.000' };
+    const mockTx = {
+      id: 'tx-warehouse-receipt',
+      status: 'COMPLETED',
+      revision: 4,
+      warehouseProcesses: [
+        {
+          id: 'wh-receipt-1',
+          transactionId: 'tx-warehouse-receipt',
+          processType: 'GSP',
+          startAt: new Date('2026-10-01T01:00:00Z'),
+          endAt: new Date('2026-10-01T02:00:00Z'),
+          startById: 'usr-start',
+          endById: 'usr-end',
+          actualWeight: 100,
+          actualQuantity: 100,
+          receivedQuantity,
+          receivedUnit: 'KG',
+          unit: 'KG',
+          palletCount: null,
+          bagCount: null,
+          rollCount: null,
+          condition: 'GOOD',
+          remarks: 'original remarks',
+          checklistItems: [],
+          revision: 2,
+          isCurrent: true,
+        },
+      ],
+    };
+    const mockTxClient = createMockTxClient(mockTx);
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    await service.correctOperationLog(
+      'tx-warehouse-receipt',
+      {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT',
+        remark: 'Koreksi catatan tanpa mengubah data penerimaan',
+        expectedRevision: 4,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WAREHOUSE,
+            targetRecordId: 'wh-receipt-1',
+            fieldName: 'remarks',
+            newValue: 'corrected remarks',
+          },
+        ],
+      },
+      {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      },
+    );
+
+    expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        receivedQuantity,
+        receivedUnit: 'KG',
+        remarks: 'corrected remarks',
+        revision: 3,
+      }),
+    });
+  });
+
   it('should execute REOPEN_WORKFLOW and supersede downstream current records', async () => {
     const mockTx = {
       id: 'tx-reopen',

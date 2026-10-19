@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import authService from '../services/authService'
 import { getErrorMessage } from '../utils/errorMessage'
+import { invalidatePhotoSession } from '../services/photoSession'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -58,6 +59,8 @@ export const useAuthStore = defineStore('auth', {
     },
     
     async logout() {
+      invalidatePhotoSession()
+
       try {
         if (this.token) {
           await authService.logout()
@@ -65,7 +68,7 @@ export const useAuthStore = defineStore('auth', {
       } catch (err) {
         console.error('API logout failed, clearing local state anyway:', err)
       } finally {
-        this.clearAuth()
+        this.clearAuth(false)
       }
     },
 
@@ -152,7 +155,7 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    clearAuth() {
+    clearAuth(invalidatePhotos = true) {
       this.user = null
       this.token = null
       this.mustChangePassword = false
@@ -171,9 +174,9 @@ export const useAuthStore = defineStore('auth', {
         delete api.defaults.headers.common['Authorization']
       }).catch(() => {})
 
-      import('../composables/useAuthenticatedPhoto').then(({ clearAuthenticatedBlobCache }) => {
-        clearAuthenticatedBlobCache()
-      }).catch(() => {})
+      if (invalidatePhotos) {
+        invalidatePhotoSession()
+      }
     },
     
     setToken(token) {

@@ -62,10 +62,14 @@ describe('Authenticated Photo Loading & Security Tests', () => {
     const attachmentUrl = '/api/attachments/att-12345/download'
     const resolved = await fetchAuthenticatedBlob(attachmentUrl)
 
-    expect(api.get).toHaveBeenCalledWith('/attachments/att-12345/download', {
-      responseType: 'blob',
-      timeout: 15000,
-    })
+    expect(api.get).toHaveBeenCalledWith(
+      '/attachments/att-12345/download',
+      expect.objectContaining({
+        responseType: 'blob',
+        timeout: 15000,
+        signal: expect.any(AbortSignal),
+      }),
+    )
     expect(window.URL.createObjectURL).toHaveBeenCalledWith(mockBlob)
     expect(resolved).toBe('blob:http://localhost:8089/mock-uuid-1')
   })
@@ -137,6 +141,31 @@ describe('Authenticated Photo Loading & Security Tests', () => {
     await new Promise((r) => setTimeout(r, 20))
     // MUST still be photo-2! Stale photo-1 must NOT overwrite!
     expect(resolvedUrl.value).toBe('blob:http://localhost:8089/photo-2')
+  })
+
+  it('rejects stale responses after cache clear and prevents repopulating the cache', async () => {
+    let resolveRequest
+    api.get.mockReturnValueOnce(new Promise((resolve) => {
+      resolveRequest = resolve
+    }))
+
+    const pending = fetchAuthenticatedBlob('/api/attachments/stale/download')
+    clearAuthenticatedBlobCache()
+
+    resolveRequest({
+      data: new Blob(['stale-bytes'], { type: 'image/jpeg' }),
+      headers: { 'content-type': 'image/jpeg' },
+    })
+
+    await expect(pending).rejects.toThrow('Sesi foto telah berubah')
+    expect(window.URL.createObjectURL).not.toHaveBeenCalled()
+
+    api.get.mockResolvedValueOnce({
+      data: new Blob(['fresh-bytes'], { type: 'image/jpeg' }),
+      headers: { 'content-type': 'image/jpeg' },
+    })
+    await expect(fetchAuthenticatedBlob('/api/attachments/stale/download')).resolves.toBeTruthy()
+    expect(api.get).toHaveBeenCalledTimes(2)
   })
 
   it('clears all cached Object URLs and revokes them upon logout', async () => {

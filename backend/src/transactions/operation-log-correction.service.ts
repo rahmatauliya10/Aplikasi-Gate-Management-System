@@ -14,13 +14,44 @@ import {
   CorrectionAction,
   CorrectionTargetModule,
   TransactionStatus,
+  ProcessType,
   QcResult,
+  Prisma,
 } from '@prisma/client';
 import * as crypto from 'crypto';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { sanitizeAuditData } from '../common/utils/mask-pii.util';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
+import {
+  REOPEN_TARGETS_BY_PROCESS,
+  isAllowedReopenTarget,
+  normalizeReopenTarget,
+} from './reopen-policy';
+
+const REOPEN_INVALIDATING_WAREHOUSE_TARGETS = new Set<TransactionStatus>([
+  TransactionStatus.REGISTERED,
+  TransactionStatus.QC_VEHICLE_PENDING,
+  TransactionStatus.QC_VEHICLE_PASSED,
+  TransactionStatus.PA_NOT_REQUIRED,
+]);
+
+const REOPEN_PRESERVING_WAREHOUSE_TARGETS = new Set<TransactionStatus>([
+  TransactionStatus.INCOMING_CHECK_PENDING,
+]);
+
+function shouldResetReceivingForReopen(
+  processType: string,
+  target: TransactionStatus,
+): boolean {
+  if (
+    processType === 'GBB' &&
+    REOPEN_PRESERVING_WAREHOUSE_TARGETS.has(target)
+  ) {
+    return false;
+  }
+  return REOPEN_INVALIDATING_WAREHOUSE_TARGETS.has(target);
+}
 
 const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   TRANSACTION: [
@@ -93,6 +124,8 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
     'endAt',
     'actualWeight',
     'actualQuantity',
+    'receivedQuantity',
+    'receivedUnit',
     'unit',
     'palletCount',
     'bagCount',
@@ -517,6 +550,10 @@ export class OperationLogCorrectionService {
               txUpdateData.actualWeight = Number(item.newValue);
             } else if (item.fieldName === 'actualQuantity') {
               txUpdateData.actualQuantity = Number(item.newValue);
+            } else if (item.fieldName === 'receivedQuantity') {
+              txUpdateData.receivedQuantity = item.newValue;
+            } else if (item.fieldName === 'receivedUnit') {
+              txUpdateData.receiptUnit = item.newValue;
             } else if (item.fieldName === 'unit') {
               txUpdateData.warehouseUnit = item.newValue;
             } else if (item.fieldName === 'startAt') {
@@ -752,6 +789,8 @@ export class OperationLogCorrectionService {
             endAt: rec.endAt,
             actualWeight: rec.actualWeight,
             actualQuantity: rec.actualQuantity,
+            receivedQuantity: rec.receivedQuantity,
+            receivedUnit: rec.receivedUnit,
             unit: rec.unit,
             palletCount: rec.palletCount,
             bagCount: rec.bagCount,
@@ -768,12 +807,15 @@ export class OperationLogCorrectionService {
               [
                 'actualWeight',
                 'actualQuantity',
+                'receivedQuantity',
                 'palletCount',
                 'bagCount',
                 'rollCount',
               ].includes(item.fieldName)
             ) {
               updatedFields[item.fieldName] = Number(item.newValue);
+            } else if (item.fieldName === 'receivedUnit') {
+              updatedFields.receivedUnit = item.newValue;
             } else if (item.fieldName === 'remarks') {
               updatedFields[item.fieldName] = String(item.newValue);
             } else {
@@ -791,6 +833,8 @@ export class OperationLogCorrectionService {
               endById: rec.endById,
               actualWeight: updatedFields.actualWeight,
               actualQuantity: updatedFields.actualQuantity,
+              receivedQuantity: updatedFields.receivedQuantity,
+              receivedUnit: updatedFields.receivedUnit,
               unit: updatedFields.unit,
               palletCount: updatedFields.palletCount,
               bagCount: updatedFields.bagCount,
@@ -1066,44 +1110,21 @@ export class OperationLogCorrectionService {
           (statusUpdatedTo as TransactionStatus) ||
           TransactionStatus.QC_VEHICLE_PENDING;
         const processType = (tx.processType || 'GBB').toUpperCase();
-        const REOPEN_ALLOWED_TARGETS: Record<string, TransactionStatus[]> = {
-          GBB: [
-            TransactionStatus.REGISTERED,
-            TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.QC_VEHICLE_PASSED,
-            TransactionStatus.INCOMING_CHECK_PENDING,
-          ],
-          GSP: [
-            TransactionStatus.REGISTERED,
-            TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.QC_VEHICLE_PASSED,
-            TransactionStatus.PA_NOT_REQUIRED,
-          ],
-          GBJ: [
-            TransactionStatus.REGISTERED,
-            TransactionStatus.QC_VEHICLE_PENDING,
-            TransactionStatus.QC_VEHICLE_PASSED,
-          ],
-        };
+        const normalizedProcessType = processType as ProcessType;
+        let effectiveTarget = normalizeReopenTarget(targetReopenStatus);
 
-        const allowedReopenTargets = REOPEN_ALLOWED_TARGETS[processType];
-
-        if (!allowedReopenTargets) {
+        if (
+          !Object.prototype.hasOwnProperty.call(
+            REOPEN_TARGETS_BY_PROCESS,
+            normalizedProcessType,
+          )
+        ) {
           throw new BadRequestException(
             `Unsupported processType for REOPEN_WORKFLOW: ${tx.processType || 'null'}`,
           );
         }
 
-        // Accept QC_VEHICLE_PASSED or legacy WAREHOUSE_IN_PROGRESS mapping to QC_VEHICLE_PASSED
-        let effectiveTarget =
-          targetReopenStatus === TransactionStatus.WAREHOUSE_IN_PROGRESS
-            ? TransactionStatus.QC_VEHICLE_PASSED
-            : targetReopenStatus;
-
-        if (
-          !allowedReopenTargets.includes(effectiveTarget) &&
-          targetReopenStatus !== TransactionStatus.WAREHOUSE_IN_PROGRESS
-        ) {
+        if (!isAllowedReopenTarget(normalizedProcessType, targetReopenStatus)) {
           throw new BadRequestException(
             `Target status ${targetReopenStatus} tidak diizinkan untuk REOPEN_WORKFLOW transaksi tipe ${processType}. Target status harus sesuai dengan workflow matriks tipe proses.`,
           );
@@ -1152,6 +1173,10 @@ export class OperationLogCorrectionService {
 
         statusUpdatedTo = effectiveTarget;
         txUpdateData.status = effectiveTarget;
+
+        if (shouldResetReceivingForReopen(processType, effectiveTarget)) {
+          txUpdateData.receivedQuantity = null;
+        }
 
         // 1. Always clear cancellation and terminal completion fields on REOPEN
         txUpdateData.cancelledAt = null;
