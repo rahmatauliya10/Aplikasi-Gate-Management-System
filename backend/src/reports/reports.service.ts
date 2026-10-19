@@ -542,7 +542,7 @@ export class ReportsService {
             ELSE NULL END, 0) AS net,
           COALESCE(fraud."warehouseActualWeight", t."actualWeight", 0) AS roll,
           fraud."id" AS fraud_id,
-          fraud."riskLevel" AS risk_level,
+          fraud."riskLevel"::text AS risk_level,
           vehicle."result" AS vehicle_result,
           incoming."result" AS incoming_result,
           fraud."deviationPercent" AS persisted_deviation

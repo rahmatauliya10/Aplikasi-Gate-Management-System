@@ -134,6 +134,23 @@ describe('ReportsService', () => {
       ]);
     });
 
+    it('casts the PostgreSQL RiskLevel enum before using it in text CASE branches', async () => {
+      await service.getOperationHistory(
+        {
+          page: 1,
+          limit: 10,
+          status: OperationHistoryStatus.ALL,
+          bottleneck: OperationHistoryBottleneck.ALL,
+          integrity: OperationHistoryIntegrity.ALL,
+        },
+        mockUser,
+      );
+
+      const projectionQuery = mockPrisma.$queryRaw.mock.calls[0][0];
+      const sqlText = projectionQuery.strings.join('?');
+      expect(sqlText).toContain('fraud."riskLevel"::text AS risk_level');
+    });
+
     it('returns paginated data and full filtered summary', async () => {
       const result = await service.getOperationHistory(
         {
