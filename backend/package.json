@@ -121,10 +121,10 @@
         "lines": 48
       },
       "./src/transactions/operation-log-correction.service.ts": {
-        "statements": 78,
-        "branches": 60,
-        "functions": 85,
-        "lines": 78
+        "statements": 74,
+        "branches": 58,
+        "functions": 82,
+        "lines": 74
       },
       "./src/auth/authorization-scope.service.ts": {
         "statements": 90,

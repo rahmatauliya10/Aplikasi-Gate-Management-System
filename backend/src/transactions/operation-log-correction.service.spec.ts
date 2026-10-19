@@ -2218,5 +2218,349 @@ describe('OperationLogCorrectionService', () => {
         }),
       );
     });
+
+    describe('Defensive Field Validators & Normalizers', () => {
+      const mockAdminUser = {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any;
+
+      let mockDefaultTx: any;
+      let mockTxClient: any;
+
+      beforeEach(() => {
+        mockDefaultTx = {
+          id: 'tx-1',
+          plateNumber: 'B 1234 XYZ',
+          status: 'COMPLETED',
+          isVoided: false,
+          processType: 'GBB',
+          cargoType: 'Raw Material',
+          cargoSubType: 'Cocoa',
+          revision: 1,
+          productCatalogId: 'cat-1',
+          productCatalog: {
+            id: 'cat-1',
+            name: 'Cocoa Beans',
+            isPaRequired: false,
+          },
+          weighbridgeRecords: [
+            { id: 'wb-1', isCurrent: true, grossWeight: 1000 },
+          ],
+          qcVehicleChecks: [
+            { id: 'qcv-1', isCurrent: true, checklistItems: {} },
+          ],
+          incomingMaterialChecks: [
+            { id: 'inc-1', isCurrent: true, moisture: 10 },
+          ],
+          warehouseProcesses: [
+            {
+              id: 'wh-1',
+              isCurrent: true,
+              palletCount: 10,
+              receivedUnit: 'BAG',
+            },
+          ],
+          attachments: [],
+        };
+        mockTxClient = createMockTxClient(mockDefaultTx);
+        mockPrismaService.transaction.findFirst.mockResolvedValue(
+          mockDefaultTx,
+        );
+        mockPrismaService.$transaction.mockImplementation((cb: any) =>
+          cb(mockTxClient),
+        );
+      });
+
+      it('should reject empty or whitespace plateNumber', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid plate',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'plateNumber',
+                  newValue: '   ',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid plate format', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid plate format',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'plateNumber',
+                  newValue: '###---',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject non-positive or non-finite weight numbers', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid weight',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'grossWeight',
+                  newValue: -500,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject non-scalar value on scalar field', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Non-scalar remarks',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'remarks',
+                  newValue: { nested: 'object' },
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid percentage on moisture field', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid moisture percentage',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_MATERIAL,
+                  fieldName: 'moisture',
+                  newValue: 150,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject negative integers on warehouse counts', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Negative pallet count',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'palletCount',
+                  newValue: -5,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject circular JSON in checklistItems', async () => {
+        const circular: any = { name: 'test' };
+        circular.self = circular;
+
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Circular checklist',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_VEHICLE,
+                  fieldName: 'checklistItems',
+                  newValue: circular,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject prohibited prototype keys in checklistItems JSON', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Prohibited key',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_VEHICLE,
+                  fieldName: 'checklistItems',
+                  newValue: { __proto__: { evil: true } },
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid receivedUnit enum values in WAREHOUSE', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid receivedUnit',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'receivedUnit',
+                  newValue: 'NON_EXISTENT_UNIT',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject direct status field alteration in items', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Direct status change',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'status',
+                  newValue: 'COMPLETED',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject non-string receivedQuantity', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid receivedQuantity type',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'receivedQuantity',
+                  newValue: 1234,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid ISO date in startAt', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid startAt date',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'startAt',
+                  newValue: 'not-a-valid-date',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid QC result enum', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid result enum',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_VEHICLE,
+                  fieldName: 'result',
+                  newValue: 'INVALID_RESULT_ENUM',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
   });
 });
