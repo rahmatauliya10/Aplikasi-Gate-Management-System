@@ -35,18 +35,8 @@
           <span class="text-3xl font-black text-slate-900 font-mono tracking-tight">{{ avgTAT }}</span>
           <span class="text-xs font-black text-slate-500 uppercase">minutes</span>
         </div>
-        <div class="mt-3 flex items-center space-x-1.5">
-          <span class="w-1.5 h-1.5 rounded-full" :class="avgTAT > 60 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'"></span>
-          <span class="text-[9.5px] font-black uppercase tracking-wider" :class="avgTAT > 60 ? 'text-amber-600' : 'text-emerald-600'">
-            {{ avgTAT > 60 ? 'SLA Alert: Delayed' : 'SLA Target: Achieved' }}
-          </span>
-        </div>
-        <!-- Micro SVG Sparkline -->
-        <div class="w-full h-8 mt-2 opacity-60">
-          <svg viewBox="0 0 100 20" class="w-full h-full stroke-[#4A8BDF] fill-none stroke-[2] stroke-linecap-round">
-            <path d="M 0 15 Q 15 5, 30 12 T 60 4 T 90 14 T 100 8" />
-          </svg>
-        </div>
+        <p class="mt-3 text-[10px] font-bold text-slate-500">SLA belum ditetapkan</p>
+        <p class="mt-2 text-[10px] text-slate-500">Ringkasan durasi tercatat; bukan indikator kepatuhan SLA.</p>
       </div>
 
       <!-- Stat 2: Active Bottleneck -->
@@ -56,18 +46,7 @@
         </div>
         <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none">Primary Bottleneck Area</p>
         <p class="text-lg font-black text-slate-900 mt-3 truncate">{{ majorBottleneck }}</p>
-        <div class="mt-2.5 flex items-center space-x-1.5">
-          <span class="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-rose-50 text-rose-600 border border-rose-100">
-            ACTION REQUIRED
-          </span>
-        </div>
-        <!-- Visual bottleneck distribution gauge -->
-        <div class="w-full h-1.5 mt-4 rounded-full bg-slate-100 overflow-hidden flex">
-          <div class="h-full bg-indigo-500" style="width: 25%"></div>
-          <div class="h-full bg-orange-500" style="width: 40%"></div>
-          <div class="h-full bg-blue-500" style="width: 20%"></div>
-          <div class="h-full bg-rose-500" style="width: 15%"></div>
-        </div>
+        <p class="mt-3 text-[10px] text-slate-500">Tahap terlama berdasarkan durasi tercatat; bukan pelanggaran SLA.</p>
       </div>
 
       <!-- Stat 3: Tonnage Reconciled -->
@@ -75,24 +54,12 @@
         <div class="absolute -right-3 -top-3 opacity-[0.03] group-hover:scale-110 transition-transform duration-500 text-slate-900">
           <span class="material-icons text-7xl">scale</span>
         </div>
-        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none">Net Tonnage Discharged</p>
+        <p class="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none">Net Weight Recorded</p>
         <div class="flex items-baseline mt-2.5 space-x-1.5">
           <span class="text-3xl font-black text-slate-900 font-mono tracking-tight">{{ totalTonnage }}</span>
           <span class="text-xs font-black text-slate-500 uppercase">metric tons</span>
         </div>
-        <div class="mt-3 flex items-center space-x-1.5 text-emerald-600">
-          <span class="material-icons text-xs">verified</span>
-          <span class="text-[9.5px] font-black uppercase tracking-wider">100% Scales Calibrated</span>
-        </div>
-        <!-- Micro Tonnage Grid -->
-        <div class="w-full h-8 mt-2 opacity-50 flex items-end justify-between gap-0.5">
-          <span class="h-1/3 w-full bg-[#10B981] rounded-t-sm"></span>
-          <span class="h-1/2 w-full bg-[#10B981] rounded-t-sm"></span>
-          <span class="h-2/3 w-full bg-[#10B981] rounded-t-sm"></span>
-          <span class="h-3/4 w-full bg-[#10B981] rounded-t-sm"></span>
-          <span class="h-full w-full bg-[#10B981] rounded-t-sm"></span>
-          <span class="h-2/3 w-full bg-[#10B981] rounded-t-sm"></span>
-        </div>
+        <p class="mt-3 text-[10px] text-slate-500">Berat net tercatat sesuai filter, bukan bukti volume bongkar atau kalibrasi.</p>
       </div>
 
       <!-- Stat 4: Security Integrity Check -->
@@ -208,10 +175,10 @@
           <span class="material-icons absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-base pointer-events-none">filter_alt</span>
           <select v-model="bottleneckFilter" class="w-full h-11 pl-10 pr-8 bg-white border border-slate-200 shadow-xs rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-[#4A8BDF] transition-all cursor-pointer">
             <option value="ALL">Semua Bottleneck</option>
-            <option value="waitingIn">Delay: Weigh In</option>
-            <option value="warehouse">Delay: Warehouse</option>
-            <option value="qc">Delay: Quality Control</option>
-            <option value="waitingOut">Delay: Weigh Out</option>
+            <option value="waitingIn">Tahap terlama: Weigh In</option>
+            <option value="warehouse">Tahap terlama: Warehouse</option>
+            <option value="qc">Tahap terlama: Quality Control</option>
+            <option value="waitingOut">Tahap terlama: Weigh Out</option>
           </select>
         </div>
 
@@ -343,7 +310,7 @@
                   <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'waitingIn')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.weighInAt || truck.weighInAt) }}</span>
-                      <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.waitingIn > 15 ? 'text-red-500' : 'text-slate-400'">
+                      <span class="font-black text-[9.5px] mt-0.5 text-slate-400">
                         {{ truck.durations.waitingIn }}m queue
                       </span>
                     </div>
@@ -352,7 +319,7 @@
                   <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'warehouse')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.warehouseEndAt || truck.warehouseEndAt) }}</span>
-                      <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.warehouse > 15 ? 'text-red-500 animate-pulse' : 'text-slate-400'">
+                      <span class="font-black text-[9.5px] mt-0.5 text-slate-400">
                         {{ truck.durations.warehouse }}m active
                       </span>
                     </div>
@@ -361,7 +328,7 @@
                   <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'qc')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(getQCEndTime(truck)) }}</span>
-                      <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.qc > 15 ? 'text-red-500 animate-pulse' : 'text-slate-400'">
+                      <span class="font-black text-[9.5px] mt-0.5 text-slate-400">
                         {{ truck.durations.qc }}m check
                       </span>
                     </div>
@@ -370,7 +337,7 @@
                   <td class="px-4 py-3 border-y border-slate-100 text-[11px] relative w-[100px] min-w-[100px]" :class="getHighlightClass(truck, 'waitingOut')">
                     <div class="flex flex-col">
                       <span class="text-slate-700 font-bold">{{ formatTime(truck.timestamps?.weighOutAt || truck.weighOutAt) }}</span>
-                      <span class="font-black text-[9.5px] mt-0.5" :class="truck.durations.waitingOut > 15 ? 'text-red-500' : 'text-slate-400'">
+                      <span class="font-black text-[9.5px] mt-0.5 text-slate-400">
                         {{ truck.durations.waitingOut }}m dispatch
                       </span>
                     </div>
@@ -379,10 +346,10 @@
                   <!-- Horizontal Flow Graphic Segment -->
                   <td class="px-4 py-3 border-y border-slate-100 w-[140px] min-w-[140px]">
                     <div class="flex items-center space-x-0.5 w-[120px] h-3 bg-slate-100 rounded-full overflow-hidden p-0.5">
-                      <div class="h-full rounded-l-full" :class="truck.durations.waitingIn > 15 ? 'bg-red-500' : 'bg-blue-400'" :style="{ width: getPercentageWidth(truck.durations.waitingIn, truck.durations.total) + '%' }" title="Waiting In"></div>
-                      <div class="h-full" :class="truck.durations.warehouse > 15 ? 'bg-red-500' : 'bg-indigo-400'" :style="{ width: getPercentageWidth(truck.durations.warehouse, truck.durations.total) + '%' }" title="Warehouse"></div>
-                      <div class="h-full" :class="truck.durations.qc > 15 ? 'bg-red-500' : 'bg-emerald-400'" :style="{ width: getPercentageWidth(truck.durations.qc, truck.durations.total) + '%' }" title="QC Check"></div>
-                      <div class="h-full rounded-r-full" :class="truck.durations.waitingOut > 15 ? 'bg-red-500' : 'bg-teal-400'" :style="{ width: getPercentageWidth(truck.durations.waitingOut, truck.durations.total) + '%' }" title="Weigh Out"></div>
+                      <div class="h-full rounded-l-full bg-blue-400" :style="{ width: getPercentageWidth(truck.durations.waitingIn, truck.durations.total) + '%' }" title="Waiting In"></div>
+                      <div class="h-full bg-indigo-400" :style="{ width: getPercentageWidth(truck.durations.warehouse, truck.durations.total) + '%' }" title="Warehouse"></div>
+                      <div class="h-full bg-emerald-400" :style="{ width: getPercentageWidth(truck.durations.qc, truck.durations.total) + '%' }" title="QC Check"></div>
+                      <div class="h-full rounded-r-full bg-teal-400" :style="{ width: getPercentageWidth(truck.durations.waitingOut, truck.durations.total) + '%' }" title="Weigh Out"></div>
                     </div>
                   </td>
                   
@@ -390,7 +357,7 @@
                     <ProcessTimerBadge 
                       :start-time="truck.gateInAt || truck.timestamps?.gateInAt || truck.createdAt" 
                       :end-time="truck.completedAt || truck.cancelledAt || (truck.durations?.total ? new Date((new Date(truck.gateInAt || truck.createdAt)).getTime() + truck.durations.total * 60000) : null)"
-                      :sla-minutes="90"
+                      :sla-minutes="null"
                       :compact="true"
                     />
                   </td>
@@ -975,8 +942,8 @@ const getPercentageWidth = (val, total) => {
 
 const getHighlightClass = (truck, stage) => {
   if (!truck || currentMode.value !== 'time') return 'text-slate-700 font-bold'
-  if (truck.bottleneck === stage && truck.durations && truck.durations[stage] > 15) {
-    return 'bg-rose-50/50 border-r-2 border-r-red-400'
+  if (truck.bottleneck === stage && truck.durations && truck.durations[stage] > 0) {
+    return 'bg-blue-50/50 border-r-2 border-r-blue-400'
   }
   return 'text-slate-700 font-bold'
 }

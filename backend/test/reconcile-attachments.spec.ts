@@ -17,8 +17,14 @@ describe('Attachment Storage Reconciliation Script Contract', () => {
     expect(content).toContain('--dry-run');
     expect(content).toContain('--grace-period=');
     expect(content).toContain('isDeletionPermitted');
-    expect(content).toContain('ATTACHMENT_RECONCILE_INTENT_CLI');
-    expect(content).toContain('ATTACHMENT_RECONCILE_PURGE_CLI');
+    expect(content).toContain('ATTACHMENT_RECONCILE_INTENT');
+    expect(content).toContain('ATTACHMENT_RECONCILE_FILES_OUTCOME');
+    expect(content).toContain("require('./attachment-recovery')");
+    expect(content).toContain(
+      'Permanent purge disabled for routine maintenance',
+    );
+    expect(content).not.toContain('fs.unlinkSync');
+    expect(content).not.toContain('fs.renameSync');
     expect(content).toContain('quarantine');
     expect(content).toContain('filesInGracePeriod');
     expect(content).toContain('cleanedOrphanFiles');

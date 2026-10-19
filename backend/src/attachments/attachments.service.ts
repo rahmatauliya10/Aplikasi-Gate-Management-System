@@ -18,6 +18,11 @@ import { validateMagicBytes } from '../common/utils/magic-byte.util';
 import type { Response } from 'express';
 import { UploadAttachmentDto } from './dto/upload-attachment.dto';
 
+// Shared with the standalone maintenance CLI.
+const recovery = require(
+  path.resolve(process.cwd(), 'scripts/attachment-recovery'),
+);
+
 const ALLOWED_MODULES = [
   'qc',
   'warehouse',
@@ -344,8 +349,13 @@ export class AttachmentsService {
       options.dryRun === false && options.removeOrphans === true;
     const isDryRun = !isDeletionPermitted;
     const useQuarantine = options.quarantineOrphans !== false;
+    if (isDeletionPermitted && !useQuarantine) {
+      throw new BadRequestException(
+        'Permanent purge dinonaktifkan pada maintenance rutin.',
+      );
+    }
 
-    if (isDeletionPermitted && !user?.id) {
+    if (isDeletionPermitted && (!user?.id || user.role !== 'ADMIN')) {
       throw new ForbiddenException(
         'Penghapusan fisik berkas memerlukan otentikasi administrator yang sah.',
       );
@@ -356,364 +366,371 @@ export class AttachmentsService {
     const now = Date.now();
     const resolvedUploadDir = path.resolve(this.baseUploadDir);
 
-    // 1. Fetch ALL attachment records from database (BOTH isCurrent: true and isCurrent: false)
-    const allAttachments = await this.prisma.attachment.findMany({
-      select: {
-        id: true,
-        transactionId: true,
-        filePath: true,
-        fileName: true,
-        sha256: true,
-        size: true,
-        isCurrent: true,
-        revision: true,
-      },
-    });
-
-    // Defensively fetch other models referencing files in uploads (Fail-Closed on live cleanup)
-    let correctionsWithEvidence: Array<{
-      id: string;
-      evidenceUrl: string | null;
-    }> = [];
+    const releaseLock = isDeletionPermitted
+      ? recovery.lock(resolvedUploadDir)
+      : () => {};
     try {
-      correctionsWithEvidence = await (
-        this.prisma as any
-      ).transactionCorrection.findMany({
-        where: { evidenceUrl: { not: null } },
-        select: { id: true, evidenceUrl: true },
+      // 1. Fetch ALL attachment records from database (BOTH isCurrent: true and isCurrent: false)
+      const allAttachments = await this.prisma.attachment.findMany({
+        select: {
+          id: true,
+          transactionId: true,
+          filePath: true,
+          fileName: true,
+          sha256: true,
+          size: true,
+          isCurrent: true,
+          revision: true,
+        },
       });
-    } catch (corrErr: any) {
-      this.logger.error(
-        `Failed to query transaction corrections for file protection: ${corrErr.message}`,
-        corrErr.stack,
-      );
-      if (isDeletionPermitted) {
-        throw new InternalServerErrorException(
-          'Rekonsiliasi dibatalkan demi keamanan integritas: Gagal memverifikasi referensi koreksi transaksi (Fail-Closed).',
-        );
-      }
-    }
 
-    let issuesWithScreenshot: Array<{
-      id: string;
-      screenshotUrl: string | null;
-    }> = [];
-    try {
-      issuesWithScreenshot = await (this.prisma as any).systemIssue.findMany({
-        where: { screenshotUrl: { not: null } },
-        select: { id: true, screenshotUrl: true },
-      });
-    } catch (issueErr: any) {
-      this.logger.error(
-        `Failed to query system issues for file protection: ${issueErr.message}`,
-        issueErr.stack,
-      );
-      if (isDeletionPermitted) {
-        throw new InternalServerErrorException(
-          'Rekonsiliasi dibatalkan demi keamanan integritas: Gagal memverifikasi referensi kendala sistem (Fail-Closed).',
-        );
-      }
-    }
-
-    const protectedDbPathsSet = new Set<string>();
-    const missingRecords: Array<{
-      id: string;
-      transactionId: string;
-      filePath: string;
-      isCurrent: boolean;
-      revision: number;
-    }> = [];
-
-    const normalizeRel = (rawPath: string | null | undefined): string => {
-      if (!rawPath) return '';
-      return rawPath
-        .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
-        .replace(/^[/\\]+/, '')
-        .replace(/\\/g, '/');
-    };
-
-    // Index all Attachment records (active + historical)
-    for (const att of allAttachments) {
-      const cleanRelPath = normalizeRel(att.filePath || att.fileName);
-      if (!cleanRelPath) {
-        missingRecords.push({
-          id: att.id,
-          transactionId: att.transactionId,
-          filePath: '',
-          isCurrent: att.isCurrent,
-          revision: att.revision,
-        });
-        continue;
-      }
-
-      protectedDbPathsSet.add(cleanRelPath.toLowerCase());
-
-      const fullPhysicalPath = path.resolve(resolvedUploadDir, cleanRelPath);
-      const relFromUpload = path.relative(resolvedUploadDir, fullPhysicalPath);
-      const isInsideUpload =
-        !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
-
-      if (!isInsideUpload || !fs.existsSync(fullPhysicalPath)) {
-        missingRecords.push({
-          id: att.id,
-          transactionId: att.transactionId,
-          filePath: cleanRelPath,
-          isCurrent: att.isCurrent,
-          revision: att.revision,
-        });
-      }
-    }
-
-    // Index TransactionCorrection evidence
-    for (const corr of correctionsWithEvidence) {
-      const clean = normalizeRel(corr.evidenceUrl);
-      if (clean) protectedDbPathsSet.add(clean.toLowerCase());
-    }
-
-    // Index SystemIssue screenshot
-    for (const issue of issuesWithScreenshot) {
-      const clean = normalizeRel(issue.screenshotUrl);
-      if (clean) protectedDbPathsSet.add(clean.toLowerCase());
-    }
-
-    // 2. Scan physical files on disk recursively (excluding quarantine directories)
-    const scannedPhysicalFiles: string[] = [];
-    if (fs.existsSync(resolvedUploadDir)) {
-      const traverse = (currentDir: string) => {
-        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-        for (const entry of entries) {
-          const fullPath = path.join(currentDir, entry.name);
-          if (entry.isDirectory()) {
-            // Skip quarantine directories from orphan candidate scanning
-            if (entry.name !== 'quarantine' && entry.name !== '.quarantine') {
-              traverse(fullPath);
-            }
-          } else if (entry.isFile()) {
-            const relPath = path
-              .relative(resolvedUploadDir, fullPath)
-              .replace(/\\/g, '/');
-            scannedPhysicalFiles.push(relPath);
-          }
-        }
-      };
-      traverse(resolvedUploadDir);
-    }
-
-    // 3. Find candidate orphan physical files (files on disk not in protected set AND older than grace period)
-    const orphanFiles: string[] = [];
-    const filesInGracePeriod: string[] = [];
-    const candidateOrphans: Array<{
-      relPath: string;
-      fullPath: string;
-      size: number;
-    }> = [];
-
-    for (const relPath of scannedPhysicalFiles) {
-      if (!protectedDbPathsSet.has(relPath.toLowerCase())) {
-        const fullPath = path.resolve(resolvedUploadDir, relPath);
-        try {
-          const stats = fs.statSync(fullPath);
-          const ageMs = now - stats.mtimeMs;
-          if (ageMs < gracePeriodMs) {
-            // File is within safety grace period (recent upload/in-flight), DO NOT touch
-            filesInGracePeriod.push(relPath);
-            continue;
-          }
-
-          orphanFiles.push(relPath);
-          candidateOrphans.push({
-            relPath,
-            fullPath,
-            size: stats.size,
-          });
-        } catch (statErr: any) {
-          this.logger.warn(
-            `Could not stat file ${relPath}: ${statErr.message}`,
-          );
-        }
-      }
-    }
-
-    const executionId = `reconcile-${now}-${Math.random().toString(36).substring(2, 7)}`;
-
-    // 4A. MANDATORY INTENT AUDIT LOGGING (Strict Fail-Closed BEFORE touching files)
-    if (isDeletionPermitted) {
+      // Defensively fetch other models referencing files in uploads (Fail-Closed on live cleanup)
+      let correctionsWithEvidence: Array<{
+        id: string;
+        evidenceUrl: string | null;
+      }> = [];
       try {
-        await this.activityLogsService.logActionStrict({
-          userId: user!.id,
-          action: 'ATTACHMENT_RECONCILE_INTENT',
-          module: 'ATTACHMENTS',
-          referenceId: executionId,
-          description: {
-            executionId,
-            mode: useQuarantine ? 'QUARANTINE' : 'PERMANENT_PURGE',
-            scannedFilesCount: scannedPhysicalFiles.length,
-            protectedDbRecordsCount: allAttachments.length,
-            inGracePeriodCount: filesInGracePeriod.length,
-            plannedOrphansCount: candidateOrphans.length,
-            plannedOrphanFiles: candidateOrphans
-              .slice(0, 50)
-              .map((c) => c.relPath),
-            reason: options.reason || 'Manual Admin Maintenance',
-          },
-          status: 'SUCCESS',
-          ipAddress,
+        correctionsWithEvidence = await (
+          this.prisma as any
+        ).transactionCorrection.findMany({
+          where: { evidenceUrl: { not: null } },
+          select: { id: true, evidenceUrl: true },
         });
-      } catch (intentErr: any) {
+      } catch (corrErr: any) {
         this.logger.error(
-          `[Fail-Closed Audit Trail] Gagal mencatat ATTACHMENT_RECONCILE_INTENT ke database: ${intentErr.message}`,
-          intentErr.stack,
+          `Failed to query transaction corrections for file protection: ${corrErr.message}`,
+          corrErr.stack,
         );
-        throw new InternalServerErrorException(
-          'Operasi pembersihan dibatalkan demi integritas data (Fail-Closed): Gagal mencatat niat audit (ActivityLog Intent) ke database sebelum memodifikasi berkas.',
-        );
-      }
-    }
-
-    // 4B. EXECUTE QUARANTINE OR PURGE (Only executed after intent audit is committed)
-    const cleanedOrphanFiles: string[] = [];
-    const quarantinedFiles: string[] = [];
-    let freedBytes = 0;
-
-    if (isDeletionPermitted) {
-      const quarantineBaseDir = path.resolve(
-        resolvedUploadDir,
-        'quarantine',
-        executionId,
-      );
-
-      for (const candidate of candidateOrphans) {
-        const { relPath, fullPath, size } = candidate;
-        try {
-          if (!fs.existsSync(fullPath)) {
-            this.logger.warn(
-              `File ${relPath} disappeared before cleanup, skipping.`,
-            );
-            continue;
-          }
-
-          const statCheck = fs.statSync(fullPath);
-          if (typeof statCheck.isFile === 'function' && !statCheck.isFile()) {
-            this.logger.warn(
-              `Path ${relPath} is no longer a regular file, skipping.`,
-            );
-            continue;
-          }
-
-          const relCheck = path.relative(resolvedUploadDir, fullPath);
-          if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) {
-            this.logger.warn(
-              `Path traversal check prevented processing ${relPath}`,
-            );
-            continue;
-          }
-
-          if (useQuarantine) {
-            const destPath = path.resolve(quarantineBaseDir, relPath);
-            const destDir = path.dirname(destPath);
-            if (!fs.existsSync(destDir)) {
-              fs.mkdirSync(destDir, { recursive: true });
-            }
-            fs.renameSync(fullPath, destPath);
-            quarantinedFiles.push(relPath);
-            cleanedOrphanFiles.push(relPath);
-            freedBytes += size;
-            this.logger.log(
-              `[Storage Cleanup] Quarantined orphan file: ${relPath} -> ${destPath}`,
-            );
-          } else {
-            fs.unlinkSync(fullPath);
-            cleanedOrphanFiles.push(relPath);
-            freedBytes += size;
-            this.logger.log(
-              `[Storage Cleanup] Purged orphan file: ${relPath} (${size} bytes)`,
-            );
-          }
-        } catch (cleanupErr: any) {
-          this.logger.error(
-            `Failed to process orphan file ${relPath}: ${cleanupErr.message}`,
-            cleanupErr.stack,
+        if (isDeletionPermitted) {
+          throw new InternalServerErrorException(
+            'Rekonsiliasi dibatalkan demi keamanan integritas: Gagal memverifikasi referensi koreksi transaksi (Fail-Closed).',
           );
         }
       }
-    }
 
-    // 4C. STRUCTURED OUTCOME ACTIVITY LOGGING
-    if (user?.id) {
+      let issuesWithScreenshot: Array<{
+        id: string;
+        screenshotUrl: string | null;
+      }> = [];
       try {
+        issuesWithScreenshot = await (this.prisma as any).systemIssue.findMany({
+          where: { screenshotUrl: { not: null } },
+          select: { id: true, screenshotUrl: true },
+        });
+      } catch (issueErr: any) {
+        this.logger.error(
+          `Failed to query system issues for file protection: ${issueErr.message}`,
+          issueErr.stack,
+        );
         if (isDeletionPermitted) {
+          throw new InternalServerErrorException(
+            'Rekonsiliasi dibatalkan demi keamanan integritas: Gagal memverifikasi referensi kendala sistem (Fail-Closed).',
+          );
+        }
+      }
+
+      const protectedDbPathsSet = new Set<string>();
+      const missingRecords: Array<{
+        id: string;
+        transactionId: string;
+        filePath: string;
+        isCurrent: boolean;
+        revision: number;
+      }> = [];
+
+      const normalizeRel = (rawPath: string | null | undefined): string => {
+        if (!rawPath) return '';
+        return rawPath
+          .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
+          .replace(/^[/\\]+/, '')
+          .replace(/\\/g, '/');
+      };
+
+      // Index all Attachment records (active + historical)
+      for (const att of allAttachments) {
+        const cleanRelPath = normalizeRel(att.filePath || att.fileName);
+        if (!cleanRelPath) {
+          missingRecords.push({
+            id: att.id,
+            transactionId: att.transactionId,
+            filePath: '',
+            isCurrent: att.isCurrent,
+            revision: att.revision,
+          });
+          continue;
+        }
+
+        protectedDbPathsSet.add(cleanRelPath.toLowerCase());
+
+        const fullPhysicalPath = path.resolve(resolvedUploadDir, cleanRelPath);
+        const relFromUpload = path.relative(
+          resolvedUploadDir,
+          fullPhysicalPath,
+        );
+        const isInsideUpload =
+          !relFromUpload.startsWith('..') && !path.isAbsolute(relFromUpload);
+
+        if (!isInsideUpload || !fs.existsSync(fullPhysicalPath)) {
+          missingRecords.push({
+            id: att.id,
+            transactionId: att.transactionId,
+            filePath: cleanRelPath,
+            isCurrent: att.isCurrent,
+            revision: att.revision,
+          });
+        }
+      }
+
+      // Index TransactionCorrection evidence
+      for (const corr of correctionsWithEvidence) {
+        const clean = normalizeRel(corr.evidenceUrl);
+        if (clean) protectedDbPathsSet.add(clean.toLowerCase());
+      }
+
+      // Index SystemIssue screenshot
+      for (const issue of issuesWithScreenshot) {
+        const clean = normalizeRel(issue.screenshotUrl);
+        if (clean) protectedDbPathsSet.add(clean.toLowerCase());
+      }
+
+      // 2. Scan physical files on disk recursively (excluding quarantine directories)
+      const scannedPhysicalFiles: string[] = [];
+      if (fs.existsSync(resolvedUploadDir)) {
+        const traverse = (currentDir: string) => {
+          const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(currentDir, entry.name);
+            if (entry.isDirectory()) {
+              // Skip quarantine directories from orphan candidate scanning
+              if (entry.name !== 'quarantine' && entry.name !== '.quarantine') {
+                traverse(fullPath);
+              }
+            } else if (
+              entry.isFile() &&
+              entry.name !== '.attachment-maintenance.lock'
+            ) {
+              const relPath = path
+                .relative(resolvedUploadDir, fullPath)
+                .replace(/\\/g, '/');
+              scannedPhysicalFiles.push(relPath);
+            }
+          }
+        };
+        traverse(resolvedUploadDir);
+      }
+
+      // 3. Find candidate orphan physical files (files on disk not in protected set AND older than grace period)
+      const orphanFiles: string[] = [];
+      const filesInGracePeriod: string[] = [];
+      const candidateOrphans: Array<{
+        relPath: string;
+        fullPath: string;
+        size: number;
+      }> = [];
+
+      for (const relPath of scannedPhysicalFiles) {
+        if (!protectedDbPathsSet.has(relPath.toLowerCase())) {
+          const fullPath = path.resolve(resolvedUploadDir, relPath);
+          try {
+            const stats = fs.statSync(fullPath);
+            const ageMs = now - stats.mtimeMs;
+            if (ageMs < gracePeriodMs) {
+              // File is within safety grace period (recent upload/in-flight), DO NOT touch
+              filesInGracePeriod.push(relPath);
+              continue;
+            }
+
+            orphanFiles.push(relPath);
+            candidateOrphans.push({
+              relPath,
+              fullPath,
+              size: stats.size,
+            });
+          } catch (statErr: any) {
+            this.logger.warn(
+              `Could not stat file ${relPath}: ${statErr.message}`,
+            );
+          }
+        }
+      }
+
+      const executionId = `reconcile-${now}-${Math.random().toString(36).substring(2, 7)}`;
+
+      const manifest = isDeletionPermitted
+        ? recovery.prepare(
+            resolvedUploadDir,
+            executionId,
+            user!.id,
+            options.reason || 'Manual Admin Maintenance',
+            candidateOrphans.map((c) => c.relPath),
+          )
+        : null;
+
+      // 4A. MANDATORY INTENT AUDIT LOGGING (Strict Fail-Closed BEFORE touching files)
+      if (isDeletionPermitted) {
+        try {
           await this.activityLogsService.logActionStrict({
-            userId: user.id,
-            action: 'ATTACHMENT_RECONCILE_PURGE',
+            userId: user!.id,
+            action: 'ATTACHMENT_RECONCILE_INTENT',
             module: 'ATTACHMENTS',
             referenceId: executionId,
             description: {
               executionId,
-              mode: useQuarantine ? 'QUARANTINE' : 'PERMANENT_PURGE',
-              quarantineDirectory: useQuarantine
-                ? `quarantine/${executionId}`
-                : null,
+              inventoryHash: manifest.inventoryHash,
+              mode: 'QUARANTINE',
               scannedFilesCount: scannedPhysicalFiles.length,
               protectedDbRecordsCount: allAttachments.length,
               inGracePeriodCount: filesInGracePeriod.length,
-              orphansDetectedCount: orphanFiles.length,
-              cleanedOrphansCount: cleanedOrphanFiles.length,
-              quarantinedFilesCount: quarantinedFiles.length,
-              freedBytes,
+              plannedOrphansCount: candidateOrphans.length,
+              plannedOrphanFiles: candidateOrphans
+                .slice(0, 50)
+                .map((c) => c.relPath),
               reason: options.reason || 'Manual Admin Maintenance',
             },
             status: 'SUCCESS',
             ipAddress,
           });
-        } else {
-          await this.activityLogsService.logAction({
-            userId: user.id,
-            action: 'ATTACHMENT_RECONCILE_AUDIT',
-            module: 'ATTACHMENTS',
-            referenceId: executionId,
-            description: `Storage reconciliation simulation executed (DRY_RUN). Scanned: ${scannedPhysicalFiles.length}, Protected records: ${allAttachments.length}, In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}. Reason: ${options.reason || 'Manual Admin Maintenance'}`,
-            status: 'SUCCESS',
-            ipAddress,
-          });
-        }
-      } catch (logErr: any) {
-        this.logger.error(
-          `Failed to record activity log outcome for reconciliation: ${logErr.message}`,
-          logErr.stack,
-        );
-        if (isDeletionPermitted) {
+        } catch (intentErr: any) {
+          this.logger.error(
+            `[Fail-Closed Audit Trail] Gagal mencatat ATTACHMENT_RECONCILE_INTENT ke database: ${intentErr.message}`,
+            intentErr.stack,
+          );
           throw new InternalServerErrorException(
-            'Gagal mencatat jejak audit hasil (ActivityLog Outcome) untuk operasi pembersihan berkas.',
+            'Operasi pembersihan dibatalkan demi integritas data (Fail-Closed): Gagal mencatat niat audit (ActivityLog Intent) ke database sebelum memodifikasi berkas.',
           );
         }
       }
+
+      const cleanedOrphanFiles: string[] = [];
+      const quarantinedFiles: string[] = [];
+      const freedBytes = 0;
+      let quarantinedBytes = 0;
+      if (isDeletionPermitted) {
+        try {
+          await recovery.execute(
+            resolvedUploadDir,
+            manifest,
+            false,
+            async (outcome: any) => {
+              await this.activityLogsService.logActionStrict({
+                userId: user!.id,
+                action: 'ATTACHMENT_RECONCILE_FILES_OUTCOME',
+                module: 'ATTACHMENTS',
+                referenceId: executionId,
+                description: outcome,
+                status: outcome.state === 'COMPLETED' ? 'SUCCESS' : 'WARNING',
+                ipAddress,
+              });
+            },
+          );
+        } catch {
+          throw new InternalServerErrorException({
+            message:
+              'Rekonsiliasi belum tuntas; periksa manifest dan audit sebelum melanjutkan.',
+            executionId,
+            state: 'PARTIAL',
+            auditPending: manifest.auditPending ?? true,
+          });
+        }
+        for (const entry of manifest.files) {
+          if (entry.state === 'QUARANTINED') {
+            quarantinedFiles.push(entry.relativePath);
+            cleanedOrphanFiles.push(entry.relativePath);
+            quarantinedBytes += entry.size;
+          }
+        }
+      }
+
+      // 4C. STRUCTURED OUTCOME ACTIVITY LOGGING
+      if (user?.id) {
+        try {
+          if (isDeletionPermitted) {
+            await this.activityLogsService.logActionStrict({
+              userId: user.id,
+              action: 'ATTACHMENT_RECONCILE_PURGE',
+              module: 'ATTACHMENTS',
+              referenceId: executionId,
+              description: {
+                executionId,
+                mode: useQuarantine ? 'QUARANTINE' : 'PERMANENT_PURGE',
+                quarantineDirectory: useQuarantine
+                  ? `quarantine/${executionId}`
+                  : null,
+                scannedFilesCount: scannedPhysicalFiles.length,
+                protectedDbRecordsCount: allAttachments.length,
+                inGracePeriodCount: filesInGracePeriod.length,
+                orphansDetectedCount: orphanFiles.length,
+                cleanedOrphansCount: cleanedOrphanFiles.length,
+                quarantinedFilesCount: quarantinedFiles.length,
+                freedBytes,
+                quarantinedBytes,
+                permanentlyDeletedBytes: 0,
+                diskSpaceRecovered: null,
+                state: manifest.state,
+                reason: options.reason || 'Manual Admin Maintenance',
+              },
+              status: manifest.state === 'COMPLETED' ? 'SUCCESS' : 'WARNING',
+              ipAddress,
+            });
+          } else {
+            await this.activityLogsService.logAction({
+              userId: user.id,
+              action: 'ATTACHMENT_RECONCILE_AUDIT',
+              module: 'ATTACHMENTS',
+              referenceId: executionId,
+              description: `Storage reconciliation simulation executed (DRY_RUN). Scanned: ${scannedPhysicalFiles.length}, Protected records: ${allAttachments.length}, In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}. Reason: ${options.reason || 'Manual Admin Maintenance'}`,
+              status: 'SUCCESS',
+              ipAddress,
+            });
+          }
+        } catch (logErr: any) {
+          this.logger.error(
+            `Failed to record activity log outcome for reconciliation: ${logErr.message}`,
+            logErr.stack,
+          );
+          if (isDeletionPermitted) {
+            manifest.state = 'PARTIAL';
+            manifest.auditPending = true;
+            recovery.checkpoint(resolvedUploadDir, manifest);
+            throw new InternalServerErrorException(
+              'Gagal mencatat jejak audit hasil (ActivityLog Outcome) untuk operasi pembersihan berkas.',
+            );
+          }
+        }
+      }
+
+      this.logger.log(
+        `[Storage Reconciliation] Scanned ${scannedPhysicalFiles.length} files, ${allAttachments.length} DB records. In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}, Cleaned: ${cleanedOrphanFiles.length} (Quarantined: ${quarantinedFiles.length}, Freed: ${freedBytes}B, DryRun: ${isDryRun})`,
+      );
+
+      return {
+        success: !manifest || manifest.state === 'COMPLETED',
+        state: manifest?.state || 'DRY_RUN',
+        quarantinedBytes,
+        permanentlyDeletedBytes: 0,
+        diskSpaceRecovered: null,
+        timestamp: new Date().toISOString(),
+        executionId,
+        dryRun: isDryRun,
+        quarantine: useQuarantine,
+        gracePeriodMinutes,
+        scannedFilesCount: scannedPhysicalFiles.length,
+        allAttachmentsCount: allAttachments.length,
+        filesInGracePeriodCount: filesInGracePeriod.length,
+        filesInGracePeriod,
+        orphanFilesCount: orphanFiles.length,
+        orphanFiles,
+        cleanedOrphanFilesCount: cleanedOrphanFiles.length,
+        cleanedOrphanFiles,
+        quarantinedFilesCount: quarantinedFiles.length,
+        quarantinedFiles,
+        freedBytes,
+        missingRecordsCount: missingRecords.length,
+        missingRecords,
+      };
+    } finally {
+      releaseLock();
     }
-
-    this.logger.log(
-      `[Storage Reconciliation] Scanned ${scannedPhysicalFiles.length} files, ${allAttachments.length} DB records. In Grace Period: ${filesInGracePeriod.length}, Orphans: ${orphanFiles.length}, Missing: ${missingRecords.length}, Cleaned: ${cleanedOrphanFiles.length} (Quarantined: ${quarantinedFiles.length}, Freed: ${freedBytes}B, DryRun: ${isDryRun})`,
-    );
-
-    return {
-      success: true,
-      timestamp: new Date().toISOString(),
-      executionId,
-      dryRun: isDryRun,
-      quarantine: useQuarantine,
-      gracePeriodMinutes,
-      scannedFilesCount: scannedPhysicalFiles.length,
-      allAttachmentsCount: allAttachments.length,
-      filesInGracePeriodCount: filesInGracePeriod.length,
-      filesInGracePeriod,
-      orphanFilesCount: orphanFiles.length,
-      orphanFiles,
-      cleanedOrphanFilesCount: cleanedOrphanFiles.length,
-      cleanedOrphanFiles,
-      quarantinedFilesCount: quarantinedFiles.length,
-      quarantinedFiles,
-      freedBytes,
-      missingRecordsCount: missingRecords.length,
-      missingRecords,
-    };
   }
 
   /**
@@ -724,78 +741,88 @@ export class AttachmentsService {
     user: JwtPayloadUser,
     ipAddress?: string,
   ) {
-    if (!user?.id) {
+    if (!user?.id || user.role !== 'ADMIN') {
       throw new ForbiddenException(
-        'Pemulihan berkas karantina memerlukan otentikasi administrator.',
+        'Pemulihan berkas memerlukan administrator.',
       );
     }
-
-    // Sanitize executionId to avoid directory traversal
-    const safeExecId = path.basename(executionId);
-    const resolvedUploadDir = path.resolve(this.baseUploadDir);
-    const quarantineTargetDir = path.resolve(
-      resolvedUploadDir,
-      'quarantine',
-      safeExecId,
-    );
-
-    if (!fs.existsSync(quarantineTargetDir)) {
-      throw new NotFoundException(
-        `Direktori karantina untuk eksekusi ${safeExecId} tidak ditemukan.`,
-      );
-    }
-
-    const restoredFiles: string[] = [];
-
-    const traverseAndRestore = (currentDir: string) => {
-      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullSourcePath = path.join(currentDir, entry.name);
-        if (entry.isDirectory()) {
-          traverseAndRestore(fullSourcePath);
-        } else if (entry.isFile()) {
-          const relFromQuarantine = path
-            .relative(quarantineTargetDir, fullSourcePath)
-            .replace(/\\/g, '/');
-          const destPath = path.resolve(resolvedUploadDir, relFromQuarantine);
-          const destDir = path.dirname(destPath);
-          if (!fs.existsSync(destDir)) {
-            fs.mkdirSync(destDir, { recursive: true });
-          }
-          fs.renameSync(fullSourcePath, destPath);
-          restoredFiles.push(relFromQuarantine);
-        }
-      }
-    };
-
-    traverseAndRestore(quarantineTargetDir);
-
-    // Audit restore action
+    const releaseLock = recovery.lock(this.baseUploadDir);
     try {
+      let manifest: any;
+      try {
+        manifest = recovery.readManifest(this.baseUploadDir, executionId);
+      } catch {
+        throw new BadRequestException(
+          'Manifest karantina tidak sah atau legacy; pemulihan otomatis ditolak.',
+        );
+      }
+      const intent = await this.prisma.activityLog.findFirst({
+        where: {
+          action: 'ATTACHMENT_RECONCILE_INTENT',
+          module: 'ATTACHMENTS',
+          status: 'SUCCESS',
+          referenceId: executionId,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      let description: any;
+      try {
+        description = JSON.parse(intent?.description || '{}');
+      } catch {
+        description = {};
+      }
+      if (description.inventoryHash !== manifest.inventoryHash) {
+        throw new BadRequestException(
+          'Manifest tidak terikat pada audit rekonsiliasi yang sah.',
+        );
+      }
       await this.activityLogsService.logActionStrict({
         userId: user.id,
-        action: 'ATTACHMENT_RECONCILE_RESTORE',
+        action: 'ATTACHMENT_RESTORE_INTENT',
         module: 'ATTACHMENTS',
-        referenceId: safeExecId,
-        description: {
-          executionId: safeExecId,
-          restoredFilesCount: restoredFiles.length,
-          restoredFiles,
-        },
+        referenceId: executionId,
+        description: { executionId, inventoryHash: manifest.inventoryHash },
         status: 'SUCCESS',
         ipAddress,
       });
-    } catch (auditErr: any) {
-      this.logger.warn(
-        `Failed to log restore audit for ${safeExecId}: ${auditErr.message}`,
-      );
+      try {
+        await recovery.execute(
+          this.baseUploadDir,
+          manifest,
+          true,
+          async (outcome: any) => {
+            await this.activityLogsService.logActionStrict({
+              userId: user.id,
+              action: 'ATTACHMENT_RECONCILE_RESTORE',
+              module: 'ATTACHMENTS',
+              referenceId: executionId,
+              description: outcome,
+              status: outcome.state === 'COMPLETED' ? 'SUCCESS' : 'WARNING',
+              ipAddress,
+            });
+          },
+        );
+      } catch {
+        throw new InternalServerErrorException({
+          message:
+            'Pemulihan belum tuntas; periksa manifest dan audit sebelum melanjutkan.',
+          executionId,
+          state: 'PARTIAL',
+          auditPending: manifest.auditPending ?? true,
+        });
+      }
+      const restoredFiles = manifest.files
+        .filter((entry: any) => entry.state === 'RESTORED')
+        .map((entry: any) => entry.relativePath);
+      return {
+        success: manifest.state === 'COMPLETED',
+        executionId,
+        state: manifest.state,
+        restoredFilesCount: restoredFiles.length,
+        restoredFiles,
+      };
+    } finally {
+      releaseLock();
     }
-
-    return {
-      success: true,
-      executionId: safeExecId,
-      restoredFilesCount: restoredFiles.length,
-      restoredFiles,
-    };
   }
 }

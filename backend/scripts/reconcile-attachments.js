@@ -11,13 +11,15 @@
  * Usage:
  *   node scripts/reconcile-attachments.js                                 # Dry-run (simulation report only)
  *   node scripts/reconcile-attachments.js --fix --confirm-purge          # Live cleanup (quarantines orphans)
- *   node scripts/reconcile-attachments.js --fix --confirm-purge --no-quarantine # Permanent purge
+ *   Permanent purge (--no-quarantine) is disabled for live maintenance.
  *   node scripts/reconcile-attachments.js --operator="DevOps John"       # Specify operator identity
  *   node scripts/reconcile-attachments.js --dry-run                      # Explicit dry-run
  */
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const recovery = require('./attachment-recovery');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -59,7 +61,9 @@ async function main() {
       'CLI_ADMIN_OPERATOR';
 
   const useQuarantine = !args.includes('--no-quarantine');
-  const executionId = `cli-reconcile-${Date.now()}`;
+  if (isDeletionPermitted && !useQuarantine)
+    throw new Error('Permanent purge disabled for routine maintenance');
+  const executionId = `cli-reconcile-${Date.now()}-${crypto.randomBytes(8).toString('hex')}`;
 
   console.log('='.repeat(70));
   console.log('📦 GMS Attachment Storage & Database Reconciliation');
@@ -86,6 +90,9 @@ async function main() {
   const gracePeriodMs = gracePeriodMinutes * 60 * 1000;
   const now = Date.now();
 
+  const releaseLock = isDeletionPermitted
+    ? recovery.lock(baseUploadDir)
+    : () => {};
   try {
     // 1. Fetch ALL attachment records (active + historical revisions)
     const allAttachments = await prisma.attachment.findMany({
@@ -122,7 +129,7 @@ async function main() {
         console.error(
           '🛑 ABORTING: Cannot perform physical cleanup when reference queries fail (Fail-Closed).',
         );
-        process.exit(1);
+        throw corrErr;
       }
     }
 
@@ -140,7 +147,7 @@ async function main() {
         console.error(
           '🛑 ABORTING: Cannot perform physical cleanup when reference queries fail (Fail-Closed).',
         );
-        process.exit(1);
+        throw issueErr;
       }
     }
 
@@ -207,7 +214,10 @@ async function main() {
           if (entry.name !== 'quarantine' && entry.name !== '.quarantine') {
             traverse(fullPath);
           }
-        } else if (entry.isFile()) {
+        } else if (
+          entry.isFile() &&
+          entry.name !== '.attachment-maintenance.lock'
+        ) {
           const relPath = path
             .relative(baseUploadDir, fullPath)
             .replace(/\\/g, '/');
@@ -249,6 +259,18 @@ async function main() {
       }
     }
 
+    const cleanedOrphanFiles = [];
+    const quarantinedFiles = [];
+    const freedBytes = 0;
+    const manifest = isDeletionPermitted
+      ? recovery.prepare(
+          baseUploadDir,
+          executionId,
+          operatorName,
+          'CLI maintenance',
+          candidateOrphans.map((c) => c.relPath),
+        )
+      : null;
     // STEP 4A: MANDATORY INTENT AUDIT LOGGING (Strict Fail-Closed BEFORE touching files)
     if (isDeletionPermitted) {
       console.log('Writing mandatory INTENT audit log to database...');
@@ -257,10 +279,14 @@ async function main() {
           data: {
             userName: operatorName,
             role: 'ADMIN',
-            action: 'ATTACHMENT_RECONCILE_INTENT_CLI',
+            action: 'ATTACHMENT_RECONCILE_INTENT',
             module: 'ATTACHMENTS',
             referenceId: executionId,
-            description: `CLI storage reconciliation intent initiated by ${operatorName}. Planned orphans: ${candidateOrphans.length}, Mode: ${useQuarantine ? 'QUARANTINE' : 'PERMANENT_PURGE'}.`,
+            description: JSON.stringify({
+              executionId,
+              inventoryHash: manifest.inventoryHash,
+              operatorName,
+            }),
             status: 'SUCCESS',
           },
         });
@@ -272,92 +298,42 @@ async function main() {
         console.error(
           '🛑 ABORTING: Zero files touched due to audit trail failure (Fail-Closed).',
         );
-        process.exit(1);
+        throw intentErr;
       }
     }
 
-    // STEP 4B: EXECUTE QUARANTINE OR PURGE
-    const cleanedOrphanFiles = [];
-    const quarantinedFiles = [];
-    let freedBytes = 0;
-
     if (isDeletionPermitted) {
-      const quarantineBaseDir = path.resolve(
+      await recovery.execute(
         baseUploadDir,
-        'quarantine',
-        executionId,
+        manifest,
+        false,
+        async (outcome) => {
+          await prisma.activityLog.create({
+            data: {
+              userName: operatorName,
+              role: 'ADMIN',
+              action: 'ATTACHMENT_RECONCILE_FILES_OUTCOME',
+              module: 'ATTACHMENTS',
+              referenceId: executionId,
+              description: JSON.stringify(outcome),
+              status: outcome.state === 'COMPLETED' ? 'SUCCESS' : 'WARNING',
+            },
+          });
+        },
       );
-
-      for (const candidate of candidateOrphans) {
-        const { relPath, fullPath, size } = candidate;
-        try {
-          if (!fs.existsSync(fullPath)) {
-            console.warn(`⚠️ File ${relPath} disappeared before cleanup.`);
-            continue;
-          }
-
-          const relCheck = path.relative(baseUploadDir, fullPath);
-          if (
-            relCheck.startsWith('..') ||
-            path.isAbsolute(relCheck) ||
-            !fs.existsSync(fullPath)
-          ) {
-            console.warn(`⚠️ Traversal check failed for ${relPath}.`);
-            continue;
-          }
-
-          if (useQuarantine) {
-            const destPath = path.resolve(quarantineBaseDir, relPath);
-            const destDir = path.dirname(destPath);
-            if (!fs.existsSync(destDir)) {
-              fs.mkdirSync(destDir, { recursive: true });
-            }
-            fs.renameSync(fullPath, destPath);
-            quarantinedFiles.push(relPath);
-            cleanedOrphanFiles.push(relPath);
-            freedBytes += size;
-            console.log(`📦 Quarantined orphan: ${relPath} -> ${destPath}`);
-          } else {
-            fs.unlinkSync(fullPath);
-            cleanedOrphanFiles.push(relPath);
-            freedBytes += size;
-            console.log(`🗑️ Removed orphan: ${relPath} (${size} bytes)`);
-          }
-        } catch (cleanupErr) {
-          console.error(
-            `❌ Cleanup error on ${relPath}: ${cleanupErr.message}`,
-          );
+      for (const entry of manifest.files)
+        if (entry.state === 'QUARANTINED') {
+          cleanedOrphanFiles.push(entry.relativePath);
+          quarantinedFiles.push(entry.relativePath);
         }
-      }
+      console.log(
+        'Quarantined bytes:',
+        manifest.files
+          .filter((e) => e.state === 'QUARANTINED')
+          .reduce((sum, e) => sum + e.size, 0),
+      );
+      if (manifest.state !== 'COMPLETED') process.exitCode = 1;
     }
-
-    // STEP 4C: OUTCOME AUDIT LOGGING
-    if (isDeletionPermitted) {
-      console.log('Writing mandatory OUTCOME audit log to database...');
-      try {
-        await prisma.activityLog.create({
-          data: {
-            userName: operatorName,
-            role: 'ADMIN',
-            action: 'ATTACHMENT_RECONCILE_PURGE_CLI',
-            module: 'ATTACHMENTS',
-            referenceId: executionId,
-            description: `CLI storage reconciliation completed by ${operatorName}. Scanned: ${scannedPhysicalFiles.length}, Cleaned: ${cleanedOrphanFiles.length} (${freedBytes} bytes freed), Mode: ${useQuarantine ? 'QUARANTINE' : 'PERMANENT_PURGE'}.`,
-            status: 'SUCCESS',
-          },
-        });
-        console.log('✅ ActivityLog outcome record written successfully.');
-      } catch (logErr) {
-        console.error(
-          `❌ CRITICAL: Failed to write outcome audit log to database: ${logErr.message}`,
-        );
-        console.error(
-          '🛑 Audit trail failure prevents claiming successful maintenance operation.',
-        );
-        process.exit(1);
-      }
-    }
-
     // 4. Report results
     console.log('\n--- Reconciliation Summary ---');
     console.log(`All DB Records     : ${allAttachments.length}`);
@@ -390,8 +366,9 @@ async function main() {
     );
   } catch (error) {
     console.error('❌ Reconciliation failed with error:', error);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
+    releaseLock();
     await prisma.$disconnect();
   }
 }
@@ -399,7 +376,7 @@ async function main() {
 if (require.main === module) {
   main().catch((err) => {
     console.error('Fatal error:', err);
-    process.exit(1);
+    process.exitCode = 1;
   });
 }
 

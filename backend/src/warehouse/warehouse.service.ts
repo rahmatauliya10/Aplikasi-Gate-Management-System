@@ -27,6 +27,7 @@ import {
 } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
+import { evaluatePaRelease } from '../qc/constants/pa-release-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 import {
   GSP_PREUNLOAD_VERSION,
@@ -389,11 +390,8 @@ export class WarehouseService {
 
         // Query current active (non-voided) PA record
         const activePa = await this.prisma.qcProductAnalysis.findFirst({
-          where: {
-            transactionId,
-            isVoided: false,
-          },
-          orderBy: { testRound: 'desc' },
+          where: { transactionId },
+          orderBy: [{ testRound: 'desc' }, { id: 'desc' }],
         });
 
         if (!activePa) {
@@ -424,66 +422,30 @@ export class WarehouseService {
           });
         }
 
-        // Validate workflow release evidence:
-        // 1. Direct compliant release: status === 'RELEASE' and result === QcResult.PASS
-        // 2. Approved GSP concession (P0-01): status === 'ACCEPT_WITH_NOTE' with exhaustive audit trail
-        const isDirectRelease =
-          activePa.status === 'RELEASE' && activePa.result === QcResult.PASS;
-
-        const isConcessionReasonValid = Boolean(
-          activePa.dispositionReason &&
-          activePa.dispositionReason.trim().length >= 5,
-        );
-        const isConcessionActorValid = Boolean(
-          activePa.dispositionById &&
-          activePa.dispositionById.trim().length > 0,
-        );
-        const isConcessionTimestampValid = Boolean(activePa.dispositionAt);
-        const isLabFactualOos = activePa.result === QcResult.REJECT;
-
-        const isApprovedConcession =
-          activePa.status === 'ACCEPT_WITH_NOTE' &&
-          activePa.dispositionAction === 'ACCEPT_WITH_NOTE' &&
-          isLabFactualOos &&
-          isConcessionReasonValid &&
-          isConcessionActorValid &&
-          isConcessionTimestampValid &&
-          !activePa.isVoided;
-
-        if (activePa.status === 'ACCEPT_WITH_NOTE' && isApprovedConcession) {
-          // Defense-in-depth: Verify non-waivable critical defects
-          const rawParams = activePa.parameters as any;
-          const sensory = rawParams?.sensory;
-          const hasCriticalDefect = sensory
-            ? Boolean(
-                (sensory.foreignMatters &&
-                  sensory.foreignMatters !== 'Tidak ada kontaminasi') ||
-                (sensory.packagingLabel &&
-                  sensory.packagingLabel !== 'Kemasan & label tidak rusak'),
-              )
-            : false;
-
-          if (hasCriticalDefect) {
-            await this.activityLogsService
-              .logAction({
-                userId: user.id,
-                action: 'WAREHOUSE_START_BLOCKED_CRITICAL_DEFECT',
-                module: 'WAREHOUSE',
-                referenceId: transactionId,
-                description: `Warehouse start blocked: Forged or invalid concession on critical sensory defects for ${tx.cargoSubType}.`,
-                status: 'FAILED',
-              })
-              .catch(() => {});
-            throw new BadRequestException({
-              success: false,
-              message:
-                'Gudang menolak memulai proses: Analisis PA memiliki cacat kritis (kontaminasi benda asing atau kerusakan kemasan/label) yang tidak dapat dimaafkan.',
-              errors: ['CRITICAL_DEFECT_NOT_WAIVABLE'],
-            });
-          }
+        const release = evaluatePaRelease(activePa, {
+          transactionId,
+          productCatalogId: tx.productCatalogId,
+        });
+        if (release.criticalDefect) {
+          await this.activityLogsService
+            .logAction({
+              userId: user.id,
+              action: 'WAREHOUSE_START_BLOCKED_CRITICAL_DEFECT',
+              module: 'WAREHOUSE',
+              referenceId: transactionId,
+              description: `Warehouse start blocked: Forged or invalid concession on critical sensory defects for ${tx.cargoSubType}.`,
+              status: 'FAILED',
+            })
+            .catch(() => {});
+          throw new BadRequestException({
+            success: false,
+            message:
+              'Gudang menolak memulai proses: Analisis PA memiliki cacat kritis (kontaminasi benda asing atau kerusakan kemasan/label) yang tidak dapat dimaafkan.',
+            errors: ['CRITICAL_DEFECT_NOT_WAIVABLE'],
+          });
         }
 
-        if (!isDirectRelease && !isApprovedConcession) {
+        if (!release.allowed) {
           throw new BadRequestException({
             success: false,
             message: `Gudang menolak memulai proses: Analisis PA terakhir belum memperoleh keputusan rilis atau disposisi sah (Status PA: ${activePa.status}, Hasil: ${activePa.result || 'NONE'}). Tidak ada izin bongkar.`,

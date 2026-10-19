@@ -15,7 +15,6 @@ import {
   CorrectionTargetModule,
   TransactionStatus,
   ProcessType,
-  QcResult,
   Prisma,
 } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -23,6 +22,7 @@ import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { sanitizeAuditData } from '../common/utils/mask-pii.util';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
+import { evaluatePaRelease } from '../qc/constants/pa-release-policy';
 import {
   REOPEN_TARGETS_BY_PROCESS,
   isAllowedReopenTarget,
@@ -295,6 +295,22 @@ export class OperationLogCorrectionService {
       if (tx.revision !== dto.expectedRevision) {
         throw new ConflictException(
           'Data transaksi telah diperbarui oleh pengguna lain (Revisi Tidak Cocok). Silakan muat ulang data terbaru sebelum melakukan koreksi.',
+        );
+      }
+
+      // Reject illegal PA bypasses before creating any correction or revision records.
+      if (
+        dto.action === CorrectionAction.REOPEN_WORKFLOW &&
+        tx.processType === 'GSP' &&
+        dto.reopenTargetStatus === TransactionStatus.PA_NOT_REQUIRED &&
+        !evaluatePaExemption(tx.productCatalog, {
+          processType: tx.processType,
+          cargoType: tx.cargoType,
+          cargoSubType: tx.cargoSubType,
+        }).isExempt
+      ) {
+        throw new BadRequestException(
+          'PA_NOT_REQUIRED hanya diizinkan untuk produk dengan pengecualian PA katalog yang sah.',
         );
       }
 
@@ -1147,21 +1163,21 @@ export class OperationLogCorrectionService {
               effectiveTarget = TransactionStatus.PA_NOT_REQUIRED;
             }
           } else {
-            // Non-exempt GSP: QC_VEHICLE_PASSED requires legitimate active PA release evidence
+            if (effectiveTarget === TransactionStatus.PA_NOT_REQUIRED) {
+              throw new BadRequestException(
+                'PA_NOT_REQUIRED hanya diizinkan untuk produk dengan pengecualian PA katalog yang sah.',
+              );
+            }
+            // The latest PA must itself prove release; never fall back to older evidence.
             if (effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED) {
               const activePa = await prismaTx.qcProductAnalysis.findFirst({
-                where: { transactionId: id, isVoided: false },
-                orderBy: { testRound: 'desc' },
+                where: { transactionId: id },
+                orderBy: [{ testRound: 'desc' }, { id: 'desc' }],
               });
-              const isDirectRelease =
-                activePa &&
-                activePa.status === 'RELEASE' &&
-                activePa.result === QcResult.PASS &&
-                activePa.isVoided === false;
-              const hasValidRelease =
-                activePa &&
-                activePa.productCatalogId === tx.productCatalogId &&
-                isDirectRelease;
+              const hasValidRelease = evaluatePaRelease(activePa, {
+                transactionId: id,
+                productCatalogId: tx.productCatalogId,
+              }).allowed;
 
               if (!hasValidRelease) {
                 // If PA evidence is missing or invalid/superseded, downgrade to QC_VEHICLE_PENDING

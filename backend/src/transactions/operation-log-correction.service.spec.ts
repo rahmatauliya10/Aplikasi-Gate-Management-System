@@ -1959,61 +1959,106 @@ describe('OperationLogCorrectionService', () => {
       });
     });
 
-    it('preserves active GSP PA records when REOPEN_WORKFLOW targets QC_VEHICLE_PASSED with valid release evidence', async () => {
-      const mockTx = {
-        id: 'tx-gsp-coal-pass',
+    it('rejects non-exempt PA_NOT_REQUIRED before transaction or child writes', async () => {
+      const tx = createMockTxClient({
+        id: 'tx-required-pa',
         status: 'COMPLETED',
         processType: 'GSP',
         cargoType: 'Coal',
         cargoSubType: 'Batubara',
-        productCatalogId: 'cat-coal-1',
         revision: 3,
+        productCatalogId: 'cat-coal-1',
         productCatalog: {
           id: 'cat-coal-1',
           name: 'Batubara',
           isPaRequired: true,
         },
-      };
-
-      const mockTxClient = createMockTxClient(mockTx);
-      mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
-        id: 'pa-1',
-        testRound: 1,
-        productCatalogId: 'cat-coal-1',
-        status: 'RELEASE',
-        result: QcResult.PASS,
-        isVoided: false,
       });
-
-      mockPrismaService.$transaction.mockImplementation((cb: any) =>
-        cb(mockTxClient),
-      );
-
-      const dto = {
-        action: CorrectionAction.REOPEN_WORKFLOW,
-        reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
-        reasonCode: 'REOPEN_WORKFLOW',
-        remark: 'Reopen Batubara to Warehouse stage with valid PA',
-        expectedRevision: 3,
-        items: [],
-      };
-
-      const res = await service.correctOperationLog('tx-gsp-coal-pass', dto, {
-        id: 'adm-1',
-        role: 'ADMIN',
-        email: 'admin@gms.local',
-      });
-
-      expect(res.success).toBe(true);
-      expect(mockTxClient.qcProductAnalysis.updateMany).not.toHaveBeenCalled();
-      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: TransactionStatus.QC_VEHICLE_PASSED,
-          }),
-        }),
-      );
+      mockPrismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      await expect(
+        service.correctOperationLog(
+          'tx-required-pa',
+          {
+            action: CorrectionAction.REOPEN_WORKFLOW,
+            reopenTargetStatus: TransactionStatus.PA_NOT_REQUIRED,
+            reasonCode: 'REOPEN_WORKFLOW',
+            remark: 'Reopen requires legitimate product exemption',
+            expectedRevision: 3,
+            items: [],
+          },
+          { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+        ),
+      ).rejects.toThrow('PA_NOT_REQUIRED');
+      expect(tx.transaction.updateMany).not.toHaveBeenCalled();
+      expect(tx.qcProductAnalysis.updateMany).not.toHaveBeenCalled();
+      expect(tx.transactionCorrection.create).not.toHaveBeenCalled();
     });
+
+    it.each(['RELEASE', 'ACCEPT_WITH_NOTE'])(
+      'preserves active GSP PA with valid %s evidence on reopen',
+      async (paStatus) => {
+        const mockTx = {
+          id: 'tx-gsp-coal-pass',
+          status: 'COMPLETED',
+          processType: 'GSP',
+          cargoType: 'Coal',
+          cargoSubType: 'Batubara',
+          productCatalogId: 'cat-coal-1',
+          revision: 3,
+          productCatalog: {
+            id: 'cat-coal-1',
+            name: 'Batubara',
+            isPaRequired: true,
+          },
+        };
+
+        const mockTxClient = createMockTxClient(mockTx);
+        mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
+          id: 'pa-1',
+          transactionId: 'tx-gsp-coal-pass',
+          testRound: 1,
+          productCatalogId: 'cat-coal-1',
+          status: paStatus,
+          result: paStatus === 'RELEASE' ? QcResult.PASS : QcResult.REJECT,
+          dispositionAction: 'ACCEPT_WITH_NOTE',
+          dispositionReason: 'Approved documented concession',
+          dispositionById: 'qc-supervisor',
+          dispositionAt: new Date('2026-10-19T00:00:00Z'),
+          isVoided: false,
+        });
+
+        mockPrismaService.$transaction.mockImplementation((cb: any) =>
+          cb(mockTxClient),
+        );
+
+        const dto = {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara to Warehouse stage with valid PA',
+          expectedRevision: 3,
+          items: [],
+        };
+
+        const res = await service.correctOperationLog('tx-gsp-coal-pass', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        });
+
+        expect(res.success).toBe(true);
+        expect(
+          mockTxClient.qcProductAnalysis.updateMany,
+        ).not.toHaveBeenCalled();
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.QC_VEHICLE_PASSED,
+            }),
+          }),
+        );
+      },
+    );
 
     it('downgrades to QC_VEHICLE_PENDING when REOPEN target QC_VEHICLE_PASSED has PA result = null', async () => {
       const mockTx = {

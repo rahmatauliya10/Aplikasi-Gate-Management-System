@@ -458,7 +458,7 @@ export class ReportsService {
         [OperationHistoryBottleneck.QC]: 'qc',
         [OperationHistoryBottleneck.WAITING_OUT]: 'waiting_out',
       }[query.bottleneck];
-      conditions.push(Prisma.sql`${Prisma.raw(`"${bottleneckColumn}"`)} > 15`);
+      conditions.push(Prisma.sql`${Prisma.raw(`"${bottleneckColumn}"`)} > 0`);
     }
     if (query.integrity !== OperationHistoryIntegrity.ALL) {
       conditions.push(
@@ -670,10 +670,10 @@ export class ReportsService {
         AVG(total)::float AS avg_tat,
         COALESCE(SUM(net), 0)::float AS total_net,
         COUNT(*) FILTER (WHERE fraud_status IN ('WARNING', 'CRITICAL'))::bigint AS anomaly_count,
-        COUNT(*) FILTER (WHERE bottleneck = 'waitingIn' AND waiting_in > 15)::bigint AS waiting_in_count,
-        COUNT(*) FILTER (WHERE bottleneck = 'warehouse' AND warehouse > 15)::bigint AS warehouse_count,
-        COUNT(*) FILTER (WHERE bottleneck = 'qc' AND qc > 15)::bigint AS qc_count,
-        COUNT(*) FILTER (WHERE bottleneck = 'waitingOut' AND waiting_out > 15)::bigint AS waiting_out_count
+        COUNT(*) FILTER (WHERE bottleneck = 'waitingIn' AND waiting_in > 0)::bigint AS waiting_in_count,
+        COUNT(*) FILTER (WHERE bottleneck = 'warehouse' AND warehouse > 0)::bigint AS warehouse_count,
+        COUNT(*) FILTER (WHERE bottleneck = 'qc' AND qc > 0)::bigint AS qc_count,
+        COUNT(*) FILTER (WHERE bottleneck = 'waitingOut' AND waiting_out > 0)::bigint AS waiting_out_count
       FROM final
     `);
     const summary = rows[0] || ({} as any);

@@ -30,6 +30,32 @@ jest.mock('fs', () => {
   };
 });
 
+jest.mock('../../scripts/attachment-recovery', () => ({
+  lock: jest.fn(() => jest.fn()),
+  prepare: jest.fn((_root, executionId, actor, reason, paths) => ({
+    executionId,
+    actor,
+    reason,
+    inventoryHash: 'inventory-hash',
+    state: 'PREPARED',
+    files: paths.map((relativePath: string) => ({
+      relativePath,
+      size: 2048,
+      state: 'PREPARED',
+    })),
+  })),
+  execute: jest.fn(async (_root, manifest, restore, audit) => {
+    manifest.files.forEach((entry: any) => {
+      entry.state = restore ? 'RESTORED' : 'QUARANTINED';
+    });
+    manifest.state = 'COMPLETED';
+    await audit(manifest);
+  }),
+  readManifest: jest.fn(() => {
+    throw new Error('Legacy manifest');
+  }),
+}));
+
 describe('AttachmentsService', () => {
   let service: AttachmentsService;
 
@@ -44,6 +70,7 @@ describe('AttachmentsService', () => {
     transaction: {
       findFirst: jest.fn(),
     },
+    activityLog: { findFirst: jest.fn() },
     transactionCorrection: {
       findMany: jest.fn().mockResolvedValue([]),
     },
@@ -449,8 +476,9 @@ describe('AttachmentsService', () => {
       expect(result.orphanFilesCount).toBe(1);
       expect(result.cleanedOrphanFilesCount).toBe(1);
       expect(result.quarantinedFilesCount).toBe(1);
-      expect(result.freedBytes).toBe(2048);
-      expect(fs.renameSync).toHaveBeenCalled();
+      expect(result.freedBytes).toBe(0);
+      expect(result.quarantinedBytes).toBe(2048);
+      expect(fs.renameSync).not.toHaveBeenCalled();
       expect(fs.unlinkSync).not.toHaveBeenCalled();
 
       // Verify INTENT was recorded strictly first, then PURGE
@@ -493,14 +521,14 @@ describe('AttachmentsService', () => {
         role: 'ADMIN',
         email: 'admin@gms.local',
       };
-      const result = await service.reconcileAttachmentStorage(
-        { removeOrphans: true, dryRun: false, quarantineOrphans: false },
-        adminUser,
-      );
+      await expect(
+        service.reconcileAttachmentStorage(
+          { removeOrphans: true, dryRun: false, quarantineOrphans: false },
+          adminUser,
+        ),
+      ).rejects.toThrow('Permanent purge');
 
-      expect(result.quarantine).toBe(false);
-      expect(result.cleanedOrphanFilesCount).toBe(1);
-      expect(fs.unlinkSync).toHaveBeenCalled();
+      expect(fs.unlinkSync).not.toHaveBeenCalled();
       expect(fs.renameSync).not.toHaveBeenCalled();
     });
 
@@ -522,21 +550,15 @@ describe('AttachmentsService', () => {
         role: 'ADMIN',
         email: 'admin@gms.local',
       };
-      const result = await service.restoreQuarantinedFiles(
-        'reconcile-run-123',
-        adminUser,
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.restoredFilesCount).toBe(1);
-      expect(fs.renameSync).toHaveBeenCalled();
-      expect(mockActivityLogsService.logActionStrict).toHaveBeenCalledWith(
-        expect.objectContaining({
-          userId: 'usr-admin-1',
-          action: 'ATTACHMENT_RECONCILE_RESTORE',
-          referenceId: 'reconcile-run-123',
+      await expect(
+        service.restoreQuarantinedFiles('reconcile-run-123', {
+          ...adminUser,
+          name: 'Admin',
+          warehouseAccess: [],
         }),
-      );
+      ).rejects.toThrow('legacy');
+      expect(fs.renameSync).not.toHaveBeenCalled();
+      expect(mockActivityLogsService.logActionStrict).not.toHaveBeenCalled();
     });
 
     it('should NOT delete or quarantine files when dryRun is false but removeOrphans is false (Dual Affirmation)', async () => {
@@ -682,6 +704,92 @@ describe('AttachmentsService', () => {
       // ZERO-TOUCH PROOF: Neither unlink nor rename was called on disk!
       expect(fs.unlinkSync).not.toHaveBeenCalled();
       expect(fs.renameSync).not.toHaveBeenCalled();
+    });
+
+    it('restores only an audit-bound manifest after strict restore intent', async () => {
+      const recovery = require('../../scripts/attachment-recovery');
+      recovery.readManifest.mockReturnValueOnce({
+        inventoryHash: 'bound-hash',
+        files: [{ relativePath: 'evidence.jpg' }],
+      });
+      mockPrismaService.activityLog.findFirst.mockResolvedValueOnce({
+        description: JSON.stringify({ inventoryHash: 'bound-hash' }),
+      });
+      const result = await service.restoreQuarantinedFiles(
+        'reconcile-1792368000000-abcde',
+        {
+          id: 'admin',
+          role: 'ADMIN',
+          name: 'Admin',
+          email: 'admin@gms.local',
+          warehouseAccess: [],
+        },
+      );
+      expect(result.success).toBe(true);
+      expect(result.restoredFiles).toEqual(['evidence.jpg']);
+      expect(mockActivityLogsService.logActionStrict).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'ATTACHMENT_RESTORE_INTENT' }),
+      );
+    });
+
+    it('does not execute restore when strict intent cannot be committed', async () => {
+      const recovery = require('../../scripts/attachment-recovery');
+      recovery.readManifest.mockReturnValueOnce({
+        inventoryHash: 'bound-hash',
+        files: [],
+      });
+      mockPrismaService.activityLog.findFirst.mockResolvedValueOnce({
+        description: JSON.stringify({ inventoryHash: 'bound-hash' }),
+      });
+      mockActivityLogsService.logActionStrict.mockRejectedValueOnce(
+        new Error('intent unavailable'),
+      );
+      await expect(
+        service.restoreQuarantinedFiles('reconcile-1792368000000-abcde', {
+          id: 'admin',
+          role: 'ADMIN',
+          name: 'Admin',
+          email: 'admin@gms.local',
+          warehouseAccess: [],
+        }),
+      ).rejects.toThrow('intent unavailable');
+      expect(recovery.execute).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-admin restore before reading the manifest', async () => {
+      const recovery = require('../../scripts/attachment-recovery');
+      await expect(
+        service.restoreQuarantinedFiles('reconcile-1792368000000-abcde', {
+          id: 'qc',
+          role: 'QC',
+          name: 'QC',
+          email: 'qc@gms.local',
+          warehouseAccess: [],
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(recovery.readManifest).not.toHaveBeenCalled();
+    });
+
+    it('rejects restore when the inventory differs from committed audit', async () => {
+      const recovery = require('../../scripts/attachment-recovery');
+      recovery.readManifest.mockReturnValueOnce({
+        inventoryHash: 'changed',
+        files: [],
+      });
+      mockPrismaService.activityLog.findFirst.mockResolvedValueOnce({
+        description: JSON.stringify({ inventoryHash: 'original' }),
+      });
+      const calls = recovery.execute.mock.calls.length;
+      await expect(
+        service.restoreQuarantinedFiles('reconcile-1792368000000-abcde', {
+          id: 'admin',
+          role: 'ADMIN',
+          name: 'Admin',
+          email: 'admin@gms.local',
+          warehouseAccess: [],
+        }),
+      ).rejects.toThrow('audit');
+      expect(recovery.execute.mock.calls.length).toBe(calls);
     });
 
     it('should abort if outcome audit fails after cleanup', async () => {

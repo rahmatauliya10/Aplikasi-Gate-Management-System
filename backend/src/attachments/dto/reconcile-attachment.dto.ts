@@ -28,7 +28,7 @@ export class ReconcileAttachmentDto {
 
   @ApiPropertyOptional({
     description:
-      'Jika true (default), berkas yatim dipindahkan ke direktori karantina yang dapat dipulihkan (quarantine/<executionId>/) sebelum penghapusan permanen. Jika false, berkas dihapus langsung setelah audit intent.',
+      'Jika true (default), berkas yatim dikarantina dengan manifest terverifikasi (quarantine/<executionId>/). Mutasi dengan false ditolak; penghapusan permanen dinonaktifkan pada maintenance rutin.',
     default: true,
   })
   @IsOptional()

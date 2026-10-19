@@ -151,6 +151,23 @@ describe('ReportsService', () => {
       expect(sqlText).toContain('fraud."riskLevel"::text AS risk_level');
     });
 
+    it('uses the longest positive stage descriptively without an unapproved 15-minute SLA', async () => {
+      await service.getOperationHistory(
+        { bottleneck: OperationHistoryBottleneck.WAREHOUSE },
+        mockUser,
+      );
+      const projectionSql =
+        mockPrisma.$queryRaw.mock.calls[0][0].strings.join('?');
+      const summarySql =
+        mockPrisma.$queryRaw.mock.calls[1][0].strings.join('?');
+      expect(projectionSql).toContain('"warehouse" > 0');
+      expect(summarySql).toContain(
+        "bottleneck = 'warehouse' AND warehouse > 0",
+      );
+      expect(projectionSql).not.toContain('> 15');
+      expect(summarySql).not.toContain('> 15');
+    });
+
     it('returns paginated data and full filtered summary', async () => {
       const result = await service.getOperationHistory(
         {

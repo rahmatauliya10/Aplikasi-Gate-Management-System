@@ -95,12 +95,14 @@ const elapsedMinutes = computed(() => {
   return elapsedSeconds.value / 60
 })
 
+const hasSla = computed(() => Number.isFinite(props.slaMinutes) && props.slaMinutes > 0)
+
 const isCaution = computed(() => {
-  return !props.endTime && elapsedMinutes.value >= (props.slaMinutes * 0.75) && elapsedMinutes.value < props.slaMinutes
+  return hasSla.value && !props.endTime && elapsedMinutes.value >= (props.slaMinutes * 0.75) && elapsedMinutes.value < props.slaMinutes
 })
 
 const isBreached = computed(() => {
-  return !props.endTime && elapsedMinutes.value >= props.slaMinutes
+  return hasSla.value && !props.endTime && elapsedMinutes.value >= props.slaMinutes
 })
 
 const formattedDuration = computed(() => {
