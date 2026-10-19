@@ -1103,7 +1103,7 @@
                   <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                     <!-- Input 1: Gross Weight -->
                     <div class="space-y-1">
-                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Gross Weight (kg) [Source {{ weightRecordTypes.gross }}]</label>
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Gross Weight (kg) [Source: {{ weightRecordTypes.gross === 'IN' ? 'Timbangan Masuk (IN)' : 'Timbangan Keluar (OUT)' }}]</label>
                       <div class="relative">
                         <input v-model.number="correctionForm.grossWeight" type="number"
                           class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -1114,7 +1114,7 @@
 
                     <!-- Input 2: Tare Weight -->
                     <div class="space-y-1">
-                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Tare Weight (kg) [Source {{ weightRecordTypes.tare }}]</label>
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Tare Weight (kg) [Source: {{ weightRecordTypes.tare === 'IN' ? 'Timbangan Masuk (IN)' : 'Timbangan Keluar (OUT)' }}]</label>
                       <div class="relative">
                         <input v-model.number="correctionForm.tareWeight" type="number"
                           class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -1125,13 +1125,13 @@
 
                     <!-- Input 3: Warehouse Realization -->
                     <div class="space-y-1">
-                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Warehouse Realization (kg)</label>
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Warehouse Realization ({{ isUomMismatch ? gspReceiptUnit : 'kg' }})</label>
                       <div class="relative">
                         <input v-model.number="correctionForm.actualWeight" type="number"
                           class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          :class="Number(correctionForm.actualWeight) !== Number(currentTruck?.actualWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                          :class="Number(correctionForm.actualWeight) !== Number(currentActualWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
-                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentTruck?.actualWeight || 0 }} kg</span>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentActualWeight || 0 }} {{ isUomMismatch ? gspReceiptUnit : 'kg' }}</span>
                     </div>
                   </div>
 
@@ -1159,11 +1159,22 @@
                       <!-- Box 2: Warehouse Realization & Deviasi -->
                       <div class="p-3 bg-amber-50/50 rounded-xl border border-amber-200/80 space-y-1">
                         <div class="text-[9px] font-black text-amber-800 uppercase tracking-widest">WAREHOUSE REALIZATION &amp; DEVIASI</div>
-                        <div class="text-xs font-bold text-amber-900 font-mono">Actual: {{ (Number(correctionForm.actualWeight) || 0).toLocaleString() }} kg</div>
-                        <div class="text-[10px] font-bold font-mono pt-0.5 flex items-center gap-1">
-                          <span class="text-slate-500">Deviasi:</span>
-                          <span :class="Math.abs(((Number(correctionForm.grossWeight) || 0) - (Number(correctionForm.tareWeight) || 0)) - (Number(correctionForm.actualWeight) || 0)) > 500 ? 'text-rose-600 font-black' : 'text-slate-800 font-bold'">
-                            {{ Math.abs(((Number(correctionForm.grossWeight) || 0) - (Number(correctionForm.tareWeight) || 0)) - (Number(correctionForm.actualWeight) || 0)).toLocaleString() }} kg
+                        <div class="text-xs font-bold text-amber-900 font-mono">Actual: {{ (Number(correctionForm.actualWeight) || 0).toLocaleString() }} {{ isUomMismatch ? gspReceiptUnit : 'kg' }}</div>
+                        <div class="text-[10px] font-bold font-mono pt-0.5 flex items-center justify-between">
+                          <div class="flex items-center gap-1">
+                            <span class="text-slate-500">Deviasi:</span>
+                            <span v-if="isUomMismatch" class="text-sky-700 font-bold text-[10px]">
+                              UOM Berbeda ({{ gspReceiptUnit }})
+                            </span>
+                            <span v-else :class="isCorrectionDeviationExceeded ? 'text-rose-600 font-black' : 'text-slate-800 font-bold'">
+                              {{ correctionDeviationKg.toLocaleString() }} kg
+                              <span v-if="correctionDeviationPct !== null" class="text-[9px] font-normal">
+                                ({{ correctionDeviationPct.toFixed(2) }}% / max {{ toleranceLimit }}%)
+                              </span>
+                            </span>
+                          </div>
+                          <span v-if="isCorrectionDeviationExceeded" class="text-[9px] font-black px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded uppercase">
+                            Exceeds Tol
                           </span>
                         </div>
                       </div>
@@ -1180,7 +1191,7 @@
                     </div>
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Nama Supir / PIC</label>
-                      <input v-model="correctionForm.driverName" type="text" placeholder="Nama supir..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.driverName !== (t.driverName || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                      <input v-model="correctionForm.driverName" type="text" placeholder="Nama supir..." class="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none transition-all text-xs font-semibold" :class="correctionForm.driverName !== (currentTruck?.driverName || '') ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
                     </div>
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Vendor / Ekspedisi</label>
@@ -1956,6 +1967,19 @@ const whOriginal = computed(() => {
   }
 })
 
+const currentActualWeight = computed(() => {
+  const t = currentTruck.value
+  if (!t) return null
+  if (t.actualWeight !== undefined && t.actualWeight !== null) {
+    return t.actualWeight
+  }
+  const currentWh = selectCurrentRecord(t.warehouseProcesses || [])
+  if (currentWh?.actualWeight !== undefined && currentWh?.actualWeight !== null) {
+    return currentWh.actualWeight
+  }
+  return null
+})
+
 const reopenMatrix = ref(null)
 const reopenMatrixError = ref(null)
 const reopenMatrixLoading = ref(false)
@@ -2209,8 +2233,8 @@ watch(() => props.isOpen, (newVal) => {
   }
 }, { immediate: true })
 
-watch(() => props.truck?.id, (newId) => {
-  if (newId && props.isOpen) {
+watch(() => props.truck?.id, (newId, oldId) => {
+  if (newId && oldId && newId !== oldId && props.isOpen) {
     detailedTruck.value = null
     detailRequestSequence.value += 1
     fetchTruckDetails().then(() => fetchCorrectionHistory())
@@ -2247,7 +2271,7 @@ const openCorrectionModal = () => {
     guestIdNumber: t.guestIdNumber || t.guestId || '',
     grossWeight: t.grossWeight || null,
     tareWeight: t.tareWeight || null,
-    actualWeight: t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (selectCurrentRecord(t.warehouseProcesses || [])?.actualWeight || null),
+    actualWeight: currentActualWeight.value !== null ? currentActualWeight.value : null,
     reasonCategory: '',
     remark: '',
     evidenceUrl: '',
@@ -2397,7 +2421,7 @@ const executeCorrectionSubmission = async () => {
       }
     }
 
-    if (correctionForm.value.actualWeight !== null && Number(correctionForm.value.actualWeight) !== Number(t.actualWeight)) {
+    if (correctionForm.value.actualWeight !== null && Number(correctionForm.value.actualWeight) !== Number(currentActualWeight.value)) {
       const whProc = selectCurrentRecord(t.warehouseProcesses || [])
       if (whProc?.id) {
         items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProc.id, fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
@@ -3290,6 +3314,29 @@ const netWeightVarianceObj = computed(() => {
 
 const toleranceLimit = computed(() => {
   return netWeightVarianceObj.value ? netWeightVarianceObj.value.toleranceValue : 2.0
+})
+
+const correctionNetWeight = computed(() => {
+  return Math.max(0, (Number(correctionForm.value.grossWeight) || 0) - (Number(correctionForm.value.tareWeight) || 0))
+})
+
+const correctionDeviationKg = computed(() => {
+  const net = correctionNetWeight.value
+  const act = Number(correctionForm.value.actualWeight) || 0
+  return Math.abs(net - act)
+})
+
+const correctionDeviationPct = computed(() => {
+  const net = correctionNetWeight.value
+  const act = Number(correctionForm.value.actualWeight) || 0
+  if (net <= 0 || act <= 0) return null
+  return Math.abs(((act / net) * 100) - 100)
+})
+
+const isCorrectionDeviationExceeded = computed(() => {
+  if (isUomMismatch.value) return false
+  if (correctionDeviationPct.value === null) return false
+  return correctionDeviationPct.value > toleranceLimit.value
 })
 
 const statusTonnage = computed(() => {

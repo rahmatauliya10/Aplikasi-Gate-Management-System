@@ -509,15 +509,13 @@ export class TransactionsService implements OnModuleInit {
           break;
 
         case TransactionStatus.WAREHOUSE_DONE:
+          assignedRole = 'WEIGHBRIDGE';
           if (tx.processType === 'GBJ') {
-            assignedRole = 'WEIGHBRIDGE';
             pendingTask = 'Timbang Keluar (Gross OUT)';
-            targetRoute = '/weighbridge';
           } else {
-            assignedRole = 'QC';
-            pendingTask = 'Analisis Laboratorium Masuk (QC Material)';
-            targetRoute = '/qc';
+            pendingTask = 'Timbang Keluar (Tare OUT)';
           }
+          targetRoute = '/weighbridge';
           break;
 
         case TransactionStatus.INCOMING_CHECK_PENDING:
