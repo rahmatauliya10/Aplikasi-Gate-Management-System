@@ -127,10 +127,11 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useGateStore } from '../stores/gateStore'
 import { useToast } from '../composables/useToast'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import { useConfirm } from '../composables/useConfirm'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import PageHeader from '../components/PageHeader.vue'
@@ -141,13 +142,6 @@ const gateStore = useGateStore()
 const toast = useToast()
 const { confirm } = useConfirm()
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[GateCheckOut] Mount-time fetch failed, using store cache:', err.message)
-  }
-})
 
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
@@ -204,6 +198,20 @@ watch(filteredTrucks, () => {
   }
 })
 watch(searchQuery, () => { currentPage.value = 1 })
+
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: completedTrucks,
+  detailsTrucks: computed(() => truckStore.trucks.filter(t =>
+    ['QC_VEHICLE_REJECTED', 'INCOMING_CHECK_REJECTED'].includes(t.status) && (!t.weighInAt || t.weighOutAt))),
+  selectDetails: (truck) => { selectedTruck.value = truck; showDetailsModal.value = true },
+  selectedTruck,
+  selectTruck: (truck) => { selectedTruck.value = truck; showDetailsModal.value = true },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    currentPage.value = Math.floor(completedTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 
 const processExit = async (truck) => {
   if (isProcessing.value) return;

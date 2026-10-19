@@ -120,7 +120,7 @@
               </div>
 
               <div v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS' && isRollWeightUnlocked">
-                <WeightInput label="Input Roll Weight GBB (KG)" :is-submitting="isProcessing" @save="handleWeightSave" />
+                <WeightInput :key="selectedTruck.id" label="Input Roll Weight GBB (KG)" :is-submitting="isProcessing" @dirty-change="pendingWeight = $event" @save="handleWeightSave" />
               </div>
 
               <!-- Vehicle & Delivery Checklist Start / Resume -->
@@ -346,11 +346,13 @@
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
 import PageHeader from '../components/PageHeader.vue'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
 import { useWarehouseStore } from '../stores/warehouseStore'
 import { useToast } from '../composables/useToast'
+import { useUnsavedWarning } from '../composables/useUnsavedWarning'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import { useConfirm } from '../composables/useConfirm'
 import StatusBadge from '../components/StatusBadge.vue'
 import StepTimeline from '../components/StepTimeline.vue'
@@ -412,13 +414,6 @@ const currentPage = ref(1)
 const searchQuery = ref('')
 const isProcessing = ref(false)
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[GBBProcess] Mount-time fetch failed:', err.message)
-  }
-})
 
 const openInspection = () => {
   showChecklistModal.value = true
@@ -481,6 +476,23 @@ const selectTruck = (truck) => {
   }
 }
 
+const pendingWeight = ref(false)
+const hasUnsavedTransaction = computed(() => pendingWeight.value || (selectedTruck.value && (
+  suratJalanInput.value !== (selectedTruck.value.suratJalanNumber || '') ||
+  poNumberInput.value !== (selectedTruck.value.poNumber || '') ||
+  checklistStates.value.some(s => s.status !== null || s.photo)
+)))
+useUnsavedWarning(hasUnsavedTransaction)
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: gbbTrucks,
+  selectedTruck,
+  selectTruck: (truck) => { pendingWeight.value = false; showChecklistModal.value = false; selectTruck(truck) },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    currentPage.value = Math.floor(gbbTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 const formatTime = formatPlantTime
 
 const saveSecurityInfo = async () => {

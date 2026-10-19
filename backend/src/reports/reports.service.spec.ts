@@ -7,6 +7,7 @@ import {
   OperationHistoryBottleneck,
   OperationHistoryExportFormat,
   OperationHistoryIntegrity,
+  OperationHistorySort,
   OperationHistoryStatus,
 } from './dto/operation-history-query.dto';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
@@ -151,6 +152,38 @@ describe('ReportsService', () => {
       expect(sqlText).toContain('fraud."riskLevel"::text AS risk_level');
     });
 
+    it.each(Object.values(OperationHistorySort))(
+      'keeps the paginated projection predicate valid for sort %s',
+      async (sort) => {
+        await service.getOperationHistory(
+          { page: 2, limit: 10, sort },
+          mockUser,
+        );
+
+        const projectionQuery = mockPrisma.$queryRaw.mock.calls[0][0];
+        const sqlText = projectionQuery.strings.join('?');
+        expect(sqlText).toMatch(/FROM final\s+WHERE 1 = 1\s+ORDER BY/);
+        expect(sqlText).not.toMatch(/WHERE\s+ORDER BY/);
+        expect(sqlText).toMatch(/LIMIT \? OFFSET \?/);
+        expect(projectionQuery.values.slice(-2)).toEqual([10, 10]);
+      },
+    );
+
+    it('closes the waiting-out ROUND expression in both projection and summary SQL', async () => {
+      await service.getOperationHistory({}, mockUser);
+
+      for (const [query] of mockPrisma.$queryRaw.mock.calls) {
+        const sqlText = query.strings.join('?');
+        expect(sqlText).toMatch(
+          /ELSE ROUND\(EXTRACT\(EPOCH FROM \(base\."weighOutAt" - COALESCE\(base\.wp_end, base\."warehouseEndAt"\)\)\) \/ 60\)\s+END AS waiting_out/,
+        );
+        // Both endpoints share this CTE; neither may emit unmatched SQL groups.
+        expect((sqlText.match(/\(/g) || []).length).toBe(
+          (sqlText.match(/\)/g) || []).length,
+        );
+      }
+    });
+
     it('uses the longest positive stage descriptively without an unapproved 15-minute SLA', async () => {
       await service.getOperationHistory(
         { bottleneck: OperationHistoryBottleneck.WAREHOUSE },
@@ -288,6 +321,61 @@ describe('ReportsService', () => {
         xlsChunks.push(chunk);
       expect(xlsChunks.join('')).toContain('&lt;XYZ');
       expect(xlsChunks.join('')).toContain('Vendor &amp; Co');
+    });
+
+    it('uses bounded keyset batches instead of materializing all export ids', async () => {
+      mockPrisma.$queryRaw.mockReset();
+      mockPrisma.transaction.findMany.mockReset();
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([
+          {
+            id: 'trx-1',
+            arrival: new Date('2026-01-01T01:00:00Z'),
+            waiting_in: 0,
+            warehouse: 0,
+            qc: 0,
+            waiting_out: 0,
+            total: 1,
+            net: 1000,
+            roll: 990,
+            diff: 10,
+            deviation_percent: 1,
+            fraud_status: 'SAFE',
+            bottleneck: 'waitingIn',
+          },
+        ])
+        .mockResolvedValueOnce([]);
+      mockPrisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'trx-1',
+          transactionNumber: 'TRX-001',
+          plateNumber: 'B1234XYZ',
+          driverName: 'Driver',
+          vendorName: 'Vendor',
+          processType: 'GBB',
+          status: 'COMPLETED',
+          gateInAt: new Date('2026-01-01T01:00:00Z'),
+          gateOutAt: new Date('2026-01-01T01:01:00Z'),
+          warehouseProcesses: [],
+          qcVehicleChecks: [],
+          incomingMaterialChecks: [],
+          fraudChecks: [],
+        },
+      ]);
+
+      const chunks: string[] = [];
+      for await (const chunk of service.exportOperationHistoryStream(
+        { format: OperationHistoryExportFormat.CSV },
+        mockUser,
+      )) {
+        chunks.push(chunk);
+      }
+
+      expect(chunks.join('')).toContain('TRX-001');
+      expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const projectionQuery = mockPrisma.$queryRaw.mock.calls[0][0];
+      expect(projectionQuery.strings.join('?')).toContain('LIMIT');
+      expect(mockPrisma.transaction.findMany).toHaveBeenCalledTimes(1);
     });
   });
 

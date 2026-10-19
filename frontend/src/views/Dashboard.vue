@@ -347,6 +347,7 @@ import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import dashboardService from '../services/dashboardService'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import DashboardFilterBar from '../components/DashboardFilterBar.vue'
@@ -417,12 +418,14 @@ const handleFilterChange = (newFilter) => {
   fetchDashboardStats(newFilter)
 }
 
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: computed(() => truckStore.trucks),
+  selectedTruck,
+  selectTruck: (truck) => { selectedTruck.value = truck; showDetailsModal.value = true },
+})
+
 onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[Dashboard] Mount-time fetch failed, using store cache:', err.message)
-  }
   await fetchDashboardStats(filterState.value)
   
   // Refresh stats every 30 seconds respecting active filter

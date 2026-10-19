@@ -262,6 +262,9 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useReminderStore } from '../stores/reminderStore'
+import { useAuthStore } from '../stores/authStore'
+import { useToast } from '../composables/useToast'
+import { navigateToReminder } from '../services/reminderNavigation'
 import { formatArrivalSequence } from '../utils/arrivalSequence'
 
 const router = useRouter()
@@ -306,13 +309,16 @@ const refresh = () => {
   reminderStore.fetchReminders()
 }
 
-const navigateToTransaction = (item) => {
-  reminderStore.markAsRead(item.id)
-  isOpen.value = false
-  if (item.routePath) {
-    router.push(item.routePath)
-  }
-}
+const authStore = useAuthStore()
+const toast = useToast()
+const navigateToTransaction = (item) => navigateToReminder({
+  item,
+  router,
+  user: authStore.user,
+  markAsRead: reminderStore.markAsRead,
+  onSuccess: () => { isOpen.value = false },
+  warn: toast.warning,
+})
 
 const getProcessBadgeClass = (proc) => {
   switch (proc) {

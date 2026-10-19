@@ -298,7 +298,10 @@ export function useAuthenticatedPhoto(src) {
         return
       }
 
-      if (currentLoadedSource && currentLoadedSource !== url) {
+      // fetchAuthenticatedBlob acquires one reference for this composable on
+      // every load, including a same-URL reload. Release the prior ownership
+      // before retaining the newly acquired reference exactly once.
+      if (currentLoadedSource) {
         releaseAuthenticatedBlob(currentLoadedSource)
       }
       currentLoadedSource = url

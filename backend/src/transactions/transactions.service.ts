@@ -414,18 +414,27 @@ export class TransactionsService implements OnModuleInit {
     const now = new Date();
     const nowEpoch = now.getTime();
     const userScopes = user.warehouseAccess || [];
+    const destinationNames: Record<string, string> = {
+      '/': 'dashboard',
+      '/qc': 'qc',
+      '/gbb': 'gbb',
+      '/gbj': 'gbj',
+      '/gsp': 'gsp',
+      '/weighbridge': 'weighbridge',
+      '/gate-out': 'gate-out',
+    };
 
     const reminders = activeTransactions.map((tx) => {
       let assignedRole: string = 'ADMIN';
       let pendingTask: string = 'Tindak Lanjut Transaksi';
-      let targetRoute: string = '/dashboard';
+      let targetRoute: string = '/';
 
       switch (tx.status) {
         case TransactionStatus.REGISTERED:
           if (tx.processType === 'GBJ') {
             assignedRole = 'QC';
             pendingTask = 'Pemeriksaan Armada (QC Vehicle)';
-            targetRoute = '/qc-verification';
+            targetRoute = '/qc';
           } else {
             assignedRole = 'WEIGHBRIDGE';
             pendingTask = 'Timbang Masuk (Gross IN)';
@@ -436,14 +445,14 @@ export class TransactionsService implements OnModuleInit {
         case TransactionStatus.WEIGH_IN_DONE:
           assignedRole = 'QC';
           pendingTask = 'Pemeriksaan Armada & Sampel (QC Verification)';
-          targetRoute = '/qc-verification';
+          targetRoute = '/qc';
           break;
 
         case TransactionStatus.QC_VEHICLE_PENDING:
         case TransactionStatus.QC_VEHICLE_IN_PROGRESS:
           assignedRole = 'QC';
           pendingTask = 'Pemeriksaan Armada (QC Vehicle)';
-          targetRoute = '/qc-verification';
+          targetRoute = '/qc';
           break;
 
         case TransactionStatus.QC_VEHICLE_PASSED:
@@ -451,51 +460,51 @@ export class TransactionsService implements OnModuleInit {
           assignedRole = 'WAREHOUSE';
           if (tx.processType === 'GBB') {
             pendingTask = 'Bongkar Bahan Baku (GBB Unloading)';
-            targetRoute = '/gbb-process';
+            targetRoute = '/gbb';
           } else if (tx.processType === 'GBJ') {
             pendingTask = 'Muat Barang Jadi (GBJ Loading)';
-            targetRoute = '/gbj-process';
+            targetRoute = '/gbj';
           } else {
             pendingTask = 'Pemeriksaan Pra-Bongkar & Bongkar GSP';
-            targetRoute = '/gsp-process';
+            targetRoute = '/gsp';
           }
           break;
 
         case TransactionStatus.QC_RETEST_REQUIRED:
           assignedRole = 'QC';
           pendingTask = 'Retest Analisis Laboratorium (QC Retest)';
-          targetRoute = '/qc-verification';
+          targetRoute = '/qc';
           break;
 
         case TransactionStatus.WAITING_UTILITY_DISPOSITION:
           assignedRole = 'ADMIN';
           pendingTask = 'Disposisi Mutu Batubara Utility';
-          targetRoute = '/qc-verification';
+          targetRoute = '/qc';
           break;
 
         case TransactionStatus.WAITING_GSP_DISPOSITION:
           assignedRole = 'WAREHOUSE';
           pendingTask = 'Disposisi Mutu Chemical (GSP / Admin)';
-          targetRoute = '/gsp-process';
+          targetRoute = '/gsp';
           break;
 
         case TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION:
           assignedRole = 'WAREHOUSE';
           pendingTask = 'Disposisi Konsesi Checklist Pra-Bongkar GSP';
-          targetRoute = '/gsp-process';
+          targetRoute = '/gsp';
           break;
 
         case TransactionStatus.WAREHOUSE_IN_PROGRESS:
           assignedRole = 'WAREHOUSE';
           if (tx.processType === 'GBB') {
             pendingTask = 'Proses Bongkar GBB Berlangsung';
-            targetRoute = '/gbb-process';
+            targetRoute = '/gbb';
           } else if (tx.processType === 'GBJ') {
             pendingTask = 'Proses Muat GBJ Berlangsung';
-            targetRoute = '/gbj-process';
+            targetRoute = '/gbj';
           } else {
             pendingTask = 'Proses Bongkar/Receiving GSP Berlangsung';
-            targetRoute = '/gsp-process';
+            targetRoute = '/gsp';
           }
           break;
 
@@ -507,7 +516,7 @@ export class TransactionsService implements OnModuleInit {
           } else {
             assignedRole = 'QC';
             pendingTask = 'Analisis Laboratorium Masuk (QC Material)';
-            targetRoute = '/qc-verification';
+            targetRoute = '/qc';
           }
           break;
 
@@ -515,7 +524,7 @@ export class TransactionsService implements OnModuleInit {
         case TransactionStatus.INCOMING_CHECK_IN_PROGRESS:
           assignedRole = 'QC';
           pendingTask = 'Pemeriksaan Laboratorium Masuk (QC Material)';
-          targetRoute = '/qc-verification';
+          targetRoute = '/qc';
           break;
 
         case TransactionStatus.INCOMING_CHECK_PASSED:
@@ -546,7 +555,7 @@ export class TransactionsService implements OnModuleInit {
         default:
           assignedRole = 'ADMIN';
           pendingTask = `Tindak Lanjut Transaksi (${tx.status})`;
-          targetRoute = '/dashboard';
+          targetRoute = '/';
       }
 
       // Check whether current user can take action
@@ -628,6 +637,7 @@ export class TransactionsService implements OnModuleInit {
         slaMinutes,
         isOverdue,
         targetRoute,
+        targetRouteName: destinationNames[targetRoute],
       };
     });
 

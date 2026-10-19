@@ -100,7 +100,7 @@ export class OperationLogCorrectionController {
     @CurrentUser() user: JwtPayloadUser,
     @Req() req?: Request,
   ) {
-    const ipAddress = req?.ip || req?.headers['x-forwarded-for']?.toString();
+    const ipAddress = req?.ip || req?.socket?.remoteAddress;
     return this.correctionService.correctOperationLog(id, dto, user, ipAddress);
   }
 }

@@ -722,7 +722,7 @@
 
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
 import { useAuthStore } from '../stores/authStore'
@@ -739,6 +739,7 @@ import CoalAnalysisForm from '../components/qc/CoalAnalysisForm.vue'
 import ChemicalPacForm from '../components/qc/ChemicalPacForm.vue'
 import ChemicalRapidKlenForm from '../components/qc/ChemicalRapidKlenForm.vue'
 import { useUnsavedWarning } from '../composables/useUnsavedWarning'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import api from '../services/api'
 import {
   GBJ_VEHICLE_CHECKLIST,
@@ -846,13 +847,6 @@ const getQcVehicleStartAt = (truck) => {
 const truckStore = useTruckStore()
 const authStore = useAuthStore()
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[QCVerification] Mount-time fetch failed:', err.message)
-  }
-})
 const qcStore = useQcStore()
 const toast = useToast()
 const { confirm } = useConfirm()
@@ -952,7 +946,33 @@ const isQcFormDirty = computed(() => {
   return false
 })
 
-useUnsavedWarning(isQcFormDirty)
+const hasUnsavedTransaction = computed(() => isQcFormDirty.value || showVerificationModal.value || showGspPaModal.value ||
+  (showSamplingModal.value && (samplingForm.value.visual !== 'Normal' || samplingForm.value.odor !== 'Normal')) ||
+  (showChecklistModal.value && checklistStates.value.some(s => s.photo)))
+useUnsavedWarning(hasUnsavedTransaction)
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: qcTrucks,
+  detailsTrucks: computed(() => truckStore.trucks.filter(t =>
+    (t.status === 'REGISTERED' && getProcessType(t) === 'GBJ') ||
+    t.status === 'WEIGH_IN_DONE' ||
+    (t.status === 'WAREHOUSE_DONE' && ['GBB', 'GSP'].includes(getProcessType(t))))),
+  selectDetails: (truck) => { selectedTruck.value = truck; showDetailsModal.value = true },
+  selectedTruck,
+  selectTruck: (truck) => {
+    showSamplingModal.value = false
+    showChecklistModal.value = false
+    showDeviationModal.value = false
+    showVerificationModal.value = false
+    showGspPaModal.value = false
+    selectTruck(truck)
+  },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    selectedWarehouse.value = 'ALL'
+    currentPage.value = Math.floor(qcTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 
 const handlePhotoUpload = (event, index) => {
   const file = event.target.files[0]

@@ -271,6 +271,43 @@ async function main() {
           candidateOrphans.map((c) => c.relPath),
         )
       : null;
+
+    const isUnreferencedImmediatelyBeforeMove = async (entry) => {
+      const normalized = normalizeRel(entry.relativePath).toLowerCase();
+      try {
+        const [latestAttachments, latestCorrections, latestIssues] =
+          await Promise.all([
+            prisma.attachment.findMany({
+              select: { filePath: true, fileName: true },
+            }),
+            prisma.transactionCorrection.findMany({
+              where: { evidenceUrl: { not: null } },
+              select: { evidenceUrl: true },
+            }),
+            prisma.systemIssue.findMany({
+              where: { screenshotUrl: { not: null } },
+              select: { screenshotUrl: true },
+            }),
+          ]);
+        const latestPaths = [
+          ...latestAttachments.flatMap((record) => [
+            record.filePath,
+            record.fileName,
+          ]),
+          ...latestCorrections.map((record) => record.evidenceUrl),
+          ...latestIssues.map((record) => record.screenshotUrl),
+        ]
+          .map(normalizeRel)
+          .filter(Boolean)
+          .map((value) => value.toLowerCase());
+        return !latestPaths.includes(normalized);
+      } catch (error) {
+        console.error(
+          `❌ Failed to revalidate references for ${entry.relativePath}: ${error.message}`,
+        );
+        throw error;
+      }
+    };
     // STEP 4A: MANDATORY INTENT AUDIT LOGGING (Strict Fail-Closed BEFORE touching files)
     if (isDeletionPermitted) {
       console.log('Writing mandatory INTENT audit log to database...');
@@ -320,6 +357,7 @@ async function main() {
             },
           });
         },
+        isUnreferencedImmediatelyBeforeMove,
       );
       for (const entry of manifest.files)
         if (entry.state === 'QUARANTINED') {

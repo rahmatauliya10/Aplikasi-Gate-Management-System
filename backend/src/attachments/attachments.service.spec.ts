@@ -54,6 +54,12 @@ jest.mock('../../scripts/attachment-recovery', () => ({
   readManifest: jest.fn(() => {
     throw new Error('Legacy manifest');
   }),
+  validateResumeManifest: jest.fn((_root, manifest, expected) => {
+    if (manifest.executionId !== expected.executionId) {
+      throw new Error('Recovery executionId binding mismatch');
+    }
+    return manifest;
+  }),
 }));
 
 describe('AttachmentsService', () => {

@@ -44,13 +44,27 @@ export class AttachmentsController {
     @CurrentUser() user?: JwtPayloadUser,
     @Req() req?: any,
   ) {
-    const rawIp =
-      req?.headers?.['x-forwarded-for'] ||
-      req?.socket?.remoteAddress ||
-      '127.0.0.1';
-    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    const ipAddress = req?.ip || req?.socket?.remoteAddress || '127.0.0.1';
     return this.attachmentsService.reconcileAttachmentStorage(
       dto,
+      user,
+      ipAddress,
+    );
+  }
+
+  @Post('reconcile/resume/:executionId')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Resume a partial attachment quarantine execution',
+  })
+  resumeReconciliation(
+    @Param('executionId') executionId: string,
+    @CurrentUser() user: JwtPayloadUser,
+    @Req() req?: any,
+  ) {
+    const ipAddress = req?.ip || req?.socket?.remoteAddress || '127.0.0.1';
+    return this.attachmentsService.resumeQuarantinedFiles(
+      executionId,
       user,
       ipAddress,
     );
@@ -66,11 +80,7 @@ export class AttachmentsController {
     @CurrentUser() user: JwtPayloadUser,
     @Req() req?: any,
   ) {
-    const rawIp =
-      req?.headers?.['x-forwarded-for'] ||
-      req?.socket?.remoteAddress ||
-      '127.0.0.1';
-    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp);
+    const ipAddress = req?.ip || req?.socket?.remoteAddress || '127.0.0.1';
     return this.attachmentsService.restoreQuarantinedFiles(
       executionId,
       user,

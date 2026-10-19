@@ -166,8 +166,8 @@ export const useReminderStore = defineStore('reminder', () => {
           slaMinutes: r.slaMinutes ?? null,
           responsibleRole: r.responsibleRole || r.assignedRole || 'ADMIN',
           assignedRole: r.assignedRole || r.responsibleRole || 'ADMIN',
-          routePath: r.routePath || r.targetRoute || '/dashboard',
-          targetRoute: r.targetRoute || r.routePath || '/dashboard',
+          routePath: r.routePath || r.targetRoute || null,
+          targetRoute: r.targetRoute || r.routePath || null,
           isOverdue: Boolean(r.isOverdue || r.category === 'OVERDUE'),
         }))
         const rawSummary = res.data.data.summary || {}

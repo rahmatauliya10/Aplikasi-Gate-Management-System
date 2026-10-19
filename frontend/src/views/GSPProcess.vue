@@ -948,7 +948,7 @@
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
 import PageHeader from '../components/PageHeader.vue'
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
 import { useWarehouseStore } from '../stores/warehouseStore'
@@ -961,6 +961,7 @@ import AuthenticatedImage from '../components/AuthenticatedImage.vue'
 import Pagination from '../components/Pagination.vue'
 import { getStatusLabel } from '../utils/statusLabel'
 import { useUnsavedWarning } from '../composables/useUnsavedWarning'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import api from '../services/api'
 
 // Canonical GSP Pre-Unloading Checklist Items (SOP-GSP-2026.1 / GSP-PREUNLOAD-2026.1)
@@ -1038,13 +1039,6 @@ const warehouseStore = useWarehouseStore()
 const toast = useToast()
 const { confirm } = useConfirm()
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[GSPProcess] Mount-time fetch failed, using store cache:', err.message)
-  }
-})
 
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
@@ -1112,7 +1106,7 @@ const openChecklistDecisionModal = () => {
 
 const isFormDirty = computed(() => {
   if (showPreUnloadModal.value) {
-    return Object.values(checklistAnswers).some(a => a.result !== null || (a.notes && a.notes.length > 0))
+    return Object.values(checklistAnswers).some(a => a.result !== null || a.photoUrl || (a.notes && a.notes.length > 0))
   }
   if (showChecklistDecisionModal.value) {
     return (checklistDecisionNotes.value || '').trim().length > 0
@@ -1120,7 +1114,10 @@ const isFormDirty = computed(() => {
   return false
 })
 
-useUnsavedWarning(isFormDirty)
+const hasUnsavedTransaction = computed(() => isFormDirty.value || Boolean(receivedQuantityInput.value || dispositionNoteInput.value) ||
+  (selectedTruck.value && (suratJalanInput.value !== (selectedTruck.value.suratJalanNumber || '') ||
+    poNumberInput.value !== (selectedTruck.value.poNumber || ''))))
+useUnsavedWarning(hasUnsavedTransaction)
 
 const handleClosePreUnloadModal = () => {
   if (isFormDirty.value) {
@@ -1283,10 +1280,14 @@ const activePaData = ref(null)
 const showAcceptWithNoteForm = ref(false)
 const dispositionNoteInput = ref('')
 
+let paRequestGeneration = 0
 const fetchActivePaData = async (truckId) => {
   if (!truckId) return
+  const request = ++paRequestGeneration
+  activePaData.value = null
   try {
     const res = await api.get(`/qc/product-analysis/${truckId}`)
+    if (request !== paRequestGeneration || selectedTruck.value?.id !== truckId) return
     const analyses = res.data?.data || []
     if (analyses.length > 0) {
       analyses.sort((a, b) => (b.testRound || 1) - (a.testRound || 1))
@@ -1296,7 +1297,7 @@ const fetchActivePaData = async (truckId) => {
     }
   } catch (err) {
     console.warn('[GSPProcess] Failed to fetch PA data for disposition:', err)
-    activePaData.value = null
+    if (request === paRequestGeneration && selectedTruck.value?.id === truckId) activePaData.value = null
   }
 }
 
@@ -1386,6 +1387,20 @@ const selectTruck = (truck) => {
     activePaData.value = null
   }
 }
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: gspTrucks,
+  selectedTruck,
+  selectTruck: (truck) => {
+    showPreUnloadModal.value = false
+    showChecklistDecisionModal.value = false
+    selectTruck(truck)
+  },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    currentPage.value = Math.floor(gspTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 const formatTime = formatPlantTime
 
 const saveSecurityInfo = async () => {

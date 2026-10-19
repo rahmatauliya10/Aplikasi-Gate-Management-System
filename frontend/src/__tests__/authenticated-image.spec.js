@@ -21,23 +21,30 @@ describe('Authenticated Photo Loading & Security Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearAuthenticatedBlobCache()
-    window.URL.createObjectURL = vi.fn().mockReturnValue('blob:http://localhost:8089/mock-uuid-1')
+    window.URL.createObjectURL = vi
+      .fn()
+      .mockReturnValue('blob:http://localhost:8089/mock-uuid-1')
     window.URL.revokeObjectURL = vi.fn()
   })
 
   it('bypasses network for data: URLs and renders image directly', async () => {
-    const dataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    const dataUri =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
     const resolved = await fetchAuthenticatedBlob(dataUri)
     expect(resolved).toBe(dataUri)
     expect(api.get).not.toHaveBeenCalled()
   })
 
   it('normalizes URL and strips redundant /api prefix for Axios compatibility', () => {
-    const parsed1 = normalizeAndValidatePhotoUrl('/api/attachments/att-123/download')
+    const parsed1 = normalizeAndValidatePhotoUrl(
+      '/api/attachments/att-123/download',
+    )
     expect(parsed1.fetchUrl).toBe('/attachments/att-123/download')
     expect(parsed1.cacheKey).toBe('/api/attachments/att-123/download')
 
-    const parsed2 = normalizeAndValidatePhotoUrl('/attachments/att-456/download')
+    const parsed2 = normalizeAndValidatePhotoUrl(
+      '/attachments/att-456/download',
+    )
     expect(parsed2.fetchUrl).toBe('/attachments/att-456/download')
   })
 
@@ -122,7 +129,9 @@ describe('Authenticated Photo Loading & Security Tests', () => {
     await nextTick()
 
     // Resolve photo 2 first
-    window.URL.createObjectURL = vi.fn().mockReturnValueOnce('blob:http://localhost:8089/photo-2')
+    window.URL.createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:http://localhost:8089/photo-2')
     resolvePhoto2({
       data: new Blob(['photo2']),
       headers: { 'content-type': 'image/jpeg' },
@@ -132,7 +141,9 @@ describe('Authenticated Photo Loading & Security Tests', () => {
     expect(resolvedUrl.value).toBe('blob:http://localhost:8089/photo-2')
 
     // Now resolve photo 1 (stale)
-    window.URL.createObjectURL = vi.fn().mockReturnValueOnce('blob:http://localhost:8089/photo-1')
+    window.URL.createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:http://localhost:8089/photo-1')
     resolvePhoto1({
       data: new Blob(['photo1']),
       headers: { 'content-type': 'image/jpeg' },
@@ -145,9 +156,11 @@ describe('Authenticated Photo Loading & Security Tests', () => {
 
   it('rejects stale responses after cache clear and prevents repopulating the cache', async () => {
     let resolveRequest
-    api.get.mockReturnValueOnce(new Promise((resolve) => {
-      resolveRequest = resolve
-    }))
+    api.get.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRequest = resolve
+      }),
+    )
 
     const pending = fetchAuthenticatedBlob('/api/attachments/stale/download')
     clearAuthenticatedBlobCache()
@@ -164,7 +177,9 @@ describe('Authenticated Photo Loading & Security Tests', () => {
       data: new Blob(['fresh-bytes'], { type: 'image/jpeg' }),
       headers: { 'content-type': 'image/jpeg' },
     })
-    await expect(fetchAuthenticatedBlob('/api/attachments/stale/download')).resolves.toBeTruthy()
+    await expect(
+      fetchAuthenticatedBlob('/api/attachments/stale/download'),
+    ).resolves.toBeTruthy()
     expect(api.get).toHaveBeenCalledTimes(2)
   })
 
@@ -183,6 +198,74 @@ describe('Authenticated Photo Loading & Security Tests', () => {
 
     clearAuthenticatedBlobCache()
     expect(window.URL.revokeObjectURL).toHaveBeenCalledWith(createdUrl)
+  })
+
+  it('releases the prior ownership on same-URL reload', async () => {
+    const mockBlob = new Blob(['reload-bytes'], { type: 'image/jpeg' })
+    api.get.mockResolvedValue({
+      data: mockBlob,
+      headers: { 'content-type': 'image/jpeg' },
+    })
+    let objectUrlIndex = 0
+    window.URL.createObjectURL = vi.fn(
+      () => `blob:http://localhost:8089/reload-${++objectUrlIndex}`,
+    )
+
+    const source = ref('/api/attachments/reload-photo/download')
+    const { resolvedUrl, reload } = useAuthenticatedPhoto(source)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(resolvedUrl.value).toBe('blob:http://localhost:8089/reload-1')
+
+    await reload()
+    // A cache hit returns the same Object URL, but the old ownership must be
+    // released so the net reference count remains one for this composable.
+    expect(resolvedUrl.value).toBe('blob:http://localhost:8089/reload-1')
+    expect(api.get).toHaveBeenCalledTimes(1)
+
+    clearAuthenticatedBlobCache()
+    expect(window.URL.revokeObjectURL).toHaveBeenCalledWith(
+      'blob:http://localhost:8089/reload-1',
+    )
+  })
+
+  it('does not release a stale response as the current composable owner', async () => {
+    let resolveFirst
+    let resolveSecond
+    api.get.mockImplementation(
+      (url) =>
+        new Promise((resolve) => {
+          if (url.includes('race-first')) resolveFirst = resolve
+          else resolveSecond = resolve
+        }),
+    )
+
+    const source = ref('/api/attachments/race-first/download')
+    const { resolvedUrl } = useAuthenticatedPhoto(source)
+    source.value = '/api/attachments/race-second/download'
+    await nextTick()
+
+    window.URL.createObjectURL = vi
+      .fn()
+      .mockReturnValueOnce('blob:http://localhost:8089/race-second')
+    resolveSecond({
+      data: new Blob(['second']),
+      headers: { 'content-type': 'image/jpeg' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(resolvedUrl.value).toBe('blob:http://localhost:8089/race-second')
+
+    window.URL.createObjectURL.mockReturnValueOnce(
+      'blob:http://localhost:8089/race-first',
+    )
+    resolveFirst({
+      data: new Blob(['first']),
+      headers: { 'content-type': 'image/jpeg' },
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(resolvedUrl.value).toBe('blob:http://localhost:8089/race-second')
+    // Both requests have completed, but the stale response must not replace
+    // the active composable result.
+    expect(window.URL.createObjectURL).toHaveBeenCalledTimes(2)
   })
 
   it('renders AuthenticatedImage component and unmounts cleanly', async () => {
@@ -215,7 +298,9 @@ describe('Authenticated Photo Loading & Security Tests', () => {
     api.get.mockRejectedValueOnce({
       response: {
         status: 401,
-        data: { message: 'Unauthorized: Sesi kedaluwarsa atau token tidak valid' },
+        data: {
+          message: 'Unauthorized: Sesi kedaluwarsa atau token tidak valid',
+        },
       },
     })
 

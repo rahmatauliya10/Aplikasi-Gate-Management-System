@@ -47,6 +47,85 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     );
   });
 
+  it.each([
+    ['REGISTERED', 'GBB', '/weighbridge', 'weighbridge'],
+    ['REGISTERED', 'GBJ', '/qc', 'qc'],
+    ['WEIGH_IN_DONE', 'GSP', '/qc', 'qc'],
+    ['QC_VEHICLE_PENDING', 'GBJ', '/qc', 'qc'],
+    ['QC_VEHICLE_IN_PROGRESS', 'GBB', '/qc', 'qc'],
+    ['QC_VEHICLE_PASSED', 'GBB', '/gbb', 'gbb'],
+    ['QC_VEHICLE_PASSED', 'GBJ', '/gbj', 'gbj'],
+    ['QC_VEHICLE_PASSED', 'GSP', '/gsp', 'gsp'],
+    ['PA_NOT_REQUIRED', 'GSP', '/gsp', 'gsp'],
+    ['WAREHOUSE_IN_PROGRESS', 'GBB', '/gbb', 'gbb'],
+    ['WAREHOUSE_IN_PROGRESS', 'GBJ', '/gbj', 'gbj'],
+    ['WAREHOUSE_IN_PROGRESS', 'GSP', '/gsp', 'gsp'],
+    ['QC_RETEST_REQUIRED', 'GSP', '/qc', 'qc'],
+    ['WAITING_UTILITY_DISPOSITION', 'GSP', '/qc', 'qc'],
+    ['WAITING_GSP_DISPOSITION', 'GSP', '/gsp', 'gsp'],
+    ['WAITING_GSP_CHECKLIST_DISPOSITION', 'GSP', '/gsp', 'gsp'],
+    ['WAREHOUSE_DONE', 'GBJ', '/weighbridge', 'weighbridge'],
+    ['WAREHOUSE_DONE', 'GBB', '/qc', 'qc'],
+    ['INCOMING_CHECK_PENDING', 'GBB', '/qc', 'qc'],
+    ['INCOMING_CHECK_IN_PROGRESS', 'GSP', '/qc', 'qc'],
+    ['INCOMING_CHECK_PASSED', 'GBB', '/weighbridge', 'weighbridge'],
+    ['WEIGH_OUT_DONE', 'GBJ', '/gate-out', 'gate-out'],
+    ['QC_VEHICLE_REJECTED', 'GBJ', '/gate-out', 'gate-out'],
+    ['INCOMING_CHECK_REJECTED', 'GBB', '/gate-out', 'gate-out'],
+    ['SOME_UNCONFIGURED_STAGE', 'GBB', '/', 'dashboard'],
+  ])(
+    'emits canonical destination for %s / %s',
+    async (status, processType, path, name) => {
+      mockPrisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'tx-route',
+          status,
+          processType,
+          revision: 2,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]);
+      const result = await service.getPendingReminders({
+        id: 'admin-route',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      } as JwtPayloadUser);
+      expect(result.data.reminders[0]).toMatchObject({
+        transactionId: 'tx-route',
+        targetRoute: path,
+        targetRouteName: name,
+        id: `tx-route-${status}-2`,
+      });
+    },
+  );
+
+  it.each(['QC_VEHICLE_REJECTED', 'INCOMING_CHECK_REJECTED'])(
+    'keeps rejected %s requiring weighing at weighbridge',
+    async (status) => {
+      mockPrisma.transaction.findMany.mockResolvedValue([
+        {
+          id: 'tx-reject',
+          status,
+          processType: 'GBB',
+          revision: 1,
+          weighInAt: new Date(),
+          weighOutAt: null,
+          createdAt: new Date(),
+        },
+      ]);
+      const result = await service.getPendingReminders({
+        id: 'admin-route',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      } as JwtPayloadUser);
+      expect(result.data.reminders[0]).toMatchObject({
+        targetRoute: '/weighbridge',
+        targetRouteName: 'weighbridge',
+      });
+    },
+  );
+
   it('1. should categorize WEIGHBRIDGE actions as NEED_ACTION for weighbridge user', async () => {
     const mockTxs = [
       {

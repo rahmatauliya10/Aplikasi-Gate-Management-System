@@ -67,7 +67,7 @@
             <!-- Loading Phase: Weight + Delivery Note Input -->
             <div class="mt-6 space-y-4" v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS'">
               <transition name="fade-slide" mode="out-in">
-                <WeightInput v-if="capturedWeight === null" label="Input Actual Weight GBJ (KG)" @save="handleWeightCapture" />
+                <WeightInput v-if="capturedWeight === null" :key="selectedTruck.id" label="Input Actual Weight GBJ (KG)" @dirty-change="pendingWeight = $event" @save="handleWeightCapture" />
 
                 <div v-else class="flex flex-col space-y-4">
                   <!-- Captured Weight Display -->
@@ -391,7 +391,7 @@
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
 import PageHeader from '../components/PageHeader.vue'
-import { ref, computed, watch, reactive, onMounted } from 'vue'
+import { ref, computed, watch, reactive } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useWarehouseStore } from '../stores/warehouseStore'
 import { useToast } from '../composables/useToast'
@@ -402,6 +402,7 @@ import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import WeightInput from '../components/WeightInput.vue'
 import Pagination from '../components/Pagination.vue'
 import { useUnsavedWarning } from '../composables/useUnsavedWarning'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 
 // Safety Helpers at the top
 const getPlateNumber = (truck) => {
@@ -445,13 +446,6 @@ const warehouseStore = useWarehouseStore()
 const toast = useToast()
 const { confirm } = useConfirm()
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[GBJProcess] Mount-time fetch failed, using store cache:', err.message)
-  }
-})
 
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
@@ -553,7 +547,11 @@ const isFormDirty = computed(() => {
   )
 })
 
-useUnsavedWarning(isFormDirty)
+const pendingWeight = ref(false)
+const hasUnsavedTransaction = computed(() => pendingWeight.value || capturedWeight.value !== null ||
+  Boolean(sjInput.value || deliveryForm.productType1 || deliveryForm.productType2 || deliveryForm.customer) ||
+  deliveryForm.productCondition.some(Boolean) || deliveryForm.documentAvailability.some(Boolean))
+useUnsavedWarning(hasUnsavedTransaction)
 
 const handleCloseDeliveryModal = () => {
   if (isFormDirty.value) {
@@ -587,6 +585,16 @@ const selectTruck = (truck) => {
   deliveryForm.productCondition = [false, false, false, false];
   deliveryForm.documentAvailability = [false, false, false, false];
 }
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: gbjTrucks,
+  selectedTruck,
+  selectTruck: (truck) => { pendingWeight.value = false; showDetailsModal.value = false; showDeliveryModal.value = false; selectTruck(truck) },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    currentPage.value = Math.floor(gbjTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 const formatTime = formatPlantTime
 
 const handleWeightCapture = (weight) => {

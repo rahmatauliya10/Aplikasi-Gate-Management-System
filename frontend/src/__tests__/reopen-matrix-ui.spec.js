@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import api from '../services/api'
 import {
+  evaluatePaExemption,
   getAllowedReopenTargets,
   getReopenMatrix,
 } from '../services/reopenPolicy'
@@ -62,19 +63,45 @@ describe('Frontend REOPEN matrix contract', () => {
     )
   })
 
-  it('narrows non-Solar GSP targets without adding local stages', () => {
-    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP', false)).toEqual([
+  it('fails closed for a missing GSP exemption result', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP')).toEqual([
       'REGISTERED',
       'QC_VEHICLE_PENDING',
       'QC_VEHICLE_PASSED',
     ])
   })
 
-  it('narrows Solar GSP targets to REGISTERED and PA_NOT_REQUIRED', () => {
-    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP', true)).toEqual([
+  it('narrows non-exempt GSP targets without adding local stages', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP', { isExempt: false })).toEqual([
+      'REGISTERED',
+      'QC_VEHICLE_PENDING',
+      'QC_VEHICLE_PASSED',
+    ])
+  })
+
+  it('narrows verified exempt GSP targets to REGISTERED and PA_NOT_REQUIRED', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP', { isExempt: true })).toEqual([
       'REGISTERED',
       'PA_NOT_REQUIRED',
     ])
+  })
+
+  it('rejects missing, inactive, mismatched, and PA-required catalog exemptions', () => {
+    const base = {
+      id: 'cat-solar-1',
+      name: 'Solar',
+      processType: 'GSP',
+      isActive: true,
+      isPaRequired: false,
+      policyVersion: 'SOP-GSP-2026.1',
+    }
+    expect(evaluatePaExemption(null, { processType: 'GSP' }).isExempt).toBe(false)
+    expect(evaluatePaExemption({ ...base, isActive: false }, { processType: 'GSP' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GBB' }).isExempt).toBe(false)
+    expect(evaluatePaExemption({ ...base, isPaRequired: true }, { processType: 'GSP' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GSP', productCatalogId: 'other' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GSP', cargoSubType: 'Diesel Fuel' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GSP', cargoSubType: 'Solar' }).isExempt).toBe(true)
   })
 
   it('returns no targets when the process is absent instead of falling back locally', () => {

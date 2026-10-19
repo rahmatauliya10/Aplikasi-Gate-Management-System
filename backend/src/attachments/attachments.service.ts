@@ -53,6 +53,61 @@ export class AttachmentsService {
     return dir;
   }
 
+  private normalizeStoragePath(rawPath: string | null | undefined): string {
+    if (!rawPath) return '';
+    return rawPath
+      .replace(/^(uploads[/\\]|\/app\/uploads[/\\])/, '')
+      .replace(/^[/\\]+/, '')
+      .replace(/\\/g, '/')
+      .toLowerCase();
+  }
+
+  /**
+   * Rechecks every persisted file reference immediately before quarantine.
+   * A query failure is fail-closed: the caller must retain the source file.
+   */
+  private async isStoragePathUnreferenced(
+    relativePath: string,
+  ): Promise<boolean> {
+    const normalized = this.normalizeStoragePath(relativePath);
+    if (!normalized) return false;
+
+    try {
+      const [attachments, corrections, issues] = await Promise.all([
+        this.prisma.attachment.findMany({
+          select: { filePath: true, fileName: true },
+        }),
+        (this.prisma as any).transactionCorrection.findMany({
+          where: { evidenceUrl: { not: null } },
+          select: { evidenceUrl: true },
+        }),
+        (this.prisma as any).systemIssue.findMany({
+          where: { screenshotUrl: { not: null } },
+          select: { screenshotUrl: true },
+        }),
+      ]);
+
+      const references = [
+        ...attachments.flatMap((record: any) => [
+          record.filePath,
+          record.fileName,
+        ]),
+        ...corrections.map((record: any) => record.evidenceUrl),
+        ...issues.map((record: any) => record.screenshotUrl),
+      ];
+      return !references.some(
+        (candidate) => this.normalizeStoragePath(candidate) === normalized,
+      );
+    } catch (error: any) {
+      const failClosed = new Error(
+        'Unable to revalidate storage references before quarantine',
+      );
+      (failClosed as any).code = 'REFERENCE_QUERY_FAILED';
+      (failClosed as any).cause = error;
+      throw failClosed;
+    }
+  }
+
   async processQuarantineUpload(
     file: any,
     transactionId: string,
@@ -622,6 +677,8 @@ export class AttachmentsService {
                 ipAddress,
               });
             },
+            async (entry: any) =>
+              this.isStoragePathUnreferenced(entry.relativePath),
           );
         } catch {
           throw new InternalServerErrorException({
@@ -727,6 +784,136 @@ export class AttachmentsService {
         freedBytes,
         missingRecordsCount: missingRecords.length,
         missingRecords,
+      };
+    } finally {
+      releaseLock();
+    }
+  }
+
+  /**
+   * Resumes a previously interrupted quarantine execution or its pending audit.
+   * The original intent actor and manifest inventory remain authoritative.
+   */
+  async resumeQuarantinedFiles(
+    executionId: string,
+    user: JwtPayloadUser,
+    ipAddress?: string,
+  ) {
+    if (!user?.id || user.role !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Melanjutkan rekonsiliasi berkas memerlukan administrator.',
+      );
+    }
+
+    const releaseLock = recovery.lock(this.baseUploadDir);
+    try {
+      let manifest: any;
+      try {
+        manifest = recovery.readManifest(this.baseUploadDir, executionId);
+        manifest = recovery.validateResumeManifest(
+          this.baseUploadDir,
+          manifest,
+          {
+            executionId,
+          },
+        );
+      } catch (error: any) {
+        throw new BadRequestException(
+          `Manifest rekonsiliasi tidak dapat dilanjutkan: ${error.message}`,
+        );
+      }
+
+      const intent = await this.prisma.activityLog.findFirst({
+        where: {
+          action: 'ATTACHMENT_RECONCILE_INTENT',
+          module: 'ATTACHMENTS',
+          status: 'SUCCESS',
+          referenceId: executionId,
+        },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (!intent) {
+        throw new BadRequestException(
+          'Niat audit rekonsiliasi asal tidak ditemukan; resume ditolak.',
+        );
+      }
+
+      let description: any = {};
+      try {
+        description = JSON.parse(intent.description || '{}');
+      } catch {
+        throw new BadRequestException('Niat audit rekonsiliasi tidak valid.');
+      }
+      if (
+        description.executionId !== executionId ||
+        description.inventoryHash !== manifest.inventoryHash ||
+        description.mode !== 'QUARANTINE'
+      ) {
+        throw new BadRequestException(
+          'Manifest tidak terikat pada niat audit rekonsiliasi asal.',
+        );
+      }
+      if (description.userId && description.userId !== manifest.actor) {
+        throw new BadRequestException('Pemilik niat audit tidak cocok.');
+      }
+
+      await this.activityLogsService.logActionStrict({
+        userId: user.id,
+        action: 'ATTACHMENT_RECONCILE_RESUME_INTENT',
+        module: 'ATTACHMENTS',
+        referenceId: executionId,
+        description: {
+          executionId,
+          inventoryHash: manifest.inventoryHash,
+          originalActor: manifest.actor,
+          resumeActor: user.id,
+          stateBefore: manifest.state,
+        },
+        status: 'SUCCESS',
+        ipAddress,
+      });
+
+      try {
+        await recovery.execute(
+          this.baseUploadDir,
+          manifest,
+          false,
+          async (outcome: any) => {
+            await this.activityLogsService.logActionStrict({
+              userId: user.id,
+              action: 'ATTACHMENT_RECONCILE_RESUME_OUTCOME',
+              module: 'ATTACHMENTS',
+              referenceId: executionId,
+              description: outcome,
+              status: outcome.state === 'COMPLETED' ? 'SUCCESS' : 'WARNING',
+              ipAddress,
+            });
+          },
+          async (entry: any) =>
+            this.isStoragePathUnreferenced(entry.relativePath),
+        );
+      } catch {
+        throw new InternalServerErrorException({
+          message:
+            'Resume rekonsiliasi belum tuntas; periksa manifest dan audit sebelum mencoba kembali.',
+          executionId,
+          state: 'PARTIAL',
+          auditPending: manifest.auditPending ?? true,
+        });
+      }
+
+      return {
+        success:
+          manifest.state === 'COMPLETED' && manifest.auditPending !== true,
+        executionId,
+        state: manifest.state,
+        auditPending: manifest.auditPending === true,
+        resumedFilesCount: manifest.files.filter(
+          (entry: any) => entry.state === 'QUARANTINED',
+        ).length,
+        conflictedFiles: manifest.files
+          .filter((entry: any) => entry.state === 'CONFLICT')
+          .map((entry: any) => entry.relativePath),
       };
     } finally {
       releaseLock();

@@ -135,10 +135,48 @@ describe('attachment recovery real filesystem', () => {
     expect(() => recovery.safePath(root, '../escape')).toThrow();
     const unlock = recovery.lock(root);
     try {
-      expect(() => recovery.lock(root)).toThrow();
+      expect(() => recovery.lock(root)).toThrow(/already locked/);
     } finally {
       unlock();
+      unlock();
     }
+  });
+
+  it('does not remove a replacement lock during owner release', () => {
+    const unlock = recovery.lock(root);
+    const lockPath = path.join(root, '.attachment-maintenance.lock');
+    fs.unlinkSync(lockPath);
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        token: 'replacement',
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    expect(() => unlock()).not.toThrow();
+    expect(fs.existsSync(lockPath)).toBe(true);
+    fs.unlinkSync(lockPath);
+  });
+
+  it('invokes the pre-move hook and retains referenced sources', async () => {
+    const manifest = prepare(root);
+    const beforeMove = jest.fn().mockResolvedValue(false);
+    await recovery.execute(root, manifest, false, jest.fn(), beforeMove);
+    expect(beforeMove).toHaveBeenCalledWith(manifest.files[0], manifest);
+    expect(manifest.state).toBe('PARTIAL');
+    expect(manifest.files[0].state).toBe('CONFLICT');
+    expect(fs.existsSync(path.join(root, 'photos/evidence.jpg'))).toBe(true);
+  });
+
+  it('accepts only partial or audit-pending manifests for resume', () => {
+    const manifest = prepare(root);
+    manifest.state = 'PARTIAL';
+    expect(
+      recovery.validateResumeManifest(root, manifest, { executionId: id }),
+    ).toBe(manifest);
+    manifest.state = 'RUNNING';
+    expect(() => recovery.validateResumeManifest(root, manifest)).toThrow();
   });
 
   it('rejects symlink ancestors', () => {

@@ -27,6 +27,14 @@ export function useUnsavedWarning(
         }
       })
     }
+    if (typeof vueRouter?.onBeforeRouteUpdate === 'function') {
+      vueRouter.onBeforeRouteUpdate((to, from) => {
+        if (to.query.transactionId !== from.query.transactionId && isDirtyRef.value) {
+          return window.confirm(customMessage)
+        }
+        return true
+      })
+    }
   } catch (e) {
     // Gracefully handle partial vue-router mocks in unit test environments
   }

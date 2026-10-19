@@ -113,6 +113,8 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
 import { useReminderStore } from '../stores/reminderStore'
+import { useToast } from '../composables/useToast'
+import { navigateToReminder } from '../services/reminderNavigation'
 import { formatArrivalSequence } from '../utils/arrivalSequence'
 
 const router = useRouter()
@@ -139,14 +141,13 @@ const handleDismiss = () => {
   reminderStore.dismissLoginModal()
 }
 
-const handleViewAll = () => {
-  reminderStore.dismissLoginModal()
-  // Navigate to first pending item route, or dashboard if none
-  const first = topNeedActionItems.value[0]
-  if (first?.routePath) {
-    router.push(first.routePath)
-  } else {
-    router.push('/')
-  }
-}
+const toast = useToast()
+const handleViewAll = () => navigateToReminder({
+  item: topNeedActionItems.value[0],
+  router,
+  user: authStore.user,
+  markAsRead: reminderStore.markAsRead,
+  onSuccess: reminderStore.dismissLoginModal,
+  warn: toast.warning,
+})
 </script>

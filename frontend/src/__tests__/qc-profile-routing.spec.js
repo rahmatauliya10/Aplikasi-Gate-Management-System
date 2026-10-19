@@ -56,6 +56,7 @@ vi.mock('../composables/useConfirm', () => ({
 }))
 
 vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
   useRouter: () => ({ push: vi.fn() })
 }))
 

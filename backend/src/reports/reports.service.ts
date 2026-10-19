@@ -33,17 +33,77 @@ import { REPORTS_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.help
 interface OperationHistoryProjection {
   id: string;
   arrival: Date | null;
-  waiting_in: number;
-  warehouse: number;
-  qc: number;
-  waiting_out: number;
-  total: number;
-  net: number;
-  roll: number;
-  diff: number;
+  waiting_in: number | null;
+  warehouse: number | null;
+  qc: number | null;
+  waiting_out: number | null;
+  total: number | null;
+  net: number | null;
+  roll: number | null;
+  diff: number | null;
   deviation_percent: number | null;
   fraud_status: string;
   bottleneck: string;
+}
+
+type OperationHistoryCursor = Pick<
+  OperationHistoryProjection,
+  'id' | 'arrival' | 'total' | 'deviation_percent'
+>;
+
+const OPERATION_HISTORY_EXPORT_BATCH_SIZE = 250;
+
+function operationHistoryCursorValue(
+  sort: OperationHistorySort,
+  cursor: OperationHistoryCursor,
+): Date | number | null {
+  switch (sort) {
+    case OperationHistorySort.TAT_DESC:
+      return cursor.total;
+    case OperationHistorySort.DEVIATION_DESC:
+      return cursor.deviation_percent;
+    case OperationHistorySort.GATE_IN_ASC:
+    case OperationHistorySort.GATE_IN_DESC:
+    default:
+      return cursor.arrival;
+  }
+}
+
+function operationHistoryCursorColumn(sort: OperationHistorySort): Prisma.Sql {
+  switch (sort) {
+    case OperationHistorySort.TAT_DESC:
+      return Prisma.sql`total`;
+    case OperationHistorySort.DEVIATION_DESC:
+      return Prisma.sql`deviation_percent`;
+    case OperationHistorySort.GATE_IN_ASC:
+    case OperationHistorySort.GATE_IN_DESC:
+    default:
+      return Prisma.sql`arrival`;
+  }
+}
+
+function operationHistoryCursorCondition(
+  sort: OperationHistorySort,
+  cursor?: OperationHistoryCursor,
+): Prisma.Sql {
+  if (!cursor) return Prisma.sql`1 = 1`;
+  const column = operationHistoryCursorColumn(sort);
+  const value = operationHistoryCursorValue(sort, cursor);
+  const descending = sort !== OperationHistorySort.GATE_IN_ASC;
+  const idOperator = descending ? '<' : '>';
+
+  if (value === null) {
+    return Prisma.sql`${column} IS NULL AND id ${Prisma.raw(idOperator)} ${cursor.id}`;
+  }
+
+  const keyOperator = descending ? '<' : '>';
+  // Every supported export ordering explicitly uses NULLS LAST.
+  const nullsLast = true;
+  return Prisma.sql`(
+    ${column} ${Prisma.raw(keyOperator)} ${value} OR
+    ${nullsLast ? Prisma.sql`${column} IS NULL OR` : Prisma.sql``}
+    (${column} = ${value} AND id ${Prisma.raw(idOperator)} ${cursor.id})
+  )`;
 }
 
 const OPERATION_HISTORY_CURRENT_INCLUDE = {
@@ -308,12 +368,6 @@ export class ReportsService {
     user: JwtPayloadUser,
   ): AsyncGenerator<string, void, unknown> {
     const normalized = this.normalizeOperationHistoryQuery(query);
-    const projections = await this.getOperationHistoryProjections(
-      normalized,
-      user,
-      false,
-    );
-    const ids = projections.map((projection) => projection.id);
     const format = query.format || OperationHistoryExportFormat.CSV;
 
     await this.activityLogsService
@@ -349,9 +403,20 @@ export class ReportsService {
         '\n';
     }
 
-    const batchSize = 250;
-    for (let offset = 0; offset < ids.length; offset += batchSize) {
-      const batchIds = ids.slice(offset, offset + batchSize);
+    // Keyset pagination bounds both the projection and detail queries. The
+    // final id tie-breaker keeps the stream progressing when sort values tie.
+    let cursor: OperationHistoryCursor | undefined;
+    while (true) {
+      const projections = await this.getOperationHistoryProjections(
+        normalized,
+        user,
+        false,
+        cursor,
+        OPERATION_HISTORY_EXPORT_BATCH_SIZE,
+      );
+      if (projections.length === 0) break;
+
+      const batchIds = projections.map((projection) => projection.id);
       const rows = this.orderRowsByIds(
         await this.loadOperationHistoryRows(
           batchIds,
@@ -368,6 +433,9 @@ export class ReportsService {
             '\n';
         }
       }
+
+      cursor = projections[projections.length - 1];
+      if (projections.length < OPERATION_HISTORY_EXPORT_BATCH_SIZE) break;
     }
 
     if (format === OperationHistoryExportFormat.XLS) yield this.xlsEnd();
@@ -515,12 +583,23 @@ export class ReportsService {
         WHERE row_number = 1
       ), current_weights AS (
         SELECT
-          wr."transactionId",
-          MAX(wr."weight") FILTER (WHERE wr."type" = 'IN') AS gross_weight,
-          MAX(wr."weight") FILTER (WHERE wr."type" = 'OUT') AS tare_weight
-        FROM "WeighbridgeRecord" wr
-        WHERE wr."isCurrent" = TRUE
-        GROUP BY wr."transactionId"
+          ranked."transactionId",
+          MAX(ranked.weight) FILTER (WHERE ranked.type = 'IN') AS gross_weight,
+          MAX(ranked.weight) FILTER (WHERE ranked.type = 'OUT') AS tare_weight
+        FROM (
+          SELECT
+            wr."transactionId",
+            wr."type" AS type,
+            wr."weight" AS weight,
+            ROW_NUMBER() OVER (
+              PARTITION BY wr."transactionId", wr."type"
+              ORDER BY wr."revision" DESC, wr."createdAt" DESC, wr."id" DESC
+            ) AS row_number
+          FROM "WeighbridgeRecord" wr
+          WHERE wr."isCurrent" = TRUE
+        ) ranked
+        WHERE ranked.row_number = 1
+        GROUP BY ranked."transactionId"
       ), base AS (
         SELECT
           t.*,
@@ -536,11 +615,18 @@ export class ReportsService {
           incoming."moisture" AS incoming_moisture,
           incoming."foreignMatter" AS incoming_foreign_matter,
           incoming."beanCondition" AS incoming_bean_condition,
-          COALESCE(fraud."netWeight", t."netWeight", CASE
+          CASE
+            WHEN fraud."netWeight" > 0 THEN fraud."netWeight"
+            WHEN t."netWeight" > 0 THEN t."netWeight"
             WHEN COALESCE(cw.gross_weight, t."grossWeight") > COALESCE(cw.tare_weight, t."tareWeight")
             THEN COALESCE(cw.gross_weight, t."grossWeight") - COALESCE(cw.tare_weight, t."tareWeight")
-            ELSE NULL END, 0) AS net,
-          COALESCE(fraud."warehouseActualWeight", t."actualWeight", 0) AS roll,
+            ELSE NULL
+          END AS net,
+          CASE
+            WHEN COALESCE(fraud."warehouseActualWeight", t."actualWeight") > 0
+            THEN COALESCE(fraud."warehouseActualWeight", t."actualWeight")
+            ELSE NULL
+          END AS roll,
           fraud."id" AS fraud_id,
           fraud."riskLevel"::text AS risk_level,
           vehicle."result" AS vehicle_result,
@@ -555,17 +641,33 @@ export class ReportsService {
       ), metrics AS (
         SELECT
           base.*,
-          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (base."weighInAt" - base.arrival)) / 60)) AS waiting_in,
-          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (base.wp_end - base.wp_start)) / 60)) AS warehouse,
+          CASE WHEN base."weighInAt" IS NULL THEN NULL
+            WHEN base."weighInAt" < base.arrival THEN NULL
+            ELSE ROUND(EXTRACT(EPOCH FROM (base."weighInAt" - base.arrival)) / 60)
+          END AS waiting_in,
+          CASE WHEN base.wp_start IS NULL OR base.wp_end IS NULL THEN NULL
+            WHEN base.wp_end < base.wp_start THEN NULL
+            ELSE ROUND(EXTRACT(EPOCH FROM (base.wp_end - base.wp_start)) / 60)
+          END AS warehouse,
           CASE
             WHEN (base.vehicle_start IS NOT NULL AND base.vehicle_end IS NOT NULL)
               OR (base.incoming_start IS NOT NULL AND base.incoming_end IS NOT NULL)
-            THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (base.vehicle_end - base.vehicle_start)) / 60))
-              + GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (base.incoming_end - base.incoming_start)) / 60))
-            ELSE GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (base."qcEndAt" - base."qcStartAt")) / 60))
+            THEN COALESCE(CASE WHEN base.vehicle_end < base.vehicle_start THEN NULL
+              ELSE ROUND(EXTRACT(EPOCH FROM (base.vehicle_end - base.vehicle_start)) / 60) END, 0)
+              + COALESCE(CASE WHEN base.incoming_end < base.incoming_start THEN NULL
+                ELSE ROUND(EXTRACT(EPOCH FROM (base.incoming_end - base.incoming_start)) / 60) END, 0)
+            WHEN base."qcStartAt" IS NULL OR base."qcEndAt" IS NULL THEN NULL
+            WHEN base."qcEndAt" < base."qcStartAt" THEN NULL
+            ELSE ROUND(EXTRACT(EPOCH FROM (base."qcEndAt" - base."qcStartAt")) / 60)
           END AS qc,
-          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (base."weighOutAt" - COALESCE(base.wp_end, base."warehouseEndAt"))) / 60)) AS waiting_out,
-          GREATEST(0, FLOOR(EXTRACT(EPOCH FROM (base."gateOutAt" - base.arrival)) / 60)) AS total
+          CASE WHEN COALESCE(base.wp_end, base."warehouseEndAt") IS NULL OR base."weighOutAt" IS NULL THEN NULL
+            WHEN base."weighOutAt" < COALESCE(base.wp_end, base."warehouseEndAt") THEN NULL
+            ELSE ROUND(EXTRACT(EPOCH FROM (base."weighOutAt" - COALESCE(base.wp_end, base."warehouseEndAt"))) / 60)
+          END AS waiting_out,
+          CASE WHEN base."gateOutAt" IS NULL THEN NULL
+            WHEN base."gateOutAt" < base.arrival THEN NULL
+            ELSE ROUND(EXTRACT(EPOCH FROM (base."gateOutAt" - base.arrival)) / 60)
+          END AS total
         FROM base
       ), scored AS (
         SELECT
@@ -577,13 +679,10 @@ export class ReportsService {
           CASE
             WHEN metrics."status" IN ('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED')
               OR metrics.vehicle_result = 'REJECT' OR metrics.incoming_result = 'REJECT'
-            THEN 'SAFE'
-            WHEN metrics.net <= 0 OR metrics.roll <= 0
+            THEN 'PENDING'
+            WHEN metrics.net IS NULL OR metrics.roll IS NULL
             THEN CASE metrics.risk_level
               WHEN 'INVALID_DATA' THEN 'ERROR DATA'
-              WHEN 'SAFE' THEN 'SAFE'
-              WHEN 'WARNING' THEN 'WARNING'
-              WHEN 'CRITICAL' THEN 'CRITICAL'
               ELSE 'PENDING' END
             WHEN metrics.risk_level IS NOT NULL
             THEN CASE metrics.risk_level
@@ -618,7 +717,7 @@ export class ReportsService {
       case OperationHistorySort.GATE_IN_ASC:
         return Prisma.sql`arrival ASC NULLS LAST, id ASC`;
       case OperationHistorySort.TAT_DESC:
-        return Prisma.sql`total DESC, id DESC`;
+        return Prisma.sql`total DESC NULLS LAST, id DESC`;
       case OperationHistorySort.DEVIATION_DESC:
         return Prisma.sql`deviation_percent DESC NULLS LAST, id DESC`;
       case OperationHistorySort.GATE_IN_DESC:
@@ -631,19 +730,28 @@ export class ReportsService {
     query: ReturnType<ReportsService['normalizeOperationHistoryQuery']>,
     user: JwtPayloadUser,
     paginated: boolean,
+    cursor?: OperationHistoryCursor,
+    limit?: number,
   ): Promise<OperationHistoryProjection[]> {
     const cte = this.operationHistoryCte(query, user);
     const orderBy = this.historyOrderBy(query.sort);
     const pagination = paginated
       ? Prisma.sql`LIMIT ${query.limit} OFFSET ${(query.page - 1) * query.limit}`
       : Prisma.sql``;
+    const cursorCondition = paginated
+      ? Prisma.sql`1 = 1`
+      : operationHistoryCursorCondition(query.sort, cursor);
+    const exportLimit =
+      !paginated && limit ? Prisma.sql`LIMIT ${limit}` : Prisma.sql``;
     return this.prisma.$queryRaw<OperationHistoryProjection[]>(Prisma.sql`
       ${cte}
       SELECT id, arrival, waiting_in, warehouse, qc, waiting_out, total,
         net, roll, diff, deviation_percent, fraud_status, bottleneck
       FROM final
+      WHERE ${cursorCondition}
       ORDER BY ${orderBy}
       ${pagination}
+      ${exportLimit}
     `);
   }
 
@@ -655,6 +763,7 @@ export class ReportsService {
     const rows = await this.prisma.$queryRaw<
       Array<{
         total: bigint;
+        completed_duration_count: bigint;
         avg_tat: number | null;
         total_net: number | null;
         anomaly_count: bigint;
@@ -667,8 +776,9 @@ export class ReportsService {
       ${cte}
       SELECT
         COUNT(*)::bigint AS total,
-        AVG(total)::float AS avg_tat,
-        COALESCE(SUM(net), 0)::float AS total_net,
+        COUNT(*) FILTER (WHERE total IS NOT NULL)::bigint AS completed_duration_count,
+        AVG(total) FILTER (WHERE total IS NOT NULL)::float AS avg_tat,
+        SUM(net) FILTER (WHERE net IS NOT NULL)::float AS total_net,
         COUNT(*) FILTER (WHERE fraud_status IN ('WARNING', 'CRITICAL'))::bigint AS anomaly_count,
         COUNT(*) FILTER (WHERE bottleneck = 'waitingIn' AND waiting_in > 0)::bigint AS waiting_in_count,
         COUNT(*) FILTER (WHERE bottleneck = 'warehouse' AND warehouse > 0)::bigint AS warehouse_count,
@@ -694,8 +804,15 @@ export class ReportsService {
       : null;
     return {
       total: Number(summary.total || 0),
-      avgTatMinutes: Math.round(Number(summary.avg_tat || 0)),
-      totalTonnageMetric: Number(summary.total_net || 0) / 1000,
+      completedDurationCount: Number(summary.completed_duration_count || 0),
+      avgTatMinutes:
+        summary.avg_tat === null || summary.avg_tat === undefined
+          ? null
+          : Math.round(Number(summary.avg_tat)),
+      totalTonnageMetric:
+        summary.total_net === null || summary.total_net === undefined
+          ? null
+          : Number(summary.total_net) / 1000,
       anomalyCount: Number(summary.anomaly_count || 0),
       majorBottleneck,
     };

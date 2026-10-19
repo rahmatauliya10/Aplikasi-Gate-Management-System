@@ -36,7 +36,7 @@
               <StepTimeline :current-step="selectedTruck?.status || selectedTruck?.step || '-'" :process-type="getProcessType(selectedTruck)" />
             </div>
           </div>
-          <WeightInput :label="weighingLabel" :previous-weight="previousWeight" :is-submitting="isProcessing" @save="handleWeightSubmit" />
+          <WeightInput :key="selectedTruck.id" :label="weighingLabel" :previous-weight="previousWeight" :is-submitting="isProcessing" @dirty-change="pendingWeight = $event" @save="handleWeightSubmit" />
           <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" />
         </div>
 
@@ -168,11 +168,13 @@
 
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
 import { useWeighbridgeStore } from '../stores/weighbridgeStore'
 import { useToast } from '../composables/useToast'
+import { useUnsavedWarning } from '../composables/useUnsavedWarning'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StepTimeline from '../components/StepTimeline.vue'
@@ -191,13 +193,6 @@ const searchQuery = ref('')
 const filterStatus = ref('ALL')
 const isProcessing = ref(false)
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[Weighbridge] Mount-time fetch failed:', err.message)
-  }
-})
 
 const getPlateNumber = (truck) => {
   if (!truck) return '-'
@@ -342,6 +337,19 @@ const previousWeight = computed(() => {
 })
 
 const selectTruck = (truck) => { selectedTruck.value = truck }
+const pendingWeight = ref(false)
+useUnsavedWarning(pendingWeight)
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: queueTrucks,
+  selectedTruck,
+  selectTruck: (truck) => { pendingWeight.value = false; selectTruck(truck) },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    filterStatus.value = 'ALL'
+    currentPage.value = Math.floor(queueTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 const handleWeightSubmit = async (weight) => {
   if (!selectedTruck.value || isProcessing.value) return
   isProcessing.value = true

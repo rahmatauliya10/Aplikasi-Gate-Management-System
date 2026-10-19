@@ -9,6 +9,13 @@ import { useAuthStore } from '../stores/authStore'
 import { useTruckStore } from '../stores/truckStore'
 import { useQcStore } from '../stores/qcStore'
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ push: vi.fn() }),
+  onBeforeRouteLeave: vi.fn(),
+  onBeforeRouteUpdate: vi.fn(),
+}))
+
 vi.mock('../components/PageHeader.vue', () => ({
   default: { template: '<div class="page-header"><slot /></div>' },
 }))

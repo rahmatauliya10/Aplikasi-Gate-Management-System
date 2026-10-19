@@ -1681,7 +1681,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useConfirm } from '../composables/useConfirm'
 import truckService from '../services/truckService'
 import qcService from '../services/qcService'
-import { getAllowedReopenTargets, getReopenMatrix } from '../services/reopenPolicy'
+import { evaluatePaExemption, getAllowedReopenTargets, getReopenMatrix } from '../services/reopenPolicy'
 import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
 import { getWeightRecordTypes } from '../utils/weightHelpers'
 import { printTruckReport } from '../utils/pdfGenerator'
@@ -1950,11 +1950,16 @@ const currentProcessType = computed(() => {
   return (currentTruck.value?.processType || props.truck?.processType || 'GBB').toUpperCase()
 })
 
-const isSolarCommodity = computed(() => {
+const paExemption = computed(() => {
   const t = currentTruck.value || props.truck || {}
-  const cargo = (t.cargoSubType || t.cargoType || t.productCatalog?.name || '').toLowerCase()
-  return cargo.includes('solar')
+  return evaluatePaExemption(t.productCatalog, {
+    productCatalogId: t.productCatalogId,
+    processType: t.processType,
+    cargoSubType: t.cargoSubType,
+  })
 })
+
+const isSolarCommodity = computed(() => paExemption.value.isExempt)
 
 const reopenTargetLabels = {
   REGISTERED: 'Registered (Registrasi Utama)',
@@ -1968,7 +1973,7 @@ const allowedReopenTargets = computed(() => {
   return getAllowedReopenTargets(
     reopenMatrix.value,
     currentProcessType.value,
-    isSolarCommodity.value
+    paExemption.value
   ).map((value, index) => ({
     value,
     label: `${index + 1}. ${reopenTargetLabels[value] || value}`,

@@ -200,15 +200,77 @@ function readManifest(root, executionId) {
 
 function lock(root) {
   const file = safePath(root, '.attachment-maintenance.lock');
-  const fd = fs.openSync(file, 'wx', 0o600);
-  fs.writeFileSync(
-    fd,
-    JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }),
-  );
-  return () => {
-    fs.closeSync(fd);
-    fs.unlinkSync(file);
+  const token = crypto.randomUUID();
+  const metadata = {
+    pid: process.pid,
+    token,
+    createdAt: new Date().toISOString(),
   };
+  let fd;
+  try {
+    fd = fs.openSync(file, 'wx', 0o600);
+    fs.writeFileSync(fd, JSON.stringify(metadata));
+    fs.fsyncSync(fd);
+    const ownerStat = fs.fstatSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      try {
+        // Never remove a lock that has been replaced by another owner.
+        const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const currentStat = fs.statSync(file);
+        if (
+          current.token !== token ||
+          currentStat.dev !== ownerStat.dev ||
+          currentStat.ino !== ownerStat.ino
+        ) {
+          return;
+        }
+        fs.unlinkSync(file);
+      } catch (err) {
+        // A lock removed by an operator or replacement owner is already gone;
+        // release must not mask the operation result.
+        if (err && err.code === 'ENOENT') return;
+        throw err;
+      }
+    };
+  } catch (err) {
+    if (fd !== undefined) fs.closeSync(fd);
+    if (err && err.code === 'EEXIST') {
+      const locked = new Error(
+        'Attachment maintenance is already locked; stale locks require operator review',
+      );
+      locked.code = 'ELOCKED';
+      throw locked;
+    }
+    throw err;
+  }
+}
+
+function validateResumeManifest(root, manifest, expected = {}) {
+  if (!manifest || typeof manifest !== 'object')
+    throw new Error('Invalid recovery resume manifest');
+  validateExecutionId(manifest.executionId);
+  if (expected.executionId && manifest.executionId !== expected.executionId)
+    throw new Error('Recovery executionId binding mismatch');
+  if (!['PARTIAL', 'COMPLETED'].includes(manifest.state))
+    throw new Error('Recovery manifest is not resumable');
+  if (manifest.state !== 'PARTIAL' && manifest.auditPending !== true)
+    throw new Error('Recovery manifest has no pending resume work');
+  if (manifest.inventoryHash !== inventoryHash(manifest))
+    throw new Error('Recovery inventory changed');
+  if (expected.actor && manifest.actor !== expected.actor)
+    throw new Error('Recovery actor binding mismatch');
+  if (
+    expected.inventoryHash &&
+    manifest.inventoryHash !== expected.inventoryHash
+  )
+    throw new Error('Recovery inventory binding mismatch');
+  return manifest;
 }
 
 function move(root, manifest, entry, restore) {
@@ -270,7 +332,7 @@ function move(root, manifest, entry, restore) {
   entry.state = restore ? 'RESTORED' : 'QUARANTINED';
 }
 
-async function execute(root, manifest, restore, audit) {
+async function execute(root, manifest, restore, audit, beforeMove) {
   validateExecutionId(manifest.executionId);
   if (manifest.inventoryHash !== inventoryHash(manifest))
     throw new Error('Recovery inventory changed');
@@ -281,6 +343,16 @@ async function execute(root, manifest, restore, audit) {
     // Mutable checkpoint states are hints, never proof that evidence was moved.
     // Reconcile the actual source/destination identity even on completed retries.
     try {
+      if (typeof beforeMove === 'function' && !restore) {
+        const decision = await beforeMove(entry, manifest);
+        if (decision === false) {
+          const conflict = new Error(
+            'Recovery source is referenced by the database',
+          );
+          conflict.code = 'REFERENCE_CONFLICT';
+          throw conflict;
+        }
+      }
       entry.state = restore ? 'RESTORE_PUBLISHING' : 'PUBLISHING';
       checkpoint(root, manifest);
       move(root, manifest, entry, restore);
@@ -288,6 +360,7 @@ async function execute(root, manifest, restore, audit) {
     } catch (err) {
       failed = true;
       entry.error = err.code || err.message;
+      if (err.code === 'REFERENCE_CONFLICT') entry.state = 'CONFLICT';
       // Retain publishing state so an interrupted hard-link can be reconciled.
     }
     checkpoint(root, manifest);
@@ -317,5 +390,6 @@ module.exports = {
   readManifest,
   checkpoint,
   lock,
+  validateResumeManifest,
   execute,
 };
