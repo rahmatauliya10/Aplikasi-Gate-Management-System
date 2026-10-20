@@ -963,6 +963,7 @@ import { getStatusLabel } from '../utils/statusLabel'
 import { useUnsavedWarning } from '../composables/useUnsavedWarning'
 import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import api from '../services/api'
+import { selectEffectiveCurrentPa } from '../utils/paCurrentSelector'
 
 // Canonical GSP Pre-Unloading Checklist Items (SOP-GSP-2026.1 / GSP-PREUNLOAD-2026.1)
 const GSP_PREUNLOAD_ITEMS = [
@@ -1289,12 +1290,7 @@ const fetchActivePaData = async (truckId) => {
     const res = await api.get(`/qc/product-analysis/${truckId}`)
     if (request !== paRequestGeneration || selectedTruck.value?.id !== truckId) return
     const analyses = res.data?.data || []
-    if (analyses.length > 0) {
-      analyses.sort((a, b) => (b.testRound || 1) - (a.testRound || 1))
-      activePaData.value = analyses[0]
-    } else {
-      activePaData.value = null
-    }
+    activePaData.value = selectEffectiveCurrentPa(analyses)
   } catch (err) {
     console.warn('[GSPProcess] Failed to fetch PA data for disposition:', err)
     if (request === paRequestGeneration && selectedTruck.value?.id === truckId) activePaData.value = null

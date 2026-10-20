@@ -72,6 +72,9 @@ describe('GSPProcess.vue — Chemical Quality Disposition Workflow', () => {
 
   const mockPaDataCleanOos = {
     id: 'pa-clean-oos-1',
+    isCurrent: true,
+    isVoided: false,
+    revision: 1,
     transactionId: 'tx-chem-held-01',
     productName: 'PAC 280 AC',
     productCategory: 'Chemical UTL',

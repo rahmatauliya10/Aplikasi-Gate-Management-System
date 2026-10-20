@@ -28,6 +28,7 @@ import {
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { evaluatePaExemption } from '../qc/constants/pa-exemption-policy';
 import { evaluatePaRelease } from '../qc/constants/pa-release-policy';
+import { selectCurrentPa } from '../qc/pa-current-selection';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 import {
   GSP_PREUNLOAD_VERSION,
@@ -388,11 +389,12 @@ export class WarehouseService {
           });
         }
 
-        // Query current active (non-voided) PA record
-        const activePa = await this.prisma.qcProductAnalysis.findFirst({
-          where: { transactionId },
-          orderBy: [{ testRound: 'desc' }, { id: 'desc' }],
-        });
+        // Revision current is per round; never choose a superseded record by timestamp or ID.
+        const activePa = selectCurrentPa(
+          await this.prisma.qcProductAnalysis.findMany({
+            where: { transactionId },
+          }),
+        );
 
         if (!activePa) {
           await this.activityLogsService

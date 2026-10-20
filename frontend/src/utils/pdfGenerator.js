@@ -3,6 +3,9 @@
  * Comprehensive PDF Audit Report & Transaction Dossier Generator
  */
 
+import { selectEffectiveCurrentPa, sortPaHistory } from './paCurrentSelector'
+import { formatPaParameters } from './paParameterDisplay'
+
 const escapeHtml = (str) => {
   if (str === null || str === undefined || str === '') return '—'
   return String(str)
@@ -449,14 +452,10 @@ export const generatePrintHTML = (truckList) => {
     const labNotes = t.qcNotes || qcDetails.note || imCheck.notes || imCheck.defectNotes || '—'
 
     // GSP Specific Extractions
-    const gspPaRounds = Array.isArray(t.productAnalyses) ? t.productAnalyses : []
-    const latestPa = gspPaRounds.length > 0 ? gspPaRounds[gspPaRounds.length - 1] : null
-    const paParams = latestPa?.parameters || {}
-    const cargoSub = (t.cargoSubType || t.cargoType || '').toUpperCase()
-    const isPac = cargoSub.includes('PAC')
-    const isRapidKlen = cargoSub.includes('RAPID') || cargoSub.includes('PRO-CIP') || cargoSub.includes('CIP')
-    const isCoal = cargoSub.includes('COAL') || cargoSub.includes('BATUBARA')
-    const latestDisposedPa = [...gspPaRounds].reverse().find(r => r.dispositionAction)
+    const gspPaRounds = sortPaHistory(t.productAnalyses || t.qcProductAnalyses || [])
+    const latestPa = selectEffectiveCurrentPa(gspPaRounds)
+    const paFacts = formatPaParameters(latestPa)
+    const latestDisposedPa = latestPa?.dispositionAction ? latestPa : null
 
     const whProc = (t.warehouseProcesses && t.warehouseProcesses[0]) || {}
     const preUnloadChecklist = whProc.checklistItems || t.preUnloadChecklist || {}
@@ -774,131 +773,11 @@ export const generatePrintHTML = (truckList) => {
             </span>
           </div>
 
-          ${isPac ? `
-          <!-- PAC Material Parameter Table -->
-          <table class="table-custom">
-            <thead>
-              <tr>
-                <th>Kondisi Visual</th>
-                <th>Bahan Pengotor</th>
-                <th>Integritas Kemasan/Label</th>
-                <th style="text-align: center;">pH (3.50 - 5.00)</th>
-                <th style="text-align: center;">Density (1.170 - 1.260 g/mL)</th>
-                <th style="width: 70px; text-align: center;">Hasil Ronde</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${escapeHtml(paParams.visual ?? paParams.kondisiVisual ?? '—')}</td>
-                <td>${escapeHtml(paParams.foreignMatters ?? paParams.bahanPengotor ?? '—')}</td>
-                <td>${escapeHtml(paParams.packagingCondition ?? paParams.integritasKemasan ?? '—')}</td>
-                <td class="font-mono-val" style="text-align: center; font-weight: 700; color: ${paParams.ph !== undefined && (paParams.ph < 3.5 || paParams.ph > 5.0) ? '#b91c1c' : '#0f172a'};">
-                  ${paParams.ph !== undefined && paParams.ph !== null ? Number(paParams.ph).toFixed(2) : '—'}
-                </td>
-                <td class="font-mono-val" style="text-align: center; font-weight: 700; color: ${((paParams.density ?? paParams.specificGravity) !== undefined && ((paParams.density ?? paParams.specificGravity) < 1.17 || (paParams.density ?? paParams.specificGravity) > 1.26)) ? '#b91c1c' : '#0f172a'};">
-                  ${(paParams.density ?? paParams.specificGravity) !== undefined && (paParams.density ?? paParams.specificGravity) !== null ? Number(paParams.density ?? paParams.specificGravity).toFixed(3) + ' g/mL' : '—'}
-                </td>
-                <td style="text-align: center;">
-                  <span class="badge ${latestPa?.status === 'REJECT' || latestPa?.result === 'REJECT' ? 'badge-critical' : 'badge-safe'}">
-                    ${escapeHtml(latestPa?.status || latestPa?.result || 'PASS')}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          ` : isRapidKlen ? `
-          <!-- Rapid Klen / PRO-CIP Material Parameter Table -->
-          <table class="table-custom">
-            <thead>
-              <tr>
-                <th>Visual</th>
-                <th>Bahan Pengotor</th>
-                <th>Kemasan</th>
-                <th style="text-align: center;">Na2O (&gt;35.00%)</th>
-                <th style="text-align: center;">NaOH (&gt;45.16%)</th>
-                <th style="text-align: center;">pH (&gt;12.000)</th>
-                <th style="text-align: center;">Density (&gt;1.400 g/mL)</th>
-                <th style="width: 65px; text-align: center;">Hasil</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${escapeHtml(paParams.visual ?? '—')}</td>
-                <td>${escapeHtml(paParams.foreignMatters ?? '—')}</td>
-                <td>${escapeHtml(paParams.packagingCondition ?? '—')}</td>
-                <td class="font-mono-val" style="text-align: center; font-weight: 700;">
-                  ${paParams.alkalinityNa2O !== undefined && paParams.alkalinityNa2O !== null ? Number(paParams.alkalinityNa2O).toFixed(2) + '%' : '—'}
-                </td>
-                <td class="font-mono-val" style="text-align: center; font-weight: 700;">
-                  ${paParams.alkalinityNaOH !== undefined && paParams.alkalinityNaOH !== null ? Number(paParams.alkalinityNaOH).toFixed(2) + '%' : '—'}
-                </td>
-                <td class="font-mono-val" style="text-align: center; font-weight: 700;">
-                  ${paParams.ph !== undefined && paParams.ph !== null ? Number(paParams.ph).toFixed(3) : '—'}
-                </td>
-                <td class="font-mono-val" style="text-align: center; font-weight: 700;">
-                  ${paParams.density !== undefined && paParams.density !== null ? Number(paParams.density).toFixed(3) + ' g/mL' : '—'}
-                </td>
-                <td style="text-align: center;">
-                  <span class="badge ${latestPa?.status === 'REJECT' || latestPa?.result === 'REJECT' ? 'badge-critical' : 'badge-safe'}">
-                    ${escapeHtml(latestPa?.status || latestPa?.result || 'PASS')}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          ` : isCoal ? `
-          <!-- Batubara Material Parameter Table -->
-          <table class="table-custom">
-            <thead>
-              <tr>
-                <th>Kondisi Batubara</th>
-                <th>Warna</th>
-                <th>Level Rank</th>
-                <th>Kilap</th>
-                <th>Bahan Pengotor</th>
-                <th>Target Kalori / Band</th>
-                <th style="text-align: center;">Total Moisture</th>
-                <th style="width: 65px; text-align: center;">Hasil</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>${escapeHtml(paParams.kondisiBatubara ?? paParams.kondisi ?? '—')}</td>
-                <td>${escapeHtml(paParams.warna ?? '—')}</td>
-                <td>${escapeHtml(paParams.levelRank ?? '—')}</td>
-                <td>${escapeHtml(paParams.kilap ?? '—')}</td>
-                <td>${escapeHtml(paParams.bahanPengotor ?? '—')}</td>
-                <td>${escapeHtml(paParams.targetCalorie ?? paParams.targetKalori ?? '—')}</td>
-                <td class="font-mono-val" style="text-align: center; font-weight: 700;">
-                  ${paParams.totalMoisture !== undefined && paParams.totalMoisture !== null ? Number(paParams.totalMoisture).toFixed(2) + '%' : '—'}
-                </td>
-                <td style="text-align: center;">
-                  <span class="badge ${latestPa?.status === 'REJECT' || latestPa?.result === 'REJECT' ? 'badge-critical' : 'badge-safe'}">
-                    ${escapeHtml(latestPa?.status || latestPa?.result || 'PASS')}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          ` : `
-          <!-- Generic / Other GSP Material Table -->
-          <table class="table-custom">
-            <thead>
-              <tr>
-                <th>Parameter Analisis</th>
-                <th>Hasil Aktual</th>
-                <th>Status / Keputusan</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Parameter PA</td>
-                <td class="font-mono-val">${escapeHtml(JSON.stringify(paParams))}</td>
-                <td><span class="badge badge-safe">${escapeHtml(latestPa?.status || latestPa?.result || 'APPROVED')}</span></td>
-              </tr>
-            </tbody>
-          </table>
-          `}
+          <table class="table-custom"><thead><tr><th>Parameter PA</th><th>Fakta tersimpan</th><th>Basis spesifikasi versi ini</th></tr></thead><tbody>
+            ${paFacts.map(fact => `<tr><td>${escapeHtml(fact.label)}</td><td>${escapeHtml(fact.value)}</td><td>${escapeHtml(fact.specText)}${fact.isOk === null ? '' : fact.isOk ? ' — PASS' : ' — OOS'}</td></tr>`).join('')}
+          </tbody></table>
+          <div>Hasil tersimpan: ${escapeHtml(latestPa?.result)} / ${escapeHtml(latestPa?.status)}${latestPa?.dispositionRequiresReview ? ' — Disposisi memerlukan review' : ''}</div>
+
 
           ${latestDisposedPa ? `
           <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; padding: 6px 8px; margin-top: 4px; font-size: 8.5px;">

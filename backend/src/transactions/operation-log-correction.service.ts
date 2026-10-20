@@ -9,7 +9,19 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
-import { CreateOperationLogCorrectionDto } from './dto/create-operation-log-correction.dto';
+import {
+  CreateOperationLogCorrectionDto,
+  PreviewPaCorrectionDto,
+} from './dto/create-operation-log-correction.dto';
+import { SpecificationProvider } from '../qc/providers/specification.provider';
+import {
+  createPaSpecSnapshot,
+  evaluatePaParameters,
+  fingerprintStableJson,
+  patchPaParameters,
+  resolvePaProfile,
+} from '../qc/pa-correction-evaluation';
+import { selectCurrentPa } from '../qc/pa-current-selection';
 import {
   CorrectionAction,
   CorrectionTargetModule,
@@ -38,6 +50,20 @@ import {
 } from '../common/utils/normalize-plate.util';
 import { assertCanonicalGspUomMapping } from '../product-catalog/constants/canonical-gsp-uom';
 import { validateReceivedQuantityString } from '../warehouse/dto/complete-warehouse.dto';
+import {
+  ALLOWED_PHOTO_MIMES,
+  GBJ_CHECKLIST_ITEMS,
+  GBJ_CHECKLIST_SEVERITY,
+  MAX_PHOTO_DECODED_BYTES,
+  MIN_DEVIATION_REASON_LENGTH,
+} from '../qc/constants/gbj-checklist-policy';
+import {
+  GSP_PREUNLOAD_CODES,
+  GSP_PREUNLOAD_LABEL_MAP,
+  GSP_PREUNLOAD_VERSION,
+  NON_CONCESSIBLE_CHECKLIST_CODES,
+} from '../warehouse/constants/gsp-preunload-checklist';
+import { isDeepStrictEqual } from 'util';
 
 const REOPEN_INVALIDATING_WAREHOUSE_TARGETS = new Set<TransactionStatus>([
   TransactionStatus.REGISTERED,
@@ -151,6 +177,9 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
   WEIGHBRIDGE: ['weight', 'ticketNumber', 'remarks'],
   QC_VEHICLE: [
     'result',
+    'decisionMode',
+    'hasDeviation',
+    'deviationReason',
     'vehicleCleanliness',
     'vehicleOdor',
     'pestEvidence',
@@ -196,6 +225,7 @@ const FIELD_ALLOWLIST: Record<CorrectionTargetModule, string[]> = {
     'notes',
     'checklistItems',
   ],
+  QC_PRODUCT_ANALYSIS: ['parameters'],
   WAREHOUSE: [
     'startAt',
     'endAt',
@@ -231,6 +261,8 @@ const assertSafeJsonValue = (
     nodes: 0,
     seen: new WeakSet<object>(),
   },
+  allowGbjPhotos = false,
+  path: string[] = [],
 ): void => {
   if (depth > 12 || ++state.nodes > 1000) {
     throw new BadRequestException(
@@ -243,7 +275,15 @@ const assertSafeJsonValue = (
     typeof value === 'string' ||
     typeof value === 'boolean'
   ) {
-    if (typeof value === 'string' && value.length > 10000) {
+    const photoLimit =
+      allowGbjPhotos &&
+      path.length === 3 &&
+      path[0] === 'items' &&
+      /^\d+$/.test(path[1]) &&
+      path[2] === 'photo'
+        ? 4 * Math.ceil(MAX_PHOTO_DECODED_BYTES / 3) + 64
+        : 10000;
+    if (typeof value === 'string' && value.length > photoLimit) {
       throw new BadRequestException(
         `Nilai teks pada field ${fieldName} terlalu panjang.`,
       );
@@ -280,8 +320,11 @@ const assertSafeJsonValue = (
   state.seen.add(value);
 
   if (Array.isArray(value)) {
-    for (const entry of value) {
-      assertSafeJsonValue(entry, fieldName, depth + 1, state);
+    for (const [index, entry] of value.entries()) {
+      assertSafeJsonValue(entry, fieldName, depth + 1, state, allowGbjPhotos, [
+        ...path,
+        String(index),
+      ]);
     }
   } else {
     for (const [key, entry] of Object.entries(value)) {
@@ -295,7 +338,10 @@ const assertSafeJsonValue = (
           `Kunci JSON ${key} pada field ${fieldName} tidak diizinkan.`,
         );
       }
-      assertSafeJsonValue(entry, fieldName, depth + 1, state);
+      assertSafeJsonValue(entry, fieldName, depth + 1, state, allowGbjPhotos, [
+        ...path,
+        key,
+      ]);
     }
   }
 };
@@ -391,13 +437,480 @@ const parseNonNegativeInteger = (value: unknown, fieldName: string): number => {
   return value;
 };
 
+const assertGspReceivingPair = (
+  tx: any,
+  quantity: unknown,
+  unit: unknown,
+): void => {
+  if (tx.processType !== ProcessType.GSP) return;
+  if (typeof quantity !== 'string' || !quantity.trim()) {
+    throw new BadRequestException(
+      'Koreksi receiving GSP wajib mempertahankan receivedQuantity yang valid.',
+    );
+  }
+  const normalizedQuantity = validateReceivedQuantityString(quantity);
+  const catalogReceiptUnit = tx.productCatalog?.receiptUnit;
+  if (!catalogReceiptUnit || unit !== catalogReceiptUnit) {
+    throw new BadRequestException(
+      'receivedUnit harus sama dengan receiptUnit ProductCatalog untuk transaksi GSP.',
+    );
+  }
+  if (tx.productCatalog?.code) {
+    assertCanonicalGspUomMapping(tx.productCatalog.code, unit as WarehouseUnit);
+  }
+  if (!normalizedQuantity) {
+    throw new BadRequestException('receivedQuantity GSP tidak boleh kosong.');
+  }
+};
+
+const assertGbjChecklistCorrection = (
+  value: unknown,
+  validateEvidence = true,
+): void => {
+  if (!isPlainRecord(value) || !Array.isArray(value.items)) {
+    throw new BadRequestException(
+      'Checklist QC Vehicle GBJ harus berupa object dengan array items.',
+    );
+  }
+
+  if (value.items.length !== GBJ_CHECKLIST_ITEMS.length) {
+    throw new BadRequestException(
+      `Checklist QC Vehicle GBJ harus memuat tepat ${GBJ_CHECKLIST_ITEMS.length} item canonical.`,
+    );
+  }
+
+  value.items.forEach((item: any, index: number) => {
+    if (!isPlainRecord(item) || item.label !== GBJ_CHECKLIST_ITEMS[index]) {
+      throw new BadRequestException(
+        `Label checklist QC Vehicle GBJ item ${index + 1} tidak sesuai policy canonical.`,
+      );
+    }
+    if (typeof item.ok !== 'boolean') {
+      throw new BadRequestException(
+        `Nilai ok checklist QC Vehicle GBJ item ${index + 1} harus boolean.`,
+      );
+    }
+    if (!item.ok && validateEvidence) {
+      if (typeof item.photo !== 'string' || !item.photo.trim()) {
+        throw new BadRequestException(
+          `Item checklist QC Vehicle GBJ ${index + 1} yang NOT OK wajib memiliki bukti foto.`,
+        );
+      }
+      const match = item.photo.match(
+        /^data:(image\/[a-zA-Z0-9+.-]+);base64,([A-Za-z0-9+/]+={0,2})$/i,
+      );
+      if (!match) {
+        throw new BadRequestException(
+          `Bukti foto checklist QC Vehicle GBJ item ${index + 1} harus berupa data URI base64.`,
+        );
+      }
+      const detectedMime = match[1].toLowerCase();
+      if (!ALLOWED_PHOTO_MIMES.includes(detectedMime)) {
+        throw new BadRequestException(
+          `Bukti foto checklist QC Vehicle GBJ item ${index + 1} memiliki MIME yang tidak diizinkan.`,
+        );
+      }
+      const base64Data = item.photo.substring(item.photo.indexOf(',') + 1);
+      const decoded = Buffer.from(base64Data, 'base64');
+      if (decoded.length === 0 || decoded.toString('base64') !== base64Data) {
+        throw new BadRequestException(
+          'Bukti foto GBJ harus berisi base64 yang valid dan tidak kosong.',
+        );
+      }
+      if (decoded.length > MAX_PHOTO_DECODED_BYTES) {
+        throw new BadRequestException(
+          `Bukti foto checklist QC Vehicle GBJ item ${index + 1} melebihi ukuran maksimum.`,
+        );
+      }
+    }
+    if (
+      item.severity !== undefined &&
+      item.severity !== GBJ_CHECKLIST_SEVERITY[index]
+    ) {
+      throw new BadRequestException(
+        `Severity checklist QC Vehicle GBJ item ${index + 1} tidak boleh diubah.`,
+      );
+    }
+  });
+};
+
+const assertGbjDecisionCorrection = (
+  fields: Record<string, unknown>,
+  existing: any,
+): void => {
+  const effective = (field: string) =>
+    Object.prototype.hasOwnProperty.call(fields, field)
+      ? fields[field]
+      : existing[field];
+  const checklist = effective('checklistItems');
+  assertGbjChecklistCorrection(checklist);
+  if (Object.prototype.hasOwnProperty.call(fields, 'checklistItems')) {
+    assertGbjChecklistCorrection(existing.checklistItems, false);
+    const metadata = (raw: any) => {
+      const { items: entries, ...top } = raw;
+      return {
+        ...top,
+        items: entries.map(({ ok: _ok, photo: _photo, ...rest }: any) => rest),
+      };
+    };
+    if (
+      !isDeepStrictEqual(metadata(existing.checklistItems), metadata(checklist))
+    ) {
+      throw new BadRequestException(
+        'Metadata, label, dan policy checklist GBJ harus dipertahankan.',
+      );
+    }
+  }
+  const items = checklist.items as Array<{ ok: boolean }>;
+  const hasDeviation = items.some((item) => item.ok === false);
+  const criticalNotOk = items.some(
+    (item, index) => !item.ok && GBJ_CHECKLIST_SEVERITY[index] === 'CRITICAL',
+  );
+  const decisionMode = effective('decisionMode');
+  const result = effective('result');
+  const deviationReason = effective('deviationReason');
+
+  if (effective('hasDeviation') !== hasDeviation) {
+    throw new BadRequestException(
+      'hasDeviation QC Vehicle GBJ harus sama dengan hasil checklist canonical.',
+    );
+  }
+  if (
+    !['NORMAL_PASS', 'APPROVED_WITH_DEVIATION', 'REJECTED'].includes(
+      String(decisionMode),
+    )
+  ) {
+    throw new BadRequestException('decisionMode QC Vehicle GBJ tidak valid.');
+  }
+  if (decisionMode === 'NORMAL_PASS' && hasDeviation) {
+    throw new BadRequestException(
+      'NORMAL_PASS tidak valid jika terdapat item NOT OK.',
+    );
+  }
+  if (decisionMode === 'APPROVED_WITH_DEVIATION') {
+    if (
+      !hasDeviation ||
+      criticalNotOk ||
+      typeof deviationReason !== 'string' ||
+      deviationReason.trim().length < MIN_DEVIATION_REASON_LENGTH
+    ) {
+      throw new BadRequestException(
+        'APPROVED_WITH_DEVIATION memerlukan temuan non-critical dan alasan minimal 10 karakter.',
+      );
+    }
+  }
+  if (decisionMode === 'REJECTED' && !hasDeviation) {
+    throw new BadRequestException(
+      'REJECTED tidak valid jika seluruh checklist OK.',
+    );
+  }
+  const expectedResult = decisionMode === 'REJECTED' ? 'REJECT' : 'PASS';
+  if (result !== expectedResult) {
+    throw new BadRequestException(
+      `result QC Vehicle GBJ harus ${expectedResult} sesuai decisionMode.`,
+    );
+  }
+};
+
+const assertGspPreUnloadChecklist = (value: unknown): void => {
+  if (
+    !isPlainRecord(value) ||
+    value.version !== GSP_PREUNLOAD_VERSION ||
+    !Array.isArray(value.items) ||
+    value.items.length !== GSP_PREUNLOAD_CODES.length
+  ) {
+    throw new BadRequestException(
+      'Checklist pra-bongkar GSP harus memakai schema canonical sembilan item.',
+    );
+  }
+  const seen = new Set<string>();
+  for (const [index, item] of value.items.entries()) {
+    if (
+      !isPlainRecord(item) ||
+      typeof item.code !== 'string' ||
+      !GSP_PREUNLOAD_CODES.includes(item.code) ||
+      seen.has(item.code)
+    ) {
+      throw new BadRequestException(
+        'Checklist pra-bongkar GSP memiliki code unknown atau duplikat.',
+      );
+    }
+    seen.add(item.code);
+    if (item.label !== GSP_PREUNLOAD_LABEL_MAP[item.code]) {
+      throw new BadRequestException(
+        `Label checklist pra-bongkar GSP ${item.code} tidak canonical.`,
+      );
+    }
+    if (!['OK', 'NOT_OK'].includes(String(item.result))) {
+      throw new BadRequestException(
+        `Result checklist pra-bongkar GSP item ${index + 1} tidak valid.`,
+      );
+    }
+  }
+  if (seen.size !== GSP_PREUNLOAD_CODES.length) {
+    throw new BadRequestException(
+      'Checklist pra-bongkar GSP harus memuat semua code canonical.',
+    );
+  }
+};
+
+const assertGspChecklistCorrection = async (
+  value: unknown,
+  existing: unknown,
+  transactionId: string,
+  client: any,
+): Promise<void> => {
+  assertGspPreUnloadChecklist(existing);
+  assertGspPreUnloadChecklist(value);
+  const previous = existing as Record<string, any>;
+  const next = value as Record<string, any>;
+  const withoutItems = ({ items: _items, ...metadata }: Record<string, any>) =>
+    metadata;
+  if (!isDeepStrictEqual(withoutItems(previous), withoutItems(next))) {
+    throw new BadRequestException(
+      'Metadata, overallResult, dan disposisi pra-bongkar GSP tidak boleh diganti melalui checklist koreksi.',
+    );
+  }
+  for (let index = 0; index < previous.items.length; index++) {
+    const { result: _oldResult, ...oldMetadata } = previous.items[index];
+    const { result: _newResult, ...newMetadata } = next.items[index];
+    if (!isDeepStrictEqual(oldMetadata, newMetadata)) {
+      throw new BadRequestException(
+        'Urutan, kode, catatan, dan bukti item GSP harus dipertahankan.',
+      );
+    }
+  }
+  const failures = next.items.filter((item: any) => item.result === 'NOT_OK');
+  const disposition = next.disposition;
+  if (next.overallResult === 'OK') {
+    if (failures.length || disposition != null) {
+      throw new BadRequestException(
+        'Checklist OK tidak boleh berisi temuan atau disposisi yang bertentangan.',
+      );
+    }
+  } else {
+    if (
+      !failures.length ||
+      !isPlainRecord(disposition) ||
+      typeof disposition.reason !== 'string' ||
+      disposition.reason.trim().length < 5 ||
+      typeof disposition.decidedById !== 'string' ||
+      !disposition.decidedById.trim() ||
+      typeof disposition.decidedAt !== 'string' ||
+      Number.isNaN(Date.parse(disposition.decidedAt))
+    ) {
+      throw new BadRequestException(
+        'Koreksi GSP memerlukan keputusan existing yang eksplisit dan konsisten; disposisi baru belum didukung.',
+      );
+    }
+    if (next.overallResult === 'CONCESSION') {
+      if (
+        disposition.action !== 'ACCEPT_WITH_NOTE' ||
+        failures.some((item: any) =>
+          NON_CONCESSIBLE_CHECKLIST_CODES.includes(item.code),
+        )
+      ) {
+        throw new BadRequestException(
+          'Konsesi GSP tidak boleh menerima temuan keselamatan non-concessible.',
+        );
+      }
+    } else if (
+      next.overallResult !== 'REJECTED' ||
+      disposition.action !== 'REJECT'
+    ) {
+      throw new BadRequestException(
+        'Status/disposisi GSP tidak didukung untuk koreksi ini.',
+      );
+    }
+  }
+  for (const item of failures) {
+    if (
+      typeof item.notes !== 'string' ||
+      item.notes.trim().length < 5 ||
+      typeof item.photoAttachmentId !== 'string' ||
+      !item.photoAttachmentId.trim()
+    ) {
+      throw new BadRequestException(
+        'Temuan NOT_OK GSP wajib memiliki catatan dan attachment bukti resmi existing.',
+      );
+    }
+    const attachment = await client.attachment.findFirst({
+      where: { id: item.photoAttachmentId, transactionId, isCurrent: true },
+    });
+    if (
+      !attachment ||
+      attachment.id !== item.photoAttachmentId ||
+      attachment.transactionId !== transactionId ||
+      attachment.isCurrent !== true ||
+      !ALLOWED_PHOTO_MIMES.includes(attachment.mimeType) ||
+      typeof attachment.sha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/i.test(attachment.sha256)
+    ) {
+      throw new BadRequestException(
+        'Attachment bukti GSP tidak current, bukan milik transaksi, atau checksum/tipe tidak valid.',
+      );
+    }
+  }
+};
+
+const assertGbbSamplingCorrection = (
+  value: unknown,
+  existing: unknown,
+): void => {
+  const entries = (raw: unknown): any[] | null =>
+    Array.isArray(raw)
+      ? raw
+      : isPlainRecord(raw) && Array.isArray(raw.items)
+        ? raw.items
+        : null;
+  const oldItems = entries(existing);
+  const newItems = entries(value);
+  if (
+    !oldItems ||
+    !newItems ||
+    oldItems.length !== newItems.length ||
+    oldItems.length === 0
+  ) {
+    throw new BadRequestException(
+      'Sampling GBB hanya boleh mengubah item yang sudah tersimpan.',
+    );
+  }
+  const top = (raw: unknown) =>
+    Array.isArray(raw)
+      ? {}
+      : Object.fromEntries(
+          Object.entries(raw as Record<string, unknown>).filter(
+            ([key]) => key !== 'items' && key !== 'initialMoisture',
+          ),
+        );
+  if (!isDeepStrictEqual(top(existing), top(value)))
+    throw new BadRequestException('Metadata sampling GBB harus dipertahankan.');
+  const labels = new Set<string>();
+  for (let index = 0; index < oldItems.length; index++) {
+    const oldItem = oldItems[index];
+    const newItem = newItems[index];
+    const label = String(oldItem?.label || '').toLowerCase();
+    const field = ['sampling visual', 'sampling bau'].includes(label)
+      ? 'ok'
+      : label === 'estimasi moisture'
+        ? 'value'
+        : null;
+    if (!field) {
+      if (!isDeepStrictEqual(oldItem, newItem))
+        throw new BadRequestException(
+          'Item sampling historis yang tidak dikenali harus dipertahankan.',
+        );
+      continue;
+    }
+    if (labels.has(label) || !isPlainRecord(oldItem) || !isPlainRecord(newItem))
+      throw new BadRequestException('Sampling GBB ambigu atau tidak valid.');
+    labels.add(label);
+    const omit = (item: Record<string, unknown>) =>
+      Object.fromEntries(Object.entries(item).filter(([key]) => key !== field));
+    if (!isDeepStrictEqual(omit(oldItem), omit(newItem)))
+      throw new BadRequestException(
+        'Label, bukti, dan metadata sampling GBB harus dipertahankan.',
+      );
+    if (field === 'ok' && typeof newItem.ok !== 'boolean')
+      throw new BadRequestException('Status sampling GBB harus boolean.');
+    if (field === 'value') parseFinitePercentage(newItem.value, 'moisture');
+  }
+  if (
+    isPlainRecord(value) &&
+    Object.prototype.hasOwnProperty.call(value, 'initialMoisture')
+  ) {
+    if (
+      !isPlainRecord(existing) ||
+      !Object.prototype.hasOwnProperty.call(existing, 'initialMoisture')
+    )
+      throw new BadRequestException(
+        'Moisture tidak boleh ditambahkan secara sintetis.',
+      );
+    parseFinitePercentage(value.initialMoisture, 'moisture');
+    const moistureItem = newItems.find(
+      (item) => String(item?.label || '').toLowerCase() === 'estimasi moisture',
+    );
+    if (
+      moistureItem &&
+      Number(moistureItem.value) !== Number(value.initialMoisture)
+    ) {
+      throw new BadRequestException(
+        'Initial moisture dan estimasi moisture GBB harus konsisten.',
+      );
+    }
+  } else if (
+    isPlainRecord(existing) &&
+    Object.prototype.hasOwnProperty.call(existing, 'initialMoisture')
+  ) {
+    throw new BadRequestException(
+      'Moisture sampling existing tidak boleh dihapus.',
+    );
+  }
+};
+
+const assertWarehouseFieldForProcess = (tx: any, fieldName: string): void => {
+  const processType = tx.processType;
+
+  if (processType === ProcessType.GSP) {
+    if (
+      [
+        'actualWeight',
+        'actualQuantity',
+        'unit',
+        'palletCount',
+        'bagCount',
+        'rollCount',
+        'condition',
+      ].includes(fieldName)
+    ) {
+      throw new BadRequestException(
+        'Koreksi receiving GSP wajib menggunakan receivedQuantity dan receivedUnit; field gudang generik tidak berlaku.',
+      );
+    }
+    return;
+  }
+
+  if (
+    processType !== ProcessType.GSP &&
+    ['receivedQuantity', 'receivedUnit'].includes(fieldName)
+  ) {
+    throw new BadRequestException(
+      'receivedQuantity dan receivedUnit hanya berlaku untuk receiving GSP.',
+    );
+  }
+
+  if (processType === ProcessType.GBB && fieldName === 'actualQuantity') {
+    throw new BadRequestException(
+      'GBB menggunakan realisasi berat; actualQuantity bukan field koreksi gudang GBB.',
+    );
+  }
+
+  if (processType === ProcessType.GBJ && fieldName === 'actualWeight') {
+    throw new BadRequestException(
+      'GBJ menggunakan realisasi jumlah; actualWeight bukan field koreksi gudang GBJ.',
+    );
+  }
+};
+
 const validateDomain = (
   fieldName: string,
   newValue: unknown,
   targetModule: CorrectionTargetModule,
+  processType?: ProcessType,
 ) => {
-  if (fieldName === 'checklistItems') {
-    assertSafeJsonValue(newValue, fieldName);
+  if (
+    fieldName === 'checklistItems' ||
+    (fieldName === 'parameters' &&
+      targetModule === CorrectionTargetModule.QC_PRODUCT_ANALYSIS)
+  ) {
+    assertSafeJsonValue(
+      newValue,
+      fieldName,
+      0,
+      undefined,
+      targetModule === CorrectionTargetModule.QC_VEHICLE &&
+        processType === ProcessType.GBJ,
+    );
     return;
   }
 
@@ -507,6 +1020,144 @@ export class OperationLogCorrectionService {
     private readonly authorizationScopeService: AuthorizationScopeService,
   ) {}
 
+  private buildPaEvaluation(
+    tx: any,
+    rec: any,
+    patch: unknown,
+    expectedPaRevision: number,
+  ) {
+    if (
+      tx.processType !== ProcessType.GSP ||
+      !rec ||
+      rec.transactionId !== tx.id ||
+      rec.isVoided ||
+      rec.isCurrent !== true
+    ) {
+      throw new BadRequestException(
+        'Target PA harus current, non-voided dan dimiliki transaksi GSP ini.',
+      );
+    }
+    if (
+      !Number.isInteger(expectedPaRevision) ||
+      rec.revision !== expectedPaRevision
+    ) {
+      throw new ConflictException(
+        'Revisi PA berubah. Muat ulang data dan preview koreksi.',
+      );
+    }
+    const current = selectCurrentPa<any>(tx.qcProductAnalyses || []);
+    if (!current || current.id !== rec.id) {
+      throw new ConflictException(
+        'Hanya revisi current ronde PA efektif terakhir yang dapat dikoreksi.',
+      );
+    }
+    if (tx.productCatalogId && rec.productCatalogId !== tx.productCatalogId) {
+      throw new BadRequestException(
+        'Identitas katalog PA tidak sesuai transaksi.',
+      );
+    }
+    assertSafeJsonValue(patch, 'parameters');
+    const analysisProfile = resolvePaProfile(rec, tx);
+    const parameters = patchPaParameters(
+      rec.parameters,
+      patch,
+      analysisProfile,
+    );
+    if (
+      fingerprintStableJson(parameters) ===
+      fingerprintStableJson(rec.parameters)
+    ) {
+      throw new BadRequestException(
+        'Tidak ada perubahan parameter PA (No-Op).',
+      );
+    }
+    const legacyOriginalSpecUnavailable = rec.specSnapshot == null;
+    const specSnapshot =
+      rec.specSnapshot ??
+      createPaSpecSnapshot(analysisProfile, new SpecificationProvider());
+    if (specSnapshot?.provider?.ruleStatus !== 'ACTIVE_CONFIGURED') {
+      throw new BadRequestException(
+        'Snapshot spesifikasi PA bukan operasional terverifikasi.',
+      );
+    }
+    const evaluation = evaluatePaParameters(
+      analysisProfile,
+      parameters,
+      rec.testRound,
+      specSnapshot,
+    );
+    const evaluationSource = legacyOriginalSpecUnavailable
+      ? 'CORRECTION_TIME_CURRENT_SPEC'
+      : 'ORIGINAL_SPEC_SNAPSHOT';
+    const fingerprint = fingerprintStableJson({
+      transactionId: tx.id,
+      expectedRevision: tx.revision,
+      targetRecordId: rec.id,
+      expectedPaRevision: rec.revision,
+      originalParameters: rec.parameters,
+      originalResult: rec.result,
+      originalStatus: rec.status,
+      originalDisposition: [
+        rec.dispositionAction,
+        rec.dispositionReason,
+        rec.dispositionById,
+        rec.dispositionAt,
+        rec.dispositionRequiresReview,
+      ],
+      analysisProfile,
+      specSnapshot,
+      parameters,
+      result: evaluation.result,
+      status: evaluation.status,
+      evaluationSource,
+    });
+    return {
+      targetRecordId: rec.id,
+      expectedRevision: tx.revision,
+      expectedPaRevision: rec.revision,
+      parameters,
+      result: evaluation.result,
+      status: evaluation.status,
+      analysisProfile,
+      specSnapshot,
+      evaluationSource,
+      legacyOriginalSpecUnavailable,
+      fingerprint,
+      dispositionRequiresReview: true,
+    };
+  }
+
+  async previewPaCorrection(
+    id: string,
+    dto: PreviewPaCorrectionDto,
+    user: any,
+  ) {
+    if (user?.role !== 'ADMIN')
+      throw new ForbiddenException(
+        'Hanya Admin dapat melakukan preview koreksi PA.',
+      );
+    const tx: any = await this.prisma.transaction.findUnique({
+      where: { id },
+      include: { productCatalog: true, qcProductAnalyses: true },
+    });
+    if (!tx) throw new NotFoundException('Transaksi tidak ditemukan.');
+    if (!TERMINAL_TRANSACTION_STATUSES.includes(tx.status))
+      throw new BadRequestException(
+        'Koreksi PA hanya untuk transaksi terminal.',
+      );
+    if (tx.revision !== dto.expectedRevision)
+      throw new ConflictException('Revisi transaksi berubah. Muat ulang data.');
+    const rec = tx.qcProductAnalyses?.find(
+      (row: any) => row.id === dto.targetRecordId,
+    );
+    return this.buildPaEvaluation(
+      tx,
+      rec,
+      dto.parameters,
+      dto.expectedPaRevision,
+    );
+  }
+
   async correctOperationLog(
     id: string,
     dto: CreateOperationLogCorrectionDto,
@@ -574,6 +1225,7 @@ export class OperationLogCorrectionService {
         where: { id },
         include: {
           productCatalog: true,
+          qcProductAnalyses: true,
           weighbridgeRecords: {
             where: { isCurrent: true },
             orderBy: { revision: 'desc' },
@@ -682,6 +1334,7 @@ export class OperationLogCorrectionService {
           targetModule: CorrectionTargetModule;
           targetRecord: any;
           items: any[];
+          paEvaluation?: any;
         }
       >();
 
@@ -694,6 +1347,47 @@ export class OperationLogCorrectionService {
         };
         if (item.targetModule === CorrectionTargetModule.QC_MATERIAL) {
           item.targetModule = CorrectionTargetModule.INCOMING_MATERIAL;
+        }
+        if (
+          item.targetModule === CorrectionTargetModule.QC_VEHICLE &&
+          tx.processType === ProcessType.GSP
+        ) {
+          throw new BadRequestException(
+            'QC Vehicle legacy tidak berlaku untuk GSP dan tidak dapat dikoreksi melalui Operation Log.',
+          );
+        }
+        if (
+          item.targetModule === CorrectionTargetModule.QC_VEHICLE &&
+          tx.processType === ProcessType.GBJ &&
+          ![
+            'result',
+            'decisionMode',
+            'hasDeviation',
+            'deviationReason',
+            'notes',
+            'checklistItems',
+          ].includes(item.fieldName)
+        ) {
+          throw new BadRequestException(
+            'Koreksi QC Vehicle GBJ hanya mendukung checklist canonical, result, decision metadata, deviation, dan notes.',
+          );
+        }
+        if (
+          item.targetModule === CorrectionTargetModule.WAREHOUSE &&
+          tx.processType === ProcessType.GSP &&
+          item.fieldName === 'condition'
+        ) {
+          throw new BadRequestException(
+            'Field condition generik tidak berlaku untuk koreksi pra-bongkar GSP.',
+          );
+        }
+        if (
+          item.targetModule === CorrectionTargetModule.INCOMING_MATERIAL &&
+          tx.processType !== ProcessType.GBB
+        ) {
+          throw new BadRequestException(
+            'QC Lab biji kopi hanya berlaku untuk transaksi GBB.',
+          );
         }
         const itemKey = `${item.targetModule}:${item.targetRecordId || id}:${item.fieldName}`;
         if (seenItemKeys.has(itemKey)) {
@@ -709,9 +1403,17 @@ export class OperationLogCorrectionService {
             `Field ${item.fieldName} pada modul ${item.targetModule} masuk dalam Denylist / Protected dan tidak boleh dikoreksi.`,
           );
         }
+        if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
+          assertWarehouseFieldForProcess(tx, item.fieldName);
+        }
 
         item.newValue = normalizeCorrectionValue(item.fieldName, item.newValue);
-        validateDomain(item.fieldName, item.newValue, item.targetModule);
+        validateDomain(
+          item.fieldName,
+          item.newValue,
+          item.targetModule,
+          tx.processType,
+        );
 
         if (
           item.targetModule === CorrectionTargetModule.TRANSACTION ||
@@ -719,6 +1421,53 @@ export class OperationLogCorrectionService {
           item.targetModule === CorrectionTargetModule.REMARK
         ) {
           rootItems.push(item);
+        } else if (
+          item.targetModule === CorrectionTargetModule.QC_PRODUCT_ANALYSIS
+        ) {
+          if (!item.targetRecordId)
+            throw new BadRequestException('Target ID PA wajib eksplisit.');
+          const rec = tx.qcProductAnalyses?.find(
+            (row: any) => row.id === item.targetRecordId,
+          );
+          const evaluation = this.buildPaEvaluation(
+            tx,
+            rec,
+            item.newValue,
+            item.expectedRecordRevision!,
+          );
+          if (
+            evaluation.legacyOriginalSpecUnavailable &&
+            item.acknowledgeCurrentSpec !== true
+          ) {
+            throw new BadRequestException(
+              'Konfirmasi evaluasi spesifikasi saat koreksi wajib untuk PA lama.',
+            );
+          }
+          if (
+            !item.evaluationFingerprint ||
+            item.evaluationFingerprint !== evaluation.fingerprint
+          ) {
+            throw new ConflictException(
+              'Preview PA tidak sesuai parameter, revisi, atau spesifikasi terbaru. Lakukan preview ulang.',
+            );
+          }
+          const now = new Date();
+          const evaluationProvenance = {
+            evaluationSource: evaluation.evaluationSource,
+            legacyOriginalSpecUnavailable:
+              evaluation.legacyOriginalSpecUnavailable,
+            evaluatedById: user.id,
+            evaluatedAt: now.toISOString(),
+            previewFingerprint: evaluation.fingerprint,
+            originalAnalysisId: rec.id,
+            correctionId,
+          };
+          recordGroups.set(`QC_PRODUCT_ANALYSIS:${rec.id}`, {
+            targetModule: CorrectionTargetModule.QC_PRODUCT_ANALYSIS,
+            targetRecord: rec,
+            items: [{ ...item, newValue: evaluation.parameters }],
+            paEvaluation: { ...evaluation, evaluationProvenance },
+          });
         } else if (item.targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
           if (!tx.weighbridgeRecords || tx.weighbridgeRecords.length === 0) {
             throw new BadRequestException(
@@ -736,10 +1485,16 @@ export class OperationLogCorrectionService {
           if (
             !rec ||
             (rec.transactionId && rec.transactionId !== id) ||
-            rec.isCurrent === false
+            rec.isCurrent !== true
           ) {
             throw new BadRequestException(
               `Record timbangan ID ${item.targetRecordId} tidak current atau tidak dimiliki transaksi ini.`,
+            );
+          }
+
+          if (!['IN', 'OUT'].includes(rec.type)) {
+            throw new BadRequestException(
+              'Record timbangan tidak memiliki arah IN/OUT yang valid.',
             );
           }
 
@@ -753,6 +1508,14 @@ export class OperationLogCorrectionService {
           }
           recordGroups.get(groupKey)!.items.push(item);
         } else if (item.targetModule === CorrectionTargetModule.WAREHOUSE) {
+          if (
+            tx.processType === ProcessType.GSP &&
+            ['actualWeight', 'actualQuantity', 'unit'].includes(item.fieldName)
+          ) {
+            throw new BadRequestException(
+              'Koreksi penerimaan GSP wajib menggunakan receivedQuantity dan receivedUnit, bukan field berat gudang generik.',
+            );
+          }
           const rec = item.targetRecordId
             ? tx.warehouseProcesses?.find(
                 (r: any) => r.id === item.targetRecordId,
@@ -764,10 +1527,19 @@ export class OperationLogCorrectionService {
           if (
             !rec ||
             (rec.transactionId && rec.transactionId !== id) ||
-            rec.isCurrent === false
+            rec.isCurrent !== true
           ) {
             throw new ConflictException(
               'Original Warehouse record tidak current atau tidak dimiliki transaksi ini.',
+            );
+          }
+          if (
+            rec.processType &&
+            tx.processType &&
+            rec.processType !== tx.processType
+          ) {
+            throw new BadRequestException(
+              'Record Warehouse tidak sesuai dengan tipe proses transaksi.',
             );
           }
 
@@ -790,7 +1562,7 @@ export class OperationLogCorrectionService {
           if (
             !rec ||
             (rec.transactionId && rec.transactionId !== id) ||
-            rec.isCurrent === false
+            rec.isCurrent !== true
           ) {
             throw new ConflictException(
               'Original QC Vehicle record tidak current atau tidak dimiliki transaksi ini.',
@@ -820,7 +1592,7 @@ export class OperationLogCorrectionService {
           if (
             !rec ||
             (rec.transactionId && rec.transactionId !== id) ||
-            rec.isCurrent === false
+            rec.isCurrent !== true
           ) {
             throw new ConflictException(
               'Original QC/Incoming Material record tidak current atau tidak dimiliki transaksi ini.',
@@ -851,7 +1623,7 @@ export class OperationLogCorrectionService {
           if (
             !rec ||
             (rec.transactionId && rec.transactionId !== id) ||
-            rec.isCurrent === false
+            rec.isCurrent !== true
           ) {
             throw new BadRequestException(
               `Record lampiran ID ${item.targetRecordId} tidak current atau tidak dimiliki transaksi ini.`,
@@ -867,6 +1639,119 @@ export class OperationLogCorrectionService {
             });
           }
           recordGroups.get(groupKey)!.items.push(item);
+        }
+      }
+
+      const supersededAttachmentIds = new Set(
+        [...recordGroups.values()]
+          .filter(
+            (group) => group.targetModule === CorrectionTargetModule.ATTACHMENT,
+          )
+          .map((group) => group.targetRecord.id),
+      );
+      if (
+        dto.evidenceAttachmentId &&
+        supersededAttachmentIds.has(dto.evidenceAttachmentId)
+      ) {
+        throw new BadRequestException(
+          'Lampiran bukti koreksi tidak boleh disupersede dalam permintaan yang sama.',
+        );
+      }
+      if (
+        tx.processType === ProcessType.GSP &&
+        supersededAttachmentIds.size > 0
+      ) {
+        for (const warehouse of tx.warehouseProcesses || []) {
+          if (warehouse.isCurrent !== true) continue;
+          const evidenceItems = warehouse.checklistItems?.items;
+          if (
+            Array.isArray(evidenceItems) &&
+            evidenceItems.some((item: any) =>
+              supersededAttachmentIds.has(item?.photoAttachmentId),
+            )
+          ) {
+            throw new BadRequestException(
+              'Lampiran bukti checklist GSP current tidak boleh disupersede melalui koreksi metadata.',
+            );
+          }
+        }
+      }
+
+      // Validate complete process-specific snapshots before any correction header or successor write.
+      for (const [, group] of recordGroups) {
+        if (
+          group.targetModule === CorrectionTargetModule.WAREHOUSE &&
+          tx.processType === ProcessType.GSP &&
+          group.items.some((item) =>
+            ['receivedQuantity', 'receivedUnit'].includes(item.fieldName),
+          )
+        ) {
+          const effective = {
+            receivedQuantity: group.targetRecord.receivedQuantity,
+            receivedUnit: group.targetRecord.receivedUnit,
+          };
+          for (const item of group.items) {
+            if (item.fieldName === 'receivedQuantity')
+              effective.receivedQuantity = item.newValue;
+            if (item.fieldName === 'receivedUnit')
+              effective.receivedUnit = item.newValue;
+          }
+          assertGspReceivingPair(
+            tx,
+            effective.receivedQuantity == null
+              ? null
+              : String(effective.receivedQuantity),
+            effective.receivedUnit,
+          );
+        }
+        if (
+          group.targetModule === CorrectionTargetModule.QC_VEHICLE &&
+          tx.processType === ProcessType.GBB
+        ) {
+          const checklistItem = group.items.find(
+            (item) => item.fieldName === 'checklistItems',
+          );
+          if (checklistItem)
+            assertGbbSamplingCorrection(
+              checklistItem.newValue,
+              group.targetRecord.checklistItems,
+            );
+        }
+        if (
+          group.targetModule === CorrectionTargetModule.QC_VEHICLE &&
+          tx.processType === ProcessType.GBJ
+        ) {
+          const proposedFields: Record<string, unknown> = {};
+          for (const item of group.items) {
+            proposedFields[item.fieldName] = item.newValue;
+          }
+          const decisionFields = [
+            'checklistItems',
+            'result',
+            'decisionMode',
+            'hasDeviation',
+            'deviationReason',
+          ];
+          if (
+            group.items.some((item) => decisionFields.includes(item.fieldName))
+          ) {
+            assertGbjDecisionCorrection(proposedFields, group.targetRecord);
+          }
+        }
+        if (
+          group.targetModule === CorrectionTargetModule.WAREHOUSE &&
+          tx.processType === ProcessType.GSP &&
+          group.items.some((item) => item.fieldName === 'checklistItems')
+        ) {
+          const checklistItem = group.items.find(
+            (item) => item.fieldName === 'checklistItems',
+          );
+          await assertGspChecklistCorrection(
+            checklistItem?.newValue,
+            group.targetRecord.checklistItems,
+            tx.id,
+            prismaTx,
+          );
         }
       }
 
@@ -891,7 +1776,23 @@ export class OperationLogCorrectionService {
       for (const [, group] of recordGroups) {
         const { targetModule, targetRecord: rec, items } = group;
 
-        if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
+        if (targetModule === CorrectionTargetModule.QC_PRODUCT_ANALYSIS) {
+          hasActualChanges = true;
+          const evaluation = group.paEvaluation;
+          for (const fieldName of [
+            'parameters',
+            'result',
+            'status',
+            'analysisProfile',
+            'specSnapshot',
+            'evaluationProvenance',
+            'dispositionRequiresReview',
+          ]) {
+            const key = `${targetModule}.${rec.id}.${fieldName}`;
+            oldValuesSummary[key] = rec[fieldName] ?? null;
+            newValuesSummary[key] = evaluation[fieldName] ?? null;
+          }
+        } else if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
           for (const item of items) {
             const extractedOldValue = rec[item.fieldName];
             if (item.fieldName === 'weight') {
@@ -1113,7 +2014,74 @@ export class OperationLogCorrectionService {
       for (const [, group] of recordGroups) {
         const { targetModule, targetRecord: rec, items } = group;
 
-        if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
+        if (targetModule === CorrectionTargetModule.QC_PRODUCT_ANALYSIS) {
+          const evaluation = group.paEvaluation;
+          const superseded = await prismaTx.qcProductAnalysis.updateMany({
+            where: {
+              id: rec.id,
+              transactionId: id,
+              revision: rec.revision,
+              isCurrent: true,
+              isVoided: false,
+            },
+            data: {
+              isCurrent: false,
+              supersededAt: new Date(),
+              supersededByCorrectionId: correction.id,
+            },
+          });
+          if (superseded.count !== 1)
+            throw new ConflictException(
+              'PA telah dikoreksi. Muat ulang data dan preview.',
+            );
+          const successor = await prismaTx.qcProductAnalysis.create({
+            data: {
+              transactionId: rec.transactionId,
+              productCatalogId: rec.productCatalogId,
+              testRound: rec.testRound,
+              productCategory: rec.productCategory,
+              productName: rec.productName,
+              policyVersion: rec.policyVersion,
+              testedById: rec.testedById,
+              testedAt: rec.testedAt,
+              dispositionAction: rec.dispositionAction,
+              dispositionReason: rec.dispositionReason,
+              dispositionById: rec.dispositionById,
+              dispositionAt: rec.dispositionAt,
+              sourceAnalysisId: rec.id,
+              revision: rec.revision + 1,
+              isCurrent: true,
+              isVoided: false,
+              parameters: evaluation.parameters,
+              result: evaluation.result,
+              status: evaluation.status,
+              analysisProfile: evaluation.analysisProfile,
+              specSnapshot: evaluation.specSnapshot,
+              evaluationProvenance: evaluation.evaluationProvenance,
+              dispositionRequiresReview: true,
+            },
+          });
+          for (const fieldName of [
+            'parameters',
+            'result',
+            'status',
+            'analysisProfile',
+            'specSnapshot',
+            'evaluationProvenance',
+            'dispositionRequiresReview',
+          ]) {
+            itemInsertPayloads.push({
+              correctionId: correction.id,
+              targetModule,
+              targetRecordId: rec.id,
+              replacementRecordId: successor.id,
+              fieldName,
+              oldValue: rec[fieldName] ?? null,
+              newValue: evaluation[fieldName] ?? null,
+              itemRemark: items[0].itemRemark || null,
+            });
+          }
+        } else if (targetModule === CorrectionTargetModule.WEIGHBRIDGE) {
           const superseded = await prismaTx.weighbridgeRecord.updateMany({
             where: {
               id: rec.id,
@@ -1276,10 +2244,29 @@ export class OperationLogCorrectionService {
             }
           }
 
+          if (
+            tx.processType === ProcessType.GSP &&
+            items.some((item) =>
+              ['receivedQuantity', 'receivedUnit'].includes(item.fieldName),
+            )
+          ) {
+            const effectiveQuantity =
+              updatedFields.receivedQuantity == null
+                ? null
+                : String(updatedFields.receivedQuantity);
+            assertGspReceivingPair(
+              tx,
+              effectiveQuantity,
+              updatedFields.receivedUnit,
+            );
+            txUpdateData.receivedQuantity = effectiveQuantity;
+            txUpdateData.receiptUnit = updatedFields.receivedUnit;
+          }
+
           const newRec = await prismaTx.warehouseProcess.create({
             data: {
               transactionId: rec.transactionId,
-              processType: rec.processType,
+              processType: rec.processType || tx.processType,
               startAt: updatedFields.startAt,
               endAt: updatedFields.endAt,
               startById: rec.startById,
@@ -1610,10 +2597,7 @@ export class OperationLogCorrectionService {
             }
             // The latest PA must itself prove release; never fall back to older evidence.
             if (effectiveTarget === TransactionStatus.QC_VEHICLE_PASSED) {
-              const activePa = await prismaTx.qcProductAnalysis.findFirst({
-                where: { transactionId: id },
-                orderBy: [{ testRound: 'desc' }, { id: 'desc' }],
-              });
+              const activePa = selectCurrentPa<any>(tx.qcProductAnalyses || []);
               const hasValidRelease = evaluatePaRelease(activePa, {
                 transactionId: id,
                 productCatalogId: tx.productCatalogId,
@@ -1711,7 +2695,7 @@ export class OperationLogCorrectionService {
           // Invalidate active GSP PA evidence when reopening to REGISTERED (pre-PA stage)
           if (processType === 'GSP') {
             await prismaTx.qcProductAnalysis.updateMany({
-              where: { transactionId: id, isVoided: false },
+              where: { transactionId: id, isVoided: false, isCurrent: true },
               data: {
                 isVoided: true,
                 voidedAt: new Date(),
@@ -1767,7 +2751,7 @@ export class OperationLogCorrectionService {
           // Invalidate active GSP PA evidence when reopening to QC_VEHICLE_PENDING (pre-PA stage)
           if (processType === 'GSP') {
             await prismaTx.qcProductAnalysis.updateMany({
-              where: { transactionId: id, isVoided: false },
+              where: { transactionId: id, isVoided: false, isCurrent: true },
               data: {
                 isVoided: true,
                 voidedAt: new Date(),
@@ -1855,6 +2839,7 @@ export class OperationLogCorrectionService {
         where: { id },
         include: {
           productCatalog: true,
+          qcProductAnalyses: true,
           weighbridgeRecords: {
             where: { isCurrent: true },
             orderBy: { revision: 'desc' },

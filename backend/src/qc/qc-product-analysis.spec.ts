@@ -156,6 +156,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       jest
         .spyOn(specProvider, 'getCoalSpec')
         .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
 
       const res = await service.submitProductAnalysis(
         'tx-coal-1',
@@ -189,6 +190,18 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
             result: QcResult.PASS,
             status: 'RELEASE',
             testedById: mockAnalystUser.id,
+            revision: 1,
+            isCurrent: true,
+            analysisProfile: 'COAL_PA',
+            specSnapshot: expect.objectContaining({
+              schemaVersion: 1,
+              profile: 'COAL_PA',
+              snapshotFingerprint: expect.any(String),
+            }),
+            evaluationProvenance: expect.objectContaining({
+              evaluationSource: 'TEST_TIME_SPEC',
+              evaluatedById: mockAnalystUser.id,
+            }),
           }),
         }),
       );
@@ -228,6 +241,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       jest
         .spyOn(specProvider, 'getCoalSpec')
         .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
 
       const res = await service.submitProductAnalysis(
         'tx-coal-1',
@@ -331,7 +345,13 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(retestTx);
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'analysis-1', testRound: 1, isVoided: false },
+        {
+          id: 'analysis-1',
+          testRound: 1,
+          isVoided: false,
+          isCurrent: true,
+          revision: 1,
+        },
       ]);
 
       const mockTxClient = {
@@ -394,7 +414,13 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(retestTx);
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'analysis-1', testRound: 1, isVoided: false },
+        {
+          id: 'analysis-1',
+          testRound: 1,
+          isVoided: false,
+          isCurrent: true,
+          revision: 1,
+        },
       ]);
 
       const mockTxClient = {
@@ -467,7 +493,13 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         retestInProgressTx,
       );
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'analysis-1', testRound: 1, isVoided: false },
+        {
+          id: 'analysis-1',
+          testRound: 1,
+          isVoided: false,
+          isCurrent: true,
+          revision: 1,
+        },
       ]);
 
       const mockTxClient = {
@@ -491,6 +523,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       jest
         .spyOn(specProvider, 'getCoalSpec')
         .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
 
       const res = await service.submitProductAnalysis(
         'tx-coal-retest-inprogress',
@@ -544,8 +577,20 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(txRetest);
       mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-        { id: 'pa-r2', testRound: 2, isVoided: false },
-        { id: 'pa-r1', testRound: 1, isVoided: false },
+        {
+          id: 'pa-r2',
+          testRound: 2,
+          isVoided: false,
+          isCurrent: true,
+          revision: 1,
+        },
+        {
+          id: 'pa-r1',
+          testRound: 1,
+          isVoided: false,
+          isCurrent: true,
+          revision: 1,
+        },
       ]);
 
       await expect(
@@ -666,6 +711,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       jest
         .spyOn(specProvider, 'getCoalSpec')
         .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
 
       const res = await service.submitProductAnalysis(
         'tx-coal-reopened',
@@ -804,6 +850,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       jest
         .spyOn(specProvider, 'getRapidKlenSpec')
         .mockReturnValue(TEST_FIXTURE_RAPID_KLEN_STRICT_GT);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
 
       // Under strict GT operational spec (> 35.0%), 35.0% fails spec -> REJECT
       const res = await service.submitProductAnalysis(
@@ -1239,6 +1286,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       jest
         .spyOn(specProvider, 'getCoalSpec')
         .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
 
       const res = await service.submitProductAnalysis(
         'tx-coal-authoritative',
@@ -1289,6 +1337,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       jest
         .spyOn(specProvider, 'getCoalSpec')
         .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
 
       await expect(
         service.submitProductAnalysis(
@@ -1624,7 +1673,13 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           createCoalRound2Tx(),
         );
         mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-          { id: 'pa-r1', testRound: 1, isVoided: false },
+          {
+            id: 'pa-r1',
+            testRound: 1,
+            isVoided: false,
+            isCurrent: true,
+            revision: 1,
+          },
         ]);
 
         try {
@@ -1661,7 +1716,13 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           createCoalRound2Tx(),
         );
         mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-          { id: 'pa-r1', testRound: 1, isVoided: false },
+          {
+            id: 'pa-r1',
+            testRound: 1,
+            isVoided: false,
+            isCurrent: true,
+            revision: 1,
+          },
         ]);
 
         try {
@@ -1697,7 +1758,13 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           createCoalRound2Tx(),
         );
         mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-          { id: 'pa-r1', testRound: 1, isVoided: false },
+          {
+            id: 'pa-r1',
+            testRound: 1,
+            isVoided: false,
+            isCurrent: true,
+            revision: 1,
+          },
         ]);
 
         try {
@@ -1733,7 +1800,13 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           createCoalRound2Tx(),
         );
         mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
-          { id: 'pa-r1', testRound: 1, isVoided: false },
+          {
+            id: 'pa-r1',
+            testRound: 1,
+            isVoided: false,
+            isCurrent: true,
+            revision: 1,
+          },
         ]);
 
         const mockTxClient = {
@@ -2077,19 +2150,22 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       result: QcResult.REJECT,
       status: 'WAITING_DISPOSITION',
       isVoided: false,
+      isCurrent: true,
+      revision: 1,
     };
 
     it('successfully accepts OOS chemical with note (ACCEPT_WITH_NOTE)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         oosPaRecord,
-      );
+      ]);
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest
             .fn()
             .mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
@@ -2127,9 +2203,14 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         }),
       );
 
-      expect(mockTxClient.qcProductAnalysis.update).toHaveBeenCalledWith(
+      expect(mockTxClient.qcProductAnalysis.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'pa-oos-1' },
+          where: {
+            id: 'pa-oos-1',
+            revision: 1,
+            isCurrent: true,
+            isVoided: false,
+          },
           data: expect.objectContaining({
             status: 'ACCEPT_WITH_NOTE',
             dispositionAction: GspDispositionAction.ACCEPT_WITH_NOTE,
@@ -2143,9 +2224,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('rejects ACCEPT_WITH_NOTE if reason is missing or less than 5 characters', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         oosPaRecord,
-      );
+      ]);
 
       await expect(
         service.submitGspDisposition(
@@ -2173,9 +2254,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         contaminatedPa,
-      );
+      ]);
 
       try {
         await service.submitGspDisposition(
@@ -2200,15 +2281,16 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('successfully requests retest for Round 1 OOS (REQUEST_RETEST)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         oosPaRecord,
-      );
+      ]);
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest
             .fn()
             .mockResolvedValue({ ...oosPaRecord, status: 'RETEST_REQUIRED' }),
@@ -2250,9 +2332,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         round2Pa,
-      );
+      ]);
 
       try {
         await service.submitGspDisposition(
@@ -2277,15 +2359,16 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('successfully rejects OOS chemical (REJECT)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         oosPaRecord,
-      );
+      ]);
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest
             .fn()
             .mockResolvedValue({ ...oosPaRecord, status: 'REJECT' }),
@@ -2395,15 +2478,16 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         oosPaRecord,
-      );
+      ]);
 
       const mockTxClient = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest
             .fn()
             .mockResolvedValue({ ...oosPaRecord, status: 'ACCEPT_WITH_NOTE' }),
@@ -2468,9 +2552,9 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         damagedPackagingPa,
-      );
+      ]);
 
       try {
         await service.submitGspDisposition(
@@ -2495,7 +2579,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('rejects disposition if active PA record is missing', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(null);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([]);
 
       await expect(
         service.submitGspDisposition(
@@ -2512,15 +2596,16 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
 
     it('rejects disposition on concurrency revision conflict (CAS failure)', async () => {
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
         oosPaRecord,
-      );
+      ]);
 
       const mockTxClientConflict = {
         transaction: {
           updateMany: jest.fn().mockResolvedValue({ count: 0 }), // CAS conflict
         },
         qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest.fn().mockResolvedValue({}),
         },
         transactionStatusHistory: {

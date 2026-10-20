@@ -59,6 +59,11 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
   let mockActivityLogsService: any;
   let mockAuthScopeService: any;
 
+  const queuePaEvidence = (record: Record<string, unknown> | null) =>
+    mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce(
+      record ? [{ testRound: 1, revision: 1, isCurrent: true, ...record }] : [],
+    );
+
   const mockUser: JwtPayloadUser = {
     id: 'user-wh-1',
     role: 'ADMIN',
@@ -507,7 +512,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-coal-1',
         transactionId: 'tx-coal-1',
         productCatalogId: 'cat-coal-1',
@@ -580,7 +585,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-coal-legacy',
         transactionId: 'tx-coal-legacy-dev',
         productCatalogId: 'cat-coal-1',
@@ -621,7 +626,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-coal-pending-disp',
         transactionId: 'tx-coal-pending-disp',
         productCatalogId: 'cat-coal-1',
@@ -683,14 +688,14 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-null-res',
         transactionId: 'tx-coal-res-null',
         productCatalogId: 'cat-coal-1',
         status: 'RELEASE',
         result: null,
         isVoided: false,
-      } as any);
+      });
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);
@@ -723,14 +728,14 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-passed-res',
         transactionId: 'tx-coal-res-passed',
         productCatalogId: 'cat-coal-1',
         status: 'RELEASE',
         result: 'PASSED',
         isVoided: false,
-      } as any);
+      });
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);
@@ -763,7 +768,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-reject-res',
         transactionId: 'tx-coal-res-reject',
         productCatalogId: 'cat-coal-1',
@@ -803,7 +808,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-mismatch-res',
         transactionId: 'tx-coal-mismatch',
         productCatalogId: 'cat-other-999',
@@ -843,7 +848,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(null);
+      queuePaEvidence(null);
       mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
         { processType: ProcessType.GSP },
       ]);
@@ -876,7 +881,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-canonical-release',
         transactionId: 'tx-coal-canonical-pass',
         productCatalogId: 'cat-coal-1',
@@ -949,7 +954,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-concession-release',
         transactionId: 'tx-chem-concession-pass',
         productCatalogId: 'cat-pac-1',
@@ -1036,7 +1041,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-concession-falsified',
         transactionId: 'tx-chem-falsified-pass',
         productCatalogId: 'cat-pac-1',
@@ -1084,7 +1089,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-concession-no-reason',
         transactionId: 'tx-chem-missing-reason',
         productCatalogId: 'cat-pac-1',
@@ -1132,7 +1137,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-concession-no-actor',
         transactionId: 'tx-chem-missing-actor',
         productCatalogId: 'cat-pac-1',
@@ -1180,7 +1185,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
       };
 
       mockPrismaService.transaction.findUnique.mockResolvedValueOnce(chemTx);
-      mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+      queuePaEvidence({
         id: 'pa-concession-critical',
         transactionId: 'tx-chem-critical-defect',
         productCatalogId: 'cat-pac-1',
@@ -1266,9 +1271,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
           baseCoalTx,
         );
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
-          mockPaRecord,
-        );
+        queuePaEvidence(mockPaRecord);
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -1288,9 +1291,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
           baseCoalTx,
         );
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
-          mockPaRecord,
-        );
+        queuePaEvidence(mockPaRecord);
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -1313,9 +1314,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
           baseCoalTx,
         );
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
-          mockPaRecord,
-        );
+        queuePaEvidence(mockPaRecord);
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -1344,9 +1343,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
           baseCoalTx,
         );
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
-          mockPaRecord,
-        );
+        queuePaEvidence(mockPaRecord);
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -1388,9 +1385,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
           baseCoalTx,
         );
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
-          mockPaRecord,
-        );
+        queuePaEvidence(mockPaRecord);
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -1441,9 +1436,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(
           baseCoalTx,
         );
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce(
-          mockPaRecord,
-        );
+        queuePaEvidence(mockPaRecord);
         mockPrismaService.userWarehouseAccess.findMany.mockResolvedValueOnce([
           { processType: ProcessType.GSP },
         ]);
@@ -2480,7 +2473,7 @@ describe('GSP 4-Group Workflow Integration Tests (Task 3)', () => {
           warehouseProcesses: [],
         };
         mockPrismaService.transaction.findUnique.mockResolvedValueOnce(startTx);
-        mockPrismaService.qcProductAnalysis.findFirst.mockResolvedValueOnce({
+        queuePaEvidence({
           id: 'pa-valid-1',
           transactionId: 'tx-start-bypass',
           productCatalogId: 'cat-pac-1',

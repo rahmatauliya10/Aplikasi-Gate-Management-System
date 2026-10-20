@@ -298,7 +298,11 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
       // Verify previous PA analyses were marked VOIDED
       expect(mockTxClient.qcProductAnalysis.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { transactionId: 'tx-pa-passed', isVoided: false },
+          where: {
+            transactionId: 'tx-pa-passed',
+            isVoided: false,
+            isCurrent: true,
+          },
           data: expect.objectContaining({
             isVoided: true,
             status: 'VOIDED',

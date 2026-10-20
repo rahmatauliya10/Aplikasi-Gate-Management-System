@@ -41,6 +41,8 @@ import { isProductPaExempt } from './constants/pa-exemption-policy';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { SpecificationProvider } from './providers/specification.provider';
+import { selectCurrentPa } from './pa-current-selection';
+import { createPaSpecSnapshot } from './pa-correction-evaluation';
 
 /**
  * Strictly parses and validates that an input parameter is a valid finite number.
@@ -423,8 +425,13 @@ export class QcProductAnalysisService {
       orderBy: { testRound: 'desc' },
     });
     const historyList = activeHistory || [];
-    const currentMaxRound =
-      historyList.length > 0 ? historyList[0].testRound : 0;
+    if (historyList.some((row) => typeof row.isCurrent !== 'boolean')) {
+      throw new BadRequestException(
+        'Metadata versioning PA tidak tersedia; muat ulang setelah schema diperbarui.',
+      );
+    }
+    const currentPa = selectCurrentPa(historyList);
+    const currentMaxRound = currentPa?.testRound ?? 0;
     const authoritativeTestRound = currentMaxRound + 1;
 
     if (authoritativeTestRound > 2) {
@@ -796,6 +803,7 @@ export class QcProductAnalysisService {
           transactionId,
           testRound: authoritativeTestRound,
           isVoided: false,
+          isCurrent: true,
         },
       });
       if (duplicateRound) {
@@ -840,6 +848,17 @@ export class QcProductAnalysisService {
           status: authoritativeDecision,
           testedById: user.id,
           testedAt: now,
+          revision: 1,
+          isCurrent: true,
+          analysisProfile: targetProfile,
+          specSnapshot: createPaSpecSnapshot(targetProfile, this.specProvider, {
+            allowTestFixture: this.specProvider.isTestFixtureActive(),
+          }) as any,
+          evaluationProvenance: {
+            evaluationSource: 'TEST_TIME_SPEC',
+            evaluatedById: user.id,
+            evaluatedAt: now.toISOString(),
+          },
         },
       });
 
@@ -960,12 +979,13 @@ export class QcProductAnalysisService {
         testedBy: { select: { id: true, name: true, role: true } },
         dispositionBy: { select: { id: true, name: true, role: true } },
       },
-      orderBy: { testRound: 'asc' },
+      orderBy: [{ testRound: 'asc' }, { revision: 'asc' }],
     });
 
     return {
       success: true,
       data: records,
+      current: selectCurrentPa(records),
     };
   }
 
@@ -1027,13 +1047,11 @@ export class QcProductAnalysisService {
       });
     }
 
-    const activePa = await this.prisma.qcProductAnalysis.findFirst({
-      where: {
-        transactionId,
-        isVoided: false,
-      },
-      orderBy: { testRound: 'desc' },
-    });
+    const activePa = selectCurrentPa(
+      await this.prisma.qcProductAnalysis.findMany({
+        where: { transactionId },
+      }),
+    );
 
     if (!activePa) {
       throw new BadRequestException({
@@ -1125,17 +1143,27 @@ export class QcProductAnalysisService {
         );
       }
 
-      // 2. Update QcProductAnalysis with disposition audit trail
-      await prismaTx.qcProductAnalysis.update({
-        where: { id: activePa.id },
+      // Claim exactly the current PA revision; a superseded approval cannot authorize its successor.
+      const paClaim = await prismaTx.qcProductAnalysis.updateMany({
+        where: {
+          id: activePa.id,
+          revision: activePa.revision,
+          isCurrent: true,
+          isVoided: false,
+        },
         data: {
           status: paStatus,
           dispositionAction: dto.action,
           dispositionReason,
           dispositionById: user.id,
           dispositionAt: now,
+          dispositionRequiresReview: false,
         },
       });
+      if (paClaim.count !== 1)
+        throw new ConflictException(
+          'Revisi PA telah berubah; disposisi dibatalkan.',
+        );
 
       // 3. Insert transaction status history
       await prismaTx.transactionStatusHistory.create({

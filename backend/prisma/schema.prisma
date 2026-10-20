@@ -123,6 +123,7 @@ enum CorrectionTargetModule {
   QC_VEHICLE
   QC_MATERIAL
   INCOMING_MATERIAL
+  QC_PRODUCT_ANALYSIS
   WAREHOUSE
   STATUS
   ATTACHMENT
@@ -596,6 +597,7 @@ model TransactionCorrection {
   supersededQcVehicleChecks       QcVehicleCheck[]            @relation("QcVehicleSupersededBy")
   supersededIncomingMaterialChecks IncomingMaterialCheck[]    @relation("IncomingMaterialSupersededBy")
   supersededAttachments           Attachment[]               @relation("AttachmentSupersededBy")
+  supersededProductAnalyses        QcProductAnalysis[]        @relation("PaAnalysisSupersededBy")
 
   @@index([transactionId])
   @@index([correctedById])
@@ -661,6 +663,15 @@ model QcProductAnalysis {
   isVoided              Boolean            @default(false)
   voidedAt              DateTime?
   voidReason            String?
+  revision              Int                @default(1)
+  isCurrent             Boolean            @default(true)
+  sourceAnalysisId      String?            @unique
+  supersededAt          DateTime?
+  supersededByCorrectionId String?
+  analysisProfile       GspAnalysisProfile?
+  specSnapshot          Json?
+  evaluationProvenance  Json?
+  dispositionRequiresReview Boolean       @default(false)
   dispositionAction     String?
   dispositionReason     String?
   dispositionById       String?
@@ -674,7 +685,13 @@ model QcProductAnalysis {
   productCatalog        ProductCatalog?    @relation(fields: [productCatalogId], references: [id], onDelete: SetNull)
   testedBy              User?              @relation("ProductAnalysisTestedBy", fields: [testedById], references: [id], onDelete: SetNull)
   dispositionBy         User?              @relation("ProductAnalysisDispositionBy", fields: [dispositionById], references: [id], onDelete: SetNull)
+  sourceAnalysis        QcProductAnalysis?  @relation("PaAnalysisLineage", fields: [sourceAnalysisId], references: [id], onDelete: SetNull)
+  successor             QcProductAnalysis?  @relation("PaAnalysisLineage")
+  supersededByCorrection TransactionCorrection? @relation("PaAnalysisSupersededBy", fields: [supersededByCorrectionId], references: [id], onDelete: SetNull)
 
+  @@index([transactionId, testRound, isCurrent])
+  @@index([sourceAnalysisId])
+  @@index([supersededByCorrectionId])
   @@index([transactionId])
   @@index([productCategory])
   @@index([productCatalogId])

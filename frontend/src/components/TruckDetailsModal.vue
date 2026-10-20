@@ -146,7 +146,7 @@
                             R{{ round.testRound }}
                           </span>
                           <span class="text-[11px] font-black text-slate-800 uppercase tracking-wide">
-                            Uji Laboratorium Ronde {{ round.testRound }}
+                            Uji Laboratorium Ronde {{ round.testRound }} · Rev {{ round.revision || '—' }} · {{ round.isCurrent === true && round.isVoided === false ? 'Current' : 'Riwayat' }}
                           </span>
                         </div>
                         <span class="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
@@ -155,6 +155,7 @@
                         </span>
                       </div>
 
+                      <p v-if="round.dispositionRequiresReview" class="text-[10px] font-bold text-amber-800">Hasil dikoreksi Admin; disposisi sebelumnya memerlukan review.</p>
                       <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
                         <span>Tester: {{ round.testedBy?.name || round.testedById || 'Analis QC' }}</span>
                         <span>{{ formatTimeFull(round.testedAt || round.createdAt) }}</span>
@@ -164,13 +165,13 @@
                       <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                         <div v-for="param in getFormattedPaParameters(round)" :key="param.label"
                           class="p-2 rounded-lg border text-center flex flex-col justify-between"
-                          :class="param.isOk ? 'bg-emerald-50/40 border-emerald-200/60' : 'bg-rose-50/40 border-rose-200/60'">
+                          :class="param.isOk === null ? 'bg-slate-50 border-slate-200' : param.isOk ? 'bg-emerald-50/40 border-emerald-200/60' : 'bg-rose-50/40 border-rose-200/60'">
                           <div class="text-[8px] font-black text-slate-400 uppercase tracking-wider mb-0.5">{{ param.label }}</div>
-                          <div class="text-xs font-black font-mono" :class="param.isOk ? 'text-emerald-800' : 'text-rose-700'">
+                          <div class="text-xs font-black font-mono" :class="param.isOk === null ? 'text-slate-700' : param.isOk ? 'text-emerald-800' : 'text-rose-700'">
                             {{ param.value }}
                           </div>
-                          <div class="text-[8px] font-mono mt-0.5" :class="param.isOk ? 'text-emerald-600' : 'text-rose-600'">
-                            {{ param.specText }} &bull; {{ param.isOk ? 'PASS' : 'OOS' }}
+                          <div class="text-[8px] font-mono mt-0.5" :class="param.isOk === null ? 'text-slate-500' : param.isOk ? 'text-emerald-600' : 'text-rose-600'">
+                            {{ param.specText }}<template v-if="param.isOk !== null"> &bull; {{ param.isOk ? 'PASS' : 'OOS' }}</template>
                           </div>
                         </div>
                       </div>
@@ -238,6 +239,7 @@
                       <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Alasan & Justifikasi Disposisi:</span>
                       <p class="font-semibold italic">"{{ latestDisposedPa.dispositionReason || 'Tanpa catatan' }}"</p>
                     </div>
+                    <p v-if="latestDisposedPa.dispositionRequiresReview" class="text-xs font-bold text-amber-900">Disposisi historis ini belum menyetujui hasil koreksi dan memerlukan review.</p>
                     <div v-if="latestDisposedPa.dispositionAction === 'ACCEPT_WITH_NOTE'" class="text-[9px] text-amber-800 bg-amber-100/60 p-2 rounded-md font-medium leading-normal border border-amber-200/50">
                       <b>Catatan Integritas Data:</b> Hasil pengujian teknis laboratorium tetap tercatat <b>REJECT (faktual)</b>. Penerimaan muatan adalah konsesi operasional bersyarat dari Gudang GSP.
                     </div>
@@ -273,17 +275,17 @@
                       <div class="space-y-1.5">
                         <div v-for="(item, idx) in gspPreUnloadItems" :key="item.code || idx"
                           class="p-2.5 rounded-lg border text-xs"
-                          :class="item.result === 'OK' || item.ok ? 'bg-emerald-50/30 border-emerald-100 text-slate-700' : 'bg-rose-50/40 border-rose-200 text-rose-800'">
+                          :class="item.ok === true ? 'bg-emerald-50/30 border-emerald-100 text-slate-700' : item.ok === false ? 'bg-rose-50/40 border-rose-200 text-rose-800' : 'bg-slate-50 border-slate-200 text-slate-600'">
                           <div class="flex items-center justify-between">
                             <div class="flex items-center space-x-1.5 truncate pr-2">
-                              <span class="material-icons text-[14px]" :class="item.result === 'OK' || item.ok ? 'text-emerald-500' : 'text-rose-500'">
-                                {{ item.result === 'OK' || item.ok ? 'check_circle' : 'cancel' }}
+                              <span class="material-icons text-[14px]" :class="item.ok === true ? 'text-emerald-500' : item.ok === false ? 'text-rose-500' : 'text-slate-400'">
+                                {{ item.ok === true ? 'check_circle' : item.ok === false ? 'cancel' : 'help_outline' }}
                               </span>
                               <span class="text-[11px] font-bold truncate" :title="item.label">{{ idx + 1 }}. {{ item.label }}</span>
                             </div>
                             <span class="text-[9px] font-mono font-black px-2 py-0.5 rounded shrink-0 uppercase"
-                              :class="item.result === 'OK' || item.ok ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'">
-                              {{ item.result === 'OK' || item.ok ? 'OK' : 'NOT OK' }}
+                              :class="item.ok === true ? 'bg-emerald-100 text-emerald-800' : item.ok === false ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-600'">
+                              {{ item.ok === true ? 'OK' : item.ok === false ? 'NOT OK' : '—' }}
                             </span>
                           </div>
                           <!-- Notes if present -->
@@ -917,7 +919,7 @@
   <!-- Admin Correction Modal Overlay (Fail-Closed & High-Accountability UI) -->
       <transition name="modal">
         <div v-if="showCorrectionModal" class="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm" @click.self="showCorrectionModal = false">
-          <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+          <div class="bg-white rounded-2xl w-full max-w-4xl p-4 sm:p-6 shadow-2xl border border-slate-100 space-y-4 max-h-[92vh] overflow-y-auto custom-scrollbar">
             <div class="flex items-center justify-between border-b border-slate-100 pb-3">
               <div class="flex items-center space-x-2">
                 <span class="material-icons text-amber-600">edit_note</span>
@@ -1067,32 +1069,34 @@
                     <span class="text-[10px] font-bold text-slate-400">Pilih modul yang akan dikoreksi</span>
                   </div>
 
-                  <!-- Segmented Control Tab Bar (4 Module Columns) -->
+                  <!-- Responsive process-aware module tabs -->
                   <div class="bg-slate-200/70 p-1 rounded-xl font-bold text-xs border border-slate-200/80">
-                    <div class="grid grid-cols-4 gap-1 text-[11px]">
+                    <div class="flex flex-wrap gap-1 text-[11px]">
                       <button type="button" @click="activeCorrectionTab = 'WEIGHBRIDGE'"
                         :class="activeCorrectionTab === 'WEIGHBRIDGE' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
-                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
-                        <span class="material-icons text-sm">scale</span>
-                        <span class="truncate">Timbangan</span>
+                        class="flex-1 min-w-[7rem] py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 uppercase">
+                        <span class="material-icons text-sm">scale</span><span>Timbangan</span>
                       </button>
                       <button type="button" @click="activeCorrectionTab = 'IDENTITY'"
                         :class="activeCorrectionTab === 'IDENTITY' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
-                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
-                        <span class="material-icons text-sm">badge</span>
-                        <span class="truncate">Identitas</span>
+                        class="flex-1 min-w-[7rem] py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 uppercase">
+                        <span class="material-icons text-sm">badge</span><span>Identitas</span>
                       </button>
-                      <button type="button" @click="activeCorrectionTab = 'QC_LAB'"
+                      <button v-if="currentProcessType === 'GBB' && imOriginal.id" type="button" @click="activeCorrectionTab = 'QC_LAB'"
                         :class="activeCorrectionTab === 'QC_LAB' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
-                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
-                        <span class="material-icons text-sm">science</span>
-                        <span class="truncate">QC Lab</span>
+                        class="flex-1 min-w-[7rem] py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 uppercase">
+                        <span class="material-icons text-sm">science</span><span>QC Biji GBB</span>
+                      </button>
+                      <button v-if="currentProcessType === 'GSP' && !isSolarCommodity && (paCorrectionRecord || paCorrectionAmbiguous)" type="button" @click="activeCorrectionTab = 'QC_PA'"
+                        :class="activeCorrectionTab === 'QC_PA' ? 'bg-[#4A8BDF] text-white font-black' : 'text-slate-600 font-bold'"
+                        class="flex-1 min-w-[7rem] py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 uppercase">
+                        <span class="material-icons text-sm">biotech</span><span>Hasil Analisa PA GSP</span>
                       </button>
                       <button type="button" @click="activeCorrectionTab = 'QC_SAMPLING'"
                         :class="activeCorrectionTab === 'QC_SAMPLING' ? 'bg-[#4A8BDF] text-white shadow-xs font-black' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/40 font-bold'"
-                        class="py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 truncate uppercase">
+                        class="flex-1 min-w-[7rem] py-2 px-2 rounded-lg transition-all flex items-center justify-center gap-1.5 uppercase">
                         <span class="material-icons text-sm">fact_check</span>
-                        <span class="truncate">QC Sampling</span>
+                        <span>{{ currentProcessType === 'GBJ' ? 'QC Kendaraan GBJ' : currentProcessType === 'GSP' ? 'Pra-bongkar GSP' : 'Sampling Awal GBB' }}</span>
                       </button>
                     </div>
                   </div>
@@ -1106,10 +1110,11 @@
                       <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Gross Weight (kg) [Source: {{ weightRecordTypes.gross === 'IN' ? 'Timbangan Masuk (IN)' : 'Timbangan Keluar (OUT)' }}]</label>
                       <div class="relative">
                         <input v-model.number="correctionForm.grossWeight" type="number"
-                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          :class="Number(correctionForm.grossWeight) !== Number(currentTruck?.grossWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                          :disabled="!currentGrossRecord"
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          :class="Number(correctionForm.grossWeight) !== Number(currentGrossWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
-                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentTruck?.grossWeight || 0 }} kg</span>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentGrossWeight ?? '—' }} kg · {{ currentGrossRecord ? 'record current' : 'record current tidak tersedia' }}</span>
                     </div>
 
                     <!-- Input 2: Tare Weight -->
@@ -1117,21 +1122,31 @@
                       <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Tare Weight (kg) [Source: {{ weightRecordTypes.tare === 'IN' ? 'Timbangan Masuk (IN)' : 'Timbangan Keluar (OUT)' }}]</label>
                       <div class="relative">
                         <input v-model.number="correctionForm.tareWeight" type="number"
-                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          :class="Number(correctionForm.tareWeight) !== Number(currentTruck?.tareWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
+                          :disabled="!currentTareRecord"
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          :class="Number(correctionForm.tareWeight) !== Number(currentTareWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
-                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentTruck?.tareWeight || 0 }} kg</span>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentTareWeight ?? '—' }} kg · {{ currentTareRecord ? 'record current' : 'record current tidak tersedia' }}</span>
                     </div>
 
-                    <!-- Input 3: Warehouse Realization -->
+                    <!-- Input 3: process-specific warehouse realization -->
                     <div class="space-y-1">
-                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">Warehouse Realization ({{ isUomMismatch ? gspReceiptUnit : 'kg' }})</label>
+                      <label class="block text-[10px] font-black text-slate-600 uppercase tracking-wider">
+                        {{ currentProcessType === 'GSP' ? `Jumlah Diterima (${currentReceivedUnit || '—'})` : currentProcessType === 'GBJ' ? `Jumlah Muat (${currentWarehouseUnit || '—'})` : 'Realisasi Gudang (kg)' }}
+                      </label>
                       <div class="relative">
-                        <input v-model.number="correctionForm.actualWeight" type="number"
-                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        <input v-if="currentProcessType === 'GSP'" v-model="correctionForm.receivedQuantity" type="text" inputmode="decimal" placeholder="contoh: 1234.567"
+                          :disabled="!currentWarehouseRecord || !gspReceivingUnitValid"
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed" />
+                        <input v-else-if="currentProcessType === 'GBJ'" v-model.number="correctionForm.actualQuantity" type="number" min="0" step="1" :disabled="!gbjWarehouseCorrectionValid" aria-label="Jumlah muat GBJ" class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold disabled:bg-slate-100" />
+                        <input v-else v-model.number="correctionForm.actualWeight" type="number"
+                          :disabled="!currentWarehouseRecord"
+                          class="w-full h-11 px-3.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 font-mono outline-none focus:border-[#4A8BDF] focus:ring-4 focus:ring-[#4A8BDF]/10 transition-all disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           :class="Number(correctionForm.actualWeight) !== Number(currentActualWeight) ? 'border-amber-400 ring-4 ring-amber-400/10 bg-amber-50/30' : ''" />
                       </div>
-                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">Current: {{ currentActualWeight || 0 }} {{ isUomMismatch ? gspReceiptUnit : 'kg' }}</span>
+                      <span class="text-[10px] font-mono font-semibold text-slate-400 block pt-0.5">
+                        Current: {{ currentProcessType === 'GSP' ? (currentReceivedQuantity ?? '—') : currentProcessType === 'GBJ' ? (currentActualQuantity ?? '—') : (currentActualWeight ?? '—') }} {{ currentProcessType === 'GSP' ? (currentReceivedUnit || '—') : currentProcessType === 'GBJ' ? (currentWarehouseUnit || '—') : 'kg' }} · {{ currentWarehouseRecord ? 'sumber WarehouseProcess current' : 'record WarehouseProcess current tidak tersedia' }}
+                      </span>
                     </div>
                   </div>
 
@@ -1150,24 +1165,25 @@
                       <div class="p-3 bg-slate-50/80 rounded-xl border border-slate-200/70 space-y-1">
                         <div class="text-[9px] font-black text-slate-400 uppercase tracking-widest">NET WEIGHT (GROSS - TARE)</div>
                         <div class="text-lg font-black text-slate-900 font-mono flex items-baseline gap-1">
-                          <span>{{ Math.max(0, (Number(correctionForm.grossWeight) || 0) - (Number(correctionForm.tareWeight) || 0)).toLocaleString() }}</span>
+                          <span>{{ correctionNetWeight === null ? '—' : correctionNetWeight.toLocaleString() }}</span>
                           <span class="text-xs font-bold text-slate-500">kg</span>
                         </div>
-                        <div class="text-[10px] text-slate-400 font-semibold font-mono">Original Net: {{ (currentTruck?.netWeight || 0).toLocaleString() }} kg</div>
+                        <div class="text-[10px] text-slate-400 font-semibold font-mono">Original Net: {{ currentTruck?.netWeight === null || currentTruck?.netWeight === undefined ? '—' : Number(currentTruck.netWeight).toLocaleString() }} kg</div>
                       </div>
 
                       <!-- Box 2: Warehouse Realization & Deviasi -->
                       <div class="p-3 bg-amber-50/50 rounded-xl border border-amber-200/80 space-y-1">
                         <div class="text-[9px] font-black text-amber-800 uppercase tracking-widest">WAREHOUSE REALIZATION &amp; DEVIASI</div>
-                        <div class="text-xs font-bold text-amber-900 font-mono">Actual: {{ (Number(correctionForm.actualWeight) || 0).toLocaleString() }} {{ isUomMismatch ? gspReceiptUnit : 'kg' }}</div>
+                        <div class="text-xs font-bold text-amber-900 font-mono">Actual: {{ currentProcessType === 'GSP' ? (correctionForm.receivedQuantity ?? '—') : currentProcessType === 'GBJ' ? (correctionForm.actualQuantity ?? '—') : (correctionForm.actualWeight ?? '—') }} {{ currentProcessType === 'GSP' ? (currentReceivedUnit || '—') : currentProcessType === 'GBJ' ? (currentWarehouseUnit || '—') : 'kg' }}</div>
                         <div class="text-[10px] font-bold font-mono pt-0.5 flex items-center justify-between">
                           <div class="flex items-center gap-1">
                             <span class="text-slate-500">Deviasi:</span>
-                            <span v-if="isUomMismatch" class="text-sky-700 font-bold text-[10px]">
+                            <span v-if="currentProcessType !== 'GBB'" class="text-sky-700 font-bold text-[10px]">Jumlah mengikuti unit sumber; tidak dibandingkan dengan net kg</span>
+                            <span v-else-if="isUomMismatch" class="text-sky-700 font-bold text-[10px]">
                               UOM Berbeda ({{ gspReceiptUnit }})
                             </span>
-                            <span v-else :class="isCorrectionDeviationExceeded ? 'text-rose-600 font-black' : 'text-slate-800 font-bold'">
-                              {{ correctionDeviationKg.toLocaleString() }} kg
+                            <span v-else-if="currentProcessType !== 'GSP'" :class="isCorrectionDeviationExceeded ? 'text-rose-600 font-black' : 'text-slate-800 font-bold'">
+                              {{ correctionDeviationKg === null ? '—' : correctionDeviationKg.toLocaleString() }} kg
                               <span v-if="correctionDeviationPct !== null" class="text-[9px] font-normal">
                                 ({{ correctionDeviationPct.toFixed(2) }}% / max {{ toleranceLimit }}%)
                               </span>
@@ -1233,8 +1249,8 @@
                   </div>
                 </div>
 
-                <!-- TAB 3: QC LAB (Quality Analysis & Incoming Material) -->
-                <div v-if="activeCorrectionTab === 'QC_LAB'" class="space-y-3.5 animate-fade">
+                <!-- TAB 3: GBB Incoming Material Lab only -->
+                <div v-if="activeCorrectionTab === 'QC_LAB' && currentProcessType === 'GBB' && imOriginal.id" class="space-y-3.5 animate-fade">
                   <div class="p-2.5 bg-blue-50/80 border border-blue-200/80 rounded-xl flex items-center gap-2 text-[11px] text-blue-900 font-medium shadow-2xs">
                     <span class="material-icons text-blue-600 text-sm shrink-0">science</span>
                     <span>Koreksi parameter Quality Analysis (QC Lab) & pengujian mutu material.</span>
@@ -1244,6 +1260,7 @@
                     <div>
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Hasil Status QC Lab</label>
                       <select v-model="correctionForm.imResult" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.imResult !== imOriginal.result ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                        <option :value="null">Tidak diubah</option>
                         <option value="APPROVED">APPROVED (Lolos Mutu)</option>
                         <option value="REJECTED">REJECTED (Ditolak Lab)</option>
                         <option value="APPROVED_WITH_NOTE">APPROVED WITH NOTE (Konsesi)</option>
@@ -1279,15 +1296,17 @@
                       <label class="block font-bold text-slate-700 mb-1 text-[11px]">Pemeriksaan Bau (Odor) & Warna</label>
                       <div class="grid grid-cols-2 gap-2">
                         <select v-model="correctionForm.imOdor" class="w-full pl-2.5 pr-6 py-2 rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.imOdor !== imOriginal.odor ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option :value="null">Odor: tidak diubah</option>
                           <option value="PASS">Odor: PASS</option>
                           <option value="REJECT">Odor: REJECT</option>
                         </select>
                         <select v-model="correctionForm.imColor" class="w-full pl-2.5 pr-6 py-2 rounded-xl border border-slate-200 bg-white text-[11px] font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.imColor !== imOriginal.color ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option :value="null">Color: tidak diubah</option>
                           <option value="PASS">Color: PASS</option>
                           <option value="REJECT">Color: REJECT</option>
                         </select>
                       </div>
-                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.odor || 'PASS' }} / {{ imOriginal.color || 'PASS' }}</span>
+                      <span class="text-[10px] font-mono text-slate-400 block mt-1">Current: {{ imOriginal.odor || '—' }} / {{ imOriginal.color || '—' }}</span>
                     </div>
                   </div>
 
@@ -1297,13 +1316,25 @@
                   </div>
                 </div>
 
-                <!-- TAB 4: QC CHECKLIST & SAMPLING (Initial QC Sampling & Warehouse Inspection) -->
+                <div v-if="currentProcessType === 'GSP' && (paCorrectionRecord || paCorrectionAmbiguous)" v-show="activeCorrectionTab === 'QC_PA'" class="space-y-3.5">
+                  <PaCorrectionEditor :key="paEditorKey" :record="paCorrectionRecord" :transaction="currentTruck"
+                    :preview="paCorrectionPreview" :preview-error="paCorrectionPreviewError"
+                    :loading="correctionLoading || paCorrectionLoading" :ambiguous="paCorrectionAmbiguous"
+                    @preview="previewPaCorrection" @item="setPaCorrectionItem"
+                    @dirty="paCorrectionDirty = $event" @invalidate="invalidatePaCorrectionPreview" />
+                </div>
+
+                <!-- TAB 4: process-specific sampling/read-only source -->
                 <div v-if="activeCorrectionTab === 'QC_SAMPLING'" class="space-y-3.5 animate-fade">
-                  <div class="p-2.5 bg-indigo-50/70 border border-indigo-200/80 rounded-xl flex items-center gap-2 text-[11px] text-indigo-900 font-medium shadow-2xs">
+                  <div class="p-2.5 bg-indigo-50/70 border border-indigo-200/80 rounded-xl flex items-start gap-2 text-[11px] text-indigo-900 font-medium shadow-2xs leading-relaxed">
                     <span class="material-icons text-indigo-600 text-sm shrink-0">assignment_turned_in</span>
-                    <span>Koreksi parameter Initial QC Sampling Pre-Unloading (Bau, Visual, Moisture), Armada, & Gudang.</span>
+                    <span v-if="currentProcessType === 'GBB'">Sampling awal GBB hanya memakai tiga parameter: visual, bau, dan estimasi moisture. Checklist gudang tidak dipetakan ke QC Vehicle.</span>
+                    <span v-else-if="currentProcessType === 'GBJ'">QC Vehicle GBJ memiliki lima item resmi. Hasil checklist, bukti, dan keputusan dapat dikoreksi pada record current yang valid; severity tetap mengikuti policy server.</span>
+                    <span v-else-if="currentProcessType === 'GSP'">PA GSP tetap hanya-baca. Hasil pemeriksaan pra-bongkar sembilan item dapat dikoreksi jika sesuai disposisi dan bukti existing. Tidak ada koreksi QC Vehicle legacy untuk GSP.</span>
+                    <span v-else>Process tidak dikenali. Modul QC dinonaktifkan secara fail-closed.</span>
                   </div>
 
+                  <template v-if="currentProcessType === 'GBB' && qcvOriginal.id">
                   <!-- 1. Form Utama Initial QC Sampling (Bau, Visual, Moisture) -->
                   <div class="p-3.5 bg-white rounded-2xl border border-indigo-100/90 space-y-3 shadow-2xs">
                     <div class="flex items-center justify-between border-b border-indigo-50 pb-2">
@@ -1318,6 +1349,7 @@
                       <div>
                         <label class="block font-bold text-slate-700 mb-1 text-[11px]">Hasil Initial Sampling</label>
                         <select v-model="correctionForm.qcvResult" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.qcvResult !== qcvOriginal.result ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option :value="null">Tidak diubah</option>
                           <option value="APPROVED">APPROVED (Lolos Sampling)</option>
                           <option value="REJECTED">REJECTED (Ditolak)</option>
                         </select>
@@ -1327,6 +1359,7 @@
                       <div>
                         <label class="block font-bold text-slate-700 mb-1 text-[11px]">1. Pengecekan Bau (Odor Check)</label>
                         <select v-model="correctionForm.qcvOdor" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.qcvOdor !== qcvOriginal.vehicleOdor ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option :value="null">Tidak diubah</option>
                           <option value="PASS">PASS (Bau Normal)</option>
                           <option value="REJECT">REJECT (Bau Abnormal)</option>
                         </select>
@@ -1336,6 +1369,7 @@
                       <div>
                         <label class="block font-bold text-slate-700 mb-1 text-[11px]">2. Pengecekan Visual (Inspection)</label>
                         <select v-model="correctionForm.qcvVisual" class="w-full pl-3 pr-8 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all cursor-pointer shadow-2xs" :class="correctionForm.qcvVisual !== qcvOriginal.vehicleCondition ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''">
+                          <option :value="null">Tidak diubah</option>
                           <option value="PASS">PASS (Visual Normal)</option>
                           <option value="REJECT">REJECT (Defect Visual)</option>
                         </select>
@@ -1350,243 +1384,81 @@
                     </div>
                   </div>
 
-                  <!-- 2. Form Checklist 10 Item Vehicle & Goods Inspection (Sesuai Gambar 1 & GBB Process) -->
-                  <div class="p-3.5 bg-white rounded-2xl border border-slate-200 space-y-3 shadow-2xs">
-                    <div class="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <h5 class="text-[10px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
-                        <span class="material-icons text-sm text-slate-600">local_shipping</span>
-                        <span>2. Vehicle & Goods Inspection (10 Checklist Items)</span>
-                      </h5>
-                      <span class="text-[9px] font-mono text-slate-400 uppercase">GBB / GSP / GBJ Checklist</span>
-                    </div>
+                  </template>
 
-                    <!-- Clean 2-Column Grid of Segmented Toggle Cards with Photo Attachment -->
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <!-- 1. Vehicle Cleanliness -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvCleanliness === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Vehicle Cleanliness</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvCleanliness = 'PASS'" :class="correctionForm.qcvCleanliness === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvCleanliness = 'REJECT'" :class="correctionForm.qcvCleanliness === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
+                  <p v-if="currentProcessType === 'GBB' && !qcvOriginal.id" class="p-3 bg-slate-50 border border-dashed border-slate-200 rounded-xl text-[10px] text-slate-500">
+                    Record current Sampling Awal GBB tidak tersedia atau ambigu. Editor sampling dinonaktifkan agar tidak membuat data sintetis.
+                  </p>
+
+                  <div v-if="currentProcessType === 'GBJ'" class="space-y-3">
+                    <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div class="flex items-center justify-between gap-2">
+                        <div>
+                          <h5 class="text-[10px] font-black text-slate-800 uppercase tracking-widest">Checklist QC Vehicle GBJ</h5>
+                          <p class="mt-1 text-[10px] text-slate-500">Lima item resmi dari record QC Vehicle current. ADMIN dapat mengoreksi nilai yang valid dan seluruh perubahan masuk audit trail.</p>
                         </div>
-                        <div v-if="correctionForm.qcvCleanliness === 'REJECT' || correctionForm.qcvCleanlinessPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvCleanlinessPhoto" type="button" @click="selectedPhoto = correctionForm.qcvCleanlinessPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvCleanlinessPhoto" type="button" @click="correctionForm.qcvCleanlinessPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvCleanlinessPhoto')" />
-                            </label>
+                        <span class="shrink-0 text-[9px] font-black uppercase text-slate-400">{{ gbjCorrectionRecord ? 'CURRENT' : 'TIDAK TERSEDIA' }}</span>
+                      </div>
+                      <div v-if="gbjChecklistCorrectionValid" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div v-for="(item, index) in gbjCorrectionItems" :key="item.label" class="p-2 rounded-lg border bg-white" :class="item.ok === true ? 'border-emerald-200' : item.ok === false ? 'border-rose-200' : 'border-slate-200'">
+                          <div class="flex items-start justify-between gap-2">
+                            <span class="text-[10px] font-bold text-slate-700 leading-snug">{{ index + 1 }}. {{ item.label }}</span>
+                            <select v-model="correctionForm.gbjChecklist[index]" class="w-24 px-1.5 py-1 rounded border border-slate-200 text-[9px] font-black" :aria-label="`Status ${item.label}`">
+                              <option :value="true">PASS</option>
+                              <option :value="false">REJECT</option>
+                            </select>
+                          </div>
+                          <div class="mt-1 flex items-center justify-between text-[9px] text-slate-400">
+                            <span>{{ item.severity }} · bukti {{ correctionForm.gbjPhotos?.[index] ? 'tersedia' : 'wajib jika REJECT' }}</span>
+                            <input type="file" accept="image/jpeg,image/png,image/webp" class="min-w-0 max-w-[160px]" :aria-label="`Bukti ${item.label}`" @change="handleGbjCorrectionPhoto($event, index)" />
                           </div>
                         </div>
                       </div>
-
-                      <!-- 2. Door Seal Intact -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvSeal === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Door Seal Intact</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvSeal = 'PASS'" :class="correctionForm.qcvSeal === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvSeal = 'REJECT'" :class="correctionForm.qcvSeal === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvSeal === 'REJECT' || correctionForm.qcvSealPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvSealPhoto" type="button" @click="selectedPhoto = correctionForm.qcvSealPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvSealPhoto" type="button" @click="correctionForm.qcvSealPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvSealPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 3. Odor/Smell Check -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvOdorCheck === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Odor/Smell Check</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvOdorCheck = 'PASS'" :class="correctionForm.qcvOdorCheck === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvOdorCheck = 'REJECT'" :class="correctionForm.qcvOdorCheck === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvOdorCheck === 'REJECT' || correctionForm.qcvOdorCheckPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvOdorCheckPhoto" type="button" @click="selectedPhoto = correctionForm.qcvOdorCheckPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvOdorCheckPhoto" type="button" @click="correctionForm.qcvOdorCheckPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvOdorCheckPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 4. Arrangement -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvArrangement === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Arrangement</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvArrangement = 'PASS'" :class="correctionForm.qcvArrangement === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvArrangement = 'REJECT'" :class="correctionForm.qcvArrangement === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvArrangement === 'REJECT' || correctionForm.qcvArrangementPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvArrangementPhoto" type="button" @click="selectedPhoto = correctionForm.qcvArrangementPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvArrangementPhoto" type="button" @click="correctionForm.qcvArrangementPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvArrangementPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 5. Pest/Animal Control -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvPest === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Pest/Animal Control</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvPest = 'PASS'" :class="correctionForm.qcvPest === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvPest = 'REJECT'" :class="correctionForm.qcvPest === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvPest === 'REJECT' || correctionForm.qcvPestPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvPestPhoto" type="button" @click="selectedPhoto = correctionForm.qcvPestPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvPestPhoto" type="button" @click="correctionForm.qcvPestPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvPestPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 6. Foreign Objects -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvForeignObjects === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Foreign Objects</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvForeignObjects = 'PASS'" :class="correctionForm.qcvForeignObjects === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvForeignObjects = 'REJECT'" :class="correctionForm.qcvForeignObjects === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvForeignObjects === 'REJECT' || correctionForm.qcvForeignObjectsPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvForeignObjectsPhoto" type="button" @click="selectedPhoto = correctionForm.qcvForeignObjectsPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvForeignObjectsPhoto" type="button" @click="correctionForm.qcvForeignObjectsPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvForeignObjectsPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 7. Packaging Integrity -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvPackaging === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Packaging Integrity</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvPackaging = 'PASS'" :class="correctionForm.qcvPackaging === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvPackaging = 'REJECT'" :class="correctionForm.qcvPackaging === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvPackaging === 'REJECT' || correctionForm.qcvPackagingPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvPackagingPhoto" type="button" @click="selectedPhoto = correctionForm.qcvPackagingPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvPackagingPhoto" type="button" @click="correctionForm.qcvPackagingPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvPackagingPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 8. CoA Validation -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvCoa === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">CoA Validation</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvCoa = 'PASS'" :class="correctionForm.qcvCoa === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvCoa = 'REJECT'" :class="correctionForm.qcvCoa === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvCoa === 'REJECT' || correctionForm.qcvCoaPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvCoaPhoto" type="button" @click="selectedPhoto = correctionForm.qcvCoaPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvCoaPhoto" type="button" @click="correctionForm.qcvCoaPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvCoaPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 9. Quantity Verification -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvQuantity === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Quantity Verification</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvQuantity = 'PASS'" :class="correctionForm.qcvQuantity === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvQuantity = 'REJECT'" :class="correctionForm.qcvQuantity === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvQuantity === 'REJECT' || correctionForm.qcvQuantityPhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvQuantityPhoto" type="button" @click="selectedPhoto = correctionForm.qcvQuantityPhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvQuantityPhoto" type="button" @click="correctionForm.qcvQuantityPhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvQuantityPhoto')" />
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 10. Leakage & Condition -->
-                      <div class="p-2.5 rounded-xl border transition-all space-y-2 bg-slate-50/50 hover:bg-white hover:border-slate-300" :class="correctionForm.qcvLeakage === 'REJECT' ? 'border-rose-200 bg-rose-50/20' : 'border-slate-200/80'">
-                        <div class="flex items-center justify-between">
-                          <span class="text-[11px] font-bold text-slate-700 truncate pr-2">Leakage & Condition</span>
-                          <div class="flex items-center bg-slate-200/80 p-0.5 rounded-lg shrink-0">
-                            <button type="button" @click="correctionForm.qcvLeakage = 'PASS'" :class="correctionForm.qcvLeakage === 'PASS' ? 'bg-emerald-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">OK</button>
-                            <button type="button" @click="correctionForm.qcvLeakage = 'REJECT'" :class="correctionForm.qcvLeakage === 'REJECT' ? 'bg-rose-600 text-white font-black shadow-xs' : 'text-slate-500 hover:text-slate-800'" class="px-2 py-0.5 text-[10px] rounded-md transition-all uppercase">NOT OK</button>
-                          </div>
-                        </div>
-                        <div v-if="correctionForm.qcvLeakage === 'REJECT' || correctionForm.qcvLeakagePhoto" class="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                          <span class="font-bold text-slate-500 flex items-center gap-1"><span class="material-icons text-[13px] text-rose-500">photo_camera</span> Foto Kendala:</span>
-                          <div class="flex items-center gap-1.5">
-                            <button v-if="correctionForm.qcvLeakagePhoto" type="button" @click="selectedPhoto = correctionForm.qcvLeakagePhoto" class="px-2 py-0.5 rounded bg-blue-100 text-blue-700 font-bold hover:bg-blue-200">Lihat</button>
-                            <button v-if="correctionForm.qcvLeakagePhoto" type="button" @click="correctionForm.qcvLeakagePhoto = null" class="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 font-bold">Hapus</button>
-                            <label v-else class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold hover:bg-slate-300 cursor-pointer">
-                              + Upload
-                              <input type="file" accept="image/*" class="hidden" @change="handleItemPhotoUpload($event, 'qcvLeakagePhoto')" />
-                            </label>
-                          </div>
-                        </div>
+                      <p v-else class="text-[10px] text-slate-500">Record current atau struktur lima item GBJ tidak lengkap/ambigu; editor checklist dinonaktifkan tanpa mengubah data historis.</p>
+                      <p v-if="gbjCorrectionUnknownCount" class="text-[10px] text-amber-700">{{ gbjCorrectionUnknownCount }} item historis dengan label lain tetap dipertahankan; koreksi checklist diblokir agar tidak membuang data tersebut.</p>
+                      <div v-if="gbjChecklistCorrectionValid" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                        <label class="p-2 rounded-lg bg-white border border-slate-200"><span class="font-bold text-slate-500 block mb-1">Decision mode</span><select v-model="correctionForm.gbjDecisionMode" class="w-full px-2 py-1 rounded border border-slate-200 text-[10px] font-bold"><option :value="null" disabled>— Pilih keputusan —</option><option value="NORMAL_PASS">NORMAL_PASS</option><option value="APPROVED_WITH_DEVIATION">APPROVED_WITH_DEVIATION</option><option value="REJECTED">REJECTED</option></select></label>
+                        <label class="p-2 rounded-lg bg-white border border-slate-200"><span class="font-bold text-slate-500 block mb-1">Alasan deviation</span><input v-model="correctionForm.gbjDeviationReason" class="w-full px-2 py-1 rounded border border-slate-200 text-[10px]" placeholder="Minimal 10 karakter untuk deviation" /></label>
+                        <div class="p-2 rounded-lg bg-white border border-slate-200"><span class="font-bold text-slate-500">Result server:</span> {{ gbjCorrectionEffectiveResult }}</div>
+                        <div class="p-2 rounded-lg bg-white border border-slate-200"><span class="font-bold text-slate-500">Has deviation:</span> {{ gbjCorrectionHasDeviation ? 'YES' : 'NO' }}</div>
                       </div>
                     </div>
                   </div>
 
+                  <div v-if="currentProcessType === 'GSP'" class="space-y-3">
+                    <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                      <div class="flex items-center justify-between gap-2">
+                        <div>
+                          <h5 class="text-[10px] font-black text-slate-800 uppercase tracking-widest">PA & Pra-bongkar GSP</h5>
+                          <p class="mt-1 text-[10px] text-slate-500">PA dan disposisi PA tetap hanya-baca karena belum memiliki lineage revisi. Pra-bongkar dapat dikoreksi ADMIN hanya jika record Warehouse current dan schema canonical valid.</p>
+                          <p class="mt-1 text-[10px] text-slate-500">Hanya hasil item yang dapat diubah; keputusan keseluruhan, disposisi pra-bongkar, catatan, bukti existing, pemeriksa, dan waktu tetap dipertahankan. NOT OK wajib memiliki catatan dan bukti existing yang valid. Perubahan yang memerlukan disposisi atau bukti baru belum didukung dan akan ditolak.</p>
+                        </div>
+                        <span class="shrink-0 text-[9px] font-black uppercase text-slate-400">{{ gspPreUnloadCorrectionValid ? 'EDITABLE' : 'READ-ONLY' }}</span>
+                      </div>
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+                        <div class="p-2 rounded-lg bg-white border border-slate-200"><span class="font-bold text-slate-500">Status PA terakhir:</span> {{ latestPaStatusLabel || '—' }}</div>
+                        <div class="p-2 rounded-lg bg-white border border-slate-200"><span class="font-bold text-slate-500">Disposisi:</span> {{ getDispositionActionLabel(latestDisposedPa?.dispositionAction) || '—' }}</div>
+                      </div>
+                      <div v-if="gspPreUnloadCorrectionValid" class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div v-for="(item, index) in gspPreUnloadItems" :key="item.code || index" class="p-2 rounded-lg border bg-white" :class="gspPreUnloadResults[index] === true ? 'border-emerald-200' : gspPreUnloadResults[index] === false ? 'border-rose-200' : 'border-slate-200'">
+                          <div class="flex items-start justify-between gap-2"><span class="text-[10px] font-bold text-slate-700 leading-snug">{{ index + 1 }}. {{ item.label }}</span><select v-model="correctionForm.gspPreUnloadResults[index]" class="w-24 px-1.5 py-1 rounded border border-slate-200 text-[9px] font-black"><option :value="true">OK</option><option :value="false">NOT OK</option></select></div>
+                          <div v-if="item.notes" class="mt-1 text-[9px] text-slate-500">{{ item.notes }}</div>
+                        </div>
+                      </div>
+                      <p v-else class="text-[10px] text-slate-500">Record Warehouse current atau checklist canonical sembilan item tidak tersedia; editor dinonaktifkan.</p>
+                    </div>
+                  </div>
+
+                  <div v-if="currentProcessType !== 'GBB'" class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[10px] text-slate-500 leading-relaxed">
+                    <span v-if="currentProcessType === 'GSP'">PA/disposisi tetap read-only karena lineage belum tersedia. Pra-bongkar hanya dapat dikoreksi bila canonical dan current; receiving tetap memakai receivedQuantity dan UOM katalog melalui tab Timbangan.</span>
+                    <span v-else-if="currentProcessType === 'GBJ'">Checklist lima item, result, decision mode, deviation, dan catatan QC Vehicle dapat dikoreksi ADMIN melalui validator canonical dan audit trail.</span>
+                    <span v-else>Data QC tidak tersedia untuk proses yang tidak dikenali.</span>
+                  </div>
+
                   <div>
-                    <label class="block font-bold text-slate-700 mb-1 text-[11px]">Catatan Initial QC Sampling & Inspeksi Kendaraan</label>
-                    <input v-model="correctionForm.qcvNotes" type="text" placeholder="Catatan pemeriksaan sampling pre-unloading & kondisi kendaraan..." class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="correctionForm.qcvNotes !== qcvOriginal.notes ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    <label class="block font-bold text-slate-700 mb-1 text-[11px]">Catatan Initial QC Sampling / Catatan Koreksi</label>
+                    <input v-if="currentProcessType === 'GBB' || currentProcessType === 'GBJ'" v-model="correctionForm.qcvNotes" type="text" placeholder="Catatan pemeriksaan sampling atau QC Vehicle..." class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium text-xs text-slate-800 focus:ring-2 focus:ring-amber-500 transition-all shadow-2xs" :class="correctionForm.qcvNotes !== qcvOriginal.notes ? 'ring-2 ring-amber-400 bg-amber-50/30' : ''" />
+                    <div v-else class="p-2 rounded-xl bg-slate-100 border border-slate-200 text-[10px] text-slate-500">Catatan QC generik tidak berlaku untuk proses ini.</div>
                   </div>
                 </div>
               </div>
@@ -1701,9 +1573,13 @@ import { useSettingsStore } from '../stores/settingsStore'
 import truckService from '../services/truckService'
 import qcService from '../services/qcService'
 import { evaluatePaExemption, getAllowedReopenTargets, getReopenMatrix } from '../services/reopenPolicy'
-import { normalizeChecklistItems, buildChecklistPayload, hasChecklistChanged } from '../utils/correctionPayload'
+import { normalizeChecklistItems, buildGbbSamplingPayload, hasSamplingChanged, isCanonicalGbjChecklist, buildGbjCorrectionItems, buildGspCorrectionChecklist } from '../utils/correctionPayload'
+import { GBJ_VEHICLE_CHECKLIST } from '../utils/gbjQcFlow'
 import { getWeightRecordTypes } from '../utils/weightHelpers'
 import { printTruckReport } from '../utils/pdfGenerator'
+import PaCorrectionEditor from './qc/PaCorrectionEditor.vue'
+import { selectCurrentPaByRound, selectEffectiveCurrentPa, sortPaHistory } from '../utils/paCurrentSelector'
+import { formatPaParameters } from '../utils/paParameterDisplay'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -1715,28 +1591,49 @@ const close = () => emit('close')
 
 const detailedTruck = ref(null)
 const gspPaRounds = ref([])
+const paCorrectionPreview = ref(null)
+const paCorrectionPreviewError = ref('')
+const paCorrectionLoading = ref(false)
+const paCorrectionItem = ref(null)
+const paCorrectionDirty = ref(false)
+const paEditorKey = ref(0)
+const paCorrectionRecord = computed(() => selectEffectiveCurrentPa(gspPaRounds.value))
+const paCorrectionAmbiguous = computed(() => selectCurrentPaByRound(gspPaRounds.value).ambiguousRounds.length > 0)
+let paPreviewEpoch = 0
+const invalidatePaCorrectionPreview = () => {
+  paPreviewEpoch += 1
+  paCorrectionPreview.value = null
+  paCorrectionPreviewError.value = ''
+  paCorrectionItem.value = null
+  paCorrectionLoading.value = false
+}
+const previewPaCorrection = async (payload) => {
+  invalidatePaCorrectionPreview()
+  const epoch = paPreviewEpoch
+  paCorrectionLoading.value = true
+  try {
+    const response = await qcService.previewPaCorrection(currentTruck.value.id, payload)
+    if (epoch === paPreviewEpoch) paCorrectionPreview.value = response?.data?.data || response?.data
+  } catch (error) {
+    if (epoch === paPreviewEpoch) paCorrectionPreviewError.value = error?.response?.data?.message || 'Preview koreksi PA gagal. Muat ulang jika revisi berubah.'
+  } finally {
+    if (epoch === paPreviewEpoch) paCorrectionLoading.value = false
+  }
+}
+const setPaCorrectionItem = (item) => { paCorrectionItem.value = item }
 const loadingDetails = ref(false)
 const activePreviewPhoto = ref(null)
 
 const currentTruck = computed(() => detailedTruck.value || props.truck || {})
 
-const latestByTestRound = (records = []) => {
-  if (!Array.isArray(records) || records.length === 0) return null
-  const ordered = [...records].sort((a, b) => {
-    const roundDiff = Number(b?.testRound || 0) - Number(a?.testRound || 0)
-    if (roundDiff !== 0) return roundDiff
-    return String(b?.id || '').localeCompare(String(a?.id || ''))
-  })
-  return ordered[0] || null
-}
+const latestByTestRound = (records = []) => selectEffectiveCurrentPa(records)
 
 const selectDisplayRecord = (records = []) => {
   if (!Array.isArray(records) || records.length === 0) return null
-  const current = records.find(record => record?.isCurrent === true)
-  if (current) return current
-  if (records.some(record => Object.prototype.hasOwnProperty.call(record || {}, 'isCurrent'))) {
-    return null
-  }
+  const current = records.filter(record => record?.isCurrent === true)
+  if (current.length === 1) return current[0]
+  if (current.length > 1) return null
+  if (records.some(record => Object.prototype.hasOwnProperty.call(record || {}, 'isCurrent'))) return null
   return records.length === 1 ? records[0] : null
 }
 
@@ -1841,12 +1738,12 @@ const voidForm = ref({
 })
 
 const normalizeQcResult = (val) => {
-  if (!val) return 'APPROVED'
+  if (val === null || val === undefined || val === '') return null
   const v = String(val).toUpperCase()
   if (v === 'PASS' || v === 'APPROVED' || v === 'ACCEPTED' || v === 'LOKAL' || v === 'OK') return 'APPROVED'
   if (v === 'FAIL' || v === 'REJECT' || v === 'REJECTED') return 'REJECTED'
   if (v.includes('NOTE') || v.includes('CONCESSION') || v.includes('CATATAN')) return 'APPROVED_WITH_NOTE'
-  return 'APPROVED'
+  return null
 }
 
 // Current-only relation queries are the normal production contract. The
@@ -1854,130 +1751,217 @@ const normalizeQcResult = (val) => {
 const selectCurrentRecord = (records = []) => {
   if (!Array.isArray(records) || records.length === 0) return null
   const explicitlyCurrent = records.filter(record => record?.isCurrent === true)
-  if (explicitlyCurrent.length > 0) return explicitlyCurrent[0]
-  if (records.some(record => Object.prototype.hasOwnProperty.call(record || {}, 'isCurrent'))) {
-    return null
-  }
+  if (explicitlyCurrent.length === 1) return explicitlyCurrent[0]
+  if (explicitlyCurrent.length > 1) return null
+  if (records.some(record => Object.prototype.hasOwnProperty.call(record || {}, 'isCurrent'))) return null
   return records.length === 1 ? records[0] : null
 }
 
 const imOriginal = computed(() => {
   const checks = currentTruck.value?.incomingMaterialChecks || []
-  const imCheck = selectCurrentRecord(checks) || {}
-  const fallback = currentTruck.value?.qcDetails || {}
-  const rawRes = imCheck.result || fallback.status || 'APPROVED'
+  const imCheck = selectCurrentRecord(checks)
+  if (!imCheck) {
+    return {
+      id: undefined, rawResult: null, result: null, moisture: null,
+      foreignMatter: null, sampleWeight: null, goodBeanPercentage: null,
+      odor: null, color: null, notes: null,
+    }
+  }
+  const rawRes = imCheck.result ?? null
   return {
-    id: imCheck.id || undefined,
+    id: imCheck.id,
     rawResult: rawRes,
-    result: normalizeQcResult(rawRes),
-    moisture: imCheck.moisture !== undefined && imCheck.moisture !== null ? imCheck.moisture : (fallback.kadarAir !== undefined ? fallback.kadarAir : 0),
-    foreignMatter: imCheck.foreignMatter !== undefined && imCheck.foreignMatter !== null ? imCheck.foreignMatter : (fallback.totalFM !== undefined ? fallback.totalFM : 0),
-    sampleWeight: imCheck.sampleWeight !== undefined && imCheck.sampleWeight !== null ? imCheck.sampleWeight : (fallback.bijiOK !== undefined ? fallback.bijiOK : 0),
-    goodBeanPercentage: imCheck.goodBeanPercentage !== undefined && imCheck.goodBeanPercentage !== null ? imCheck.goodBeanPercentage : 0,
-    odor: (imCheck.odor === 'REJECT' || fallback.bau === 'Abnormal') ? 'REJECT' : 'PASS',
-    color: (imCheck.color === 'REJECT' || fallback.warna === 'Abnormal') ? 'REJECT' : 'PASS',
-    notes: imCheck.notes || imCheck.defectNotes || fallback.note || ''
+    result: rawRes == null ? null : normalizeQcResult(rawRes),
+    moisture: imCheck.moisture ?? null,
+    foreignMatter: imCheck.foreignMatter ?? null,
+    sampleWeight: imCheck.sampleWeight ?? null,
+    goodBeanPercentage: imCheck.goodBeanPercentage ?? null,
+    odor: imCheck.odor ?? null,
+    color: imCheck.color ?? null,
+    notes: imCheck.notes ?? imCheck.defectNotes ?? null,
   }
 })
 
 const qcvOriginal = computed(() => {
-  const checks = currentTruck.value?.qcVehicleChecks || []
-  const qcvCheck = selectCurrentRecord(checks) || {}
-  const fallback = currentTruck.value?.qcDetails || {}
-  const rawRes = qcvCheck.result || 'APPROVED'
-  const normChecklist = normalizeChecklistItems(qcvCheck.checklistItems)
-  const checklistItemsList = normChecklist.items.length > 0 ? normChecklist.items : (parsedChecklist.value?.items || [])
+  const qcvCheck = selectCurrentRecord(currentTruck.value?.qcVehicleChecks || [])
+  const rawResult = qcvCheck?.result ?? null
+  const normalized = normalizeChecklistItems(qcvCheck?.checklistItems)
+  const persistedItems = normalized.items
+  const findItem = (label) => persistedItems.find(item => String(item?.label || '').toLowerCase() === label.toLowerCase())
+  const getStatus = (fieldName, label) => {
+    const item = findItem(label)
+    if (item) return item.ok === true ? 'PASS' : item.ok === false ? 'REJECT' : null
+    const value = qcvCheck?.[fieldName]
+    return value === 'PASS' || value === 'REJECT' ? value : null
+  }
 
-  const getItemData = (label, defaultVal = 'PASS') => {
-    let okStatus = defaultVal
-    let photoUrl = null
-    const found = checklistItemsList.find(i => i.label?.toLowerCase() === label.toLowerCase())
-    if (found) {
-      okStatus = found.ok ? 'PASS' : 'REJECT'
-      photoUrl = found.photo || null
+  return {
+    id: qcvCheck?.id,
+    rawResult,
+    result: normalizeQcResult(rawResult),
+    vehicleOdor: getStatus('vehicleOdor', 'Sampling Bau'),
+    vehicleCondition: getStatus('vehicleCondition', 'Sampling Visual'),
+    moisture: normalized.initialMoisture,
+    vehicleCleanliness: getStatus('vehicleCleanliness', 'Vehicle Cleanliness'),
+    vehicleCleanlinessPhoto: findItem('Vehicle Cleanliness')?.photo ?? null,
+    sealCondition: getStatus('sealCondition', 'Door Seal Intact'),
+    sealConditionPhoto: findItem('Door Seal Intact')?.photo ?? null,
+    odorCheck: getStatus('vehicleOdor', 'Odor/Smell Check'),
+    odorCheckPhoto: findItem('Odor/Smell Check')?.photo ?? null,
+    arrangement: getStatus(null, 'Arrangement'),
+    arrangementPhoto: findItem('Arrangement')?.photo ?? null,
+    pestEvidence: getStatus('pestEvidence', 'Pest/Animal Control'),
+    pestEvidencePhoto: findItem('Pest/Animal Control')?.photo ?? null,
+    foreignObjects: getStatus(null, 'Foreign Objects'),
+    foreignObjectsPhoto: findItem('Foreign Objects')?.photo ?? null,
+    packaging: getStatus(null, 'Packaging Integrity'),
+    packagingPhoto: findItem('Packaging Integrity')?.photo ?? null,
+    coa: getStatus('documentCompleteness', 'CoA Validation'),
+    coaPhoto: findItem('CoA Validation')?.photo ?? null,
+    quantity: getStatus(null, 'Quantity Verification'),
+    quantityPhoto: findItem('Quantity Verification')?.photo ?? null,
+    leakage: getStatus('vehicleCondition', 'Leakage & Condition'),
+    leakagePhoto: findItem('Leakage & Condition')?.photo ?? null,
+    notes: qcvCheck?.notes ?? null,
+    _checklistEntries: persistedItems,
+  }
+})
+
+const gbjCorrectionRecord = computed(() => {
+  if (currentProcessType.value !== 'GBJ') return null
+  return selectCurrentRecord(currentTruck.value?.qcVehicleChecks || [])
+})
+
+const gbjChecklistCorrectionValid = computed(() => isCanonicalGbjChecklist(gbjCorrectionRecord.value?.checklistItems))
+
+const handleGbjCorrectionPhoto = async (event, index) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size === 0 || file.size > 2 * 1024 * 1024) {
+    correctionError.value = 'Bukti GBJ wajib gambar JPEG/PNG/WebP, tidak kosong, maksimal 2 MB.'
+    event.target.value = ''
+    return
+  }
+  try {
+    const photo = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('Bukti foto gagal dibaca.'))
+      reader.readAsDataURL(file)
+    })
+    correctionForm.value.gbjPhotos[index] = photo
+    correctionError.value = null
+  } catch (error) { correctionError.value = error.message }
+}
+
+const gbjCorrectionItems = computed(() => {
+  const record = gbjCorrectionRecord.value
+  if (!record) return []
+  const persistedItems = normalizeChecklistItems(record.checklistItems).items
+  return GBJ_VEHICLE_CHECKLIST.map((label, index) => {
+    const matched = persistedItems.find(item =>
+      String(item?.label || '').trim().toLowerCase() === label.trim().toLowerCase(),
+    )
+    const ok = matched?.ok === true ? true : matched?.ok === false ? false : null
+    return {
+      label,
+      severity: ['CRITICAL', 'CRITICAL', 'CONDITIONAL', 'CRITICAL', 'CONDITIONAL'][index],
+      ok,
+      photo: matched?.photo ?? null,
     }
-    return { ok: okStatus, photo: photoUrl }
-  }
-
-  const cleanliness = getItemData('Vehicle Cleanliness', qcvCheck.vehicleCleanliness === 'REJECT' ? 'REJECT' : 'PASS')
-  const seal = getItemData('Door Seal Intact', qcvCheck.sealCondition === 'REJECT' ? 'REJECT' : 'PASS')
-  const odor = getItemData('Odor/Smell Check', qcvCheck.vehicleOdor === 'REJECT' ? 'REJECT' : 'PASS')
-  const arrangement = getItemData('Arrangement', 'PASS')
-  const pest = getItemData('Pest/Animal Control', qcvCheck.pestEvidence === 'REJECT' ? 'REJECT' : 'PASS')
-  const foreignObjects = getItemData('Foreign Objects', 'PASS')
-  const packaging = getItemData('Packaging Integrity', 'PASS')
-  const coa = getItemData('CoA Validation', qcvCheck.documentCompleteness === 'REJECT' ? 'REJECT' : 'PASS')
-  const quantity = getItemData('Quantity Verification', 'PASS')
-  const leakage = getItemData('Leakage & Condition', qcvCheck.vehicleCondition === 'REJECT' ? 'REJECT' : 'PASS')
-
-  return {
-    id: qcvCheck.id || undefined,
-    rawResult: rawRes,
-    result: normalizeQcResult(rawRes),
-    vehicleOdor: (qcvCheck.vehicleOdor === 'REJECT' || fallback.samplingBau === 'Abnormal' || fallback.bau === 'Abnormal') ? 'REJECT' : 'PASS',
-    vehicleCondition: (qcvCheck.vehicleCondition === 'REJECT' || fallback.samplingVisual === 'Abnormal' || fallback.visual === 'Abnormal') ? 'REJECT' : 'PASS',
-    moisture: normChecklist.initialMoisture !== null ? normChecklist.initialMoisture : (fallback.initialMoisture !== undefined ? fallback.initialMoisture : (fallback.kadarAir !== undefined ? fallback.kadarAir : 0)),
-    vehicleCleanliness: cleanliness.ok,
-    vehicleCleanlinessPhoto: cleanliness.photo,
-    sealCondition: seal.ok,
-    sealConditionPhoto: seal.photo,
-    odorCheck: odor.ok,
-    odorCheckPhoto: odor.photo,
-    arrangement: arrangement.ok,
-    arrangementPhoto: arrangement.photo,
-    pestEvidence: pest.ok,
-    pestEvidencePhoto: pest.photo,
-    foreignObjects: foreignObjects.ok,
-    foreignObjectsPhoto: foreignObjects.photo,
-    packaging: packaging.ok,
-    packagingPhoto: packaging.photo,
-    coa: coa.ok,
-    coaPhoto: coa.photo,
-    quantity: quantity.ok,
-    quantityPhoto: quantity.photo,
-    leakage: leakage.ok,
-    leakagePhoto: leakage.photo,
-    notes: qcvCheck.notes || fallback.samplingNotes || '',
-    _checklistEntries: [
-      { label: 'Vehicle Cleanliness', ok: cleanliness.ok === 'PASS', photo: cleanliness.photo },
-      { label: 'Door Seal Intact', ok: seal.ok === 'PASS', photo: seal.photo },
-      { label: 'Odor/Smell Check', ok: odor.ok === 'PASS', photo: odor.photo },
-      { label: 'Arrangement', ok: arrangement.ok === 'PASS', photo: arrangement.photo },
-      { label: 'Pest/Animal Control', ok: pest.ok === 'PASS', photo: pest.photo },
-      { label: 'Foreign Objects', ok: foreignObjects.ok === 'PASS', photo: foreignObjects.photo },
-      { label: 'Packaging Integrity', ok: packaging.ok === 'PASS', photo: packaging.photo },
-      { label: 'CoA Validation', ok: coa.ok === 'PASS', photo: coa.photo },
-      { label: 'Quantity Verification', ok: quantity.ok === 'PASS', photo: quantity.photo },
-      { label: 'Leakage & Condition', ok: leakage.ok === 'PASS', photo: leakage.photo },
-    ]
-  }
+  })
 })
 
-const whOriginal = computed(() => {
-  const procs = currentTruck.value?.warehouseProcesses || []
-  const whProcess = selectCurrentRecord(procs) || {}
-  const rawCond = whProcess.condition || 'GOOD'
-  let normalizedCond = 'GOOD'
-  if (rawCond === 'DAMAGED') normalizedCond = 'DAMAGED'
-  if (rawCond === 'REJECTED') normalizedCond = 'REJECTED'
-  return {
-    id: whProcess.id || undefined,
-    condition: normalizedCond,
-    remarks: whProcess.remarks || ''
-  }
+const gbjCorrectionUnknownCount = computed(() => {
+  const persistedItems = normalizeChecklistItems(gbjCorrectionRecord.value?.checklistItems).items
+  const knownLabels = new Set(GBJ_VEHICLE_CHECKLIST.map(label => label.trim().toLowerCase()))
+  return persistedItems.filter(item => !knownLabels.has(String(item?.label || '').trim().toLowerCase())).length
 })
+
+const gbjCorrectionHasDeviation = computed(() =>
+  Array.isArray(correctionForm.value.gbjChecklist) && correctionForm.value.gbjChecklist.some(value => value === false),
+)
+
+const gbjCorrectionEffectiveResult = computed(() =>
+  !correctionForm.value.gbjDecisionMode ? '—' : correctionForm.value.gbjDecisionMode === 'REJECTED' ? 'REJECT' : 'PASS',
+)
+
+const gspPreUnloadCorrectionValid = computed(() => {
+  const record = currentWarehouseRecord.value
+  const rawChecklist = record?.checklistItems
+  const rawItems = rawChecklist && typeof rawChecklist === 'object' && !Array.isArray(rawChecklist)
+    ? rawChecklist.items
+    : null
+  const items = gspPreUnloadItems.value
+  const canonicalCodes = canonicalGspChecklistItems.map(item => item.code)
+  const validItems = Array.isArray(rawItems) && rawItems.length === canonicalCodes.length && rawItems.every((item, index) =>
+    item?.code === canonicalCodes[index] &&
+    item?.label === canonicalGspChecklistItems[index].label &&
+    ['OK', 'NOT_OK'].includes(String(item?.result)),
+  )
+  return currentProcessType.value === 'GSP' &&
+    Boolean(record?.id) &&
+    rawChecklist?.version === 'GSP-PREUNLOAD-2026.1' &&
+    validItems &&
+    items.length === canonicalCodes.length
+})
+
+const gspPreUnloadResults = computed(() => correctionForm.value.gspPreUnloadResults || [])
+
+const currentWarehouseRecord = computed(() =>
+  selectCurrentRecord(currentTruck.value?.warehouseProcesses || [])
+)
+
+const currentGrossRecord = computed(() => {
+  const records = Array.isArray(currentTruck.value?.weighbridgeRecords)
+    ? currentTruck.value.weighbridgeRecords
+    : []
+  const matches = records.filter(record =>
+    record?.isCurrent === true && record.type === weightRecordTypes.value.gross,
+  )
+  return matches.length === 1 ? matches[0] : null
+})
+
+const currentTareRecord = computed(() => {
+  const records = Array.isArray(currentTruck.value?.weighbridgeRecords)
+    ? currentTruck.value.weighbridgeRecords
+    : []
+  const matches = records.filter(record =>
+    record?.isCurrent === true && record.type === weightRecordTypes.value.tare,
+  )
+  return matches.length === 1 ? matches[0] : null
+})
+
+const currentGrossWeight = computed(() => currentGrossRecord.value?.weight ?? null)
+const currentTareWeight = computed(() => currentTareRecord.value?.weight ?? null)
 
 const currentActualWeight = computed(() => {
-  const t = currentTruck.value
-  if (!t) return null
-  if (t.actualWeight !== undefined && t.actualWeight !== null) {
-    return t.actualWeight
-  }
-  const currentWh = selectCurrentRecord(t.warehouseProcesses || [])
-  if (currentWh?.actualWeight !== undefined && currentWh?.actualWeight !== null) {
-    return currentWh.actualWeight
-  }
-  return null
+  const value = currentWarehouseRecord.value?.actualWeight
+  return value === undefined || value === null ? null : value
+})
+
+const currentActualQuantity = computed(() => currentWarehouseRecord.value?.actualQuantity ?? null)
+const currentWarehouseUnit = computed(() => currentWarehouseRecord.value?.unit ?? null)
+const gbjWarehouseCorrectionValid = computed(() => currentProcessType.value === 'GBJ' && Boolean(currentWarehouseRecord.value?.id) && ['BAG', 'PALLET', 'ROLL', 'PCS', 'KG', 'LITER'].includes(currentWarehouseUnit.value) && currentActualQuantity.value !== null && Number.isSafeInteger(Number(currentActualQuantity.value)) && Number(currentActualQuantity.value) >= 0)
+
+const currentReceivedQuantity = computed(() => {
+  const value = currentWarehouseRecord.value?.receivedQuantity
+  return value === undefined || value === null || value === '' ? null : String(value)
+})
+
+const currentReceivedUnit = computed(() => {
+  const value = currentWarehouseRecord.value?.receivedUnit
+  return value ? String(value).toUpperCase() : null
+})
+
+const gspReceivingUnitValid = computed(() => {
+  if (currentProcessType.value !== 'GSP' || !currentWarehouseRecord.value) return false
+  const catalogUnit = currentTruck.value?.productCatalog?.receiptUnit
+  return Boolean(
+    catalogUnit &&
+    currentReceivedUnit.value &&
+    String(catalogUnit).toUpperCase() === currentReceivedUnit.value,
+  )
 })
 
 const reopenMatrix = ref(null)
@@ -1996,50 +1980,37 @@ const correctionForm = ref({
   grossWeight: null,
   tareWeight: null,
   actualWeight: null,
+  actualQuantity: null,
+  receivedQuantity: null,
+  receivedUnit: null,
   reasonCategory: '',
   remark: '',
   evidenceUrl: '',
   evidenceAttachmentId: '',
   evidencePhoto: null,
-  imResult: 'APPROVED',
-  imMoisture: 0,
-  imForeignMatter: 0,
-  imSampleWeight: 0,
-  imGoodBeanPercentage: 0,
-  imOdor: 'PASS',
-  imColor: 'PASS',
-  imNotes: '',
-  qcvResult: 'APPROVED',
-  qcvOdor: 'PASS',
-  qcvVisual: 'PASS',
-  qcvMoisture: 0,
-  qcvCleanliness: 'PASS',
-  qcvCleanlinessPhoto: null,
-  qcvSeal: 'PASS',
-  qcvSealPhoto: null,
-  qcvOdorCheck: 'PASS',
-  qcvOdorCheckPhoto: null,
-  qcvArrangement: 'PASS',
-  qcvArrangementPhoto: null,
-  qcvPest: 'PASS',
-  qcvPestPhoto: null,
-  qcvForeignObjects: 'PASS',
-  qcvForeignObjectsPhoto: null,
-  qcvPackaging: 'PASS',
-  qcvPackagingPhoto: null,
-  qcvCoa: 'PASS',
-  qcvCoaPhoto: null,
-  qcvQuantity: 'PASS',
-  qcvQuantityPhoto: null,
-  qcvLeakage: 'PASS',
-  qcvLeakagePhoto: null,
-  qcvNotes: '',
-  whCondition: 'GOOD',
-  whRemarks: '',
+  imResult: null,
+  imMoisture: null,
+  imForeignMatter: null,
+  imSampleWeight: null,
+  imGoodBeanPercentage: null,
+  imOdor: null,
+  imColor: null,
+  imNotes: null,
+  qcvResult: null,
+  qcvOdor: null,
+  qcvVisual: null,
+  qcvMoisture: null,
+  qcvNotes: null,
+  gbjChecklist: [],
+  gbjPhotos: [],
+  gbjDecisionMode: null,
+  gbjDeviationReason: '',
+  gspPreUnloadResults: [],
 })
 
 const currentProcessType = computed(() => {
-  return (currentTruck.value?.processType || 'GBB').toUpperCase()
+  const processType = currentTruck.value?.processType
+  return typeof processType === 'string' ? processType.toUpperCase() : null
 })
 
 const paExemption = computed(() => {
@@ -2201,7 +2172,9 @@ const fetchTruckDetails = async () => {
       try {
         const paRes = await qcService.getProductAnalysisHistory(transactionId)
         if (requestId !== detailRequestSequence.value || String(props.truck?.id) !== String(transactionId)) return
-        gspPaRounds.value = paRes.data?.data || paRes.data || []
+        invalidatePaCorrectionPreview()
+        paCorrectionDirty.value = false
+        gspPaRounds.value = sortPaHistory(paRes.data?.data || paRes.data || [])
       } catch (err) {
         if (requestId === detailRequestSequence.value) {
           console.warn('Gagal memuat riwayat PA:', err)
@@ -2241,20 +2214,12 @@ watch(() => props.truck?.id, (newId, oldId) => {
   }
 })
 
-const handleItemPhotoUpload = (e, fieldKey) => {
-  const file = e.target.files?.[0]
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = (event) => {
-    correctionForm.value[fieldKey] = event.target.result
-  }
-  reader.readAsDataURL(file)
-}
-
 const openCorrectionModal = () => {
+  invalidatePaCorrectionPreview()
+  paCorrectionDirty.value = false
+  paEditorKey.value += 1
   const im = imOriginal.value
   const qcv = qcvOriginal.value
-  const wh = whOriginal.value
 
   const t = currentTruck.value || {}
   correctionForm.value = {
@@ -2269,9 +2234,12 @@ const openCorrectionModal = () => {
     poNumber: t.poNumber || '',
     permitCardNumber: t.permitCardNumber || t.permitCard || '',
     guestIdNumber: t.guestIdNumber || t.guestId || '',
-    grossWeight: t.grossWeight || null,
-    tareWeight: t.tareWeight || null,
+    grossWeight: currentGrossWeight.value,
+    tareWeight: currentTareWeight.value,
     actualWeight: currentActualWeight.value !== null ? currentActualWeight.value : null,
+    actualQuantity: currentActualQuantity.value,
+    receivedQuantity: currentReceivedQuantity.value,
+    receivedUnit: currentReceivedUnit.value,
     reasonCategory: '',
     remark: '',
     evidenceUrl: '',
@@ -2289,29 +2257,12 @@ const openCorrectionModal = () => {
     qcvOdor: qcv.vehicleOdor,
     qcvVisual: qcv.vehicleCondition,
     qcvMoisture: qcv.moisture,
-    qcvCleanliness: qcv.vehicleCleanliness,
-    qcvCleanlinessPhoto: qcv.vehicleCleanlinessPhoto,
-    qcvSeal: qcv.sealCondition,
-    qcvSealPhoto: qcv.sealConditionPhoto,
-    qcvOdorCheck: qcv.odorCheck,
-    qcvOdorCheckPhoto: qcv.odorCheckPhoto,
-    qcvArrangement: qcv.arrangement,
-    qcvArrangementPhoto: qcv.arrangementPhoto,
-    qcvPest: qcv.pestEvidence,
-    qcvPestPhoto: qcv.pestEvidencePhoto,
-    qcvForeignObjects: qcv.foreignObjects,
-    qcvForeignObjectsPhoto: qcv.foreignObjectsPhoto,
-    qcvPackaging: qcv.packaging,
-    qcvPackagingPhoto: qcv.packagingPhoto,
-    qcvCoa: qcv.coa,
-    qcvCoaPhoto: qcv.coaPhoto,
-    qcvQuantity: qcv.quantity,
-    qcvQuantityPhoto: qcv.quantityPhoto,
-    qcvLeakage: qcv.leakage,
-    qcvLeakagePhoto: qcv.leakagePhoto,
     qcvNotes: qcv.notes,
-    whCondition: wh.condition,
-    whRemarks: wh.remarks,
+    gbjChecklist: gbjCorrectionItems.value.map(item => item.ok),
+    gbjDecisionMode: gbjCorrectionRecord.value?.decisionMode ?? null,
+    gbjPhotos: gbjCorrectionItems.value.map(item => item.photo),
+    gbjDeviationReason: gbjCorrectionRecord.value?.deviationReason || '',
+    gspPreUnloadResults: gspPreUnloadItems.value.map(item => item.ok),
   }
   activeCorrectionTab.value = 'WEIGHBRIDGE'
   correctionError.value = null
@@ -2334,6 +2285,14 @@ const submitCorrection = () => {
     correctionError.value = 'Data URI tidak dapat digunakan sebagai bukti resmi. Unggah attachment terverifikasi.'
     return
   }
+  if (paCorrectionLoading.value || (paCorrectionDirty.value && !paCorrectionItem.value)) {
+    correctionError.value = 'Preview dan gunakan koreksi PA terbaru, atau reset pengukuran PA sebelum menyimpan.'
+    return
+  }
+  if (paCorrectionItem.value && correctionForm.value.action === 'REOPEN_WORKFLOW') {
+    correctionError.value = 'Simpan koreksi PA terpisah dari tindakan buka ulang alur.'
+    return
+  }
   if (!correctionForm.value.reasonCategory) {
     correctionError.value = 'Kategori / Alasan koreksi wajib dipilih.'
     return
@@ -2344,7 +2303,9 @@ const submitCorrection = () => {
   }
 
   // Check for sensitive changes (status change or huge weight deviation)
-  const grossDiff = Math.abs((Number(correctionForm.value.grossWeight) || 0) - (Number(currentTruck.value?.grossWeight) || 0))
+  const grossDiff = currentGrossWeight.value === null || correctionForm.value.grossWeight === null
+    ? 0
+    : Math.abs(Number(correctionForm.value.grossWeight) - Number(currentGrossWeight.value))
   if (grossDiff >= 1000 && !showSensitiveConfirm.value) {
     showSensitiveConfirm.value = true
     return
@@ -2372,6 +2333,7 @@ const executeCorrectionSubmission = async () => {
       return
     }
     const items = []
+    if (paCorrectionItem.value) items.push(paCorrectionItem.value)
     if (correctionForm.value.plateNumber !== undefined && correctionForm.value.plateNumber !== (t.plateNumber || '')) {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'plateNumber', newValue: String(correctionForm.value.plateNumber).trim() })
     }
@@ -2400,87 +2362,82 @@ const executeCorrectionSubmission = async () => {
       items.push({ targetModule: 'TRANSACTION', fieldName: 'guestIdNumber', newValue: String(correctionForm.value.guestIdNumber) })
     }
 
-    const wbRecs = t.weighbridgeRecords || []
-    const weightRecordTypes = getWeightRecordTypes(t.processType)
-    const grossRecord = wbRecs.find(record => record.type === weightRecordTypes.gross && record.isCurrent === true)
-    const tareRecord = wbRecs.find(record => record.type === weightRecordTypes.tare && record.isCurrent === true)
-
-    if (correctionForm.value.grossWeight !== null && Number(correctionForm.value.grossWeight) !== Number(t.grossWeight)) {
-      if (grossRecord?.id) {
-        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: grossRecord.id, fieldName: 'weight', newValue: Number(correctionForm.value.grossWeight) })
-      } else {
-        items.push({ targetModule: 'TRANSACTION', fieldName: 'grossWeight', newValue: Number(correctionForm.value.grossWeight) })
-      }
+    if (correctionForm.value.grossWeight !== null && currentGrossRecord.value?.id && Number(correctionForm.value.grossWeight) !== Number(currentGrossWeight.value)) {
+      items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: currentGrossRecord.value.id, fieldName: 'weight', newValue: Number(correctionForm.value.grossWeight) })
     }
 
-    if (correctionForm.value.tareWeight !== null && Number(correctionForm.value.tareWeight) !== Number(t.tareWeight)) {
-      if (tareRecord?.id) {
-        items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: tareRecord.id, fieldName: 'weight', newValue: Number(correctionForm.value.tareWeight) })
-      } else {
-        items.push({ targetModule: 'TRANSACTION', fieldName: 'tareWeight', newValue: Number(correctionForm.value.tareWeight) })
-      }
+    if (correctionForm.value.tareWeight !== null && currentTareRecord.value?.id && Number(correctionForm.value.tareWeight) !== Number(currentTareWeight.value)) {
+      items.push({ targetModule: 'WEIGHBRIDGE', targetRecordId: currentTareRecord.value.id, fieldName: 'weight', newValue: Number(correctionForm.value.tareWeight) })
     }
 
-    if (correctionForm.value.actualWeight !== null && Number(correctionForm.value.actualWeight) !== Number(currentActualWeight.value)) {
-      const whProc = selectCurrentRecord(t.warehouseProcesses || [])
-      if (whProc?.id) {
-        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProc.id, fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
-      } else {
-        items.push({ targetModule: 'TRANSACTION', fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
+    if (currentProcessType.value === 'GSP') {
+      const nextQuantity = correctionForm.value.receivedQuantity
+      if (currentWarehouseRecord.value?.id && gspReceivingUnitValid.value && nextQuantity !== null && nextQuantity !== undefined && String(nextQuantity) !== String(currentReceivedQuantity.value ?? '')) {
+        items.push({ targetModule: 'WAREHOUSE', targetRecordId: currentWarehouseRecord.value.id, fieldName: 'receivedQuantity', newValue: String(nextQuantity).trim() })
       }
+    } else if (currentProcessType.value === 'GBJ' && gbjWarehouseCorrectionValid.value && correctionForm.value.actualQuantity !== null && correctionForm.value.actualQuantity !== '' && Number(correctionForm.value.actualQuantity) !== Number(currentActualQuantity.value)) {
+      items.push({ targetModule: 'WAREHOUSE', targetRecordId: currentWarehouseRecord.value.id, fieldName: 'actualQuantity', newValue: Number(correctionForm.value.actualQuantity) })
+    } else if (currentProcessType.value === 'GBB' && currentWarehouseRecord.value?.id && correctionForm.value.actualWeight !== null && Number(correctionForm.value.actualWeight) !== Number(currentActualWeight.value)) {
+      items.push({ targetModule: 'WAREHOUSE', targetRecordId: currentWarehouseRecord.value.id, fieldName: 'actualWeight', newValue: Number(correctionForm.value.actualWeight) })
     }
 
-    // QC Vehicle mapping — use current revision record for both compare and targetRecordId
     const qcvChecks = t.qcVehicleChecks || []
     const qcvRec = selectCurrentRecord(qcvChecks)
-    if (qcvRec) {
-      if (correctionForm.value.qcvResult !== undefined && correctionForm.value.qcvResult !== qcvOriginal.value.result) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'result', newValue: correctionForm.value.qcvResult })
-      }
-      if (correctionForm.value.qcvOdor !== undefined && correctionForm.value.qcvOdor !== qcvOriginal.value.vehicleOdor) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleOdor', newValue: correctionForm.value.qcvOdor })
-      }
-      if (correctionForm.value.qcvVisual !== undefined && correctionForm.value.qcvVisual !== qcvOriginal.value.vehicleCondition) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleCondition', newValue: correctionForm.value.qcvVisual })
-      }
-      if (correctionForm.value.qcvCleanliness !== undefined && correctionForm.value.qcvCleanliness !== qcvOriginal.value.vehicleCleanliness) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'vehicleCleanliness', newValue: correctionForm.value.qcvCleanliness })
-      }
-      if (correctionForm.value.qcvSeal !== undefined && correctionForm.value.qcvSeal !== qcvOriginal.value.sealCondition) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'sealCondition', newValue: correctionForm.value.qcvSeal })
-      }
-      if (correctionForm.value.qcvPest !== undefined && correctionForm.value.qcvPest !== qcvOriginal.value.pestEvidence) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'pestEvidence', newValue: correctionForm.value.qcvPest })
-      }
-      // qcvMoisture is preserved inside checklistItems.initialMoisture (P0-03 fix)
+    if (qcvRec && currentProcessType.value !== 'GSP') {
       if (correctionForm.value.qcvNotes !== undefined && correctionForm.value.qcvNotes !== qcvOriginal.value.notes) {
         items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'notes', newValue: correctionForm.value.qcvNotes })
       }
-
-      // Build canonical checklistItems JSON preserving { initialMoisture, items } shape (P0-03 fix)
-      const checklistPayload = buildChecklistPayload(correctionForm.value, qcvRec.checklistItems)
-      if (hasChecklistChanged(qcvOriginal.value._checklistEntries, qcvOriginal.value.moisture, checklistPayload, qcvRec.checklistItems)) {
-        items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: checklistPayload })
+      if (currentProcessType.value === 'GBB') {
+        const samplingChanged = ['qcvOdor', 'qcvVisual', 'qcvMoisture'].some((key, index) => {
+          const original = [qcvOriginal.value.vehicleOdor, qcvOriginal.value.vehicleCondition, qcvOriginal.value.moisture][index]
+          return correctionForm.value[key] !== original
+        })
+        if (['APPROVED', 'REJECTED'].includes(correctionForm.value.qcvResult) && correctionForm.value.qcvResult !== qcvOriginal.value.result) {
+          items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'result', newValue: correctionForm.value.qcvResult === 'APPROVED' ? 'PASS' : 'REJECT' })
+        }
+        for (const [formKey, fieldName, original] of [
+          ['qcvOdor', 'vehicleOdor', qcvOriginal.value.vehicleOdor],
+          ['qcvVisual', 'vehicleCondition', qcvOriginal.value.vehicleCondition],
+        ]) {
+          if (['PASS', 'REJECT'].includes(correctionForm.value[formKey]) && correctionForm.value[formKey] !== original) {
+            items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName, newValue: correctionForm.value[formKey] })
+          }
+        }
+        if (samplingChanged) {
+          const samplingPayload = buildGbbSamplingPayload(correctionForm.value, qcvRec.checklistItems)
+          if (samplingPayload && hasSamplingChanged(qcvRec.checklistItems, samplingPayload)) {
+            items.push({ targetModule: 'QC_VEHICLE', targetRecordId: qcvRec.id, fieldName: 'checklistItems', newValue: samplingPayload })
+          }
+        }
+      }
+      if (currentProcessType.value === 'GBJ' && gbjChecklistCorrectionValid.value) {
+        items.push(...buildGbjCorrectionItems(qcvRec, correctionForm.value))
+      }
+    }
+    if (currentProcessType.value === 'GSP' && gspPreUnloadCorrectionValid.value) {
+      const correctedChecklist = buildGspCorrectionChecklist(currentWarehouseRecord.value.checklistItems, correctionForm.value.gspPreUnloadResults)
+      if (correctedChecklist) {
+        items.push({ targetModule: 'WAREHOUSE', targetRecordId: currentWarehouseRecord.value.id, fieldName: 'checklistItems', newValue: correctedChecklist })
       }
     }
 
     // Incoming Material mapping — use current revision record
     const imChecks = t.incomingMaterialChecks || []
     const imRec = selectCurrentRecord(imChecks)
-    if (imRec) {
+    if (currentProcessType.value === 'GBB' && imRec) {
       if (correctionForm.value.imResult !== undefined && correctionForm.value.imResult !== imOriginal.value.result) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'result', newValue: correctionForm.value.imResult })
       }
-      if (correctionForm.value.imMoisture !== null && correctionForm.value.imMoisture !== undefined && Number(correctionForm.value.imMoisture) !== Number(imOriginal.value.moisture)) {
+      if (correctionForm.value.imMoisture !== null && correctionForm.value.imMoisture !== undefined && (imOriginal.value.moisture === null || Number(correctionForm.value.imMoisture) !== Number(imOriginal.value.moisture))) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'moisture', newValue: Number(correctionForm.value.imMoisture) })
       }
-      if (correctionForm.value.imForeignMatter !== null && correctionForm.value.imForeignMatter !== undefined && Number(correctionForm.value.imForeignMatter) !== Number(imOriginal.value.foreignMatter)) {
+      if (correctionForm.value.imForeignMatter !== null && correctionForm.value.imForeignMatter !== undefined && (imOriginal.value.foreignMatter === null || Number(correctionForm.value.imForeignMatter) !== Number(imOriginal.value.foreignMatter))) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'foreignMatter', newValue: Number(correctionForm.value.imForeignMatter) })
       }
-      if (correctionForm.value.imSampleWeight !== null && correctionForm.value.imSampleWeight !== undefined && Number(correctionForm.value.imSampleWeight) !== Number(imOriginal.value.sampleWeight)) {
+      if (correctionForm.value.imSampleWeight !== null && correctionForm.value.imSampleWeight !== undefined && (imOriginal.value.sampleWeight === null || Number(correctionForm.value.imSampleWeight) !== Number(imOriginal.value.sampleWeight))) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'sampleWeight', newValue: Number(correctionForm.value.imSampleWeight) })
       }
-      if (correctionForm.value.imGoodBeanPercentage !== null && correctionForm.value.imGoodBeanPercentage !== undefined && Number(correctionForm.value.imGoodBeanPercentage) !== Number(imOriginal.value.goodBeanPercentage)) {
+      if (correctionForm.value.imGoodBeanPercentage !== null && correctionForm.value.imGoodBeanPercentage !== undefined && (imOriginal.value.goodBeanPercentage === null || Number(correctionForm.value.imGoodBeanPercentage) !== Number(imOriginal.value.goodBeanPercentage))) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'goodBeanPercentage', newValue: Number(correctionForm.value.imGoodBeanPercentage) })
       }
       if (correctionForm.value.imOdor !== undefined && correctionForm.value.imOdor !== imOriginal.value.odor) {
@@ -2491,18 +2448,6 @@ const executeCorrectionSubmission = async () => {
       }
       if (correctionForm.value.imNotes !== undefined && correctionForm.value.imNotes !== imOriginal.value.notes) {
         items.push({ targetModule: 'INCOMING_MATERIAL', targetRecordId: imRec.id, fieldName: 'notes', newValue: correctionForm.value.imNotes })
-      }
-    }
-
-    // Warehouse Process mapping — use current revision record
-    const whProcs = t.warehouseProcesses || []
-    const whProcRec = selectCurrentRecord(whProcs)
-    if (whProcRec) {
-      if (correctionForm.value.whCondition !== undefined && correctionForm.value.whCondition !== whOriginal.value.condition) {
-        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'condition', newValue: correctionForm.value.whCondition })
-      }
-      if (correctionForm.value.whRemarks !== undefined && correctionForm.value.whRemarks !== whOriginal.value.remarks) {
-        items.push({ targetModule: 'WAREHOUSE', targetRecordId: whProcRec.id, fieldName: 'remarks', newValue: correctionForm.value.whRemarks })
       }
     }
 
@@ -2722,7 +2667,7 @@ const isInitialSamplingRejected = computed(() => {
   if (t.status === 'QC_VEHICLE_REJECTED') return true;
   if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
     const check = selectDisplayRecord(t.qcVehicleChecks);
-    if (check.result === 'REJECT' || check.result === 'REJECTED') return true;
+    if (check?.result === 'REJECT' || check?.result === 'REJECTED') return true;
   }
   if (t.qcSamplingDetails?.status === 'REJECTED' || t.qcSamplingDetails?.status === 'REJECT') return true;
   if (t.qcDetails && (t.qcDetails.status === 'REJECT' || t.qcDetails.status === 'REJECTED') && t.qcDetails.kadarAir === undefined) {
@@ -2790,32 +2735,33 @@ const initialSamplingDetails = computed(() => {
   if (!t) return null
   if (t.processType !== 'GBB' && t.processType !== 'GSP') return null;
 
-  let pic = 'QC Inspector'
-  let status = 'APPROVED'
-  let note = ''
-  let bau = 'PASS'
-  let visual = 'PASS'
+  let pic = null
+  let status = null
+  let note = null
+  let bau = null
+  let visual = null
   let moisture = null
 
   if (t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
     const check = selectDisplayRecord(t.qcVehicleChecks);
-    pic = check.checkedBy?.name || check.inspector || 'QC Inspector'
-    status = check.result === 'PASS' || check.result === 'APPROVED' ? 'APPROVED' : check.result === 'REJECT' || check.result === 'REJECTED' ? 'REJECTED' : check.result || 'APPROVED'
-    note = check.notes || check.notesStr || ''
-    bau = check.vehicleOdor || 'PASS'
-    visual = check.vehicleCondition || 'PASS'
+    if (!check) return null
+    pic = check.checkedBy?.name || check.inspector || null
+    status = check.result === 'PASS' || check.result === 'APPROVED' ? 'APPROVED' : check.result === 'REJECT' || check.result === 'REJECTED' ? 'REJECTED' : check.result || null
+    note = check.notes ?? check.notesStr ?? null
+    bau = check.vehicleOdor ?? null
+    visual = check.vehicleCondition ?? null
     moisture = extractMoistureValue(check) ?? extractMoistureValue(t)
   } else if (t.qcSamplingDetails) {
     return t.qcSamplingDetails;
   } else if (t.qcDetails) {
-    pic = t.qcDetails.pic || 'QC Inspector'
-    status = (t.qcDetails.status === 'REJECT' || t.qcDetails.status === 'REJECTED' || t.status === 'QC_VEHICLE_REJECTED') ? 'REJECTED' : 'APPROVED'
-    note = t.qcDetails.note || t.qcDetails.samplingNotes || ''
-    bau = t.qcDetails.samplingBau || t.qcDetails.bau || 'PASS'
-    visual = t.qcDetails.samplingVisual || t.qcDetails.visual || 'PASS'
+    pic = t.qcDetails.pic ?? null
+    status = (t.qcDetails.status === 'REJECT' || t.qcDetails.status === 'REJECTED' || t.status === 'QC_VEHICLE_REJECTED') ? 'REJECTED' : t.qcDetails.status ?? null
+    note = t.qcDetails.note ?? t.qcDetails.samplingNotes ?? null
+    bau = t.qcDetails.samplingBau ?? t.qcDetails.bau ?? null
+    visual = t.qcDetails.samplingVisual ?? t.qcDetails.visual ?? null
     moisture = extractMoistureValue(t.qcDetails) ?? extractMoistureValue(t)
   } else if (t.status === 'QC_VEHICLE_REJECTED' || t.status === 'QC_VEHICLE_PASSED' || t.status === 'QC_VEHICLE_IN_PROGRESS') {
-    status = t.status === 'QC_VEHICLE_REJECTED' ? 'REJECTED' : 'APPROVED'
+    status = t.status === 'QC_VEHICLE_REJECTED' ? 'REJECTED' : t.status === 'QC_VEHICLE_PASSED' ? 'APPROVED' : null
     moisture = extractMoistureValue(t)
   } else {
     return null
@@ -2832,16 +2778,18 @@ const initialSamplingMetrics = computed(() => {
   if (!initialSamplingDetails.value) return []
   const d = initialSamplingDetails.value
 
-  const odorPass = d.bau === 'PASS' || d.bau === 'Normal' || d.bau === 'COMPLIANT' || d.bau === 'OK'
-  const visualPass = d.visual === 'PASS' || d.visual === 'Normal' || d.visual === 'COMPLIANT' || d.visual === 'OK'
+  const odorKnown = d.bau !== null && d.bau !== undefined && d.bau !== ''
+  const visualKnown = d.visual !== null && d.visual !== undefined && d.visual !== ''
+  const odorPass = odorKnown && (d.bau === 'PASS' || d.bau === 'Normal' || d.bau === 'COMPLIANT' || d.bau === 'OK')
+  const visualPass = visualKnown && (d.visual === 'PASS' || d.visual === 'Normal' || d.visual === 'COMPLIANT' || d.visual === 'OK')
 
   const extractedM = d.moisture !== null && d.moisture !== undefined ? Number(d.moisture) : extractMoistureValue(currentTruck.value)
-  const moistureVal = (extractedM !== undefined && extractedM !== null && !isNaN(extractedM)) ? `${Number(extractedM).toFixed(2)}%` : '0.00%'
+  const moistureVal = (extractedM !== undefined && extractedM !== null && !isNaN(extractedM)) ? `${Number(extractedM).toFixed(2)}%` : '—'
 
   return [
-    { label: 'MOISTURE', value: moistureVal, isOk: true, isText: false },
-    { label: 'VISUAL', value: visualPass ? 'OK' : 'NOT OK', isOk: visualPass, isText: true },
-    { label: 'ODOR', value: odorPass ? 'OK' : 'NOT OK', isOk: odorPass, isText: true },
+    { label: 'MOISTURE', value: moistureVal, isOk: extractedM !== null && extractedM !== undefined && !isNaN(extractedM), isText: false },
+    { label: 'VISUAL', value: !visualKnown ? '—' : visualPass ? 'OK' : 'NOT OK', isOk: visualKnown ? visualPass : null, isText: true },
+    { label: 'ODOR', value: !odorKnown ? '—' : odorPass ? 'OK' : 'NOT OK', isOk: odorKnown ? odorPass : null, isText: true },
   ]
 })
 
@@ -2856,6 +2804,7 @@ const qcLabDetails = computed(() => {
 
   if (t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0) {
     const check = selectDisplayRecord(t.incomingMaterialChecks);
+    if (!check) return null
     return {
       pic: check.checkedBy?.name || 'QC Lab Inspector',
       status: check.result,
@@ -2882,6 +2831,7 @@ const qcDetails = computed(() => {
 
   if (currentTruck.value?.incomingMaterialChecks && currentTruck.value.incomingMaterialChecks.length > 0) {
     const check = selectDisplayRecord(currentTruck.value.incomingMaterialChecks);
+    if (!check) return null
     relationDetails = {
       pic: check.checkedBy?.name || 'QC Inspector',
       status: check.result,
@@ -2896,6 +2846,7 @@ const qcDetails = computed(() => {
   }
   else if (currentTruck.value?.qcVehicleChecks && currentTruck.value.qcVehicleChecks.length > 0) {
     const check = selectDisplayRecord(currentTruck.value.qcVehicleChecks);
+    if (!check) return null
     relationDetails = {
       pic: check.checkedBy?.name || 'QC Inspector',
       status: check.result,
@@ -2953,6 +2904,7 @@ const qcMetrics = computed(() => {
   // If it's a vehicle check (GBJ)
   if (currentTruck.value?.processType === 'GBJ' && currentTruck.value.qcVehicleChecks && currentTruck.value.qcVehicleChecks.length > 0) {
     const check = selectDisplayRecord(currentTruck.value.qcVehicleChecks);
+    if (!check) return metrics
     if (check.vehicleCleanliness) metrics.push({ label: 'Cleanliness', value: check.vehicleCleanliness })
     if (check.vehicleOdor) metrics.push({ label: 'Odor', value: check.vehicleOdor })
     if (check.pestEvidence) metrics.push({ label: 'Pest Evidence', value: check.pestEvidence })
@@ -2971,6 +2923,7 @@ const parsedChecklist = computed(() => {
   // If GBJ, populate checklist from qcVehicleChecks
   if (t.processType === 'GBJ' && t.qcVehicleChecks && t.qcVehicleChecks.length > 0) {
     const check = selectDisplayRecord(currentTruck.value.qcVehicleChecks);
+    if (!check) return null
     const norm = normalizeChecklistItems(check.checklistItems);
     let items = norm.items;
 
@@ -2996,7 +2949,7 @@ const parsedChecklist = computed(() => {
         items.push({ label: 'Leakage & Condition', ok: check.vehicleCondition === 'PASS' })
       }
     }
-    const hasIssue = check.result === 'REJECT' || check.hasDeviation === true || items.some(i => !i.ok)
+    const hasIssue = check.result === 'REJECT' || check.hasDeviation === true || items.some(i => i.ok === false)
     return {
       hasIssue,
       samplings: [],
@@ -3096,8 +3049,8 @@ const checklistStatusInfo = computed(() => {
   }
 
   const hasIssue = checklist?.hasIssue ||
-                   checklist?.samplings?.some(s => !s.compliant) ||
-                   checklist?.items?.some(i => !i.ok)
+                   checklist?.samplings?.some(s => s.compliant === false) ||
+                   checklist?.items?.some(i => i.ok === false)
 
   if (hasIssue) {
     return {
@@ -3185,22 +3138,22 @@ const isRejected = computed(() => {
 const warehouseRealization = computed(() => {
   const t = currentTruck.value
   if (!t) return null
-  if (isRejected.value) return 0
+  if (isRejected.value) return null
   if (t.processType === 'GBB') {
     return t.nettoTimbanganRoll !== undefined && t.nettoTimbanganRoll !== null ? t.nettoTimbanganRoll : (t.weights?.nettoTimbanganRoll !== undefined && t.weights?.nettoTimbanganRoll !== null ? t.weights.nettoTimbanganRoll : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
   }
   if (t.processType === 'GSP') {
-    if (t.receivedQuantity !== undefined && t.receivedQuantity !== null && t.receivedQuantity !== '') {
-      return Number(t.receivedQuantity)
-    }
-    const whProcess = selectDisplayRecord(t.warehouseProcesses)
+    const whProcess = currentWarehouseRecord.value
     if (whProcess?.receivedQuantity !== undefined && whProcess?.receivedQuantity !== null && whProcess?.receivedQuantity !== '') {
-      return Number(whProcess.receivedQuantity)
+      return whProcess.receivedQuantity
     }
-    return t.jumlahNettoGSP !== undefined && t.jumlahNettoGSP !== null ? t.jumlahNettoGSP : (t.weights?.jumlahNettoGSP !== undefined && t.weights?.jumlahNettoGSP !== null ? t.weights.jumlahNettoGSP : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
+    return null
   }
   if (t.processType === 'GBJ') {
-    return t.nettoInstantCoffee !== undefined && t.nettoInstantCoffee !== null ? t.nettoInstantCoffee : (t.weights?.nettoInstantCoffee !== undefined && t.weights?.nettoInstantCoffee !== null ? t.weights.nettoInstantCoffee : (t.actualWeight !== undefined && t.actualWeight !== null ? t.actualWeight : (t.weights?.rollWeight !== undefined && t.weights?.rollWeight !== null ? t.weights.rollWeight : (t.rollWeight !== undefined && t.rollWeight !== null ? t.rollWeight : null))))
+    const whProcess = currentWarehouseRecord.value
+    return whProcess?.actualQuantity !== undefined && whProcess?.actualQuantity !== null
+      ? whProcess.actualQuantity
+      : null
   }
   return null
 })
@@ -3210,25 +3163,16 @@ const isGspProcess = computed(() => {
   return p === 'GSP'
 })
 
-const gspCommodityName = computed(() => {
-  const t = currentTruck.value || {}
-  return (t.cargoSubType || t.cargoType || t.productCatalog?.name || '').toLowerCase()
-})
-
 const gspReceiptUnit = computed(() => {
-  const t = currentTruck.value || {}
-  if (t.receiptUnit) return String(t.receiptUnit).toUpperCase()
-  const whProcess = selectDisplayRecord(t.warehouseProcesses)
-  if (whProcess?.receivedUnit) return String(whProcess.receivedUnit).toUpperCase()
-  if (!isGspProcess.value) return 'KG'
-  const name = gspCommodityName.value
-  if (name.includes('coal') || name.includes('batubara')) return 'KG'
-  if (name.includes('solar') || name.includes('pac') || name.includes('rapid') || name.includes('chemical')) return 'LITER'
-  return 'KG'
+  const catalogUnit = currentTruck.value?.productCatalog?.receiptUnit
+  if (catalogUnit) return String(catalogUnit).toUpperCase()
+  return currentReceivedUnit.value
 })
 
 const isUomMismatch = computed(() => {
-  return isGspProcess.value && gspReceiptUnit.value === 'LITER'
+  if (!isGspProcess.value) return false
+  const catalogUnit = currentTruck.value?.productCatalog?.receiptUnit
+  return !catalogUnit || !currentReceivedUnit.value || String(catalogUnit).toUpperCase() !== currentReceivedUnit.value
 })
 
 const formattedRealizationDisplay = computed(() => {
@@ -3316,24 +3260,33 @@ const toleranceLimit = computed(() => {
   return netWeightVarianceObj.value ? netWeightVarianceObj.value.toleranceValue : 2.0
 })
 
+const correctionWeightValue = (value) => {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null
+}
+
 const correctionNetWeight = computed(() => {
-  return Math.max(0, (Number(correctionForm.value.grossWeight) || 0) - (Number(correctionForm.value.tareWeight) || 0))
+  const gross = correctionWeightValue(correctionForm.value.grossWeight)
+  const tare = correctionWeightValue(correctionForm.value.tareWeight)
+  return gross === null || tare === null || gross < tare ? null : gross - tare
 })
 
 const correctionDeviationKg = computed(() => {
   const net = correctionNetWeight.value
-  const act = Number(correctionForm.value.actualWeight) || 0
-  return Math.abs(net - act)
+  const act = correctionWeightValue(correctionForm.value.actualWeight)
+  return net === null || act === null ? null : Math.abs(net - act)
 })
 
 const correctionDeviationPct = computed(() => {
   const net = correctionNetWeight.value
-  const act = Number(correctionForm.value.actualWeight) || 0
-  if (net <= 0 || act <= 0) return null
+  const act = correctionWeightValue(correctionForm.value.actualWeight)
+  if (net === null || net <= 0 || act === null || act <= 0) return null
   return Math.abs(((act / net) * 100) - 100)
 })
 
 const isCorrectionDeviationExceeded = computed(() => {
+  if (currentProcessType.value !== 'GBB') return false
   if (isUomMismatch.value) return false
   if (correctionDeviationPct.value === null) return false
   return correctionDeviationPct.value > toleranceLimit.value
@@ -3621,12 +3574,19 @@ const gspPreUnloadItems = computed(() => {
 
   return canonicalGspChecklistItems.map(canonical => {
     const matched = items.find(i => (i.code && i.code === canonical.code) || (i.label && i.label.toLowerCase() === canonical.label.toLowerCase()))
-    const isOk = matched ? (matched.result === 'OK' || matched.ok === true || matched.result === 'PASS') : false
+    const rawResult = String(matched?.result || '').toUpperCase()
+    const isOk = matched
+      ? rawResult === 'OK' || rawResult === 'PASS' || matched.ok === true
+      : null
+    const isNotOk = matched
+      ? rawResult === 'NOT_OK' || rawResult === 'NOT OK' || rawResult === 'REJECT' || rawResult === 'FAIL' || matched.ok === false
+      : false
+    const resolved = isNotOk ? false : isOk ? true : null
     return {
       code: canonical.code,
       label: canonical.label,
-      ok: isOk,
-      result: isOk ? 'OK' : 'NOT OK',
+      ok: resolved,
+      result: resolved === true ? 'OK' : resolved === false ? 'NOT OK' : null,
       notes: matched?.notes || matched?.note || '',
       photoUrl: matched?.photoUrl || null
     }
@@ -3641,7 +3601,13 @@ const gspPreUnloadStatus = computed(() => {
       badgeClass: 'bg-slate-100 text-slate-600 border border-slate-200'
     }
   }
-  const allOk = items.every(i => i.ok)
+  if (items.some(i => i.ok === null)) {
+    return {
+      label: 'DATA BELUM LENGKAP',
+      badgeClass: 'bg-slate-100 text-slate-600 border border-slate-200'
+    }
+  }
+  const allOk = items.every(i => i.ok === true)
   if (allOk) {
     return {
       label: 'COMPLIANT (9/9)',
@@ -3655,9 +3621,13 @@ const gspPreUnloadStatus = computed(() => {
 })
 
 const latestDisposedPa = computed(() => {
-  if (!gspPaRounds.value || gspPaRounds.value.length === 0) return null
-  const withDisp = gspPaRounds.value.filter(r => r.dispositionAction)
-  return latestByTestRound(withDisp)
+  const current = latestByTestRound(gspPaRounds.value)
+  return current?.dispositionAction ? current : null
+})
+
+const latestPaStatusLabel = computed(() => {
+  const latest = latestByTestRound(gspPaRounds.value)
+  return latest ? getPaStatusLabel(latest.status || latest.result) : null
 })
 
 const hasGspDisposition = computed(() => {
@@ -3694,176 +3664,10 @@ const getDispositionActionLabel = (action) => {
 }
 
 const getFormattedPaParameters = (round) => {
-  if (!round || !round.parameters) return []
-  const params = round.parameters
-  const pName = (round.productName || '').toLowerCase()
-  const pCat = (round.productCategory || '').toLowerCase()
-  const list = []
-
-  // Extract nested or flat parameters safely
-  const sensoryVisual = params.visual || params.sensory?.visual
-  const sensoryForeign = params.foreignMatters || params.sensory?.foreignMatters
-  const sensoryPkg = params.packagingCondition || params.packagingLabel || params.sensory?.packagingLabel
-  const rawDensity = params.density !== undefined ? params.density : params.specificGravity
-  const rawPh = params.ph
-
-  // 1. PAC (Poly Aluminium Chloride)
-  if (pName.includes('pac') || pCat.includes('utl') || (params.al2o3Content !== undefined)) {
-    // 1) Visual
-    if (sensoryVisual !== undefined) {
-      const v = String(sensoryVisual)
-      const ok = v === 'Kuning' || v === 'Coklat Jernih'
-      list.push({ label: 'Kondisi Visual', value: v, specText: 'Kuning / Coklat Jernih', isOk: ok })
-    }
-    // 2) Foreign matters
-    if (sensoryForeign !== undefined) {
-      const v = String(sensoryForeign)
-      const ok = v === 'Tidak ada kontaminasi'
-      list.push({ label: 'Bahan Pengotor', value: v, specText: 'Tidak ada kontaminasi', isOk: ok })
-    }
-    // 3) Packaging condition / label
-    if (sensoryPkg !== undefined) {
-      const v = String(sensoryPkg)
-      const ok = v === 'Kemasan & label tidak rusak'
-      list.push({ label: 'Integritas Kemasan/Label', value: v, specText: 'Tidak rusak', isOk: ok })
-    }
-    // 4) pH (3.50 - 5.00)
-    if (rawPh !== undefined && rawPh !== null) {
-      const v = Number(rawPh)
-      const ok = v >= 3.50 && v <= 5.00
-      list.push({ label: 'pH', value: v.toFixed(2), specText: '3.50 - 5.00', isOk: ok })
-    }
-    // 5) Density (1.170 - 1.260 g/mL)
-    if (rawDensity !== undefined && rawDensity !== null) {
-      const v = Number(rawDensity)
-      const ok = v >= 1.170 && v <= 1.260
-      list.push({ label: 'Density', value: `${v.toFixed(3)} g/mL`, specText: '1.170 - 1.260 g/mL', isOk: ok })
-    }
-    // Extra legacy PAC params if present
-    if (params.al2o3Content !== undefined) {
-      const v = Number(params.al2o3Content)
-      const ok = v >= 10.0 && v <= 11.5
-      list.push({ label: 'Al2O3 Content', value: `${v.toFixed(2)}%`, specText: '10.00 - 11.50%', isOk: ok })
-    }
-    if (params.basicity !== undefined) {
-      const v = Number(params.basicity)
-      const ok = v >= 40.0 && v <= 60.0
-      list.push({ label: 'Basicity', value: `${v.toFixed(2)}%`, specText: '40.00 - 60.00%', isOk: ok })
-    }
-  }
-  // 2. Rapid Klen / PRO-CIP B++ / Chemical PROD
-  else if (pName.includes('rapid') || pName.includes('cip') || pCat.includes('prod') || (params.alkalinityNa2O !== undefined) || (params.alkalinity !== undefined)) {
-    // 1) Visual
-    if (sensoryVisual !== undefined) {
-      const v = String(sensoryVisual)
-      const ok = v === 'Jernih' || v === 'Pass' || v === 'Clear Liquid'
-      list.push({ label: 'Kondisi Visual', value: v, specText: 'Jernih', isOk: ok })
-    }
-    // 2) Foreign matters
-    if (sensoryForeign !== undefined) {
-      const v = String(sensoryForeign)
-      const ok = v === 'Tidak ada kontaminasi'
-      list.push({ label: 'Bahan Pengotor', value: v, specText: 'Tidak ada kontaminasi', isOk: ok })
-    }
-    // 3) Packaging condition / label
-    if (sensoryPkg !== undefined) {
-      const v = String(sensoryPkg)
-      const ok = v === 'Kemasan & label tidak rusak'
-      list.push({ label: 'Integritas Kemasan', value: v, specText: 'Tidak rusak', isOk: ok })
-    }
-    // 4) Na2O (> 35.00%)
-    if (params.alkalinityNa2O !== undefined && params.alkalinityNa2O !== null) {
-      const v = Number(params.alkalinityNa2O)
-      const ok = v > 35.00
-      list.push({ label: 'Alkalinitas (Na₂O)', value: `${v.toFixed(2)}%`, specText: '> 35.00%', isOk: ok })
-    } else if (params.alkalinity !== undefined && params.alkalinity !== null) {
-      const v = Number(params.alkalinity)
-      const ok = v >= 18.0 && v <= 24.0
-      list.push({ label: 'Total Alkalinity', value: `${v.toFixed(2)}%`, specText: '18.00 - 24.00%', isOk: ok })
-    }
-    // 5) NaOH (> 45.16%)
-    if (params.alkalinityNaOH !== undefined && params.alkalinityNaOH !== null) {
-      const v = Number(params.alkalinityNaOH)
-      const ok = v > 45.16
-      list.push({ label: 'Alkalinitas (NaOH)', value: `${v.toFixed(2)}%`, specText: '> 45.16%', isOk: ok })
-    }
-    // 6) pH (> 12.000)
-    if (rawPh !== undefined && rawPh !== null) {
-      const v = Number(rawPh)
-      const ok = v > 12.000
-      list.push({ label: 'pH', value: v.toFixed(3), specText: '> 12.000', isOk: ok })
-    }
-    // 7) Density (> 1.400 g/mL)
-    if (rawDensity !== undefined && rawDensity !== null) {
-      const v = Number(rawDensity)
-      const ok = v > 1.400
-      list.push({ label: 'Density', value: `${v.toFixed(3)} g/mL`, specText: '> 1.400 g/mL', isOk: ok })
-    }
-  }
-  // 3. Batubara (Coal)
-  else if (pName.includes('batu') || pName.includes('coal') || pCat.includes('coal') || (params.targetCalorie !== undefined) || (params.calorieBand !== undefined) || (params.grossCalorificValue !== undefined)) {
-    const knd = params.kondisi || params.visual?.kondisi
-    if (knd !== undefined) {
-      const ok = knd === 'Kering (Tidak Basah)'
-      list.push({ label: 'Kondisi Batubara', value: knd, specText: 'Kering (Tidak Basah)', isOk: ok })
-    }
-    const wrn = params.warna || params.visual?.warna
-    if (wrn !== undefined) {
-      const ok = ['Hitam', 'Hitam Kecoklatan', 'Coklat'].includes(wrn)
-      list.push({ label: 'Warna Batubara', value: wrn, specText: 'Hitam / Kecoklatan', isOk: ok })
-    }
-    const rnk = params.levelRank || params.visual?.levelRank
-    if (rnk !== undefined) {
-      const ok = ['High Rank Coal', 'Medium Rank Coal', 'Low Rank Coal'].includes(rnk)
-      list.push({ label: 'Level Rank', value: rnk, specText: 'High/Med/Low Rank', isOk: ok })
-    }
-    const klp = params.kilap || params.visual?.kilap
-    if (klp !== undefined) {
-      const ok = ['Hitam Mengkilap', 'Hitam Kecoklatan', 'Mudah Lapuk'].includes(klp)
-      list.push({ label: 'Kilap Batubara', value: klp, specText: 'Mengkilap/Kecoklatan', isOk: ok })
-    }
-    const bpn = params.bahanPengotor || params.visual?.bahanPengotor
-    if (bpn !== undefined) {
-      const ok = bpn === 'Tidak ada kontaminasi batuan maupun tanah'
-      list.push({ label: 'Bahan Pengotor', value: bpn, specText: 'Bebas kontaminasi', isOk: ok })
-    }
-    const cal = params.targetCalorie || params.calorieBand
-    if (cal !== undefined) {
-      const calLabel = cal === 'COAL_GT_6000' ? '> 6000 kcal/kg' : cal === 'COAL_5600_6000' ? '5600 - 6000 kcal/kg' : String(cal)
-      list.push({ label: 'Target Kalori / Band', value: calLabel, specText: 'Sesuai Target', isOk: true })
-    }
-    if (params.totalMoisture !== undefined && params.totalMoisture !== null) {
-      const v = Number(params.totalMoisture)
-      const maxTm = cal === 'COAL_GT_6000' ? 25.00 : 33.00
-      const ok = v <= maxTm
-      list.push({ label: 'Total Moisture (TM)', value: `${v.toFixed(2)}%`, specText: `≤ ${maxTm.toFixed(2)}%`, isOk: ok })
-    }
-    // Keputusan Ronde
-    const rVerdict = round.status || round.result || 'PASS'
-    list.push({ label: 'Keputusan Ronde', value: String(rVerdict).toUpperCase(), specText: 'PASS / RELEASE', isOk: String(rVerdict).toUpperCase() === 'PASS' })
-
-    // Legacy Coal params if present
-    if (params.grossCalorificValue !== undefined) {
-      const v = Number(params.grossCalorificValue)
-      const ok = v >= 3800
-      list.push({ label: 'Calorific Value (GCV)', value: `${v} kcal/kg`, specText: '≥ 3800 kcal/kg', isOk: ok })
-    }
-    if (params.ashContent !== undefined) {
-      const v = Number(params.ashContent)
-      const ok = v <= 8.00
-      list.push({ label: 'Ash Content', value: `${v.toFixed(2)}%`, specText: '≤ 8.00%', isOk: ok })
-    }
-  }
-  // 4. Fallback for any other product
-  else {
-    for (const [k, v] of Object.entries(params)) {
-      if (k === 'notes' || k === 'id' || typeof v === 'object') continue
-      list.push({ label: k, value: String(v), specText: 'Parameter', isOk: true })
-    }
-  }
-
-  return list
+  return formatPaParameters(round)
 }
+
+
 </script>
 
 <style scoped>

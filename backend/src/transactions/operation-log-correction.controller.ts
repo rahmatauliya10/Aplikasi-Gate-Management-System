@@ -21,7 +21,10 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { OperationLogCorrectionService } from './operation-log-correction.service';
-import { CreateOperationLogCorrectionDto } from './dto/create-operation-log-correction.dto';
+import {
+  CreateOperationLogCorrectionDto,
+  PreviewPaCorrectionDto,
+} from './dto/create-operation-log-correction.dto';
 import type { Request } from 'express';
 
 @ApiTags('Transactions')
@@ -71,6 +74,20 @@ export class OperationLogCorrectionController {
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.correctionService.getUnifiedAuditHistory(id, user);
+  }
+
+  @Post(':id/pa-correction-preview')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Preview factual PA correction without writing data (ADMIN only)',
+  })
+  previewPaCorrection(
+    @Param('id') id: string,
+    @Body() dto: PreviewPaCorrectionDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.correctionService.previewPaCorrection(id, dto, user);
   }
 
   @Post(':id/operation-log-corrections')

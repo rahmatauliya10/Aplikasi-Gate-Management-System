@@ -4,6 +4,8 @@ interface PaReleaseEvidence {
   transactionId?: string;
   productCatalogId?: string | null;
   isVoided?: boolean;
+  isCurrent?: boolean | null;
+  dispositionRequiresReview?: boolean | null;
   status?: string;
   result?: QcResult | null;
   dispositionAction?: string | null;
@@ -21,6 +23,8 @@ export function evaluatePaRelease(
   if (
     !pa ||
     pa.isVoided !== false ||
+    pa.isCurrent !== true ||
+    pa.dispositionRequiresReview === true ||
     !context.productCatalogId ||
     pa.productCatalogId !== context.productCatalogId ||
     pa.transactionId !== context.transactionId

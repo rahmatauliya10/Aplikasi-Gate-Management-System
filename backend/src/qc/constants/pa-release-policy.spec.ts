@@ -7,6 +7,7 @@ describe('evaluatePaRelease', () => {
     transactionId: 'tx-1',
     productCatalogId: 'cat-1',
     isVoided: false,
+    isCurrent: true,
     status: 'RELEASE',
     result: QcResult.PASS,
   };
@@ -35,6 +36,9 @@ describe('evaluatePaRelease', () => {
   it.each([
     { isVoided: true },
     { isVoided: undefined },
+    { isCurrent: false },
+    { isCurrent: undefined },
+    { dispositionRequiresReview: true },
     { transactionId: 'other' },
     { productCatalogId: 'other' },
     { status: 'VOIDED' },

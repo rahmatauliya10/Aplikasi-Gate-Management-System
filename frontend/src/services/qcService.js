@@ -42,6 +42,10 @@ const qcService = {
     return api.get(`/qc/product-analysis/${transactionId}`)
   },
 
+  previewPaCorrection(transactionId, data) {
+    return api.post(`/transactions/${transactionId}/pa-correction-preview`, data)
+  },
+
   /**
    * Submit QC Vehicle result (approve/reject) - For GBJ
    * @param {Number|String} transactionId
