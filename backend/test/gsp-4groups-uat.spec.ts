@@ -731,6 +731,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           },
         },
         isVoided: false,
+        isCurrent: true,
       });
 
       const mockTxClientGspReject = {
@@ -738,6 +739,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest.fn().mockResolvedValue({}),
         },
         transactionStatusHistory: {
@@ -1322,6 +1324,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           },
         },
         isVoided: false,
+        isCurrent: true,
       });
 
       const mockTxClientGspReject7 = {
@@ -1329,6 +1332,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
         qcProductAnalysis: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           update: jest.fn().mockResolvedValue({}),
         },
         transactionStatusHistory: {

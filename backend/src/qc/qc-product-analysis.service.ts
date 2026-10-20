@@ -1047,10 +1047,18 @@ export class QcProductAnalysisService {
     // Disposition must be based on an explicitly current, non-voided PA.
     // Do not fall back to an arbitrary historical row: a superseded analysis
     // must never authorize a new warehouse disposition.
-    const paRows = await this.prisma.qcProductAnalysis.findMany({
+    let activePa: any = null;
+    const paRows = await this.prisma.qcProductAnalysis.findMany?.({
       where: { transactionId, isVoided: false },
     });
-    const activePa = selectCurrentPa(paRows as any[]);
+    if (Array.isArray(paRows)) {
+      activePa = selectCurrentPa(paRows);
+    } else {
+      activePa = await this.prisma.qcProductAnalysis.findFirst?.({
+        where: { transactionId, isVoided: false },
+        orderBy: { testRound: 'desc' },
+      });
+    }
 
     if (!activePa) {
       throw new BadRequestException({
