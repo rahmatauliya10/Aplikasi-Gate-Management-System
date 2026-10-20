@@ -1044,17 +1044,13 @@ export class QcProductAnalysisService {
       });
     }
 
-    const paRows = (await this.prisma.qcProductAnalysis.findMany?.({
+    // Disposition must be based on an explicitly current, non-voided PA.
+    // Do not fall back to an arbitrary historical row: a superseded analysis
+    // must never authorize a new warehouse disposition.
+    const paRows = await this.prisma.qcProductAnalysis.findMany({
       where: { transactionId, isVoided: false },
-    })) as any;
-    const activePa =
-      (Array.isArray(paRows) && paRows.length > 0
-        ? selectCurrentPa(paRows) || paRows[0]
-        : null) ||
-      (await this.prisma.qcProductAnalysis.findFirst({
-        where: { transactionId, isVoided: false },
-        orderBy: { testRound: 'desc' },
-      }));
+    });
+    const activePa = selectCurrentPa(paRows as any[]);
 
     if (!activePa) {
       throw new BadRequestException({
@@ -1147,42 +1143,39 @@ export class QcProductAnalysisService {
       }
 
       // Claim exactly the current PA revision; a superseded approval cannot authorize its successor.
-      if (typeof prismaTx.qcProductAnalysis?.updateMany === 'function') {
-        const paClaim = await prismaTx.qcProductAnalysis.updateMany({
-          where: {
-            id: activePa.id,
-            ...(typeof activePa.revision === 'number'
-              ? { revision: activePa.revision }
-              : {}),
-            isCurrent: true,
-            isVoided: false,
-          },
-          data: {
-            status: paStatus,
-            dispositionAction: dto.action,
-            dispositionReason,
-            dispositionById: user.id,
-            dispositionAt: now,
-            dispositionRequiresReview: false,
-          },
-        });
-        if (paClaim.count !== 1)
-          throw new ConflictException(
-            'Revisi PA telah berubah; disposisi dibatalkan.',
-          );
-      } else {
-        await prismaTx.qcProductAnalysis.update({
-          where: { id: activePa.id },
-          data: {
-            status: paStatus,
-            dispositionAction: dto.action,
-            dispositionReason,
-            dispositionById: user.id,
-            dispositionAt: now,
-            dispositionRequiresReview: false,
-          },
-        });
+      // Production Prisma must expose updateMany so the current/non-voided/revision
+      // predicates remain part of the atomic claim. A single-row update fallback
+      // would turn a stale approval into a write, so fail closed instead.
+      if (typeof prismaTx.qcProductAnalysis?.updateMany !== 'function') {
+        throw new ConflictException(
+          'Disposisi dibatalkan: dukungan klaim PA atomik tidak tersedia.',
+        );
       }
+
+      // The checked-in generated client may lag the lineage migration in a
+      // source checkout. Keep the runtime contract explicit at this boundary;
+      // production Prisma is generated from the current schema before deploy.
+      const paModel = prismaTx.qcProductAnalysis as any;
+      const paClaim = await paModel.updateMany({
+        where: {
+          id: activePa.id,
+          revision: activePa.revision,
+          isCurrent: true,
+          isVoided: false,
+        },
+        data: {
+          status: paStatus,
+          dispositionAction: dto.action,
+          dispositionReason,
+          dispositionById: user.id,
+          dispositionAt: now,
+          dispositionRequiresReview: false,
+        },
+      });
+      if (paClaim.count !== 1)
+        throw new ConflictException(
+          'Revisi PA telah berubah; disposisi dibatalkan.',
+        );
 
       // 3. Insert transaction status history
       await prismaTx.transactionStatusHistory.create({

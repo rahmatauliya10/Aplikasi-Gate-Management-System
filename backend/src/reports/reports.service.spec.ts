@@ -175,7 +175,7 @@ describe('ReportsService', () => {
       for (const [query] of mockPrisma.$queryRaw.mock.calls) {
         const sqlText = query.strings.join('?');
         expect(sqlText).toMatch(
-          /ELSE ROUND\(EXTRACT\(EPOCH FROM \(base\."weighOutAt" - COALESCE\(base\.wp_end, base\."warehouseEndAt"\)\)\) \/ 60\)\s+END AS waiting_out/,
+          /ELSE ROUND\(EXTRACT\(EPOCH FROM \(base\."weighOutAt" - base\.wp_end\)\) \/ 60\)\s+END AS waiting_out/,
         );
         // Both endpoints share this CTE; neither may emit unmatched SQL groups.
         expect((sqlText.match(/\(/g) || []).length).toBe(

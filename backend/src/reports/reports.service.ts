@@ -24,6 +24,8 @@ import {
   OperationHistoryStatus,
 } from './dto/operation-history-query.dto';
 import {
+  FRAUD_CRITICAL_THRESHOLD_PERCENT,
+  FRAUD_WARNING_THRESHOLD_PERCENT,
   normalizeOperationHistoryTransaction,
   OperationHistoryFraud,
   OperationHistoryDurations,
@@ -471,7 +473,7 @@ export class ReportsService {
       bottleneck: query.bottleneck || OperationHistoryBottleneck.ALL,
       integrity: query.integrity || OperationHistoryIntegrity.ALL,
       sort: query.sort || OperationHistorySort.GATE_IN_DESC,
-      toleranceLimit: 2,
+      toleranceLimit: FRAUD_WARNING_THRESHOLD_PERCENT,
     };
   }
 
@@ -606,8 +608,8 @@ export class ReportsService {
           COALESCE(t."gateInAt", t."createdAt") AS arrival,
           COALESCE(cw.gross_weight, t."grossWeight") AS gross_weight,
           COALESCE(cw.tare_weight, t."tareWeight") AS tare_weight,
-          wp."startAt" AS wp_start,
-          wp."endAt" AS wp_end,
+          CASE WHEN wp."id" IS NULL THEN t."warehouseStartAt" ELSE wp."startAt" END AS wp_start,
+          CASE WHEN wp."id" IS NULL THEN t."warehouseEndAt" ELSE wp."endAt" END AS wp_end,
           vehicle."startedAt" AS vehicle_start,
           vehicle."completedAt" AS vehicle_end,
           incoming."startedAt" AS incoming_start,
@@ -650,19 +652,37 @@ export class ReportsService {
             ELSE ROUND(EXTRACT(EPOCH FROM (base.wp_end - base.wp_start)) / 60)
           END AS warehouse,
           CASE
-            WHEN (base.vehicle_start IS NOT NULL AND base.vehicle_end IS NOT NULL)
-              OR (base.incoming_start IS NOT NULL AND base.incoming_end IS NOT NULL)
-            THEN COALESCE(CASE WHEN base.vehicle_end < base.vehicle_start THEN NULL
-              ELSE ROUND(EXTRACT(EPOCH FROM (base.vehicle_end - base.vehicle_start)) / 60) END, 0)
-              + COALESCE(CASE WHEN base.incoming_end < base.incoming_start THEN NULL
-                ELSE ROUND(EXTRACT(EPOCH FROM (base.incoming_end - base.incoming_start)) / 60) END, 0)
+            WHEN base.vehicle_start IS NOT NULL AND base.vehicle_end IS NOT NULL
+              OR base.incoming_start IS NOT NULL AND base.incoming_end IS NOT NULL
+            THEN
+              CASE
+                WHEN (base.vehicle_start IS NOT NULL AND base.vehicle_end IS NOT NULL
+                  AND base.vehicle_end >= base.vehicle_start)
+                  OR (base.incoming_start IS NOT NULL AND base.incoming_end IS NOT NULL
+                    AND base.incoming_end >= base.incoming_start)
+                THEN
+                  COALESCE(
+                    CASE WHEN base.vehicle_end < base.vehicle_start THEN NULL
+                      ELSE ROUND(EXTRACT(EPOCH FROM (base.vehicle_end - base.vehicle_start)) / 60) END,
+                    0
+                  )
+                  + COALESCE(
+                    CASE WHEN base.incoming_end < base.incoming_start THEN NULL
+                      ELSE ROUND(EXTRACT(EPOCH FROM (base.incoming_end - base.incoming_start)) / 60) END,
+                    0
+                  )
+                ELSE NULL
+              END
+            WHEN base.vehicle_start IS NOT NULL OR base.vehicle_end IS NOT NULL
+              OR base.incoming_start IS NOT NULL OR base.incoming_end IS NOT NULL
+            THEN NULL
             WHEN base."qcStartAt" IS NULL OR base."qcEndAt" IS NULL THEN NULL
             WHEN base."qcEndAt" < base."qcStartAt" THEN NULL
             ELSE ROUND(EXTRACT(EPOCH FROM (base."qcEndAt" - base."qcStartAt")) / 60)
           END AS qc,
-          CASE WHEN COALESCE(base.wp_end, base."warehouseEndAt") IS NULL OR base."weighOutAt" IS NULL THEN NULL
-            WHEN base."weighOutAt" < COALESCE(base.wp_end, base."warehouseEndAt") THEN NULL
-            ELSE ROUND(EXTRACT(EPOCH FROM (base."weighOutAt" - COALESCE(base.wp_end, base."warehouseEndAt"))) / 60)
+          CASE WHEN base.wp_end IS NULL OR base."weighOutAt" IS NULL THEN NULL
+            WHEN base."weighOutAt" < base.wp_end THEN NULL
+            ELSE ROUND(EXTRACT(EPOCH FROM (base."weighOutAt" - base.wp_end)) / 60)
           END AS waiting_out,
           CASE WHEN base."gateOutAt" IS NULL THEN NULL
             WHEN base."gateOutAt" < base.arrival THEN NULL
@@ -689,19 +709,23 @@ export class ReportsService {
               WHEN 'INVALID_DATA' THEN 'ERROR DATA'
               WHEN 'PENDING_DATA' THEN 'PENDING'
               ELSE metrics.risk_level END
-            WHEN ABS(100 - (metrics.roll / metrics.net * 100)) > ${query.toleranceLimit}
+            WHEN ABS(100 - (metrics.roll / metrics.net * 100)) > ${FRAUD_CRITICAL_THRESHOLD_PERCENT}
             THEN 'CRITICAL'
-            WHEN ABS(100 - (metrics.roll / metrics.net * 100)) > ${query.toleranceLimit / 2}
+            WHEN ABS(100 - (metrics.roll / metrics.net * 100)) > ${FRAUD_WARNING_THRESHOLD_PERCENT}
             THEN 'WARNING'
             ELSE 'SAFE'
           END AS fraud_status,
           CASE
-            WHEN metrics.waiting_in >= metrics.warehouse
-              AND metrics.waiting_in >= metrics.qc
-              AND metrics.waiting_in >= metrics.waiting_out THEN 'waitingIn'
-            WHEN metrics.warehouse >= metrics.qc
-              AND metrics.warehouse >= metrics.waiting_out THEN 'warehouse'
-            WHEN metrics.qc >= metrics.waiting_out THEN 'qc'
+            WHEN metrics.waiting_in IS NULL
+              AND metrics.warehouse IS NULL
+              AND metrics.qc IS NULL
+              AND metrics.waiting_out IS NULL THEN 'ALL'
+            WHEN COALESCE(metrics.waiting_in, -1) >= COALESCE(metrics.warehouse, -1)
+              AND COALESCE(metrics.waiting_in, -1) >= COALESCE(metrics.qc, -1)
+              AND COALESCE(metrics.waiting_in, -1) >= COALESCE(metrics.waiting_out, -1) THEN 'waitingIn'
+            WHEN COALESCE(metrics.warehouse, -1) >= COALESCE(metrics.qc, -1)
+              AND COALESCE(metrics.warehouse, -1) >= COALESCE(metrics.waiting_out, -1) THEN 'warehouse'
+            WHEN COALESCE(metrics.qc, -1) >= COALESCE(metrics.waiting_out, -1) THEN 'qc'
             ELSE 'waitingOut'
           END AS bottleneck
         FROM metrics

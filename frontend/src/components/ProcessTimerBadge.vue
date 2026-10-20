@@ -40,7 +40,7 @@ const props = defineProps({
   },
   slaMinutes: {
     type: Number,
-    default: 30
+    default: null
   },
   label: {
     type: String,

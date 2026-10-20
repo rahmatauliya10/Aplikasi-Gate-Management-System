@@ -26,7 +26,7 @@
                 <ProcessTimerBadge
                   :start-time="activeStageStartTime"
                   :end-time="currentTruck.completedAt || currentTruck.cancelledAt"
-                  :sla-minutes="60"
+                  :sla-minutes="null"
                   label="Durasi"
                   :compact="true"
                 />

@@ -47,7 +47,7 @@
           </div>
         </div>
         <div>
-           <p class="text-3xl sm:text-4xl font-black tracking-tighter font-mono" :class="avgTotalTAT > targetTat ? 'text-red-500' : 'text-slate-900'">{{ avgTotalTAT }}<span class="text-lg sm:text-xl font-bold ml-1 text-slate-500">m</span></p>
+           <p class="text-3xl sm:text-4xl font-black tracking-tighter font-mono" :class="typeof avgTotalTAT === 'number' && avgTotalTAT > targetTat ? 'text-red-500' : 'text-slate-900'">{{ formatMinutes(avgTotalTAT) }}<span v-if="typeof avgTotalTAT === 'number'" class="text-lg sm:text-xl font-bold ml-1 text-slate-500">m</span></p>
           <p class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 uppercase tracking-wider">Turnaround Time</p>
         </div>
       </div>
@@ -202,37 +202,37 @@
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">Gate → WB IN</span>
-                <span class="text-lg font-black text-slate-800 font-mono">{{ avgStageTimes.waitingIn }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                <span class="text-lg font-black text-slate-800 font-mono">{{ formatMinutes(avgStageTimes.waitingIn) }}<span v-if="typeof avgStageTimes.waitingIn === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000 animate-fill" style="background:linear-gradient(90deg,#818CF8,#3A6ABF)" :style="{ width: Math.min(avgStageTimes.waitingIn * 5, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000 animate-fill" style="background:linear-gradient(90deg,#818CF8,#3A6ABF)" :style="{ width: stageBarWidth(avgStageTimes.waitingIn, 5) }"></div>
               </div>
             </div>
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">Warehouse</span>
-                <span class="text-lg font-black text-orange-600 font-mono">{{ avgStageTimes.warehouse }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                <span class="text-lg font-black text-orange-600 font-mono">{{ formatMinutes(avgStageTimes.warehouse) }}<span v-if="typeof avgStageTimes.warehouse === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000 animate-fill stagger-2" style="background:linear-gradient(90deg,#FBBF24,#A0006D)" :style="{ width: Math.min(avgStageTimes.warehouse * 2, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000 animate-fill stagger-2" style="background:linear-gradient(90deg,#FBBF24,#A0006D)" :style="{ width: stageBarWidth(avgStageTimes.warehouse, 2) }"></div>
               </div>
             </div>
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">QC Verify</span>
-                <span class="text-lg font-black text-indigo-600 font-mono">{{ avgStageTimes.qc }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                <span class="text-lg font-black text-indigo-600 font-mono">{{ formatMinutes(avgStageTimes.qc) }}<span v-if="typeof avgStageTimes.qc === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#818CF8,#4338CA)" :style="{ width: Math.min(avgStageTimes.qc * 5, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#818CF8,#4338CA)" :style="{ width: stageBarWidth(avgStageTimes.qc, 5) }"></div>
               </div>
             </div>
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">QC → Gate OUT</span>
-                 <span class="text-lg font-black text-[#3A6ABF] font-mono">{{ avgStageTimes.waitingOut }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                 <span class="text-lg font-black text-[#3A6ABF] font-mono">{{ formatMinutes(avgStageTimes.waitingOut) }}<span v-if="typeof avgStageTimes.waitingOut === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#34D399,#4A8BDF)" :style="{ width: Math.min(avgStageTimes.waitingOut * 5, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#34D399,#4A8BDF)" :style="{ width: stageBarWidth(avgStageTimes.waitingOut, 5) }"></div>
               </div>
             </div>
           </div>
@@ -300,7 +300,7 @@
                 <ProcessTimerBadge 
                   :start-time="truck.warehouseStartAt || truck.qcStartAt || truck.weighInAt || truck.gateInAt || truck.createdAt" 
                   :end-time="truck.completedAt || truck.cancelledAt"
-                  :sla-minutes="60"
+                  :sla-minutes="null"
                   :compact="true"
                 />
               </td>
@@ -477,8 +477,10 @@ const activeTruckCount = computed(() => {
 })
 const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted || 0)
 
-const avgTotalTAT = computed(() => stats.value?.avgTotalTAT || 0)
-const avgStageTimes = computed(() => stats.value?.avgStageTimes || { waitingIn: 0, warehouse: 0, qc: 0, waitingOut: 0 })
+const avgTotalTAT = computed(() => stats.value?.avgTotalTAT ?? null)
+const avgStageTimes = computed(() => stats.value?.avgStageTimes || { waitingIn: null, warehouse: null, qc: null, waitingOut: null })
+const formatMinutes = (value) => typeof value === 'number' ? value : '—'
+const stageBarWidth = (value, multiplier) => typeof value === 'number' ? `${Math.min(value * multiplier, 100)}%` : '0%'
 
 const alertList = computed(() => {
   const list = stats.value?.activeFraudAlerts || []

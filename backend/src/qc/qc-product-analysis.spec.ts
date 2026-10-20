@@ -88,6 +88,7 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
         findFirst: jest.fn(),
         findMany: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
       },
       transactionStatusHistory: {
         create: jest.fn(),
@@ -2592,6 +2593,83 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
           mockGspWarehouseUser,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects disposition when only historical/non-current PA rows are returned', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        { ...oosPaRecord, isCurrent: false },
+      ]);
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.REJECT,
+            reason: 'Tidak boleh memakai analisa histori',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        ),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ errors: ['MISSING_ACTIVE_PA'] }),
+      });
+    });
+
+    it('rejects ambiguous current PA rows instead of choosing an arbitrary row', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        oosPaRecord,
+        { ...oosPaRecord, id: 'pa-oos-duplicate-current' },
+      ]);
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.REJECT,
+            reason: 'Current PA ambigu harus ditolak',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('fails closed when the transactional PA CAS method is unavailable', async () => {
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(heldTx);
+      mockPrismaService.qcProductAnalysis.findMany.mockResolvedValueOnce([
+        oosPaRecord,
+      ]);
+
+      const mockTxClientWithoutPaCas = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: { update: jest.fn() },
+        transactionStatusHistory: { create: jest.fn() },
+      };
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClientWithoutPaCas),
+      );
+
+      await expect(
+        service.submitGspDisposition(
+          'tx-chem-held',
+          {
+            action: GspDispositionAction.REJECT,
+            reason: 'Dukungan CAS PA tidak tersedia',
+            revision: 2,
+          },
+          mockGspWarehouseUser,
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(
+        mockTxClientWithoutPaCas.qcProductAnalysis.update,
+      ).not.toHaveBeenCalled();
+      expect(
+        mockTxClientWithoutPaCas.transactionStatusHistory.create,
+      ).not.toHaveBeenCalled();
     });
 
     it('rejects disposition on concurrency revision conflict (CAS failure)', async () => {

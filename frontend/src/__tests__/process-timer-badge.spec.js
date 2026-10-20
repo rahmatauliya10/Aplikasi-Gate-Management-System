@@ -18,6 +18,21 @@ describe('ProcessTimerBadge SLA evidence', () => {
     wrapper.unmount()
   })
 
+  it('does not assert overdue for a completed timer without a matching SLA', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-19T12:00:00Z'))
+    const wrapper = mount(ProcessTimerBadge, {
+      props: {
+        startTime: '2026-10-19T08:00:00Z',
+        endTime: '2026-10-19T12:00:00Z',
+        slaMinutes: null
+      }
+    })
+    expect(wrapper.text()).toContain('04:00:00')
+    expect(wrapper.text()).not.toContain('OVER SLA')
+    wrapper.unmount()
+  })
+
   it('retains warnings when an explicit positive SLA is provided', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-10-19T12:00:00Z'))

@@ -7,6 +7,8 @@ export type OperationHistoryDataQualityFlag =
   | 'MISSING_TIMESTAMP'
   | 'INVALID_TIMESTAMP'
   | 'INVERTED_TIMESTAMP'
+  | 'PARTIAL_QC_TIMESTAMP'
+  | 'PARTIAL_WAREHOUSE_TIMESTAMP'
   | 'MISSING_WEIGHT'
   | 'INVALID_WEIGHT'
   | 'REJECTED_NOT_EVALUATED';
@@ -30,6 +32,11 @@ export interface OperationHistoryFraud {
   status: OperationHistoryStatusLabel;
   dataQuality: OperationHistoryDataQualityFlag[];
 }
+
+// These are the existing producer thresholds. Reports must not invent a
+// different classification for records that have no persisted FraudCheck.
+export const FRAUD_WARNING_THRESHOLD_PERCENT = 2;
+export const FRAUD_CRITICAL_THRESHOLD_PERCENT = 5;
 
 const asNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null;
@@ -71,10 +78,28 @@ const minutesBetween = (
 const latestCurrent = (items: any[] | undefined): any | null => {
   if (!Array.isArray(items) || items.length === 0) return null;
   return (
+    [...items]
+      .filter((item) => item?.isCurrent === true && item?.isVoided !== true)
+      .sort((left, right) => {
+        const revision =
+          Number(right?.revision || 0) - Number(left?.revision || 0);
+        if (revision !== 0) return revision;
+        const rightCreated = asDate(right?.createdAt)?.getTime() || 0;
+        const leftCreated = asDate(left?.createdAt)?.getTime() || 0;
+        if (rightCreated !== leftCreated) return rightCreated - leftCreated;
+        return String(right?.id || '').localeCompare(String(left?.id || ''));
+      })[0] || null
+  );
+};
+
+const latestFraudCheck = (items: any[] | undefined): any | null => {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
     [...items].sort((left, right) => {
-      const revision =
-        Number(right?.revision || 0) - Number(left?.revision || 0);
-      if (revision !== 0) return revision;
+      const rightCalculated = asDate(right?.calculatedAt)?.getTime() || 0;
+      const leftCalculated = asDate(left?.calculatedAt)?.getTime() || 0;
+      if (rightCalculated !== leftCalculated)
+        return rightCalculated - leftCalculated;
       const rightCreated = asDate(right?.createdAt)?.getTime() || 0;
       const leftCreated = asDate(left?.createdAt)?.getTime() || 0;
       if (rightCreated !== leftCreated) return rightCreated - leftCreated;
@@ -82,6 +107,19 @@ const latestCurrent = (items: any[] | undefined): any | null => {
     })[0] || null
   );
 };
+
+const intervalFromPair = (
+  start: unknown,
+  end: unknown,
+  quality: OperationHistoryDataQualityFlag[],
+  partialFlag: OperationHistoryDataQualityFlag,
+): number | null => {
+  if ((start == null) !== (end == null)) quality.push(partialFlag);
+  return durationBetween(start, end, quality);
+};
+
+const completePair = (start: unknown, end: unknown): boolean =>
+  start != null && end != null;
 
 const durationBetween = (
   start: unknown,
@@ -97,21 +135,55 @@ export function getOperationHistoryDurations(
   const warehouse = latestCurrent(tx.warehouseProcesses);
   const vehicle = latestCurrent(tx.qcVehicleChecks);
   const incoming = latestCurrent(tx.incomingMaterialChecks);
-  const qcStart = vehicle?.startedAt || incoming?.startedAt || tx.qcStartAt;
-  const qcEnd = vehicle?.completedAt || incoming?.completedAt || tx.qcEndAt;
+
+  const warehouseStart = warehouse ? warehouse.startAt : tx.warehouseStartAt;
+  const warehouseEnd = warehouse ? warehouse.endAt : tx.warehouseEndAt;
+  const warehouseDuration = intervalFromPair(
+    warehouseStart,
+    warehouseEnd,
+    quality,
+    'PARTIAL_WAREHOUSE_TIMESTAMP',
+  );
+
+  const qcPairs = [
+    { start: vehicle?.startedAt, end: vehicle?.completedAt },
+    { start: incoming?.startedAt, end: incoming?.completedAt },
+  ];
+  const hasQcChild = Boolean(vehicle || incoming);
+  const completeQcPairs = qcPairs.filter((pair) =>
+    completePair(pair.start, pair.end),
+  );
+  const qcDurations = completeQcPairs.map((pair) =>
+    durationBetween(pair.start, pair.end, quality),
+  );
+  for (const pair of qcPairs) {
+    if (
+      !completePair(pair.start, pair.end) &&
+      (pair.start != null || pair.end != null)
+    )
+      quality.push('PARTIAL_QC_TIMESTAMP');
+  }
+  const qc =
+    completeQcPairs.length > 0
+      ? qcDurations.reduce<number | null>(
+          (total, duration) =>
+            duration === null ? total : (total ?? 0) + duration,
+          null,
+        )
+      : hasQcChild
+        ? null
+        : intervalFromPair(
+            tx.qcStartAt,
+            tx.qcEndAt,
+            quality,
+            'PARTIAL_QC_TIMESTAMP',
+          );
+
   const durations = {
     waitingIn: durationBetween(gateIn, tx.weighInAt, quality),
-    warehouse: durationBetween(
-      warehouse?.startAt || tx.warehouseStartAt,
-      warehouse?.endAt || tx.warehouseEndAt,
-      quality,
-    ),
-    qc: durationBetween(qcStart, qcEnd, quality),
-    waitingOut: durationBetween(
-      warehouse?.endAt || tx.warehouseEndAt,
-      tx.weighOutAt,
-      quality,
-    ),
+    warehouse: warehouseDuration,
+    qc,
+    waitingOut: durationBetween(warehouseEnd, tx.weighOutAt, quality),
     total: durationBetween(gateIn, tx.gateOutAt, quality),
     dataQuality: [...new Set(quality)],
   };
@@ -204,10 +276,10 @@ function mapFraudStatus(riskLevel: unknown): OperationHistoryStatusLabel {
 
 export function getOperationHistoryFraud(
   tx: any,
-  toleranceLimit = 2,
+  _toleranceLimit = FRAUD_WARNING_THRESHOLD_PERCENT,
 ): OperationHistoryFraud {
   const quality: OperationHistoryDataQualityFlag[] = [];
-  const latestFraud = latestCurrent(tx.fraudChecks);
+  const latestFraud = latestFraudCheck(tx.fraudChecks);
   const fraudNet = asNumber(latestFraud?.netWeight);
   const fraudRoll = asNumber(latestFraud?.warehouseActualWeight);
   const net = fraudNet ?? getNetWeight(tx, quality);
@@ -238,15 +310,18 @@ export function getOperationHistoryFraud(
 
   const fraudDeviation = asNumber(latestFraud?.deviationPercent);
   if (net === null || roll === null) {
+    // A persisted FraudCheck is historical evidence even when its numeric
+    // inputs are unavailable to this projection. Preserve its verdict and
+    // expose the missing evidence through dataQuality rather than silently
+    // replacing it with a newly derived PENDING status.
     return {
       net,
       roll,
       diff: null,
       ratioPercent: null,
-      deviationPercent: null,
+      deviationPercent: fraudDeviation,
       direction: null,
-      status:
-        latestFraud?.riskLevel === 'INVALID_DATA' ? 'ERROR DATA' : 'PENDING',
+      status: latestFraud ? mapFraudStatus(latestFraud.riskLevel) : 'PENDING',
       dataQuality: [...new Set(quality)],
     };
   }
@@ -255,9 +330,9 @@ export function getOperationHistoryFraud(
   const deviationPercent = fraudDeviation ?? Math.abs(100 - (roll / net) * 100);
   const status = latestFraud
     ? mapFraudStatus(latestFraud.riskLevel)
-    : deviationPercent > toleranceLimit
+    : deviationPercent > FRAUD_CRITICAL_THRESHOLD_PERCENT
       ? 'CRITICAL'
-      : deviationPercent > toleranceLimit / 2
+      : deviationPercent > FRAUD_WARNING_THRESHOLD_PERCENT
         ? 'WARNING'
         : 'SAFE';
 
@@ -275,10 +350,10 @@ export function getOperationHistoryFraud(
 
 export function normalizeOperationHistoryTransaction(
   tx: any,
-  toleranceLimit = 2,
+  _toleranceLimit = FRAUD_WARNING_THRESHOLD_PERCENT,
 ): any {
   const durations = getOperationHistoryDurations(tx);
-  const fraud = getOperationHistoryFraud(tx, toleranceLimit);
+  const fraud = getOperationHistoryFraud(tx);
   const vehicle = latestCurrent(tx.qcVehicleChecks);
   const incoming = latestCurrent(tx.incomingMaterialChecks);
   const warehouse = latestCurrent(tx.warehouseProcesses);
