@@ -301,7 +301,6 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
           where: {
             transactionId: 'tx-pa-passed',
             isVoided: false,
-            isCurrent: true,
           },
           data: expect.objectContaining({
             isVoided: true,
