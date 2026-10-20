@@ -127,7 +127,7 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     },
   );
 
-  it('1. should categorize WEIGHBRIDGE actions as NEED_ACTION for weighbridge user', async () => {
+  it('1. should categorize weighing actions as NEED_ACTION for Security', async () => {
     const mockTxs = [
       {
         id: 'tx-1',
@@ -158,7 +158,7 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     const wbUser: JwtPayloadUser = {
       id: 'wb-1',
       email: 'wb@gms.local',
-      role: 'WEIGHBRIDGE',
+      role: 'SECURITY',
     } as any;
 
     const res = await service.getPendingReminders(wbUser);
@@ -167,7 +167,7 @@ describe('Pending Transaction Reminders Unit Tests', () => {
     expect(res.data.reminders.length).toBe(2);
 
     const tx1 = res.data.reminders.find((r: any) => r.transactionId === 'tx-1');
-    expect(tx1.assignedRole).toBe('WEIGHBRIDGE');
+    expect(tx1.assignedRole).toBe('SECURITY');
     expect(tx1.category).toBe('NEED_ACTION');
     expect(tx1.isMyAction).toBe(true);
     expect(tx1.targetRoute).toBe('/weighbridge');
@@ -179,6 +179,41 @@ describe('Pending Transaction Reminders Unit Tests', () => {
 
     expect(res.data.summary.needActionCount).toBe(1);
     expect(res.data.summary.waitingOtherCount).toBe(1);
+  });
+
+  it.each([
+    ['REGISTERED', 'GBB'],
+    ['WAREHOUSE_DONE', 'GBB'],
+    ['WAREHOUSE_DONE', 'GBJ'],
+    ['WAREHOUSE_DONE', 'GSP'],
+    ['INCOMING_CHECK_PASSED', 'GBB'],
+    ['QC_VEHICLE_REJECTED', 'GBB'],
+    ['INCOMING_CHECK_REJECTED', 'GSP'],
+  ])('assigns weighing at %s / %s to Security', async (status, processType) => {
+    mockPrisma.transaction.findMany.mockResolvedValue([
+      {
+        id: 'tx-security',
+        status,
+        processType,
+        revision: 1,
+        weighInAt: new Date(),
+        weighOutAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    const result = await service.getPendingReminders({
+      id: 'security-1',
+      email: 'security@gms.local',
+      role: 'SECURITY',
+    } as JwtPayloadUser);
+    expect(result.data.reminders[0]).toMatchObject({
+      assignedRole: 'SECURITY',
+      isMyAction: true,
+      category: 'NEED_ACTION',
+      targetRoute: '/weighbridge',
+    });
+    expect(result.data.summary.needActionCount).toBe(1);
   });
 
   it('2. should enforce warehouse access scope for WAREHOUSE users', async () => {
@@ -314,7 +349,7 @@ describe('Pending Transaction Reminders Unit Tests', () => {
       const wbUser: JwtPayloadUser = {
         id: 'wb-1',
         email: 'wb@gms.local',
-        role: 'WEIGHBRIDGE',
+        role: 'SECURITY',
       } as any;
 
       const res = await service.getPendingReminders(wbUser);

@@ -11,7 +11,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { TransactionQueryDto } from './dto/transaction-query.dto';
-import { Prisma, TransactionStatus } from '@prisma/client';
+import { Prisma, Role, TransactionStatus } from '@prisma/client';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
 import { TRANSACTION_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
@@ -425,7 +425,7 @@ export class TransactionsService implements OnModuleInit {
     };
 
     const reminders = activeTransactions.map((tx) => {
-      let assignedRole: string = 'ADMIN';
+      let assignedRole: Role = Role.ADMIN;
       let pendingTask: string = 'Tindak Lanjut Transaksi';
       let targetRoute: string = '/';
 
@@ -436,7 +436,7 @@ export class TransactionsService implements OnModuleInit {
             pendingTask = 'Pemeriksaan Armada (QC Vehicle)';
             targetRoute = '/qc';
           } else {
-            assignedRole = 'WEIGHBRIDGE';
+            assignedRole = 'SECURITY';
             pendingTask = 'Timbang Masuk (Gross IN)';
             targetRoute = '/weighbridge';
           }
@@ -509,7 +509,7 @@ export class TransactionsService implements OnModuleInit {
           break;
 
         case TransactionStatus.WAREHOUSE_DONE:
-          assignedRole = 'WEIGHBRIDGE';
+          assignedRole = 'SECURITY';
           if (tx.processType === 'GBJ') {
             pendingTask = 'Timbang Keluar (Gross OUT)';
           } else {
@@ -526,7 +526,7 @@ export class TransactionsService implements OnModuleInit {
           break;
 
         case TransactionStatus.INCOMING_CHECK_PASSED:
-          assignedRole = 'WEIGHBRIDGE';
+          assignedRole = 'SECURITY';
           pendingTask = 'Timbang Keluar (Tare OUT)';
           targetRoute = '/weighbridge';
           break;
@@ -540,7 +540,7 @@ export class TransactionsService implements OnModuleInit {
         case TransactionStatus.QC_VEHICLE_REJECTED:
         case TransactionStatus.INCOMING_CHECK_REJECTED:
           if (tx.weighInAt && !tx.weighOutAt) {
-            assignedRole = 'WEIGHBRIDGE';
+            assignedRole = 'SECURITY';
             pendingTask = 'Timbang Keluar Kendaraan Ditolak';
             targetRoute = '/weighbridge';
           } else {
@@ -562,8 +562,6 @@ export class TransactionsService implements OnModuleInit {
         isMyAction = true;
       } else if (user.role === 'SECURITY') {
         isMyAction = assignedRole === 'SECURITY';
-      } else if (user.role === 'WEIGHBRIDGE') {
-        isMyAction = assignedRole === 'WEIGHBRIDGE';
       } else if (user.role === 'QC') {
         isMyAction =
           assignedRole === 'QC' &&
