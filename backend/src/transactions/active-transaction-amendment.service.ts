@@ -248,7 +248,7 @@ export class ActiveTransactionAmendmentService {
     await this.prisma.$transaction(async (prismaTx) => {
       // Invalidate any previous QC Product Analysis records so old test results cannot be reused
       await prismaTx.qcProductAnalysis.updateMany({
-        where: { transactionId, isVoided: false, isCurrent: true },
+        where: { transactionId, isVoided: false },
         data: {
           isVoided: true,
           voidedAt: new Date(),

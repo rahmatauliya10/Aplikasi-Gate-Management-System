@@ -48,6 +48,25 @@ beforeEach(() => { vi.clearAllMocks(); mocks.paHistory.mockResolvedValue({ data:
 afterEach(() => wrapper?.unmount())
 
 describe('Actual Admin operation correction modal', () => {
+  it('renders legacy coal results as readable groups without JSON or duplicate aliases', async () => {
+    const truck = fixture(); truck.productCatalog = { code: 'COAL', gspAnalysisProfile: 'COAL_PA' }; truck.gspAnalysisProfile = 'COAL_PA'
+    const visual = { kondisi: 'Kering (Tidak Basah)', warna: 'Hitam', levelRank: 'High Rank Coal', kilap: 'Hitam Mengkilap', bahanPengotor: 'Tidak ada kontaminasi batuan maupun tanah' }
+    const pa = { id: 'pa-display', testRound: 1, revision: 1, isCurrent: true, isVoided: false, status: 'RELEASE', testedBy: { name: 'Analis asli' }, testedAt: '2026-10-15T06:34:54Z', parameters: { ...visual, visual, calorieBand: 'COAL_5600_6000', targetCalorie: 'COAL_5600_6000', totalMoisture: 31, maxAllowedMoisture: 33 } }
+    mocks.paHistory.mockResolvedValue({ data: { data: [pa] } })
+    await open(truck)
+    const panel = wrapper.get('[data-testid="pa-analysis-parameters"]')
+    expect(panel.findAll('[data-testid="pa-legacy-spec-notice"]')).toHaveLength(1)
+    expect(panel.findAll('[data-pa-parameter]')).toHaveLength(7)
+    expect(panel.text()).toContain('Hasil pengukuran')
+    expect(panel.text()).toContain('Pemeriksaan visual / sensori')
+    expect(panel.text()).toContain('5.600–6.000')
+    expect(panel.text()).not.toContain('{"')
+    expect(panel.text()).not.toContain('targetCalorie')
+    expect(panel.text()).not.toContain('PASS')
+    expect(wrapper.text()).toContain('Analis asli')
+    expect(wrapper.text()).toContain('Uji laboratorium · Ronde 1')
+    expect(wrapper.text()).toContain('RELEASE')
+  })
   it('submits PA to the effective current revision and refetches its history', async () => {
     const truck = fixture(); truck.productCatalog = { code: 'PAC', gspAnalysisProfile: 'PAC_PA' }; truck.gspAnalysisProfile = 'PAC_PA'
     const pa = { id: 'pa-current', testRound: 2, revision: 3, isCurrent: true, isVoided: false, analysisProfile: 'PAC_PA', parameters: { ph: 6, density: 1.2 } }

@@ -121,12 +121,12 @@
 
                 <!-- 1b. Coal & Chemical QC Product Analysis Rounds -->
                 <div v-else class="rounded-xl overflow-hidden bg-white border border-slate-100 shadow-sm">
-                  <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-50 bg-slate-50/50">
-                    <div class="flex items-center space-x-2">
-                      <span class="material-icons text-blue-500 text-[15px]">science</span>
-                      <h3 class="text-[10px] font-black text-slate-700 uppercase tracking-[0.15em]">Analisis Laboratorium (QC PA)</h3>
+                  <div class="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/50 px-4 py-3">
+                    <div class="flex min-w-0 items-center gap-2">
+                      <span class="material-icons shrink-0 text-blue-500 text-[18px]">science</span>
+                      <h3 class="text-xs font-bold leading-relaxed text-slate-700">Analisis Laboratorium (QC PA)</h3>
                     </div>
-                    <span class="text-[9px] font-bold text-slate-500 font-mono">
+                    <span class="min-w-0 break-words text-xs font-medium text-slate-500">
                       {{ currentTruck.gspAnalysisProfile || currentTruck.cargoSubType || 'GSP' }}
                     </span>
                   </div>
@@ -140,41 +140,27 @@
 
                     <!-- PA Rounds List -->
                     <div v-for="round in gspPaRounds" :key="round.id || round.testRound" class="space-y-2 border border-slate-100 rounded-xl p-3 bg-slate-50/30">
-                      <div class="flex items-center justify-between border-b border-slate-100 pb-2">
-                        <div class="flex items-center space-x-2">
-                          <span class="w-5 h-5 rounded-md bg-blue-100 text-blue-800 font-mono font-black text-[10px] flex items-center justify-center">
-                            R{{ round.testRound }}
-                          </span>
-                          <span class="text-[11px] font-black text-slate-800 uppercase tracking-wide">
-                            Uji Laboratorium Ronde {{ round.testRound }} · Rev {{ round.revision || '—' }} · {{ round.isCurrent === true && round.isVoided === false ? 'Current' : 'Riwayat' }}
-                          </span>
+                      <div class="flex min-w-0 flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                        <div class="min-w-0 space-y-2">
+                          <h4 class="text-sm font-bold leading-relaxed text-slate-800">Uji laboratorium · Ronde {{ round.testRound }}</h4>
+                          <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold">
+                            <span class="rounded-md bg-slate-100 px-2 py-0.5 text-slate-600">Revisi {{ round.revision || '—' }}</span>
+                            <span class="rounded-md px-2 py-0.5" :class="round.isCurrent === true && round.isVoided === false ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'">{{ round.isCurrent === true && round.isVoided === false ? 'Current' : 'Riwayat' }}</span>
+                          </div>
                         </div>
-                        <span class="px-2 py-0.5 rounded-full text-[9px] font-black tracking-wider uppercase"
+                        <span class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase"
                           :class="getPaStatusBadgeClass(round.status || round.result)">
                           {{ getPaStatusLabel(round.status || round.result) }}
                         </span>
                       </div>
 
-                      <p v-if="round.dispositionRequiresReview" class="text-[10px] font-bold text-amber-800">Hasil dikoreksi Admin; disposisi sebelumnya memerlukan review.</p>
-                      <div class="flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                        <span>Tester: {{ round.testedBy?.name || round.testedById || 'Analis QC' }}</span>
-                        <span>{{ formatTimeFull(round.testedAt || round.createdAt) }}</span>
+                      <p v-if="round.dispositionRequiresReview" class="rounded-lg bg-amber-50 p-2.5 text-xs font-medium leading-relaxed text-amber-800">Hasil dikoreksi Admin; disposisi sebelumnya memerlukan review.</p>
+                      <div class="flex min-w-0 flex-col gap-1 py-1 text-xs leading-relaxed text-slate-500 sm:flex-row sm:flex-wrap sm:justify-between">
+                        <span class="min-w-0 break-words">Penguji: <span class="font-medium text-slate-700">{{ round.testedBy?.name || round.testedById || 'Analis QC' }}</span></span>
+                        <span class="min-w-0 break-words">{{ formatTimeFull(round.testedAt || round.createdAt) }}</span>
                       </div>
 
-                      <!-- Parameters Grid -->
-                      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
-                        <div v-for="param in getFormattedPaParameters(round)" :key="param.label"
-                          class="p-2 rounded-lg border text-center flex flex-col justify-between"
-                          :class="param.isOk === null ? 'bg-slate-50 border-slate-200' : param.isOk ? 'bg-emerald-50/40 border-emerald-200/60' : 'bg-rose-50/40 border-rose-200/60'">
-                          <div class="text-[8px] font-black text-slate-400 uppercase tracking-wider mb-0.5">{{ param.label }}</div>
-                          <div class="text-xs font-black font-mono" :class="param.isOk === null ? 'text-slate-700' : param.isOk ? 'text-emerald-800' : 'text-rose-700'">
-                            {{ param.value }}
-                          </div>
-                          <div class="text-[8px] font-mono mt-0.5" :class="param.isOk === null ? 'text-slate-500' : param.isOk ? 'text-emerald-600' : 'text-rose-600'">
-                            {{ param.specText }}<template v-if="param.isOk !== null"> &bull; {{ param.isOk ? 'PASS' : 'OOS' }}</template>
-                          </div>
-                        </div>
-                      </div>
+                      <PaAnalysisParameters :record="round" />
 
                       <!-- Round Notes if any -->
                       <div v-if="round.notes || round.parameters?.notes" class="text-[10px] font-medium text-slate-600 bg-white p-2 rounded-lg border border-slate-100 italic">
@@ -1579,7 +1565,7 @@ import { getWeightRecordTypes } from '../utils/weightHelpers'
 import { printTruckReport } from '../utils/pdfGenerator'
 import PaCorrectionEditor from './qc/PaCorrectionEditor.vue'
 import { selectCurrentPaByRound, selectEffectiveCurrentPa, sortPaHistory } from '../utils/paCurrentSelector'
-import { formatPaParameters } from '../utils/paParameterDisplay'
+import PaAnalysisParameters from './qc/PaAnalysisParameters.vue'
 
 const props = defineProps({
   isOpen: { type: Boolean, required: true },
@@ -3662,11 +3648,6 @@ const getDispositionActionLabel = (action) => {
   if (a === 'REJECT') return 'TOLAK MUATAN'
   return a
 }
-
-const getFormattedPaParameters = (round) => {
-  return formatPaParameters(round)
-}
-
 
 </script>
 

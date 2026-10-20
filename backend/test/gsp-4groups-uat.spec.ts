@@ -581,6 +581,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: 'RELEASE',
         result: QcResult.PASS,
         isVoided: false,
+        isCurrent: true,
       });
 
       const mockTxClientWhStart = {
@@ -1006,6 +1007,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: 'ACCEPT_WITH_DEVIATION',
         dispositionById: 'legacy-util-user-id',
         isVoided: false,
+        isCurrent: true,
       });
       await expect(
         warehouseService.startWarehouse(coalTx.id, {}, warehouseUser),
@@ -1022,6 +1024,7 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         status: 'RELEASE',
         result: QcResult.PASS,
         isVoided: false,
+        isCurrent: true,
       });
 
       const mockTxClientWhStart = {

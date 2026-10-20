@@ -774,7 +774,7 @@ export const generatePrintHTML = (truckList) => {
           </div>
 
           <table class="table-custom"><thead><tr><th>Parameter PA</th><th>Fakta tersimpan</th><th>Basis spesifikasi versi ini</th></tr></thead><tbody>
-            ${paFacts.map(fact => `<tr><td>${escapeHtml(fact.label)}</td><td>${escapeHtml(fact.value)}</td><td>${escapeHtml(fact.specText)}${fact.isOk === null ? '' : fact.isOk ? ' — PASS' : ' — OOS'}</td></tr>`).join('')}
+            ${paFacts.map(fact => `<tr><td>${escapeHtml(fact.label)}${fact.conflict ? ` (${escapeHtml(fact.source)})` : ''}</td><td>${escapeHtml(fact.value)}</td><td>${escapeHtml(fact.specText)}${fact.isOk === null ? '' : fact.isOk ? ' — PASS' : ' — OOS'}</td></tr>`).join('')}
           </tbody></table>
           <div>Hasil tersimpan: ${escapeHtml(latestPa?.result)} / ${escapeHtml(latestPa?.status)}${latestPa?.dispositionRequiresReview ? ' — Disposisi memerlukan review' : ''}</div>
 

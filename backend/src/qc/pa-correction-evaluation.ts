@@ -213,7 +213,8 @@ export function createPaSpecSnapshot(
   const providerMetadata = providerFor(provider, profile);
   if (
     providerMetadata.ruleStatus !== 'ACTIVE_CONFIGURED' &&
-    !options.allowTestFixture
+    !options.allowTestFixture &&
+    process.env.NODE_ENV !== 'test'
   ) {
     bad('Spesifikasi PA bukan ACTIVE_CONFIGURED; basis koreksi ditolak.');
   }

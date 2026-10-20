@@ -12,6 +12,12 @@ describe('PA report version and specification evidence', () => {
     expect(html).toContain('Disposisi memerlukan review')
     expect(html).not.toContain('3.50 - 5.00')
   })
+  it('keeps conflicting measurement sources explicit in the report', () => {
+    const html = generatePrintHTML([{ ...truck, qcProductAnalyses: [{ ...row, specSnapshot: null, parameters: { moisture: 29, totalMoisture: 31 } }] }])
+    expect(html).toContain('Total moisture (%) (moisture)')
+    expect(html).toContain('Total moisture (%) (totalMoisture)')
+    expect(html).toContain('Nilai tersimpan berbeda')
+  })
   it('labels unavailable historical specifications instead of manufacturing a PASS', () => {
     const html = generatePrintHTML([{ ...truck, qcProductAnalyses: [{ ...row, specSnapshot: null }] }])
     expect(html).toContain('Referensi spesifikasi historis tidak tersedia')

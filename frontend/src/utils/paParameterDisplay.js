@@ -1,43 +1,76 @@
+const LEGACY_SPEC = 'Referensi spesifikasi historis tidak tersedia'
+const INFORMATION = 'Informasi / tidak dievaluasi'
+const isObject = value => value !== null && typeof value === 'object'
+const present = value => value !== undefined && value !== null
+const readableKey = key => key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ').replace(/^./, c => c.toUpperCase())
+const calorieLabels = { COAL_5600_6000: '5.600–6.000', COAL_GT_6000: '> 6.000' }
+
 /** Display persisted facts against their own frozen specification, never current frontend rules. */
 export function formatPaParameters(record) {
-  if (!record?.parameters) return []
+  const p = record?.parameters
+  if (!isObject(p) || Array.isArray(p)) return []
   const snapshot = record.specSnapshot
   const thresholds = snapshot?.effectiveThresholds || {}
   const rules = snapshot?.sensoryRules || {}
-  const result = []
-  const add = (label, value, expected, test) => {
-    if (value === undefined || value === null) return
-    const known = snapshot && expected !== undefined
-    result.push({ label, value: typeof value === 'object' ? JSON.stringify(value) : String(value), specText: known ? String(expected) : 'Referensi spesifikasi historis tidak tersedia', isOk: known && test ? test(value) : null })
-  }
-  const p = record.parameters
   const profile = snapshot?.profile || record.analysisProfile
-  const sensory = profile === 'COAL_PA' ? p.visual || p : p.sensory || {}
-  for (const [key, value] of Object.entries(sensory)) {
-    const expected = rules[key]
-    add(key, value, Array.isArray(expected) ? expected.join(' / ') : expected, v => Array.isArray(expected) ? expected.includes(v) : v === expected)
-  }
-  const numeric = (key, value, min, max, strict = false) => {
-    const hasMin = typeof min === 'number'
-    const hasMax = typeof max === 'number'
-    const text = hasMin && hasMax ? `${min} – ${max}` : hasMin ? `${strict ? '>' : '≥'} ${min}` : hasMax ? `≤ ${max}` : undefined
-    add(key, value, text, v => typeof v === 'number' && Number.isFinite(v) && (!hasMin || (strict ? v > min : v >= min)) && (!hasMax || v <= max))
-  }
-  if (profile === 'COAL_PA') {
-    const band = p.calorieBand ?? p.targetCalorie
-    add('Target kalori', band, undefined)
-    numeric('Total moisture (%)', p.moisture ?? p.totalMoisture, undefined, thresholds.calorieBands?.[band]?.maxTotalMoisturePct)
-  } else {
-    numeric('pH', p.ph, thresholds.phMin, thresholds.phMax, profile === 'RAPID_KLEN_PA')
-    numeric('Density (g/mL)', p.density, thresholds.densityMin, thresholds.densityMax, profile === 'RAPID_KLEN_PA')
-    if (profile === 'RAPID_KLEN_PA') {
-      numeric('Alkalinity Na₂O (%)', p.alkalinityNa2O ?? p.alkalinityNa2o, thresholds.na2oMin, undefined, true)
-      numeric('Alkalinity NaOH (%)', p.alkalinityNaOH ?? p.alkalinityNaoh, thresholds.naohMin, undefined, true)
+  const result = []
+  const consumed = new Set(['notes'])
+  const get = path => path.split('.').reduce((value, key) => value?.[key], p)
+  const addAliases = (key, label, paths, group, expected, test, display = String, informational = false) => {
+    const entries = paths.filter(path => present(get(path)) && !isObject(get(path))).map(path => ({ path, value: get(path) }))
+    entries.forEach(entry => consumed.add(entry.path))
+    const unique = entries.filter((entry, index) => entries.findIndex(other => Object.is(other.value, entry.value)) === index)
+    const conflict = unique.length > 1
+    for (const entry of unique) {
+      const known = !!snapshot && expected !== undefined && !conflict
+      result.push({
+        key: conflict ? entry.path : key, label, group, source: entry.path, conflict,
+        value: display(entry.value),
+        specText: conflict ? 'Nilai tersimpan berbeda — perlu pemeriksaan' : known ? String(expected) : informational ? INFORMATION : snapshot ? 'Aturan parameter tidak tersedia pada snapshot' : LEGACY_SPEC,
+        isOk: known && test ? test(entry.value) : null,
+      })
     }
-    add('Alumina (%) — informasi', p.aluminaContent, undefined)
   }
-  if (!snapshot) {
-    return Object.entries(p).filter(([key]) => key !== 'notes').map(([label, value]) => ({ label, value: typeof value === 'object' ? JSON.stringify(value) : String(value), specText: 'Referensi spesifikasi historis tidak tersedia', isOk: null }))
+  const numeric = (key, label, paths, min, max, strict = false) => {
+    const hasMin = typeof min === 'number' && Number.isFinite(min)
+    const hasMax = typeof max === 'number' && Number.isFinite(max)
+    const expected = hasMin && hasMax ? `${min} – ${max}` : hasMin ? `${strict ? '>' : '≥'} ${min}` : hasMax ? `≤ ${max}` : undefined
+    addAliases(key, label, paths, 'measurements', expected, value => typeof value === 'number' && Number.isFinite(value) && (!hasMin || (strict ? value > min : value >= min)) && (!hasMax || value <= max))
+  }
+  addAliases('calorieBand', 'Target kalori', ['calorieBand', 'targetCalorie'], 'measurements', undefined, null, value => calorieLabels[value] || String(value), true)
+  const bands = ['calorieBand', 'targetCalorie'].map(get).filter(present)
+  const bandConflict = bands.some(value => value !== bands[0])
+  numeric('totalMoisture', 'Total moisture (%)', ['moisture', 'totalMoisture'], undefined, bandConflict ? undefined : thresholds.calorieBands?.[bands[0]]?.maxTotalMoisturePct)
+  numeric('ph', 'pH', ['ph'], thresholds.phMin, thresholds.phMax, profile === 'RAPID_KLEN_PA')
+  numeric('density', 'Densitas (g/mL)', ['density'], thresholds.densityMin, thresholds.densityMax, profile === 'RAPID_KLEN_PA')
+  numeric('alkalinityNa2O', 'Alkalinitas Na₂O (%)', ['alkalinityNa2O', 'alkalinityNa2o'], thresholds.na2oMin, undefined, true)
+  numeric('alkalinityNaOH', 'Alkalinitas NaOH (%)', ['alkalinityNaOH', 'alkalinityNaoh'], thresholds.naohMin, undefined, true)
+  addAliases('aluminaContent', 'Alumina (%) — informasi', ['aluminaContent'], 'measurements', undefined, null, String, true)
+  const sensoryFields = [
+    ['kondisi', 'Kondisi', ['visual.kondisi', 'kondisi']],
+    ['warna', 'Warna', ['visual.warna', 'warna']],
+    ['levelRank', 'Peringkat batubara', ['visual.levelRank', 'levelRank']],
+    ['kilap', 'Kilap', ['visual.kilap', 'kilap']],
+    ['bahanPengotor', 'Bahan pengotor', ['visual.bahanPengotor', 'bahanPengotor']],
+    ['visual', 'Kondisi visual', ['sensory.visual']],
+    ['foreignMatters', 'Benda asing / kontaminasi', ['sensory.foreignMatters']],
+    ['packagingLabel', 'Kemasan & label', ['sensory.packagingLabel']],
+  ]
+  for (const [key, label, paths] of sensoryFields) {
+    const rule = rules[key]
+    const expected = Array.isArray(rule) ? rule.join(' / ') : rule
+    addAliases(key, label, paths, 'sensory', expected, value => Array.isArray(rule) ? rule.includes(value) : value === rule)
+  }
+  const additional = (value, path, label) => {
+    if (consumed.has(path)) return
+    if (isObject(value) && Object.keys(value).length) {
+      for (const [key, child] of Object.entries(value)) additional(child, path ? `${path}.${key}` : key, label ? `${label} · ${readableKey(key)}` : readableKey(key))
+      return
+    }
+    result.push({ key: path, label, value: value == null ? '—' : isObject(value) ? (Array.isArray(value) ? 'Daftar kosong' : 'Tidak ada rincian') : String(value), group: 'additional', isOk: null, specText: INFORMATION })
+  }
+  for (const [key, value] of Object.entries(p)) {
+    additional(value, key, key === 'maxAllowedMoisture' ? 'Batas moisture tersimpan (%) — referensi lama' : readableKey(key))
   }
   return result
 }

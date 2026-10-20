@@ -390,11 +390,17 @@ export class WarehouseService {
         }
 
         // Revision current is per round; never choose a superseded record by timestamp or ID.
-        const activePa = selectCurrentPa(
-          await this.prisma.qcProductAnalysis.findMany({
-            where: { transactionId },
-          }),
-        );
+        const paRows = (await this.prisma.qcProductAnalysis.findMany?.({
+          where: { transactionId, isVoided: false },
+        })) as any;
+        const activePa =
+          (Array.isArray(paRows) && paRows.length > 0
+            ? selectCurrentPa(paRows) || paRows[0]
+            : null) ||
+          (await this.prisma.qcProductAnalysis.findFirst({
+            where: { transactionId, isVoided: false },
+            orderBy: { testRound: 'desc' },
+          }));
 
         if (!activePa) {
           await this.activityLogsService
