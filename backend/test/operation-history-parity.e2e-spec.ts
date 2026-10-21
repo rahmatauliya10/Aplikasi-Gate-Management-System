@@ -739,6 +739,99 @@ describePostgres(
 
         expect(zeroRows).toHaveLength(0);
       });
+
+      it('strictly isolates GSP transactions from PostgreSQL Operation History Summary for scope [GBB, GBJ]', async () => {
+        const service = new ReportsService(
+          {} as any,
+          {} as any,
+          { assertScopeNotEmpty: () => {} } as any,
+        );
+        const scopedUser = {
+          id: 'wh-gbb-gbj',
+          role: 'WAREHOUSE',
+          warehouseAccess: ['GBB', 'GBJ'],
+        };
+        const cte = (service as any).operationHistoryCte(
+          (service as any).normalizeOperationHistoryQuery({}),
+          scopedUser,
+        ) as Prisma.Sql;
+        const strings = [...cte.strings];
+        strings[0] = strings[0].replace(/^\s*WITH\s/, '');
+        const body = Prisma.sql(strings, ...cte.values);
+
+        const summaryRows = await client.$transaction(async (tx) => {
+          await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+          return tx.$queryRaw<any[]>(Prisma.sql`
+            WITH ${fixtureRelations()}, ${body}
+            SELECT
+              COUNT(*)::bigint AS total,
+              SUM(net) FILTER (WHERE net IS NOT NULL)::float AS total_net
+            FROM final
+          `);
+        });
+
+        expect(summaryRows.length).toBe(1);
+        const summary = summaryRows[0];
+        expect(Number(summary.total)).toBeGreaterThan(0);
+
+        const adminCte = (service as any).operationHistoryCte(
+          (service as any).normalizeOperationHistoryQuery({}),
+          { role: 'ADMIN' },
+        ) as Prisma.Sql;
+        const adminStrings = [...adminCte.strings];
+        adminStrings[0] = adminStrings[0].replace(/^\s*WITH\s/, '');
+        const adminBody = Prisma.sql(adminStrings, ...adminCte.values);
+        const adminSummaryRows = await client.$transaction(async (tx) => {
+          await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+          return tx.$queryRaw<any[]>(Prisma.sql`
+            WITH ${fixtureRelations()}, ${adminBody}
+            SELECT
+              COUNT(*)::bigint AS total,
+              SUM(net) FILTER (WHERE net IS NOT NULL)::float AS total_net
+            FROM final
+          `);
+        });
+
+        expect(Number(summary.total)).toBeLessThan(
+          Number(adminSummaryRows[0].total),
+        );
+      });
+
+      it('isolates GBB/GBJ transactions from PostgreSQL Operation History Summary for scope [GSP]', async () => {
+        const service = new ReportsService(
+          {} as any,
+          {} as any,
+          { assertScopeNotEmpty: () => {} } as any,
+        );
+        const scopedUser = {
+          id: 'wh-gsp-only',
+          role: 'WAREHOUSE',
+          warehouseAccess: ['GSP'],
+        };
+        const cte = (service as any).operationHistoryCte(
+          (service as any).normalizeOperationHistoryQuery({}),
+          scopedUser,
+        ) as Prisma.Sql;
+        const strings = [...cte.strings];
+        strings[0] = strings[0].replace(/^\s*WITH\s/, '');
+        const body = Prisma.sql(strings, ...cte.values);
+
+        const summaryRows = await client.$transaction(async (tx) => {
+          await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+          return tx.$queryRaw<any[]>(Prisma.sql`
+            WITH ${fixtureRelations()}, ${body}
+            SELECT
+              COUNT(*)::bigint AS total,
+              SUM(net) FILTER (WHERE net IS NOT NULL)::float AS total_net
+            FROM final
+          `);
+        });
+
+        expect(summaryRows.length).toBe(1);
+        const summary = summaryRows[0];
+        expect(Number(summary.total)).toBe(1);
+        expect(Number(summary.total_net)).toBe(80);
+      });
     });
   },
 );

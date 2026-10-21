@@ -6,6 +6,9 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { ReportsController } from '../src/reports/reports.controller';
 import { ReportsService } from '../src/reports/reports.service';
+import { TransactionsController } from '../src/transactions/transactions.controller';
+import { TransactionsService } from '../src/transactions/transactions.service';
+import { ActiveTransactionAmendmentService } from '../src/transactions/active-transaction-amendment.service';
 import { JwtStrategy } from '../src/auth/strategies/jwt.strategy';
 import { RolesGuard } from '../src/common/guards/roles.guard';
 import { AuthorizationScopeService } from '../src/auth/authorization-scope.service';
@@ -403,6 +406,23 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
             );
           },
         ),
+      findFirst: jest.fn().mockImplementation(({ where }: { where: any }) => {
+        const targetId = where?.id;
+        const tx = testTransactions.find((t) => t.id === targetId);
+        if (!tx) return Promise.resolve(null);
+        const scope = where?.processType?.in;
+        if (scope && !scope.includes(tx.processType)) {
+          return Promise.resolve(null);
+        }
+        return Promise.resolve({
+          ...tx,
+          weighbridgeRecords: [],
+          qcInspections: [],
+          warehouseProcesses: [],
+          fraudChecks: [],
+          statusHistory: [],
+        });
+      }),
     },
     $queryRaw: jest.fn().mockImplementation((query: any) => {
       let filtered = [...testTransactions];
@@ -498,9 +518,11 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
           }),
         }),
       ],
-      controllers: [ReportsController],
+      controllers: [ReportsController, TransactionsController],
       providers: [
         ReportsService,
+        TransactionsService,
+        { provide: ActiveTransactionAmendmentService, useValue: {} },
         JwtStrategy,
         RolesGuard,
         AuthorizationScopeService,
@@ -778,6 +800,83 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
       expect(res.body.data.some((r: any) => r.processType === 'GBJ')).toBe(
         true,
       );
+    });
+
+    it('strictly isolates Summary and Meta metrics based on user process scope', async () => {
+      // 1. Scoped WAREHOUSE [GBB, GBJ]
+      const scopedToken = createToken('warehouse-scoped');
+      const scopedRes = await request(app.getHttpServer())
+        .get('/api/reports/operation-history')
+        .set('Authorization', `Bearer ${scopedToken}`)
+        .expect(200);
+
+      expect(scopedRes.body.meta).toBeDefined();
+      expect(scopedRes.body.meta.total).toBe(8); // 7 GBB + 1 GBJ, excluding 1 GSP
+      expect(scopedRes.body.summary).toBeDefined();
+
+      // 2. Scoped WAREHOUSE [GSP]
+      const gspToken = createToken('warehouse-gsp');
+      const gspRes = await request(app.getHttpServer())
+        .get('/api/reports/operation-history')
+        .set('Authorization', `Bearer ${gspToken}`)
+        .expect(200);
+
+      expect(gspRes.body.meta.total).toBe(1); // 1 GSP only
+      expect(gspRes.body.summary).toBeDefined();
+
+      // 3. ADMIN (all scopes)
+      const adminToken = createToken('admin-1');
+      const adminRes = await request(app.getHttpServer())
+        .get('/api/reports/operation-history')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(adminRes.body.meta.total).toBe(9); // All 9 transactions
+      expect(adminRes.body.summary).toBeDefined();
+    });
+
+    it('enforces Detail isolation: returns 404 when accessing out-of-scope transaction', async () => {
+      const scopedToken = createToken('warehouse-scoped'); // scope: ['GBB', 'GBJ']
+      const gspToken = createToken('warehouse-gsp'); // scope: ['GSP']
+      const adminToken = createToken('admin-1');
+
+      // A. WAREHOUSE [GBB, GBJ] attempting to view GSP transaction detail -> 404
+      const resGspByWh = await request(app.getHttpServer())
+        .get('/api/transactions/tx-gsp-coal')
+        .set('Authorization', `Bearer ${scopedToken}`)
+        .expect(404);
+      expect(resGspByWh.body.message).toContain('Transaction not found');
+
+      // B. WAREHOUSE [GBB, GBJ] viewing permitted GBB transaction detail -> 200
+      const resGbbByWh = await request(app.getHttpServer())
+        .get('/api/transactions/tx-inverted-timestamps')
+        .set('Authorization', `Bearer ${scopedToken}`)
+        .expect(200);
+      expect(resGbbByWh.body.success).toBe(true);
+      expect(resGbbByWh.body.data.id).toBe('tx-inverted-timestamps');
+
+      // C. WAREHOUSE [GSP] attempting to view GBB transaction detail -> 404
+      const resGbbByGsp = await request(app.getHttpServer())
+        .get('/api/transactions/tx-inverted-timestamps')
+        .set('Authorization', `Bearer ${gspToken}`)
+        .expect(404);
+      expect(resGbbByGsp.body.message).toContain('Transaction not found');
+
+      // D. WAREHOUSE [GSP] viewing permitted GSP transaction detail -> 200
+      const resGspByGsp = await request(app.getHttpServer())
+        .get('/api/transactions/tx-gsp-coal')
+        .set('Authorization', `Bearer ${gspToken}`)
+        .expect(200);
+      expect(resGspByGsp.body.success).toBe(true);
+      expect(resGspByGsp.body.data.id).toBe('tx-gsp-coal');
+
+      // E. ADMIN viewing any transaction detail -> 200
+      const resAdminGsp = await request(app.getHttpServer())
+        .get('/api/transactions/tx-gsp-coal')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+      expect(resAdminGsp.body.success).toBe(true);
+      expect(resAdminGsp.body.data.id).toBe('tx-gsp-coal');
     });
   });
 });

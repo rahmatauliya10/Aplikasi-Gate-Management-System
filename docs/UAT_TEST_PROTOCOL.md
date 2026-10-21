@@ -86,10 +86,14 @@ Pemetaan Timbang TEGAS: IN = Tare, OUT = Gross, Net Weight = Gross - Tare
 
 | ID | Skenario UAT | Aktor | Langkah Operasional | Kriteria Keberhasilan (Acceptance Criteria) | Status | Tanda Tangan |
 |:---|:---|:---|:---|:---|:---:|:---|
-| **CORR-01** | Koreksi Hasil Analisa PA Terminal | QC / ADM | Ubah nilai kadar air / foreign matter / biji rusak pada transaksi terselesaikan | Dialog konfirmasi memunculkan preview perubahan dan deviasi bobot; revisi baru terbentuk rapi. | [ ] PASS | ________ |
-| **CORR-02** | Deteksi Konflik Konkurensi Koreksi | ADM (2x) | Dua admin membuka form koreksi pada revisi yang sama dan submit berurutan | Admin kedua menerima pesan `409 Conflict / Revision Mismatch`; data tidak tertimpa secara corrupt. | [ ] PASS | ________ |
-| **CORR-03** | Pembatasan Hak Koreksi (Segregation of Duties) | WH / SEC | User non-Admin / non-QC berwenang mencoba melakukan koreksi | Sistem menolak aksi dengan `403 Forbidden` dan mencatat upaya ilegal ke security audit log. | [ ] PASS | ________ |
-| **CORR-04** | Audit Trail & Disposisi Koreksi | ADM | Periksa riwayat transaksi setelah koreksi dilakukan | Riwayat menampilkan nilai sebelum, nilai sesudah, user pengoreksi, alasan, timestamp, dan disposisi. | [ ] PASS | ________ |
+| **CORR-01** | Koreksi Berat Timbang | Admin | Koreksi Gross Weight dari 25.000 kg ke 24.500 kg | Baris revisi baru terbentuk (`isCurrent: true`), Net dihitung ulang; baris lama Gross=25.000 menjadi `isCurrent: false` dan `supersededAt` tercatat. | [ ] PASS | ________ |
+| **CORR-02** | Koreksi Hasil QC Kendaraan | Admin | Koreksi checklist kendaraan (misal perbaikan terpal) | Catatan QC diperbarui dengan referensi berita acara resmi, lampiran foto lama/baru tetap tersimpan di arsip. | [ ] PASS | ________ |
+| **CORR-03** | Koreksi Analisa QC / PA Terminal | QC / ADM | Ubah nilai kadar air / foreign matter / biji rusak pada transaksi terselesaikan | Dialog konfirmasi memunculkan preview perubahan dan deviasi bobot; revisi baru terbentuk rapi tanpa menimpa data historis. | [ ] PASS | ________ |
+| **CORR-04** | Koreksi Gudang / Remarks | Admin | Tambahkan catatan khusus / alokasi gudang baru | Log gudang diperbarui, seluruh riwayat timestamps proses awal tetap utuh. | [ ] PASS | ________ |
+| **CORR-05** | Lampiran Bukti Koreksi Resmi | Admin | Upload dokumen berita acara koreksi (.pdf / .jpg) | Bukti tersimpan via Attachment Service resmi, URL bukti tersimpan di log koreksi. | [ ] PASS | ________ |
+| **CORR-06** | Deteksi Konflik Konkurensi Koreksi | Admin (2x) | Dua admin membuka modal koreksi pada revisi yang sama dan submit berurutan | Admin 1 sukses (200 OK); Admin 2 menerima `409 ConflictException (Stale Revision)`. Data tidak rusak atau tertimpa. | [ ] PASS | ________ |
+| **CORR-07** | REOPEN dari Status Selesai | Admin | Lakukan REOPEN pada transaksi COMPLETED / CANCELLED | Status transaksi kembali ke antrian yang valid (misal `WEIGH_OUT_DONE`), log koreksi mencatat aksi REOPEN resmi. | [ ] PASS | ________ |
+| **CORR-08** | Eksekusi Ulang Workflow | Operasional & Admin | Proses ulang transaksi hasil reopen hingga tuntas | Alur workflow berjalan normal hingga mencapai status final `COMPLETED` kembali tanpa error invariant atau duplikasi. | [ ] PASS | ________ |
 
 ---
 
@@ -97,8 +101,8 @@ Pemetaan Timbang TEGAS: IN = Tare, OUT = Gross, Net Weight = Gross - Tare
 
 | ID | Skenario UAT | Aktor | Langkah Operasional | Kriteria Keberhasilan (Acceptance Criteria) | Status | Tanda Tangan |
 |:---|:---|:---|:---|:---|:---:|:---|
-| **ISO-01** | Isolasi Process Scope WAREHOUSE (GBB/GBJ) | WH | Login sebagai user WAREHOUSE dengan scope `['GBB', 'GBJ']`, akses Operation History & Export | Hanya transaksi GBB dan GBJ yang tampil; transaksi GSP **100% TIDAK MUNCUL** pada list, detail, summary, maupun export. | [ ] PASS | ________ |
-| **ISO-02** | Isolasi Process Scope WAREHOUSE (GSP) | WH | Login sebagai user WAREHOUSE dengan scope `['GSP']`, akses Operation History | Hanya transaksi GSP yang tampil; transaksi GBB dan GBJ tidak dapat diakses. | [ ] PASS | ________ |
+| **ISO-01** | Isolasi Process Scope WAREHOUSE (GBB/GBJ) — List, Detail, Summary, Export | WH | Login sebagai user WAREHOUSE dengan scope `['GBB', 'GBJ']`, akses List, Detail, Summary, dan Export | **List:** Hanya transaksi GBB dan GBJ yang tampil.<br/>**Detail:** Akses detail transaksi GSP menghasilkan `404 Not Found`.<br/>**Summary:** Metrik agregasi hanya menghitung transaksi GBB/GBJ.<br/>**Export:** File CSV/XLS bebas dari data GSP. | [ ] PASS | ________ |
+| **ISO-02** | Isolasi Process Scope WAREHOUSE (GSP) — List, Detail, Summary, Export | WH | Login sebagai user WAREHOUSE dengan scope `['GSP']`, akses List, Detail, Summary, dan Export | **List:** Hanya transaksi GSP yang tampil.<br/>**Detail:** Akses detail transaksi GBB/GBJ menghasilkan `404 Not Found`.<br/>**Summary:** Metrik agregasi hanya menghitung transaksi GSP.<br/>**Export:** File CSV/XLS hanya memuat transaksi GSP. | [ ] PASS | ________ |
 | **SEC-01** | Segregation of Duties (SoD) | WH | User WAREHOUSE mencoba menginput analisa QC Lab | Sistem menolak dengan error `403 Forbidden` (Akses ditolak). | [ ] PASS | ________ |
 | **SEC-02** | Double Submission / Concurrency | SEC (2x) | Dua petugas mendaftarkan nomor pelat yang sama secara bersamaan | Hanya 1 transaksi yang berhasil dibuat; permintaan kedua menerima `409 Conflict`. | [ ] PASS | ________ |
 | **SEC-03** | Session Expiry & Auto-Logout | ALL | Diamkan aplikasi hingga masa berlaku token habis | Pengguna dialihkan ke halaman login secara aman tanpa merusak data transaksi. | [ ] PASS | ________ |
