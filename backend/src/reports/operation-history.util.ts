@@ -258,6 +258,9 @@ function getNetWeight(
   ) {
     quality.push('INVALID_WEIGHT');
   }
+  if (persistedNet !== null && persistedNet <= 0) {
+    quality.push('INVALID_WEIGHT');
+  }
   if (persistedNet !== null && persistedNet > 0) return persistedNet;
   const gross = getWeighbridgeWeight(tx, 'gross', quality);
   const tare = getWeighbridgeWeight(tx, 'tare', quality);
@@ -291,19 +294,27 @@ export function getOperationHistoryFraud(
 ): OperationHistoryFraud {
   const quality: OperationHistoryDataQualityFlag[] = [];
   const latestFraud = latestFraudCheck(tx.fraudChecks);
-  const fraudNet = asNumber(latestFraud?.netWeight);
+  const rawFraudNet = asNumber(latestFraud?.netWeight);
+  if (
+    latestFraud?.netWeight !== null &&
+    latestFraud?.netWeight !== undefined &&
+    (rawFraudNet === null || rawFraudNet <= 0)
+  ) {
+    quality.push('INVALID_WEIGHT');
+  }
+  const fraudNet = rawFraudNet !== null && rawFraudNet > 0 ? rawFraudNet : null;
   const fraudRoll = asNumber(latestFraud?.warehouseActualWeight);
   const net = fraudNet ?? getNetWeight(tx, quality);
   const rawRoll = fraudRoll ?? asNumber(tx.actualWeight);
   const roll = rawRoll !== null && rawRoll > 0 ? rawRoll : null;
   if (rawRoll !== null && rawRoll <= 0) quality.push('INVALID_WEIGHT');
   if (rawRoll === null) quality.push('MISSING_WEIGHT');
+  const currentIncoming = latestCurrent(tx.incomingMaterialChecks);
+  const currentVehicle = latestCurrent(tx.qcVehicleChecks);
   const rejected =
     ['INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED'].includes(tx.status) ||
-    tx.incomingMaterialChecks?.some(
-      (check: any) => check.result === 'REJECT',
-    ) ||
-    tx.qcVehicleChecks?.some((check: any) => check.result === 'REJECT');
+    currentIncoming?.result === 'REJECT' ||
+    currentVehicle?.result === 'REJECT';
 
   if (rejected) {
     quality.push('REJECTED_NOT_EVALUATED');

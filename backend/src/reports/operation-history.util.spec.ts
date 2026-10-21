@@ -238,4 +238,82 @@ describe('operation history normalization', () => {
       rollWeight: 80,
     });
   });
+
+  it.each([0, -10])(
+    'falls back to transaction netWeight when FraudCheck netWeight is %s and records INVALID_WEIGHT',
+    (fraudNet) => {
+      const fraud = getOperationHistoryFraud({
+        status: 'COMPLETED',
+        netWeight: 100,
+        actualWeight: 93,
+        fraudChecks: [
+          {
+            id: 'fc-non-positive-net',
+            riskLevel: 'CRITICAL',
+            netWeight: fraudNet,
+            deviationPercent: 7,
+          },
+        ],
+      });
+
+      expect(fraud.net).toBe(100);
+      expect(fraud.roll).toBe(93);
+      expect(fraud.deviationPercent).toBe(7);
+      expect(fraud.dataQuality).toContain('INVALID_WEIGHT');
+    },
+  );
+
+  it('evaluates rejection from the current QC child revision and ignores superseded rejected revisions', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 100,
+      actualWeight: 98,
+      qcVehicleChecks: [
+        {
+          id: 'qc-rev1-old',
+          revision: 1,
+          isCurrent: false,
+          result: 'REJECT',
+        },
+        {
+          id: 'qc-rev2-active',
+          revision: 2,
+          isCurrent: true,
+          result: 'PASS',
+        },
+      ],
+      fraudChecks: [],
+    });
+
+    expect(fraud.status).toBe('SAFE');
+    expect(fraud.deviationPercent).toBe(2);
+    expect(fraud.dataQuality).not.toContain('REJECTED_NOT_EVALUATED');
+  });
+
+  it('rejects transaction when the current QC child revision is REJECT even if previous revision was PASS', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 100,
+      actualWeight: 98,
+      qcVehicleChecks: [
+        {
+          id: 'qc-rev1-old',
+          revision: 1,
+          isCurrent: false,
+          result: 'PASS',
+        },
+        {
+          id: 'qc-rev2-active',
+          revision: 2,
+          isCurrent: true,
+          result: 'REJECT',
+        },
+      ],
+      fraudChecks: [],
+    });
+
+    expect(fraud.status).toBe('PENDING');
+    expect(fraud.deviationPercent).toBeNull();
+    expect(fraud.dataQuality).toContain('REJECTED_NOT_EVALUATED');
+  });
 });
