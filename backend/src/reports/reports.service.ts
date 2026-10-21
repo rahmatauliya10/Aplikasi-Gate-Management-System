@@ -490,14 +490,14 @@ export class ReportsService {
     if (user.role === 'WAREHOUSE' || user.role === 'QC') {
       const allowed = user.warehouseAccess || [];
       conditions.push(
-        Prisma.sql`"processType" IN (${Prisma.join(allowed.map((value) => Prisma.sql`${value}`))})`,
+        Prisma.sql`"processType"::text IN (${Prisma.join(allowed.map((value) => Prisma.sql`${value}`))})`,
       );
     } else if (user.role !== 'ADMIN' && user.role !== 'SECURITY') {
       conditions.push(Prisma.sql`1 = 0`);
     }
 
     if (query.processType) {
-      conditions.push(Prisma.sql`"processType" = ${query.processType}`);
+      conditions.push(Prisma.sql`"processType"::text = ${query.processType}`);
     }
     if (query.search?.trim()) {
       const search = `%${query.search.trim()}%`;

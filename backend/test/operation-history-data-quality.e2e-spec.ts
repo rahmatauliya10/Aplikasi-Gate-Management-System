@@ -431,7 +431,7 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
       const values: any[] = query?.values || [];
 
       // Process scope filtering
-      if (text.includes('"processType" IN')) {
+      if (text.includes('"processType"') && text.includes('IN')) {
         const allowedTypes = values.filter((v) =>
           ['GBB', 'GSP', 'GBJ'].includes(v),
         );
@@ -446,7 +446,7 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
       }
 
       // Check for explicit query processType filter
-      const match = text.match(/"processType"\s*=\s*\$(\d+)/);
+      const match = text.match(/"processType"(?:::text)?\s*=\s*\$(\d+)/);
       if (match) {
         const paramIndex = parseInt(match[1], 10) - 1;
         const targetType = values[paramIndex];
