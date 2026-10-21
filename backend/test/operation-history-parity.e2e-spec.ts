@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ReportsService } from '../src/reports/reports.service';
-import { getOperationHistoryFraud } from '../src/reports/operation-history.util';
+import {
+  getOperationHistoryFraud,
+  getOperationHistoryDurations,
+  getOperationHistoryBottleneck,
+} from '../src/reports/operation-history.util';
 import { reportTestDatabaseUrl } from './helpers/report-test-database';
 
 const testUrl = reportTestDatabaseUrl(process.env.DATABASE_URL_TEST);
@@ -294,6 +298,161 @@ const fixtures: any[] = [
     actualWeight: 93,
     fraudChecks: [fraud({ netWeight: 0, deviationPercent: null })],
   },
+
+  // Parity fixture: Complete operational lifecycle durations & waitingOut bottleneck
+  {
+    id: 'durations-complete-cycle',
+    processType: 'GBB',
+    gateInAt: '2026-10-21T00:00:00.000Z',
+    weighInAt: '2026-10-21T00:15:00.000Z',
+    warehouseProcesses: [
+      {
+        id: 'wh-cycle-rev1-superseded',
+        revision: 1,
+        isCurrent: false,
+        startAt: '2026-10-21T00:20:00.000Z',
+        endAt: '2026-10-21T00:30:00.000Z',
+        createdAt: '2026-10-20T00:00:00.000Z',
+      },
+      {
+        id: 'wh-cycle-rev2-active',
+        revision: 2,
+        isCurrent: true,
+        startAt: '2026-10-21T00:20:00.000Z',
+        endAt: '2026-10-21T00:50:00.000Z',
+        createdAt: '2026-10-21T00:00:00.000Z',
+      },
+    ],
+    qcVehicleChecks: [
+      {
+        id: 'qc-v-complete',
+        revision: 1,
+        isCurrent: true,
+        result: 'PASS',
+        startedAt: '2026-10-21T00:50:00.000Z',
+        completedAt: '2026-10-21T01:10:00.000Z',
+        createdAt: timestamp,
+      },
+    ],
+    incomingMaterialChecks: [
+      {
+        id: 'im-complete',
+        revision: 1,
+        isCurrent: true,
+        result: 'PASS',
+        startedAt: '2026-10-21T01:10:00.000Z',
+        completedAt: '2026-10-21T01:15:00.000Z',
+        createdAt: timestamp,
+      },
+    ],
+    weighOutAt: '2026-10-21T01:25:00.000Z',
+    gateOutAt: '2026-10-21T01:30:00.000Z',
+    netWeight: 100,
+    actualWeight: 98,
+    fraudChecks: [],
+  },
+
+  // Parity fixture: Warehouse stage bottleneck
+  {
+    id: 'durations-warehouse-bottleneck',
+    processType: 'GBB',
+    gateInAt: '2026-10-21T00:00:00.000Z',
+    weighInAt: '2026-10-21T00:10:00.000Z',
+    warehouseProcesses: [
+      {
+        id: 'wh-bottleneck',
+        revision: 1,
+        isCurrent: true,
+        startAt: '2026-10-21T00:10:00.000Z',
+        endAt: '2026-10-21T01:10:00.000Z',
+        createdAt: timestamp,
+      },
+    ],
+    weighOutAt: '2026-10-21T01:15:00.000Z',
+    gateOutAt: '2026-10-21T01:20:00.000Z',
+    netWeight: 100,
+    actualWeight: 98,
+    fraudChecks: [],
+  },
+
+  // Parity fixture: QC stage bottleneck
+  {
+    id: 'durations-qc-bottleneck',
+    processType: 'GBB',
+    gateInAt: '2026-10-21T00:00:00.000Z',
+    weighInAt: '2026-10-21T00:05:00.000Z',
+    qcVehicleChecks: [
+      {
+        id: 'qc-bottleneck',
+        revision: 1,
+        isCurrent: true,
+        result: 'PASS',
+        startedAt: '2026-10-21T00:10:00.000Z',
+        completedAt: '2026-10-21T01:00:00.000Z',
+        createdAt: timestamp,
+      },
+    ],
+    gateOutAt: '2026-10-21T01:10:00.000Z',
+    netWeight: 100,
+    actualWeight: 98,
+    fraudChecks: [],
+  },
+
+  // Parity fixture: Inverted timestamps produce NULL stage durations
+  {
+    id: 'durations-inverted-timestamps',
+    processType: 'GBB',
+    gateInAt: '2026-10-21T01:00:00.000Z',
+    weighInAt: '2026-10-21T00:50:00.000Z',
+    warehouseProcesses: [
+      {
+        id: 'wh-inverted',
+        revision: 1,
+        isCurrent: true,
+        startAt: '2026-10-21T02:00:00.000Z',
+        endAt: '2026-10-21T01:50:00.000Z',
+        createdAt: timestamp,
+      },
+    ],
+    netWeight: 100,
+    actualWeight: 98,
+    fraudChecks: [],
+  },
+
+  // Parity fixture: Partial QC timestamps
+  {
+    id: 'durations-partial-qc',
+    processType: 'GBB',
+    qcVehicleChecks: [
+      {
+        id: 'qc-partial',
+        revision: 1,
+        isCurrent: true,
+        result: 'PASS',
+        startedAt: '2026-10-21T00:10:00.000Z',
+        completedAt: null,
+        createdAt: timestamp,
+      },
+    ],
+    fraudChecks: [],
+  },
+
+  // Parity fixture: Partial Warehouse timestamps
+  {
+    id: 'durations-partial-warehouse',
+    processType: 'GBB',
+    warehouseProcesses: [
+      {
+        id: 'wh-partial',
+        revision: 1,
+        isCurrent: true,
+        startAt: '2026-10-21T00:10:00.000Z',
+        endAt: null,
+        createdAt: timestamp,
+      },
+    ],
+    fraudChecks: [],
+  },
 ].map((tx) => ({
   processType: 'GBB',
   status: 'COMPLETED',
@@ -390,6 +549,8 @@ function fixtureRelations() {
     )`;
 }
 
+const asNum = (v: any): number | null => (v == null ? null : Number(v));
+
 describePostgres(
   'operation-history actual PostgreSQL / TypeScript parity (read-only)',
   () => {
@@ -417,7 +578,19 @@ describePostgres(
         await tx.$executeRaw`SET TRANSACTION READ ONLY`;
         return tx.$queryRaw<any[]>(Prisma.sql`
           WITH ${fixtureRelations()}, ${body}
-          SELECT id, net, roll, deviation_percent, fraud_status FROM final ORDER BY id
+          SELECT
+            id,
+            net,
+            roll,
+            deviation_percent,
+            fraud_status,
+            waiting_in,
+            warehouse,
+            qc,
+            waiting_out,
+            total,
+            bottleneck
+          FROM final ORDER BY id
         `);
       });
     }, 30000);
@@ -427,23 +600,64 @@ describePostgres(
     });
 
     it.each(fixtures.map((tx) => [tx.id, tx]))(
-      'matches persisted/derived/rejected evidence for %s',
+      'matches fraud evidence, process durations, and bottleneck for %s',
       (id, tx) => {
         const actual = rows.find((row) => row.id === id);
-        const expected = getOperationHistoryFraud(tx);
+        const expectedFraud = getOperationHistoryFraud(tx);
+        const expectedDurations = getOperationHistoryDurations(tx);
+        const expectedBottleneck =
+          getOperationHistoryBottleneck(expectedDurations);
+
         expect(actual).toBeDefined();
-        expect(actual.net).toBe(expected.net);
-        expect(actual.roll).toBe(expected.roll);
-        expect(actual.fraud_status).toBe(expected.status);
-        if (expected.deviationPercent === null) {
+
+        // 1. Fraud & Weight Evidence Parity
+        expect(actual.net).toBe(expectedFraud.net);
+        expect(actual.roll).toBe(expectedFraud.roll);
+        expect(actual.fraud_status).toBe(expectedFraud.status);
+        if (expectedFraud.deviationPercent === null) {
           expect(actual.deviation_percent).toBeNull();
         } else {
           expect(actual.deviation_percent).toBeCloseTo(
-            expected.deviationPercent,
+            expectedFraud.deviationPercent,
             10,
           );
         }
+
+        // 2. Process Stage Durations Parity (minutes)
+        expect(asNum(actual.waiting_in)).toBe(expectedDurations.waitingIn);
+        expect(asNum(actual.warehouse)).toBe(expectedDurations.warehouse);
+        expect(asNum(actual.qc)).toBe(expectedDurations.qc);
+        expect(asNum(actual.waiting_out)).toBe(expectedDurations.waitingOut);
+        expect(asNum(actual.total)).toBe(expectedDurations.total);
+
+        // 3. Bottleneck Determination Parity
+        expect(actual.bottleneck).toBe(expectedBottleneck);
       },
     );
+
+    describe('dataQuality audit integrity contracts', () => {
+      it.each([
+        ['zero-roll', 'INVALID_WEIGHT'],
+        ['fraud-net-zero-fallback', 'INVALID_WEIGHT'],
+        ['fraud-net-negative-fallback', 'INVALID_WEIGHT'],
+        ['rejected-QC_VEHICLE_REJECTED', 'REJECTED_NOT_EVALUATED'],
+        ['rejected-INCOMING_CHECK_REJECTED', 'REJECTED_NOT_EVALUATED'],
+        ['qc-vehicle-active-rejected', 'REJECTED_NOT_EVALUATED'],
+        ['missing-all', 'MISSING_WEIGHT'],
+        ['durations-inverted-timestamps', 'INVERTED_TIMESTAMPS'],
+        ['durations-partial-qc', 'PARTIAL_QC_TIMESTAMP'],
+        ['durations-partial-warehouse', 'PARTIAL_WAREHOUSE_TIMESTAMP'],
+      ])('asserts expected dataQuality flag %s for %s', (id, expectedFlag) => {
+        const fixture = fixtures.find((f) => f.id === id);
+        expect(fixture).toBeDefined();
+        const fraudRes = getOperationHistoryFraud(fixture);
+        const durationsRes = getOperationHistoryDurations(fixture);
+        const allQuality = [
+          ...fraudRes.dataQuality,
+          ...durationsRes.dataQuality,
+        ];
+        expect(allQuality).toContain(expectedFlag);
+      });
+    });
   },
 );
