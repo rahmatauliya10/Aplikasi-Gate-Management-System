@@ -668,7 +668,7 @@ describePostgres(
           expect(['GBB', 'GBJ']).toContain(row.processType);
           expect(row.processType).not.toBe('GSP');
         }
-        expect(scopedRows.some((r) => r.id === 'gsp-process-aware')).toBe(
+        expect(scopedRows.some((r) => r.id === 'gsp-standard')).toBe(
           false,
         );
       });
@@ -704,7 +704,7 @@ describePostgres(
         for (const row of scopedRows) {
           expect(row.processType).toBe('GSP');
         }
-        expect(scopedRows.some((r) => r.id === 'gsp-process-aware')).toBe(true);
+        expect(scopedRows.some((r) => r.id === 'gsp-standard')).toBe(true);
         expect(scopedRows.some((r) => r.id === 'gbj-process-aware')).toBe(
           false,
         );
