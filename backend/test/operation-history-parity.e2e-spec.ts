@@ -668,9 +668,7 @@ describePostgres(
           expect(['GBB', 'GBJ']).toContain(row.processType);
           expect(row.processType).not.toBe('GSP');
         }
-        expect(scopedRows.some((r) => r.id === 'gsp-standard')).toBe(
-          false,
-        );
+        expect(scopedRows.some((r) => r.id === 'gsp-standard')).toBe(false);
       });
 
       it('isolates GBB and GBJ transactions from WAREHOUSE user with scope [GSP]', async () => {
