@@ -189,10 +189,10 @@ describe('ReportsService', () => {
 
       const sqlText = mockPrisma.$queryRaw.mock.calls[0][0].strings.join('?');
       expect(sqlText).toContain(
-        'ranked."processType" = \'GBJ\' AND ranked.type = \'OUT\'',
+        "ranked.\"processType\" = 'GBJ' AND ranked.type = 'OUT'",
       );
       expect(sqlText).toContain(
-        'ranked."processType" = \'GBJ\' AND ranked.type = \'IN\'',
+        "ranked.\"processType\" = 'GBJ' AND ranked.type = 'IN'",
       );
       expect(sqlText).toContain('INNER JOIN "Transaction" t');
     });
@@ -256,8 +256,10 @@ describe('ReportsService', () => {
         }),
       );
       const sqlText = mockPrisma.$queryRaw.mock.calls[0][0].strings.join('?');
-      expect(sqlText).toContain("WHEN metrics.risk_level IS NOT NULL");
-      expect(sqlText).toContain("WHEN metrics.net IS NULL OR metrics.roll IS NULL");
+      expect(sqlText).toContain('WHEN metrics.risk_level IS NOT NULL');
+      expect(sqlText).toContain(
+        'WHEN metrics.net IS NULL OR metrics.roll IS NULL',
+      );
     });
 
     it('uses the longest positive stage descriptively without an unapproved 15-minute SLA', async () => {
