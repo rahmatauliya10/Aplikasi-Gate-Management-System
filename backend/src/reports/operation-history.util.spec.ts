@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import {
   getOperationHistoryDurations,
   getOperationHistoryFraud,
+  normalizeOperationHistoryTransaction,
 } from './operation-history.util';
 
 describe('operation history normalization', () => {
@@ -179,5 +180,62 @@ describe('operation history normalization', () => {
     expect(fraud.deviationPercent).toBe(7);
     expect(fraud.net).toBeNull();
     expect(fraud.roll).toBeNull();
+  });
+
+  it.each([
+    ['GBB', 120, 40, 80],
+    ['GSP', 120, 40, 80],
+    ['GBJ', 40, 120, 80],
+  ])(
+    'maps %s weighbridge IN/OUT records to the process-aware gross/tare contract',
+    (processType, inWeight, outWeight, expectedNet) => {
+      const normalized = normalizeOperationHistoryTransaction({
+        processType,
+        netWeight: null,
+        actualWeight: 80,
+        weighbridgeRecords: [
+          {
+            id: `${processType}-in`,
+            type: 'IN',
+            isCurrent: true,
+            revision: 1,
+            weight: inWeight,
+          },
+          {
+            id: `${processType}-out`,
+            type: 'OUT',
+            isCurrent: true,
+            revision: 1,
+            weight: outWeight,
+          },
+        ],
+      });
+
+      expect(normalized.weights.gross).toBe(
+        processType === 'GBJ' ? outWeight : inWeight,
+      );
+      expect(normalized.weights.tare).toBe(
+        processType === 'GBJ' ? inWeight : outWeight,
+      );
+      expect(normalized.fraud.net).toBe(expectedNet);
+    },
+  );
+
+  it('uses GBJ root gross/tare fields with the same mapping when weighbridge records are absent', () => {
+    const normalized = normalizeOperationHistoryTransaction({
+      processType: 'GBJ',
+      grossWeight: 120,
+      tareWeight: 40,
+      netWeight: null,
+      actualWeight: 80,
+      weighbridgeRecords: [],
+    });
+
+    expect(normalized.weights).toEqual({
+      gross: 120,
+      tare: 40,
+      net: 80,
+      rollWeight: 80,
+    });
   });
 });

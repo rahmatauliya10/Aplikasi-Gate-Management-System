@@ -586,11 +586,22 @@ export class ReportsService {
       ), current_weights AS (
         SELECT
           ranked."transactionId",
-          MAX(ranked.weight) FILTER (WHERE ranked.type = 'IN') AS gross_weight,
-          MAX(ranked.weight) FILTER (WHERE ranked.type = 'OUT') AS tare_weight
+          MAX(
+            ranked.weight
+          ) FILTER (
+            WHERE (ranked."processType" IN ('GBB', 'GSP') AND ranked.type = 'IN')
+              OR (ranked."processType" = 'GBJ' AND ranked.type = 'OUT')
+          ) AS gross_weight,
+          MAX(
+            ranked.weight
+          ) FILTER (
+            WHERE (ranked."processType" IN ('GBB', 'GSP') AND ranked.type = 'OUT')
+              OR (ranked."processType" = 'GBJ' AND ranked.type = 'IN')
+          ) AS tare_weight
         FROM (
           SELECT
             wr."transactionId",
+            t."processType" AS "processType",
             wr."type" AS type,
             wr."weight" AS weight,
             ROW_NUMBER() OVER (
@@ -598,6 +609,7 @@ export class ReportsService {
               ORDER BY wr."revision" DESC, wr."createdAt" DESC, wr."id" DESC
             ) AS row_number
           FROM "WeighbridgeRecord" wr
+          INNER JOIN "Transaction" t ON t."id" = wr."transactionId"
           WHERE wr."isCurrent" = TRUE
         ) ranked
         WHERE ranked.row_number = 1
@@ -610,8 +622,10 @@ export class ReportsService {
           COALESCE(cw.tare_weight, t."tareWeight") AS tare_weight,
           CASE WHEN wp."id" IS NULL THEN t."warehouseStartAt" ELSE wp."startAt" END AS wp_start,
           CASE WHEN wp."id" IS NULL THEN t."warehouseEndAt" ELSE wp."endAt" END AS wp_end,
+          vehicle."id" AS vehicle_id,
           vehicle."startedAt" AS vehicle_start,
           vehicle."completedAt" AS vehicle_end,
+          incoming."id" AS incoming_id,
           incoming."startedAt" AS incoming_start,
           incoming."completedAt" AS incoming_end,
           incoming."moisture" AS incoming_moisture,
@@ -652,8 +666,7 @@ export class ReportsService {
             ELSE ROUND(EXTRACT(EPOCH FROM (base.wp_end - base.wp_start)) / 60)
           END AS warehouse,
           CASE
-            WHEN base.vehicle_start IS NOT NULL AND base.vehicle_end IS NOT NULL
-              OR base.incoming_start IS NOT NULL AND base.incoming_end IS NOT NULL
+            WHEN base.vehicle_id IS NOT NULL OR base.incoming_id IS NOT NULL
             THEN
               CASE
                 WHEN (base.vehicle_start IS NOT NULL AND base.vehicle_end IS NOT NULL
@@ -662,20 +675,23 @@ export class ReportsService {
                     AND base.incoming_end >= base.incoming_start)
                 THEN
                   COALESCE(
-                    CASE WHEN base.vehicle_end < base.vehicle_start THEN NULL
-                      ELSE ROUND(EXTRACT(EPOCH FROM (base.vehicle_end - base.vehicle_start)) / 60) END,
+                    CASE WHEN base.vehicle_start IS NOT NULL
+                      AND base.vehicle_end IS NOT NULL
+                      AND base.vehicle_end >= base.vehicle_start
+                      THEN ROUND(EXTRACT(EPOCH FROM (base.vehicle_end - base.vehicle_start)) / 60)
+                    END,
                     0
                   )
                   + COALESCE(
-                    CASE WHEN base.incoming_end < base.incoming_start THEN NULL
-                      ELSE ROUND(EXTRACT(EPOCH FROM (base.incoming_end - base.incoming_start)) / 60) END,
+                    CASE WHEN base.incoming_start IS NOT NULL
+                      AND base.incoming_end IS NOT NULL
+                      AND base.incoming_end >= base.incoming_start
+                      THEN ROUND(EXTRACT(EPOCH FROM (base.incoming_end - base.incoming_start)) / 60)
+                    END,
                     0
                   )
                 ELSE NULL
               END
-            WHEN base.vehicle_start IS NOT NULL OR base.vehicle_end IS NOT NULL
-              OR base.incoming_start IS NOT NULL OR base.incoming_end IS NOT NULL
-            THEN NULL
             WHEN base."qcStartAt" IS NULL OR base."qcEndAt" IS NULL THEN NULL
             WHEN base."qcEndAt" < base."qcStartAt" THEN NULL
             ELSE ROUND(EXTRACT(EPOCH FROM (base."qcEndAt" - base."qcStartAt")) / 60)
@@ -700,15 +716,13 @@ export class ReportsService {
             WHEN metrics."status" IN ('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED')
               OR metrics.vehicle_result = 'REJECT' OR metrics.incoming_result = 'REJECT'
             THEN 'PENDING'
-            WHEN metrics.net IS NULL OR metrics.roll IS NULL
-            THEN CASE metrics.risk_level
-              WHEN 'INVALID_DATA' THEN 'ERROR DATA'
-              ELSE 'PENDING' END
             WHEN metrics.risk_level IS NOT NULL
             THEN CASE metrics.risk_level
               WHEN 'INVALID_DATA' THEN 'ERROR DATA'
               WHEN 'PENDING_DATA' THEN 'PENDING'
               ELSE metrics.risk_level END
+            WHEN metrics.net IS NULL OR metrics.roll IS NULL
+            THEN 'PENDING'
             WHEN ABS(100 - (metrics.roll / metrics.net * 100)) > ${FRAUD_CRITICAL_THRESHOLD_PERCENT}
             THEN 'CRITICAL'
             WHEN ABS(100 - (metrics.roll / metrics.net * 100)) > ${FRAUD_WARNING_THRESHOLD_PERCENT}

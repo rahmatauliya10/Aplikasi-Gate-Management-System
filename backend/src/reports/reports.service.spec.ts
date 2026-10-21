@@ -184,6 +184,82 @@ describe('ReportsService', () => {
       }
     });
 
+    it('uses process-aware gross/tare mapping for GBJ in the SQL projection', async () => {
+      await service.getOperationHistory({}, mockUser);
+
+      const sqlText = mockPrisma.$queryRaw.mock.calls[0][0].strings.join('?');
+      expect(sqlText).toContain(
+        'ranked."processType" = \'GBJ\' AND ranked.type = \'OUT\'',
+      );
+      expect(sqlText).toContain(
+        'ranked."processType" = \'GBJ\' AND ranked.type = \'IN\'',
+      );
+      expect(sqlText).toContain('INNER JOIN "Transaction" t');
+    });
+
+    it('preserves a persisted FraudCheck verdict when projection weights are unavailable', async () => {
+      mockPrisma.$queryRaw.mockReset();
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce([
+          {
+            id: 'trx-persisted-verdict',
+            net: null,
+            roll: null,
+            deviation_percent: 7,
+            fraud_status: 'CRITICAL',
+            bottleneck: 'ALL',
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            total: BigInt(1),
+            avg_tat: null,
+            total_net: null,
+            anomaly_count: BigInt(1),
+            waiting_in_count: BigInt(0),
+            warehouse_count: BigInt(0),
+            qc_count: BigInt(0),
+            waiting_out_count: BigInt(0),
+          },
+        ]);
+      mockPrisma.transaction.findMany.mockResolvedValueOnce([
+        {
+          id: 'trx-persisted-verdict',
+          processType: 'GBB',
+          status: 'COMPLETED',
+          fraudChecks: [
+            {
+              id: 'fraud-persisted-critical',
+              riskLevel: 'CRITICAL',
+              deviationPercent: 7,
+              calculatedAt: new Date('2026-01-01T01:00:00Z'),
+            },
+          ],
+          weighbridgeRecords: [],
+          warehouseProcesses: [],
+          qcVehicleChecks: [],
+          incomingMaterialChecks: [],
+        },
+      ]);
+
+      const result = await service.getOperationHistory({}, mockUser);
+
+      expect(result.data[0]).toEqual(
+        expect.objectContaining({
+          id: 'trx-persisted-verdict',
+          fraud: expect.objectContaining({
+            status: 'CRITICAL',
+            deviationPercent: 7,
+            net: null,
+            roll: null,
+          }),
+        }),
+      );
+      const sqlText = mockPrisma.$queryRaw.mock.calls[0][0].strings.join('?');
+      expect(sqlText).toContain("WHEN metrics.risk_level IS NOT NULL");
+      expect(sqlText).toContain("WHEN metrics.net IS NULL OR metrics.roll IS NULL");
+    });
+
     it('uses the longest positive stage descriptively without an unapproved 15-minute SLA', async () => {
       await service.getOperationHistory(
         { bottleneck: OperationHistoryBottleneck.WAREHOUSE },

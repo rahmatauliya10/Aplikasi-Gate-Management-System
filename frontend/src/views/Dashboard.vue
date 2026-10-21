@@ -42,7 +42,8 @@
             <span class="material-icons text-xl group-hover:scale-110 transition-transform">speed</span>
           </div>
           <div class="text-right">
-             <span class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] block">Target TAT</span>
+             <span class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] block">Configured TAT Target</span>
+             <span class="text-[9px] font-bold text-slate-400 block">Display setting · not formal SLA approval</span>
              <span class="text-[10px] sm:text-xs font-bold text-[#A0006D] block font-mono">{{ targetTat }}m</span>
           </div>
         </div>
@@ -89,7 +90,8 @@
                <p class="text-[10px] sm:text-xs font-bold text-slate-500 ml-0 sm:ml-11 mt-2 sm:mt-0">Real-time deviation check between Weighbridge and Area Scale.</p>
              </div>
              <div class="text-left sm:text-right shrink-0">
-               <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Tolerance Limit</span>
+               <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Configured Display Threshold</span>
+               <span class="text-[9px] font-bold text-slate-400 block mb-1.5">Not formal policy approval</span>
                <div class="px-3 py-1.5 rounded-lg text-xs font-black inline-block" style="background:rgba(239,68,68,0.06);color:#EF4444;border:1px solid rgba(239,68,68,0.12)">
                  &gt; {{ targetDeviation }}% Deviation
                </div>
@@ -180,8 +182,8 @@
                    <div class="w-14 h-14 mx-auto rounded-2xl flex items-center justify-center mb-3" style="background:rgba(74,139,223,0.06);border:1px solid rgba(74,139,223,0.1)">
                      <span class="material-icons text-[#4A8BDF] text-2xl">verified_user</span>
                    </div>
-                   <p class="text-sm font-black text-slate-700">No Critical Deviations Detected</p>
-                   <p class="text-xs font-bold text-slate-400 mt-1">All weighbridge data is within safe tolerance limits.</p>
+                   <p class="text-sm font-black text-slate-700">No Active Alerts</p>
+                   <p class="text-xs font-bold text-slate-400 mt-1">No active alerts in the selected period and filters.</p>
                 </div>
              </div>
            </div>

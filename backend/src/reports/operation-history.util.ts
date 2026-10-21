@@ -210,12 +210,24 @@ export function getOperationHistoryBottleneck(
 
 function getWeighbridgeWeight(
   tx: any,
-  type: 'IN' | 'OUT',
+  logicalWeight: 'gross' | 'tare',
   quality: OperationHistoryDataQualityFlag[] = [],
 ): number | null {
+  const processType = String(tx.processType || '');
+  const recordType =
+    processType === 'GBJ'
+      ? logicalWeight === 'gross'
+        ? 'OUT'
+        : 'IN'
+      : logicalWeight === 'gross'
+        ? 'IN'
+        : 'OUT';
+  const rootWeight = logicalWeight === 'gross' ? tx.grossWeight : tx.tareWeight;
   const records = Array.isArray(tx.weighbridgeRecords)
     ? tx.weighbridgeRecords
-        .filter((item: any) => item.type === type && item.isCurrent !== false)
+        .filter(
+          (item: any) => item.type === recordType && item.isCurrent !== false,
+        )
         .sort((left: any, right: any) => {
           const revision =
             Number(right?.revision || 0) - Number(left?.revision || 0);
@@ -226,8 +238,7 @@ function getWeighbridgeWeight(
           return String(right?.id || '').localeCompare(String(left?.id || ''));
         })
     : [];
-  const raw =
-    records[0]?.weight ?? (type === 'IN' ? tx.grossWeight : tx.tareWeight);
+  const raw = records[0]?.weight ?? rootWeight;
   const value = asNumber(raw);
   if (raw !== null && raw !== undefined && value === null)
     quality.push('INVALID_WEIGHT');
@@ -248,8 +259,8 @@ function getNetWeight(
     quality.push('INVALID_WEIGHT');
   }
   if (persistedNet !== null && persistedNet > 0) return persistedNet;
-  const gross = getWeighbridgeWeight(tx, 'IN', quality);
-  const tare = getWeighbridgeWeight(tx, 'OUT', quality);
+  const gross = getWeighbridgeWeight(tx, 'gross', quality);
+  const tare = getWeighbridgeWeight(tx, 'tare', quality);
   if (gross === null || tare === null) return null;
   if (gross <= tare) {
     quality.push('INVALID_WEIGHT');
@@ -399,8 +410,8 @@ export function normalizeOperationHistoryTransaction(
       cancelledAt: tx.cancelledAt || null,
     },
     weights: {
-      gross: getWeighbridgeWeight(tx, 'IN'),
-      tare: getWeighbridgeWeight(tx, 'OUT'),
+      gross: getWeighbridgeWeight(tx, 'gross'),
+      tare: getWeighbridgeWeight(tx, 'tare'),
       net: fraud.net,
       rollWeight: fraud.roll,
     },
