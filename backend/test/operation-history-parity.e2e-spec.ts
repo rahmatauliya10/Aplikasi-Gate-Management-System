@@ -634,30 +634,27 @@ describePostgres(
         expect(actual.bottleneck).toBe(expectedBottleneck);
       },
     );
-
-    describe('dataQuality audit integrity contracts', () => {
-      it.each([
-        ['zero-roll', 'INVALID_WEIGHT'],
-        ['fraud-net-zero-fallback', 'INVALID_WEIGHT'],
-        ['fraud-net-negative-fallback', 'INVALID_WEIGHT'],
-        ['rejected-QC_VEHICLE_REJECTED', 'REJECTED_NOT_EVALUATED'],
-        ['rejected-INCOMING_CHECK_REJECTED', 'REJECTED_NOT_EVALUATED'],
-        ['qc-vehicle-active-rejected', 'REJECTED_NOT_EVALUATED'],
-        ['missing-all', 'MISSING_WEIGHT'],
-        ['durations-inverted-timestamps', 'INVERTED_TIMESTAMPS'],
-        ['durations-partial-qc', 'PARTIAL_QC_TIMESTAMP'],
-        ['durations-partial-warehouse', 'PARTIAL_WAREHOUSE_TIMESTAMP'],
-      ])('asserts expected dataQuality flag %s for %s', (id, expectedFlag) => {
-        const fixture = fixtures.find((f) => f.id === id);
-        expect(fixture).toBeDefined();
-        const fraudRes = getOperationHistoryFraud(fixture);
-        const durationsRes = getOperationHistoryDurations(fixture);
-        const allQuality = [
-          ...fraudRes.dataQuality,
-          ...durationsRes.dataQuality,
-        ];
-        expect(allQuality).toContain(expectedFlag);
-      });
-    });
   },
 );
+
+describe('dataQuality audit integrity contracts', () => {
+  it.each([
+    ['zero-roll', 'INVALID_WEIGHT'],
+    ['fraud-net-zero-fallback', 'INVALID_WEIGHT'],
+    ['fraud-net-negative-fallback', 'INVALID_WEIGHT'],
+    ['rejected-QC_VEHICLE_REJECTED', 'REJECTED_NOT_EVALUATED'],
+    ['rejected-INCOMING_CHECK_REJECTED', 'REJECTED_NOT_EVALUATED'],
+    ['qc-vehicle-active-rejected', 'REJECTED_NOT_EVALUATED'],
+    ['missing-all', 'MISSING_WEIGHT'],
+    ['durations-inverted-timestamps', 'INVERTED_TIMESTAMP'],
+    ['durations-partial-qc', 'PARTIAL_QC_TIMESTAMP'],
+    ['durations-partial-warehouse', 'PARTIAL_WAREHOUSE_TIMESTAMP'],
+  ])('asserts expected dataQuality flag %s for %s', (id, expectedFlag) => {
+    const fixture = fixtures.find((f) => f.id === id);
+    expect(fixture).toBeDefined();
+    const fraudRes = getOperationHistoryFraud(fixture);
+    const durationsRes = getOperationHistoryDurations(fixture);
+    const allQuality = [...fraudRes.dataQuality, ...durationsRes.dataQuality];
+    expect(allQuality).toContain(expectedFlag);
+  });
+});
