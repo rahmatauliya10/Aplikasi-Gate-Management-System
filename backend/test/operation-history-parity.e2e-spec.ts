@@ -634,6 +634,114 @@ describePostgres(
         expect(actual.bottleneck).toBe(expectedBottleneck);
       },
     );
+
+    describe('PostgreSQL role & process scope data isolation contracts', () => {
+      it('strictly isolates GSP transactions from WAREHOUSE user with scope [GBB, GBJ]', async () => {
+        const service = new ReportsService(
+          {} as any,
+          {} as any,
+          { assertScopeNotEmpty: () => {} } as any,
+        );
+        const scopedUser = {
+          id: 'wh-gbb-gbj',
+          role: 'WAREHOUSE',
+          warehouseAccess: ['GBB', 'GBJ'],
+        };
+        const cte = (service as any).operationHistoryCte(
+          (service as any).normalizeOperationHistoryQuery({}),
+          scopedUser,
+        ) as Prisma.Sql;
+        const strings = [...cte.strings];
+        strings[0] = strings[0].replace(/^\s*WITH\s/, '');
+        const body = Prisma.sql(strings, ...cte.values);
+
+        const scopedRows = await client.$transaction(async (tx) => {
+          await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+          return tx.$queryRaw<any[]>(Prisma.sql`
+            WITH ${fixtureRelations()}, ${body}
+            SELECT id, "processType" FROM final ORDER BY id
+          `);
+        });
+
+        expect(scopedRows.length).toBeGreaterThan(0);
+        for (const row of scopedRows) {
+          expect(['GBB', 'GBJ']).toContain(row.processType);
+          expect(row.processType).not.toBe('GSP');
+        }
+        expect(scopedRows.some((r) => r.id === 'gsp-process-aware')).toBe(
+          false,
+        );
+      });
+
+      it('isolates GBB and GBJ transactions from WAREHOUSE user with scope [GSP]', async () => {
+        const service = new ReportsService(
+          {} as any,
+          {} as any,
+          { assertScopeNotEmpty: () => {} } as any,
+        );
+        const scopedUser = {
+          id: 'wh-gsp-only',
+          role: 'WAREHOUSE',
+          warehouseAccess: ['GSP'],
+        };
+        const cte = (service as any).operationHistoryCte(
+          (service as any).normalizeOperationHistoryQuery({}),
+          scopedUser,
+        ) as Prisma.Sql;
+        const strings = [...cte.strings];
+        strings[0] = strings[0].replace(/^\s*WITH\s/, '');
+        const body = Prisma.sql(strings, ...cte.values);
+
+        const scopedRows = await client.$transaction(async (tx) => {
+          await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+          return tx.$queryRaw<any[]>(Prisma.sql`
+            WITH ${fixtureRelations()}, ${body}
+            SELECT id, "processType" FROM final ORDER BY id
+          `);
+        });
+
+        expect(scopedRows.length).toBeGreaterThan(0);
+        for (const row of scopedRows) {
+          expect(row.processType).toBe('GSP');
+        }
+        expect(scopedRows.some((r) => r.id === 'gsp-process-aware')).toBe(true);
+        expect(scopedRows.some((r) => r.id === 'gbj-process-aware')).toBe(
+          false,
+        );
+        expect(scopedRows.some((r) => r.id === 'weighbridge-rev-active')).toBe(
+          false,
+        );
+      });
+
+      it('returns 0 rows in PostgreSQL for unauthorized roles', async () => {
+        const service = new ReportsService(
+          {} as any,
+          {} as any,
+          { assertScopeNotEmpty: () => {} } as any,
+        );
+        const driverUser = {
+          id: 'driver-test',
+          role: 'DRIVER',
+        };
+        const cte = (service as any).operationHistoryCte(
+          (service as any).normalizeOperationHistoryQuery({}),
+          driverUser,
+        ) as Prisma.Sql;
+        const strings = [...cte.strings];
+        strings[0] = strings[0].replace(/^\s*WITH\s/, '');
+        const body = Prisma.sql(strings, ...cte.values);
+
+        const zeroRows = await client.$transaction(async (tx) => {
+          await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+          return tx.$queryRaw<any[]>(Prisma.sql`
+            WITH ${fixtureRelations()}, ${body}
+            SELECT id FROM final
+          `);
+        });
+
+        expect(zeroRows).toHaveLength(0);
+      });
+    });
   },
 );
 

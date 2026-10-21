@@ -12,14 +12,20 @@ import { AuthorizationScopeService } from '../src/auth/authorization-scope.servi
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ActivityLogsService } from '../src/activity-logs/activity-logs.service';
 import { configureApp } from '../src/app.config';
+import { getJwtAccessSecret } from '../src/common/utils/jwt-secrets.util';
+
+if (!process.env.JWT_ACCESS_SECRET) {
+  process.env.JWT_ACCESS_SECRET =
+    'secure-test-jwt-access-secret-32-chars-long-hex-random-12345';
+}
+if (!process.env.JWT_REFRESH_SECRET) {
+  process.env.JWT_REFRESH_SECRET =
+    'secure-test-jwt-refresh-secret-32-chars-long-hex-random-12345';
+}
 
 describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
   let app: INestApplication;
   let jwtService: JwtService;
-
-  const testSecret =
-    process.env.JWT_ACCESS_SECRET ||
-    'test-jwt-access-secret-for-ci-pipeline-min-32-chars-long';
 
   const mockUsers: Record<string, any> = {
     'admin-1': {
@@ -76,6 +82,17 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
       mustChangePassword: false,
       tokenVersion: 0,
       warehouseAccess: [],
+    },
+    'warehouse-gsp': {
+      id: 'warehouse-gsp',
+      email: 'warehouse_gsp@gms.local',
+      username: 'warehouse_gsp',
+      name: 'Warehouse Officer GSP',
+      role: 'WAREHOUSE',
+      isActive: true,
+      mustChangePassword: false,
+      tokenVersion: 0,
+      warehouseAccess: [{ processType: 'GSP' }],
     },
   };
 
@@ -312,6 +329,58 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
       weighbridgeRecords: [],
       corrections: [],
     },
+
+    // 8. GSP Inbound Material Penolong (Batubara)
+    {
+      id: 'tx-gsp-coal',
+      transactionNumber: 'TRX-GSP-001',
+      plateNumber: 'B 8888 GSP',
+      driverName: 'Pak Batubara',
+      vendorName: 'PT Tambang Batubara',
+      processType: 'GSP',
+      status: 'COMPLETED',
+      createdAt: new Date('2026-10-21T00:00:00.000Z'),
+      gateInAt: new Date('2026-10-21T00:05:00.000Z'),
+      weighInAt: new Date('2026-10-21T00:10:00.000Z'),
+      gateOutAt: new Date('2026-10-21T00:45:00.000Z'),
+      weighOutAt: new Date('2026-10-21T00:40:00.000Z'),
+      grossWeight: 25000,
+      tareWeight: 10000,
+      netWeight: 15000,
+      actualWeight: 14950,
+      warehouseProcesses: [],
+      qcVehicleChecks: [],
+      incomingMaterialChecks: [],
+      fraudChecks: [],
+      weighbridgeRecords: [],
+      corrections: [],
+    },
+
+    // 9. GBJ Outbound Barang Jadi
+    {
+      id: 'tx-gbj-finished',
+      transactionNumber: 'TRX-GBJ-001',
+      plateNumber: 'B 9999 GBJ',
+      driverName: 'Pak Barang Jadi',
+      vendorName: 'PT Distribusi Logistik',
+      processType: 'GBJ',
+      status: 'COMPLETED',
+      createdAt: new Date('2026-10-21T00:00:00.000Z'),
+      gateInAt: new Date('2026-10-21T00:05:00.000Z'),
+      weighInAt: new Date('2026-10-21T00:10:00.000Z'),
+      gateOutAt: new Date('2026-10-21T00:45:00.000Z'),
+      weighOutAt: new Date('2026-10-21T00:40:00.000Z'),
+      grossWeight: 18000,
+      tareWeight: 8000,
+      netWeight: 10000,
+      actualWeight: 9980,
+      warehouseProcesses: [],
+      qcVehicleChecks: [],
+      incomingMaterialChecks: [],
+      fraudChecks: [],
+      weighbridgeRecords: [],
+      corrections: [],
+    },
   ];
 
   const mockPrisma = {
@@ -336,17 +405,44 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
         ),
     },
     $queryRaw: jest.fn().mockImplementation((query: any) => {
-      // Differentiate between getOperationHistorySummary and getOperationHistoryProjections
+      let filtered = [...testTransactions];
       const text =
-        typeof query === 'string' ? query : query?.strings?.join(' ') || '';
+        typeof query === 'string' ? query : query?.text || query?.sql || '';
+      const values: any[] = query?.values || [];
+
+      // Process scope filtering
+      if (text.includes('"processType" IN')) {
+        const allowedTypes = values.filter((v) =>
+          ['GBB', 'GSP', 'GBJ'].includes(v),
+        );
+        if (allowedTypes.length > 0) {
+          filtered = filtered.filter((tx) =>
+            allowedTypes.includes(tx.processType),
+          );
+        }
+      }
+      if (text.includes('1 = 0')) {
+        filtered = [];
+      }
+
+      // Check for explicit query processType filter
+      const match = text.match(/"processType"\s*=\s*\$(\d+)/);
+      if (match) {
+        const paramIndex = parseInt(match[1], 10) - 1;
+        const targetType = values[paramIndex];
+        if (targetType) {
+          filtered = filtered.filter((tx) => tx.processType === targetType);
+        }
+      }
+
       if (
         text.includes('avg_tat') ||
         text.includes('completed_duration_count')
       ) {
         return Promise.resolve([
           {
-            total: BigInt(testTransactions.length),
-            completed_duration_count: BigInt(testTransactions.length),
+            total: BigInt(filtered.length),
+            completed_duration_count: BigInt(filtered.length),
             avg_tat: 35.5,
             total_net: 500,
             anomaly_count: BigInt(1),
@@ -357,9 +453,9 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
           },
         ]);
       }
-      // Return projections matching test transactions
+      // Return projections matching filtered transactions
       return Promise.resolve(
-        testTransactions.map((tx) => ({
+        filtered.map((tx) => ({
           id: tx.id,
           arrival: tx.gateInAt || tx.createdAt,
           waiting_in: 10,
@@ -391,15 +487,15 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
   };
 
   beforeAll(async () => {
-    process.env.JWT_ACCESS_SECRET = testSecret;
-
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({ isGlobal: true }),
         PassportModule.register({ defaultStrategy: 'jwt' }),
-        JwtModule.register({
-          secret: testSecret,
-          signOptions: { expiresIn: '1h' },
+        JwtModule.registerAsync({
+          useFactory: () => ({
+            secret: getJwtAccessSecret(),
+            signOptions: { expiresIn: '1h' },
+          }),
         }),
       ],
       controllers: [ReportsController],
@@ -601,6 +697,87 @@ describe('Operation History API dataQuality & HTTP Integration (e2e)', () => {
       expect(item.fraud.dataQuality).not.toContain('REJECTED_NOT_EVALUATED');
       expect(item.fraud.deviationPercent).toBeCloseTo(2, 5);
       expect(item.fraud.status).toBe('SAFE');
+    });
+  });
+
+  describe('4. Process Scope Data Isolation & Leaking Prevention (HTTP & Export)', () => {
+    it('strictly excludes GSP transactions from History list when WAREHOUSE has scope [GBB, GBJ]', async () => {
+      const scopedToken = createToken('warehouse-scoped');
+      const res = await request(app.getHttpServer())
+        .get('/api/reports/operation-history')
+        .set('Authorization', `Bearer ${scopedToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBeGreaterThan(0);
+
+      // Verify every returned transaction belongs to allowed scopes
+      for (const row of res.body.data) {
+        expect(['GBB', 'GBJ']).toContain(row.processType);
+        expect(row.processType).not.toBe('GSP');
+      }
+
+      // Assert GSP transactions never leak to the client
+      expect(res.body.data.some((r: any) => r.id === 'tx-gsp-coal')).toBe(
+        false,
+      );
+      expect(
+        res.body.data.some((r: any) => r.transactionNumber === 'TRX-GSP-001'),
+      ).toBe(false);
+    });
+
+    it('strictly excludes GSP transactions from Export CSV stream when WAREHOUSE has scope [GBB, GBJ]', async () => {
+      const scopedToken = createToken('warehouse-scoped');
+      const res = await request(app.getHttpServer())
+        .get('/api/reports/operation-history/export?format=csv')
+        .set('Authorization', `Bearer ${scopedToken}`)
+        .expect(200);
+
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.text).toContain('TRX-INV-001');
+      expect(res.text).not.toContain('TRX-GSP-001');
+      expect(res.text).not.toContain('tx-gsp-coal');
+    });
+
+    it('strictly isolates GSP transactions when WAREHOUSE has scope [GSP]', async () => {
+      const gspToken = createToken('warehouse-gsp');
+      const res = await request(app.getHttpServer())
+        .get('/api/reports/operation-history')
+        .set('Authorization', `Bearer ${gspToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.length).toBeGreaterThan(0);
+
+      for (const row of res.body.data) {
+        expect(row.processType).toBe('GSP');
+      }
+      expect(res.body.data.some((r: any) => r.id === 'tx-gsp-coal')).toBe(true);
+      expect(res.body.data.some((r: any) => r.id === 'tx-gbj-finished')).toBe(
+        false,
+      );
+      expect(
+        res.body.data.some((r: any) => r.id === 'tx-inverted-timestamps'),
+      ).toBe(false);
+    });
+
+    it('allows ADMIN to see all process types (GBB, GSP, GBJ)', async () => {
+      const adminToken = createToken('admin-1');
+      const res = await request(app.getHttpServer())
+        .get('/api/reports/operation-history')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.some((r: any) => r.processType === 'GBB')).toBe(
+        true,
+      );
+      expect(res.body.data.some((r: any) => r.processType === 'GSP')).toBe(
+        true,
+      );
+      expect(res.body.data.some((r: any) => r.processType === 'GBJ')).toBe(
+        true,
+      );
     });
   });
 });
