@@ -709,9 +709,15 @@ export class ReportsService {
         SELECT
           metrics.*,
           ABS(metrics.roll - metrics.net) AS diff,
-          CASE WHEN metrics.net > 0 AND metrics.roll > 0
-            THEN COALESCE(metrics.persisted_deviation, ABS(100 - (metrics.roll / metrics.net * 100)))
-            ELSE NULL END AS deviation_percent,
+          CASE
+            WHEN metrics."status" IN ('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED')
+              OR metrics.vehicle_result = 'REJECT' OR metrics.incoming_result = 'REJECT'
+            THEN NULL
+            ELSE COALESCE(metrics.persisted_deviation,
+              CASE WHEN metrics.net > 0 AND metrics.roll > 0
+                THEN ABS(100 - (metrics.roll / metrics.net * 100))
+                ELSE NULL END)
+          END AS deviation_percent,
           CASE
             WHEN metrics."status" IN ('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED')
               OR metrics.vehicle_result = 'REJECT' OR metrics.incoming_result = 'REJECT'

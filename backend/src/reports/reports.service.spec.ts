@@ -197,6 +197,17 @@ describe('ReportsService', () => {
       expect(sqlText).toContain('INNER JOIN "Transaction" t');
     });
 
+    it('keeps persisted deviation outside the positive-weight fallback guard in both SQL queries', async () => {
+      await service.getOperationHistory({}, mockUser);
+
+      for (const [query] of mockPrisma.$queryRaw.mock.calls) {
+        const sql = query.strings.join('?');
+        expect(sql).toMatch(
+          /CASE\s+WHEN metrics\."status" IN \('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED'\)\s+OR metrics\.vehicle_result = 'REJECT' OR metrics\.incoming_result = 'REJECT'\s+THEN NULL\s+ELSE COALESCE\(metrics\.persisted_deviation,\s*CASE WHEN metrics\.net > 0 AND metrics\.roll > 0\s*THEN ABS\(100 - \(metrics\.roll \/ metrics\.net \* 100\)\)\s*ELSE NULL END\)\s+END AS deviation_percent/,
+        );
+      }
+    });
+
     it('preserves a persisted FraudCheck verdict when projection weights are unavailable', async () => {
       mockPrisma.$queryRaw.mockReset();
       mockPrisma.$queryRaw
