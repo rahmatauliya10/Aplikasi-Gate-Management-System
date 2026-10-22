@@ -77,7 +77,11 @@ export function configureApp(app: INestApplication) {
         if (allowedOrigins.includes('*')) {
           return callback(null, true);
         }
-        if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        if (
+          /^http:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(
+            origin,
+          )
+        ) {
           return callback(null, true);
         }
       }
