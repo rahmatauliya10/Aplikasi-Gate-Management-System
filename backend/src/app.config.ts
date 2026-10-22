@@ -73,17 +73,16 @@ export function configureApp(app: INestApplication) {
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-      if (!isProduction) {
-        if (allowedOrigins.includes('*')) {
-          return callback(null, true);
-        }
-        if (
-          /^http:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(
-            origin,
-          )
-        ) {
-          return callback(null, true);
-        }
+      // Permit private plant LAN IP origins (10.x.x.x, 192.168.x.x, 172.16-31.x.x, localhost)
+      if (
+        /^http:\/\/(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(:\d+)?$/.test(
+          origin,
+        )
+      ) {
+        return callback(null, true);
+      }
+      if (!isProduction && allowedOrigins.includes('*')) {
+        return callback(null, true);
       }
       return callback(new Error('Not allowed by CORS'), false);
     },
