@@ -9,6 +9,7 @@ import { reportTestDatabaseUrl } from './helpers/report-test-database';
 import {
   CargoProcessType,
   ProcessType,
+  RiskLevel,
   Role,
   TransactionStatus,
 } from '@prisma/client';
@@ -145,7 +146,21 @@ describePostgres(
         tv: userAdmin.tokenVersion,
       });
 
+      // Clean up any residual test data before seeding
+      await prisma.fraudCheck.deleteMany({
+        where: {
+          transactionId: { in: [txIdGbb, txIdGsp, txIdGbj] },
+        },
+      });
+      await prisma.transaction.deleteMany({
+        where: {
+          id: { in: [txIdGbb, txIdGsp, txIdGbj] },
+        },
+      });
+
       // 2. Seed Real Transactions in PostgreSQL
+      // Base date: 07:00:00Z
+      // txIdGbb: gateIn 07:00, weighIn 07:10 (waitingIn=10m), qc 07:10-07:45 (qc=35m), warehouse 07:45-07:55 (wh=10m), weighOut 07:58 (waitingOut=3m), gateOut 08:00 (TAT=60m). Bottleneck: 'qc' (35m). SAFE (deviation 0%).
       const baseDate = new Date('2026-10-21T07:00:00Z');
       await prisma.transaction.create({
         data: {
@@ -162,18 +177,21 @@ describePostgres(
           status: TransactionStatus.COMPLETED,
           gateInAt: baseDate,
           weighInAt: new Date(baseDate.getTime() + 10 * 60000),
-          warehouseStartAt: new Date(baseDate.getTime() + 20 * 60000),
-          warehouseEndAt: new Date(baseDate.getTime() + 40 * 60000),
-          weighOutAt: new Date(baseDate.getTime() + 50 * 60000),
+          qcStartAt: new Date(baseDate.getTime() + 10 * 60000),
+          qcEndAt: new Date(baseDate.getTime() + 45 * 60000),
+          warehouseStartAt: new Date(baseDate.getTime() + 45 * 60000),
+          warehouseEndAt: new Date(baseDate.getTime() + 55 * 60000),
+          weighOutAt: new Date(baseDate.getTime() + 58 * 60000),
           gateOutAt: new Date(baseDate.getTime() + 60 * 60000),
           completedAt: new Date(baseDate.getTime() + 60 * 60000),
           grossWeight: 20000,
           tareWeight: 8000,
           netWeight: 12000,
-          actualWeight: 11950,
+          actualWeight: 12000,
         },
       });
 
+      // txIdGsp: gateIn 07:00, weighIn 07:10 (waitingIn=10m), warehouse 07:10-07:55 (wh=45m), weighOut 08:00 (waitingOut=5m), gateOut 08:05 (TAT=65m). Bottleneck: 'warehouse' (45m). WARNING anomaly via FraudCheck.
       await prisma.transaction.create({
         data: {
           id: txIdGsp,
@@ -189,9 +207,9 @@ describePostgres(
           status: TransactionStatus.COMPLETED,
           gateInAt: baseDate,
           weighInAt: new Date(baseDate.getTime() + 10 * 60000),
-          warehouseStartAt: new Date(baseDate.getTime() + 25 * 60000),
-          warehouseEndAt: new Date(baseDate.getTime() + 45 * 60000),
-          weighOutAt: new Date(baseDate.getTime() + 55 * 60000),
+          warehouseStartAt: new Date(baseDate.getTime() + 10 * 60000),
+          warehouseEndAt: new Date(baseDate.getTime() + 55 * 60000),
+          weighOutAt: new Date(baseDate.getTime() + 60 * 60000),
           gateOutAt: new Date(baseDate.getTime() + 65 * 60000),
           completedAt: new Date(baseDate.getTime() + 65 * 60000),
           grossWeight: 35000,
@@ -201,6 +219,20 @@ describePostgres(
         },
       });
 
+      // Seed explicit FraudCheck with RiskLevel.WARNING for GSP to prove cross-scope anomaly isolation
+      await prisma.fraudCheck.create({
+        data: {
+          transactionId: txIdGsp,
+          netWeight: 25000,
+          warehouseActualWeight: 25000,
+          deviationKg: 0,
+          deviationPercent: 0,
+          riskLevel: RiskLevel.WARNING,
+          riskReason: 'Audit isolation verification: GSP anomaly fixture',
+        },
+      });
+
+      // txIdGbj: gateIn 07:00, weighIn 07:10 (waitingIn=10m), qc 07:10-07:35 (qc=25m), warehouse 07:35-07:45 (wh=10m), weighOut 07:48 (waitingOut=3m), gateOut 07:50 (TAT=50m). Bottleneck: 'qc' (25m). SAFE (deviation 0%).
       await prisma.transaction.create({
         data: {
           id: txIdGbj,
@@ -216,9 +248,11 @@ describePostgres(
           status: TransactionStatus.COMPLETED,
           gateInAt: baseDate,
           weighInAt: new Date(baseDate.getTime() + 10 * 60000),
-          warehouseStartAt: new Date(baseDate.getTime() + 20 * 60000),
-          warehouseEndAt: new Date(baseDate.getTime() + 35 * 60000),
-          weighOutAt: new Date(baseDate.getTime() + 45 * 60000),
+          qcStartAt: new Date(baseDate.getTime() + 10 * 60000),
+          qcEndAt: new Date(baseDate.getTime() + 35 * 60000),
+          warehouseStartAt: new Date(baseDate.getTime() + 35 * 60000),
+          warehouseEndAt: new Date(baseDate.getTime() + 45 * 60000),
+          weighOutAt: new Date(baseDate.getTime() + 48 * 60000),
           gateOutAt: new Date(baseDate.getTime() + 50 * 60000),
           completedAt: new Date(baseDate.getTime() + 50 * 60000),
           grossWeight: 22000,
@@ -231,6 +265,11 @@ describePostgres(
 
     afterAll(async () => {
       if (prisma) {
+        await prisma.fraudCheck.deleteMany({
+          where: {
+            transactionId: { in: [txIdGbb, txIdGsp, txIdGbj] },
+          },
+        });
         await prisma.transaction.deleteMany({
           where: {
             id: { in: [txIdGbb, txIdGsp, txIdGbj] },
@@ -427,26 +466,26 @@ describePostgres(
           .set('Authorization', `Bearer ${tokenAdmin}`)
           .expect(200);
 
-        // 1. Scoped WAREHOUSE [GBB, GBJ] (GBB: 12 MT, 60m TAT; GBJ: 13 MT, 50m TAT)
+        // 1. Scoped WAREHOUSE [GBB, GBJ] (GBB: 12 MT, 60m TAT, QC bottleneck; GBJ: 13 MT, 50m TAT, QC bottleneck)
         expect(resGbbGbj.body.meta.total).toBe(2);
         expect(resGbbGbj.body.summary.totalTonnageMetric).toBe(25); // (12,000 + 13,000) / 1000 = 25 MT
         expect(resGbbGbj.body.summary.avgTatMinutes).toBe(55); // (60 + 50) / 2 = 55m
-        expect(resGbbGbj.body.summary.anomalyCount).toBe(0);
-        expect(resGbbGbj.body.summary.majorBottleneck).toBe('warehouse');
+        expect(resGbbGbj.body.summary.anomalyCount).toBe(0); // 0 anomalies in GBB/GBJ scope
+        expect(resGbbGbj.body.summary.majorBottleneck).toBe('qc'); // Both GBB & GBJ have QC as longest phase (35m & 25m)
 
-        // 2. Scoped WAREHOUSE [GSP] (GSP: 25 MT, 65m TAT)
+        // 2. Scoped WAREHOUSE [GSP] (GSP: 25 MT, 65m TAT, Warehouse bottleneck, 1 WARNING anomaly)
         expect(resGsp.body.meta.total).toBe(1);
         expect(resGsp.body.summary.totalTonnageMetric).toBe(25); // 25,000 / 1000 = 25 MT
         expect(resGsp.body.summary.avgTatMinutes).toBe(65);
-        expect(resGsp.body.summary.anomalyCount).toBe(0);
-        expect(resGsp.body.summary.majorBottleneck).toBe('warehouse');
+        expect(resGsp.body.summary.anomalyCount).toBe(1); // 1 anomaly from FraudCheck fixture in GSP
+        expect(resGsp.body.summary.majorBottleneck).toBe('warehouse'); // GSP has Warehouse as longest phase (45m)
 
-        // 3. ADMIN (All 3: GBB 12 MT, GBJ 13 MT, GSP 25 MT -> 50 MT total, avg TAT: (60+65+50)/3 = 58m)
+        // 3. ADMIN (All 3: GBB 12 MT, GBJ 13 MT, GSP 25 MT -> 50 MT total, avg TAT: (60+50+65)/3 = 58m)
         expect(resAdmin.body.meta.total).toBe(3);
         expect(resAdmin.body.summary.totalTonnageMetric).toBe(50);
         expect(resAdmin.body.summary.avgTatMinutes).toBe(58);
-        expect(resAdmin.body.summary.anomalyCount).toBe(0);
-        expect(resAdmin.body.summary.majorBottleneck).toBe('warehouse');
+        expect(resAdmin.body.summary.anomalyCount).toBe(1); // 1 anomaly total across all scopes
+        expect(resAdmin.body.summary.majorBottleneck).toBe('qc'); // 2 QC bottlenecks > 1 Warehouse bottleneck
       });
     });
 
