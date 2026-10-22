@@ -409,6 +409,45 @@ describePostgres(
         expect(resGsp.body.meta.total).toBeGreaterThanOrEqual(1);
         expect(resGbbGbj.body.meta.total).toBeGreaterThanOrEqual(2);
       });
+
+      it('accurately isolates aggregate numbers (tonnage, avg TAT, anomaly count, bottleneck) on scoped search', async () => {
+        // Query scoped exclusively to seeded test transactions via search prefix
+        const resGbbGbj = await request(app.getHttpServer())
+          .get('/api/reports/operation-history?search=TRX-REAL-ISO')
+          .set('Authorization', `Bearer ${tokenWhGbbGbj}`)
+          .expect(200);
+
+        const resGsp = await request(app.getHttpServer())
+          .get('/api/reports/operation-history?search=TRX-REAL-ISO')
+          .set('Authorization', `Bearer ${tokenWhGsp}`)
+          .expect(200);
+
+        const resAdmin = await request(app.getHttpServer())
+          .get('/api/reports/operation-history?search=TRX-REAL-ISO')
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+          .expect(200);
+
+        // 1. Scoped WAREHOUSE [GBB, GBJ] (GBB: 12 MT, 60m TAT; GBJ: 13 MT, 50m TAT)
+        expect(resGbbGbj.body.meta.total).toBe(2);
+        expect(resGbbGbj.body.summary.totalTonnageMetric).toBe(25); // (12,000 + 13,000) / 1000 = 25 MT
+        expect(resGbbGbj.body.summary.avgTatMinutes).toBe(55); // (60 + 50) / 2 = 55m
+        expect(resGbbGbj.body.summary.anomalyCount).toBe(0);
+        expect(resGbbGbj.body.summary.majorBottleneck).toBe('warehouse');
+
+        // 2. Scoped WAREHOUSE [GSP] (GSP: 25 MT, 65m TAT)
+        expect(resGsp.body.meta.total).toBe(1);
+        expect(resGsp.body.summary.totalTonnageMetric).toBe(25); // 25,000 / 1000 = 25 MT
+        expect(resGsp.body.summary.avgTatMinutes).toBe(65);
+        expect(resGsp.body.summary.anomalyCount).toBe(0);
+        expect(resGsp.body.summary.majorBottleneck).toBe('warehouse');
+
+        // 3. ADMIN (All 3: GBB 12 MT, GBJ 13 MT, GSP 25 MT -> 50 MT total, avg TAT: (60+65+50)/3 = 58m)
+        expect(resAdmin.body.meta.total).toBe(3);
+        expect(resAdmin.body.summary.totalTonnageMetric).toBe(50);
+        expect(resAdmin.body.summary.avgTatMinutes).toBe(58);
+        expect(resAdmin.body.summary.anomalyCount).toBe(0);
+        expect(resAdmin.body.summary.majorBottleneck).toBe('warehouse');
+      });
     });
 
     describe('4. HTTP API Export Stream Isolation (GET /api/reports/operation-history/export)', () => {
@@ -431,6 +470,40 @@ describePostgres(
           .expect(200);
 
         expect(res.headers['content-type']).toContain('text/csv');
+        expect(res.text).toContain(txNumGsp);
+        expect(res.text).not.toContain(txNumGbb);
+        expect(res.text).not.toContain(txNumGbj);
+      });
+
+      it('strictly isolates XLS export stream for WAREHOUSE [GBB, GBJ]', async () => {
+        const res = await request(app.getHttpServer())
+          .get('/api/reports/operation-history/export?format=xls')
+          .set('Authorization', `Bearer ${tokenWhGbbGbj}`)
+          .expect(200);
+
+        expect(res.headers['content-type']).toContain(
+          'application/vnd.ms-excel',
+        );
+        expect(res.headers['content-disposition']).toContain(
+          'operation-history.xls',
+        );
+        expect(res.text).toContain(txNumGbb);
+        expect(res.text).toContain(txNumGbj);
+        expect(res.text).not.toContain(txNumGsp);
+      });
+
+      it('strictly isolates XLS export stream for WAREHOUSE [GSP]', async () => {
+        const res = await request(app.getHttpServer())
+          .get('/api/reports/operation-history/export?format=xls')
+          .set('Authorization', `Bearer ${tokenWhGsp}`)
+          .expect(200);
+
+        expect(res.headers['content-type']).toContain(
+          'application/vnd.ms-excel',
+        );
+        expect(res.headers['content-disposition']).toContain(
+          'operation-history.xls',
+        );
         expect(res.text).toContain(txNumGsp);
         expect(res.text).not.toContain(txNumGbb);
         expect(res.text).not.toContain(txNumGbj);
