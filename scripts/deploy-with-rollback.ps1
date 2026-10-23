@@ -270,9 +270,25 @@ function Execute-Rollback {
 [bool]$IsProductionMode = [bool]($RequireDigest -or ($ComposeFile -like "*prod*"))
 [bool]$EffectiveRequireNginx = if ($PSBoundParameters.ContainsKey('RequireNginx')) { [bool]$RequireNginx } else { $IsProductionMode }
 
+# STRICT PRODUCTION FAULT INJECTION GUARD
+[string]$EffectiveDeployFault = if ($FaultInjectionPhase) { $FaultInjectionPhase } else { $env:GMS_FAULT_INJECTION_PHASE }
+if (-not [string]::IsNullOrWhiteSpace($EffectiveDeployFault)) {
+    if ($IsProductionMode -and $env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE" -and $env:CI -ne "true") {
+        throw "[CRITICAL GOVERNANCE VIOLATION] Fault injection (-FaultInjectionPhase '$EffectiveDeployFault') is unconditionally blocked on production deployments. No overrides permitted on production."
+    }
+}
+
 if ($RollbackOnly) {
     if (-not $RollbackManifestPath -and -not $NoSchemaChangeVerified) {
         throw "[GMS GOVERNANCE VIOLATION] -RollbackOnly requires either an explicit -RollbackManifestPath to restore the database to a verified pre-migration state, or -NoSchemaChangeVerified to explicitly confirm no schema migration occurred."
+    }
+    if (-not $RollbackManifestPath -and $NoSchemaChangeVerified) {
+        Write-Host "[GMS Rollback Guard] -NoSchemaChangeVerified specified for image-only rollback. Verifying database state..." -ForegroundColor Cyan
+        $livePg = (& docker ps -q -f "name=gate-system-postgres" 2>$null).ToString().Trim()
+        if ($livePg) {
+            [string]$migCheck = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>$null).ToString().Trim()
+            Write-Host "[GMS Rollback Guard] Target database verified responsive with migration inventory ($migCheck completed migrations)." -ForegroundColor Green
+        }
     }
     [bool]$dbRollbackRequired = [bool](-not [string]::IsNullOrWhiteSpace($RollbackManifestPath))
     try {

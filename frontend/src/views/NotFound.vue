@@ -25,12 +25,10 @@
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&display=swap');
-
 .page_404 {
   padding: 40px 0;
   background: #fff;
-  font-family: 'Arvo', serif;
+  font-family: Georgia, 'Times New Roman', serif;
 }
 
 .page_404 img {

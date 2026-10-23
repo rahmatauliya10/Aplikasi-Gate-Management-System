@@ -3,6 +3,9 @@
  * Comprehensive PDF Audit Report & Transaction Dossier Generator
  */
 
+import { selectEffectiveCurrentPa, sortPaHistory } from './paCurrentSelector'
+import { formatPaParameters } from './paParameterDisplay'
+
 const escapeHtml = (str) => {
   if (str === null || str === undefined || str === '') return '—'
   return String(str)
@@ -58,7 +61,7 @@ const getProcessType = (truck) => {
 
 export const generatePrintHTML = (truckList) => {
   const list = Array.isArray(truckList) ? truckList : [truckList]
-  
+
   let html = `<!DOCTYPE html>
 <html lang="id">
 <head>
@@ -403,18 +406,25 @@ export const generatePrintHTML = (truckList) => {
     const vendor = getVendor(t)
 
     // Weights calculation
-    const scaleInWeight = pType === 'GBJ' 
-      ? (t.weights?.tare ?? t.tareWeight ?? t.weighInWeight) 
+    const isGsp = pType === 'GSP'
+    const gspReceiptUnit = (t.receiptUnit || (t.warehouseProcesses?.[0]?.receivedUnit) || ((t.cargoSubType || t.cargoType || '').toLowerCase().includes('coal') ? 'KG' : 'LITER')).toUpperCase()
+    const isUomDiff = isGsp && gspReceiptUnit === 'LITER'
+
+    const scaleInWeight = pType === 'GBJ'
+      ? (t.weights?.tare ?? t.tareWeight ?? t.weighInWeight)
       : (t.weights?.gross ?? t.grossWeight ?? t.weighInWeight)
-    const scaleOutWeight = pType === 'GBJ' 
-      ? (t.weights?.gross ?? t.grossWeight ?? t.weighOutWeight) 
+    const scaleOutWeight = pType === 'GBJ'
+      ? (t.weights?.gross ?? t.grossWeight ?? t.weighOutWeight)
       : (t.weights?.tare ?? t.tareWeight ?? t.weighOutWeight)
     const netWeight = t.fraud?.net ?? (scaleInWeight && scaleOutWeight ? Math.abs(scaleInWeight - scaleOutWeight) : (t.netWeight || null))
-    const whRealization = t.fraud?.roll ?? t.warehouseGrossWeight ?? t.actualWeight ?? null
-    const deviationKg = t.fraud?.diff ?? (netWeight !== null && whRealization !== null ? Math.abs(netWeight - whRealization) : null)
-    const deviationPct = t.fraud?.deviationPercent ?? (netWeight && whRealization ? ((whRealization - netWeight) / netWeight) * 100 : null)
-    const deviationDirection = t.fraud?.direction || (whRealization !== null && netWeight !== null ? (whRealization > netWeight ? '+' : whRealization < netWeight ? '-' : '=') : '')
-    const devDirLabel = deviationDirection === '+' ? 'Overage / Kelebihan' : deviationDirection === '-' ? 'Shortage / Susut' : (deviationKg === 0 ? 'Matched / Sesuai' : '—')
+    const rawWhReal = t.receivedQuantity ?? t.warehouseProcesses?.[0]?.receivedQuantity ?? t.fraud?.roll ?? t.warehouseGrossWeight ?? t.actualWeight ?? null
+    const whRealization = rawWhReal
+    const deviationKg = isUomDiff ? null : (t.fraud?.diff ?? (netWeight !== null && whRealization !== null ? Math.abs(netWeight - whRealization) : null))
+    const deviationPct = isUomDiff ? null : (t.fraud?.deviationPercent ?? (netWeight && whRealization ? ((whRealization - netWeight) / netWeight) * 100 : null))
+    const deviationDirection = isUomDiff ? '' : (t.fraud?.direction || (whRealization !== null && netWeight !== null ? (whRealization > netWeight ? '+' : whRealization < netWeight ? '-' : '=') : ''))
+    const devDirLabel = isUomDiff
+      ? 'Deviasi belum dapat dihitung — satuan timbangan (KG) dan penerimaan (LITER) berbeda.'
+      : (deviationDirection === '+' ? 'Overage / Kelebihan' : deviationDirection === '-' ? 'Shortage / Susut' : (deviationKg === 0 ? 'Matched / Sesuai' : '—'))
 
     // QC & Checks Extraction
     const qcDetails = t.qcDetails || {}
@@ -441,6 +451,19 @@ export const generatePrintHTML = (truckList) => {
     const labPic = qcDetails.pic || (imCheck.checkedBy && imCheck.checkedBy.name) || 'QC Lab Analyst'
     const labNotes = t.qcNotes || qcDetails.note || imCheck.notes || imCheck.defectNotes || '—'
 
+    // GSP Specific Extractions
+    const gspPaRounds = sortPaHistory(t.productAnalyses || t.qcProductAnalyses || [])
+    const latestPa = selectEffectiveCurrentPa(gspPaRounds)
+    const paFacts = formatPaParameters(latestPa)
+    const latestDisposedPa = latestPa?.dispositionAction ? latestPa : null
+
+    const whProc = (t.warehouseProcesses && t.warehouseProcesses[0]) || {}
+    const preUnloadChecklist = whProc.checklistItems || t.preUnloadChecklist || {}
+    const checklistItems = Array.isArray(preUnloadChecklist.items) ? preUnloadChecklist.items : []
+    const checklistDisposition = preUnloadChecklist.disposition || t.checklistDisposition || null
+    const checklistInspector = preUnloadChecklist.inspectorName || preUnloadChecklist.inspectedBy || whProc.inspectorName || 'Gudang GSP'
+    const checklistInspectedAt = preUnloadChecklist.inspectedAt || whProc.checklistCompletedAt || whProc.startedAt
+
     // GBJ Vehicle Checklist Items
     const vCleanliness = qcvCheck.vehicleCleanliness || qcDetails.vehicleCleanliness || 'PASS'
     const vSeal = qcvCheck.sealCondition || qcDetails.sealCondition || 'PASS'
@@ -451,6 +474,15 @@ export const generatePrintHTML = (truckList) => {
     const vVerdict = qcvCheck.result || qcDetails.status || 'APPROVED'
     const vPic = (qcvCheck.checkedBy && qcvCheck.checkedBy.name) || qcDetails.pic || 'QC Inspector'
     const vNotes = qcvCheck.notes || qcDetails.note || '—'
+
+    // GBJ Delivery Checklist & Arrival Sequence Extractions
+    const gbjDeliveryChecklist = t.deliveryChecklist || (pType === 'GBJ' ? whProc.checklistItems : null) || null
+    const gbjProductTypes = Array.isArray(gbjDeliveryChecklist?.productTypes)
+      ? gbjDeliveryChecklist.productTypes
+      : (gbjDeliveryChecklist?.productType ? [gbjDeliveryChecklist.productType] : [])
+    const arrivalSeqNumber = t.dailySequence != null
+      ? `#${String(t.dailySequence).padStart(3, '0')}`
+      : (t.timestamps?.dailySequence != null ? `#${String(t.timestamps.dailySequence).padStart(3, '0')}` : null)
 
     // Durations & TAT
     const durations = t.durations || {}
@@ -488,7 +520,7 @@ export const generatePrintHTML = (truckList) => {
           </td>
           <td class="doc-badge">
             <h2 class="doc-title">TRUCK AUDIT DOSSIER</h2>
-            <div class="doc-meta">ID: ${escapeHtml(t.id)} &bull; ${escapeHtml(pType)} HUB</div>
+            <div class="doc-meta">ID: ${escapeHtml(t.id)} &bull; ${escapeHtml(pType)} HUB${arrivalSeqNumber ? ` &bull; <strong>NO. URUT: ${escapeHtml(arrivalSeqNumber)}</strong>` : ''}</div>
           </td>
         </tr>
       </table>
@@ -503,6 +535,11 @@ export const generatePrintHTML = (truckList) => {
         </div>
         <div class="grid-2">
           <div class="card-box">
+            ${arrivalSeqNumber ? `
+            <div class="data-row" style="background: #eef2ff; border-radius: 4px; padding: 2px 4px; margin-bottom: 2px;">
+              <span class="data-label" style="color: #3730a3; font-weight: 800;">Arrival Sequence</span>
+              <span class="data-value font-mono-val" style="color: #3730a3; font-weight: 900; font-size: 11px;">${escapeHtml(arrivalSeqNumber)}</span>
+            </div>` : ''}
             <div class="data-row">
               <span class="data-label">Plate Number (Nopol)</span>
               <span class="data-value font-mono-val" style="font-size: 11px;">${escapeHtml(plate)}</span>
@@ -584,11 +621,11 @@ export const generatePrintHTML = (truckList) => {
       <div class="section">
         <div class="section-header">
           <h3 class="section-title">${cargoItems.length > 0 ? '3' : '2'}. Weighbridge & Warehouse Scale Reconciliation</h3>
-          <span class="badge ${t.fraud?.status === 'CRITICAL' ? 'badge-critical' : t.fraud?.status === 'WARNING' ? 'badge-warning' : t.fraud?.status === 'PENDING' ? 'badge-slate' : 'badge-safe'}">
-            Scale Audit: ${escapeHtml(t.fraud?.status || 'PENDING')}
+          <span class="badge ${isUomDiff ? 'badge-slate' : (t.fraud?.status === 'CRITICAL' ? 'badge-critical' : t.fraud?.status === 'WARNING' ? 'badge-warning' : t.fraud?.status === 'PENDING' ? 'badge-slate' : 'badge-safe')}">
+            Scale Audit: ${isUomDiff ? 'UOM_DIFFERENT' : escapeHtml(t.fraud?.status || 'PENDING')}
           </span>
         </div>
-        
+
         <div class="grid-4" style="margin-bottom: 8px;">
           <div class="metric-card">
             <div class="metric-label">Scale IN (${pType === 'GBJ' ? 'Tare' : 'Gross'})</div>
@@ -607,12 +644,20 @@ export const generatePrintHTML = (truckList) => {
           </div>
           <div class="metric-card" style="background: #eff6ff; border-color: #bfdbfe;">
             <div class="metric-label" style="color: #1e40af;">Warehouse Realization</div>
-            <div class="metric-val" style="color: #1e3a8a;">${formatWeight(whRealization)}</div>
+            <div class="metric-val" style="color: #1e3a8a;">${whRealization !== null ? Number(whRealization).toLocaleString('id-ID') + ' ' + (isGsp ? gspReceiptUnit : 'kg') : '—'}</div>
             <div class="metric-sub" style="color: #2563eb;">Realisasi Gudang</div>
           </div>
         </div>
 
         <div class="card-box">
+          ${isUomDiff ? `
+          <div class="data-row" style="background: #f0f9ff; padding: 6px 8px; border-radius: 4px;">
+            <span class="data-label" style="color: #0369a1; font-weight: 700;">Informasi Satuan Berbeda</span>
+            <span class="data-value" style="color: #0c4a6e; font-weight: 700;">
+              Deviasi belum dapat dihitung — satuan timbangan (KG) dan penerimaan (LITER) berbeda.
+            </span>
+          </div>
+          ` : `
           <div class="data-row">
             <span class="data-label">Scale Variance (Selisih kg)</span>
             <span class="data-value font-mono-val" style="color: ${deviationKg && deviationKg > 50 ? '#b91c1c' : '#0f172a'};">
@@ -631,6 +676,7 @@ export const generatePrintHTML = (truckList) => {
               ${escapeHtml(t.fraud?.details || t.fraud?.notes || (deviationKg === 0 ? 'Toleransi Timbangan Sesuai (Zero Anomaly)' : devDirLabel))}
             </span>
           </div>
+          `}
         </div>
       </div>
 
@@ -683,8 +729,129 @@ export const generatePrintHTML = (truckList) => {
             </tr>
           </tbody>
         </table>
+
+        ${gbjDeliveryChecklist ? `
+        <!-- GBJ Finished Goods Dispatch & Delivery Checklist -->
+        <div style="margin-top: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+            <span style="font-weight: 800; text-transform: uppercase; font-size: 8px; color: #4338ca; letter-spacing: 0.04em;">
+              Finished Goods Dispatch &amp; Delivery Checklist
+            </span>
+            <span style="font-size: 8px; color: #64748b;">
+              Customer: <strong>${escapeHtml(gbjDeliveryChecklist.customer || gbjDeliveryChecklist.customerDestination || '—')}</strong> &bull; SJ: <strong>${escapeHtml(t.suratJalanNumber || gbjDeliveryChecklist.suratJalanNumber || '—')}</strong>
+            </span>
+          </div>
+          <table class="table-custom">
+            <thead>
+              <tr>
+                <th>Product Type 1</th>
+                <th>Product Type 2 (Optional)</th>
+                <th>Loaded Weight (IC)</th>
+                <th>Dispatch Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>${escapeHtml(gbjProductTypes[0] || '—')}</strong></td>
+                <td><strong>${escapeHtml(gbjProductTypes[1] || '—')}</strong></td>
+                <td class="font-mono-val">${formatWeight(whProc.actualWeight || t.actualWeight || 0)}</td>
+                <td>${escapeHtml(gbjDeliveryChecklist.date || formatDateTime(whEndTime || whStartTime))}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+        ` : pType === 'GSP' ? `
+        <!-- GSP Product Analysis (PAC / Rapid Klen / Batubara) -->
+        <div style="margin-bottom: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+            <span style="font-weight: 800; text-transform: uppercase; font-size: 8px; color: #475569; letter-spacing: 0.04em;">
+              Product Analysis (PA) Laboratorium GSP ${latestPa ? `&bull; Ronde ${latestPa.testRound || 1}` : ''}
+            </span>
+            <span style="font-size: 8px; color: #64748b;">
+              Analis: <strong>${escapeHtml(latestPa?.testedBy?.name || latestPa?.testedById || labPic)}</strong> &bull; ${formatDateTime(latestPa?.testedAt || latestPa?.createdAt || qcEndTime)}
+            </span>
+          </div>
+
+          <table class="table-custom"><thead><tr><th>Parameter PA</th><th>Fakta tersimpan</th><th>Basis spesifikasi versi ini</th></tr></thead><tbody>
+            ${paFacts.map(fact => `<tr><td>${escapeHtml(fact.label)}${fact.conflict ? ` (${escapeHtml(fact.source)})` : ''}</td><td>${escapeHtml(fact.value)}</td><td>${escapeHtml(fact.specText)}${fact.isOk === null ? '' : fact.isOk ? ' — PASS' : ' — OOS'}</td></tr>`).join('')}
+          </tbody></table>
+          <div>Hasil tersimpan: ${escapeHtml(latestPa?.result)} / ${escapeHtml(latestPa?.status)}${latestPa?.dispositionRequiresReview ? ' — Disposisi memerlukan review' : ''}</div>
+
+
+          ${latestDisposedPa ? `
+          <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 4px; padding: 6px 8px; margin-top: 4px; font-size: 8.5px;">
+            <div style="display: flex; justify-content: space-between; font-weight: 700; color: #92400e; margin-bottom: 2px;">
+              <span>Disposisi Mutu PA: ${escapeHtml(latestDisposedPa.dispositionAction === 'ACCEPT_WITH_NOTE' ? 'TERIMA DENGAN CATATAN (KONSESI MUTU)' : latestDisposedPa.dispositionAction === 'REQUEST_RETEST' ? 'UJI ULANG (RETEST)' : 'TOLAK MUATAN')}</span>
+              <span>Oleh: ${escapeHtml(latestDisposedPa.dispositionBy?.name || latestDisposedPa.dispositionById || 'Gudang GSP')} &bull; ${formatDateTime(latestDisposedPa.dispositionAt)}</span>
+            </div>
+            <div style="color: #78350f;"><strong>Alasan Disposisi:</strong> "${escapeHtml(latestDisposedPa.dispositionReason || '—')}"</div>
+            ${latestDisposedPa.dispositionAction === 'ACCEPT_WITH_NOTE' ? '<div style="color: #b45309; font-style: italic; margin-top: 2px;">Catatan Integritas: Hasil teknis laboratorium tetap tercatat REJECT secara faktual. Penerimaan muatan merupakan konsesi operasional bersyarat.</div>' : ''}
+          </div>
+          ` : ''}
+        </div>
+
+        <!-- GSP Pemeriksaan Pra-Bongkar (9 Parameter) -->
+        <div style="margin-top: 6px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+            <span style="font-weight: 800; text-transform: uppercase; font-size: 8px; color: #475569; letter-spacing: 0.04em;">
+              Pemeriksaan Pra-Bongkar GSP (9 Parameter Fisik &amp; Dokumen)
+            </span>
+            <span style="font-size: 8px; color: #64748b;">
+              Pemeriksa: <strong>${escapeHtml(checklistInspector)}</strong> &bull; ${formatDateTime(checklistInspectedAt)}
+            </span>
+          </div>
+
+          ${checklistItems.length > 0 ? `
+          <table class="table-custom">
+            <thead>
+              <tr>
+                <th style="width: 24px; text-align: center;">#</th>
+                <th>Parameter Pemeriksaan</th>
+                <th style="width: 70px; text-align: center;">Hasil</th>
+                <th>Catatan Lapangan</th>
+                <th style="width: 70px; text-align: center;">Bukti Foto</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${checklistItems.map((item, idx) => `
+              <tr>
+                <td style="text-align: center; font-weight: 700;">${idx + 1}</td>
+                <td>${escapeHtml(item.label || item.id || `Parameter ${idx + 1}`)}</td>
+                <td style="text-align: center;">
+                  <span class="badge ${item.status === 'OK' || item.result === 'OK' || item.ok ? 'badge-safe' : 'badge-critical'}">
+                    ${item.status === 'OK' || item.result === 'OK' || item.ok ? 'OK' : 'NOT OK'}
+                  </span>
+                </td>
+                <td style="color: ${item.notes ? '#0f172a' : '#94a3b8'}; font-style: ${item.notes ? 'italic' : 'normal'};">
+                  ${escapeHtml(item.notes || '—')}
+                </td>
+                <td style="text-align: center; font-size: 8px;">
+                  ${item.photoUrl ? '<span style="color: #0369a1; font-weight: 700;">&#128247; Terlampir</span>' : '—'}
+                </td>
+              </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : `
+          <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; padding: 6px; text-align: center; color: #64748b; font-size: 8.5px;">
+            Belum ada rekaman pemeriksaan pra-bongkar pada transaksi ini.
+          </div>
+          `}
+
+          ${checklistDisposition ? `
+          <div style="background-color: ${checklistDisposition.action === 'ACCEPT_WITH_NOTE' ? '#fffbeb' : '#fef2f2'}; border: 1px solid ${checklistDisposition.action === 'ACCEPT_WITH_NOTE' ? '#fde68a' : '#fecaca'}; border-radius: 4px; padding: 6px 8px; margin-top: 4px; font-size: 8.5px;">
+            <div style="display: flex; justify-content: space-between; font-weight: 700; color: ${checklistDisposition.action === 'ACCEPT_WITH_NOTE' ? '#92400e' : '#991b1b'}; margin-bottom: 2px;">
+              <span>Keputusan Checklist Pra-Bongkar: ${escapeHtml(checklistDisposition.action === 'ACCEPT_WITH_NOTE' ? 'TERIMA DENGAN CATATAN (KONSESI PRA-BONGKAR)' : 'TOLAK MUATAN')}</span>
+              <span>Oleh: ${escapeHtml(checklistDisposition.decidedByName || checklistDisposition.decidedById || 'Gudang GSP')} &bull; ${formatDateTime(checklistDisposition.decidedAt)}</span>
+            </div>
+            <div style="color: ${checklistDisposition.action === 'ACCEPT_WITH_NOTE' ? '#78350f' : '#7f1d1d'};"><strong>Alasan Keputusan:</strong> "${escapeHtml(checklistDisposition.reason || '—')}"</div>
+            ${checklistDisposition.action === 'ACCEPT_WITH_NOTE' ? '<div style="color: #b45309; font-style: italic; margin-top: 2px;">Catatan Integritas: Hasil checklist fisik tetap tercatat NOT OK secara faktual; muatan diterima atas dasar konsesi penerimaan GSP.</div>' : ''}
+          </div>
+          ` : ''}
+        </div>
         ` : `
-        <!-- GBB / GSP Raw Material QA Parameters -->
+        <!-- GBB Raw Material QA Parameters -->
         <table class="table-custom">
           <thead>
             <tr>
@@ -866,10 +1033,10 @@ export const printTruckReport = (truckListOrSingle) => {
     alert('Popup terblokir oleh browser. Izinkan popup untuk mencetak laporan PDF.')
     return
   }
-  
+
   printWindow.document.write(generatePrintHTML(list))
   printWindow.document.close()
-  
+
   printWindow.onload = () => {
     printWindow.focus()
     printWindow.print()

@@ -36,7 +36,7 @@
               <StepTimeline :current-step="selectedTruck?.status || selectedTruck?.step || '-'" :process-type="getProcessType(selectedTruck)" />
             </div>
           </div>
-          <WeightInput :label="weighingLabel" :previous-weight="previousWeight" :is-submitting="isProcessing" @save="handleWeightSubmit" />
+          <WeightInput :key="selectedTruck.id" :label="weighingLabel" :previous-weight="previousWeight" :is-submitting="isProcessing" @dirty-change="pendingWeight = $event" @save="handleWeightSubmit" />
           <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" @close="showDetailsModal = false" />
         </div>
 
@@ -114,7 +114,12 @@
                 
                 <div class="flex justify-between items-start pl-3">
                   <div>
-                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">{{ getStepLabel(truck) }}</div>
+                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 flex items-center space-x-1.5">
+                      <span>{{ getStepLabel(truck) }}</span>
+                      <span v-if="truck.dailySequence" class="px-1.5 py-0.2 rounded text-[9px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        #{{ String(truck.dailySequence).padStart(3, '0') }}
+                      </span>
+                    </div>
                     <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ getPlateNumber(truck) }}</div>
                   </div>
                   <div class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest"
@@ -163,11 +168,13 @@
 
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTruckStore } from '../stores/truckStore'
 import { useWeighbridgeStore } from '../stores/weighbridgeStore'
 import { useToast } from '../composables/useToast'
+import { useUnsavedWarning } from '../composables/useUnsavedWarning'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import StatusBadge from '../components/StatusBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StepTimeline from '../components/StepTimeline.vue'
@@ -186,13 +193,6 @@ const searchQuery = ref('')
 const filterStatus = ref('ALL')
 const isProcessing = ref(false)
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[Weighbridge] Mount-time fetch failed:', err.message)
-  }
-})
 
 const getPlateNumber = (truck) => {
   if (!truck) return '-'
@@ -286,6 +286,7 @@ const truckInfoRows = computed(() => {
   if (!selectedTruck.value) return []
   const t = selectedTruck.value
   return [
+    ...(t.dailySequence ? [{ label: 'No. Urut Kedatangan', value: `#${String(t.dailySequence).padStart(3, '0')}`, cls: 'text-indigo-600 font-mono text-base font-black' }] : []),
     { label: 'Plate Number', value: getPlateNumber(t), cls: 'text-slate-900 font-mono text-lg tracking-widest' },
     { label: 'Driver', value: t.driverName || '-' },
     { label: 'Vendor', value: getVendor(t), cls: 'text-slate-700' },
@@ -336,6 +337,19 @@ const previousWeight = computed(() => {
 })
 
 const selectTruck = (truck) => { selectedTruck.value = truck }
+const pendingWeight = ref(false)
+useUnsavedWarning(pendingWeight)
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: queueTrucks,
+  selectedTruck,
+  selectTruck: (truck) => { pendingWeight.value = false; selectTruck(truck) },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    filterStatus.value = 'ALL'
+    currentPage.value = Math.floor(queueTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 const handleWeightSubmit = async (weight) => {
   if (!selectedTruck.value || isProcessing.value) return
   isProcessing.value = true

@@ -24,16 +24,26 @@ import { TransactionQueryDto } from './dto/transaction-query.dto';
 import { CancelTransactionDto } from '../gate/dto/cancel-transaction.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { REOPEN_TARGETS_BY_PROCESS } from './reopen-policy';
 
 import { Req } from '@nestjs/common';
 import type { Request } from 'express';
+
+import { ActiveTransactionAmendmentService } from './active-transaction-amendment.service';
+import {
+  AmendActiveProductDto,
+  RecordOperationalIncidentDto,
+} from './dto/amend-active-transaction.dto';
 
 @ApiTags('Transactions')
 @ApiBearerAuth()
 @Controller('transactions')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class TransactionsController {
-  constructor(private readonly transactionsService: TransactionsService) {}
+  constructor(
+    private readonly transactionsService: TransactionsService,
+    private readonly amendmentService: ActiveTransactionAmendmentService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all transactions with pagination and filters' })
@@ -56,21 +66,11 @@ export class TransactionsController {
   getReopenMatrix() {
     return {
       success: true,
-      data: {
-        GBB: [
-          'REGISTERED',
-          'QC_VEHICLE_PENDING',
-          'QC_VEHICLE_PASSED',
-          'INCOMING_CHECK_PENDING',
-        ],
-        GSP: [
-          'REGISTERED',
-          'QC_VEHICLE_PENDING',
-          'QC_VEHICLE_PASSED',
-          'INCOMING_CHECK_PENDING',
-        ],
-        GBJ: ['REGISTERED', 'QC_VEHICLE_PENDING', 'QC_VEHICLE_PASSED'],
-      },
+      data: Object.fromEntries(
+        Object.entries(REOPEN_TARGETS_BY_PROCESS).map(
+          ([processType, targets]) => [processType, [...targets]],
+        ),
+      ),
     };
   }
 
@@ -84,6 +84,79 @@ export class TransactionsController {
   })
   findActive(@CurrentUser() user: JwtPayloadUser) {
     return this.transactionsService.findActive(user);
+  }
+
+  @Get('pending-reminders')
+  @ApiOperation({
+    summary:
+      'Get role-scoped pending transaction reminders with categorization and SLA',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending transaction reminders retrieved',
+  })
+  getPendingReminders(@CurrentUser() user: JwtPayloadUser) {
+    return this.transactionsService.getPendingReminders(user);
+  }
+
+  @Post('pending-reminders/:id/snooze')
+  @ApiOperation({ summary: 'Snooze pending reminder for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reminder snoozed for current user',
+  })
+  snoozeReminder(
+    @Param('id') reminderId: string,
+    @CurrentUser() user: JwtPayloadUser,
+    @Body() body: { minutes?: number },
+  ) {
+    return this.transactionsService.snoozeReminder(
+      user.id,
+      reminderId,
+      body?.minutes || 30,
+    );
+  }
+
+  @Post('pending-reminders/:id/unsnooze')
+  @ApiOperation({ summary: 'Unsnooze pending reminder for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reminder unsnoozed for current user',
+  })
+  unsnoozeReminder(
+    @Param('id') reminderId: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.transactionsService.unsnoozeReminder(user.id, reminderId);
+  }
+
+  @Post('pending-reminders/:id/read')
+  @ApiOperation({ summary: 'Mark reminder as read for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reminder marked read for current user',
+  })
+  markReminderRead(
+    @Param('id') reminderId: string,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.transactionsService.markReminderRead(user.id, reminderId);
+  }
+
+  @Post('pending-reminders/read-all')
+  @ApiOperation({ summary: 'Mark all reminders as read for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'All reminders marked read for current user',
+  })
+  markAllRemindersRead(
+    @CurrentUser() user: JwtPayloadUser,
+    @Body() body: { ids?: string[] },
+  ) {
+    return this.transactionsService.markAllRemindersRead(
+      user.id,
+      body?.ids || [],
+    );
   }
 
   @Get(':id')
@@ -145,5 +218,48 @@ export class TransactionsController {
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.transactionsService.voidTransaction(id, dto, user);
+  }
+
+  @Post(':id/amend-product')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Amend product details on active transaction before unloading (ADMIN only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Product amended successfully; status downgraded if applicable',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Unloading started or invalid transaction state',
+  })
+  amendProduct(
+    @Param('id') id: string,
+    @Body() dto: AmendActiveProductDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.amendmentService.amendActiveProduct(id, dto, user);
+  }
+
+  @Post(':id/operational-incident')
+  @Roles('ADMIN')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Record operational incident for post-unloading corrections with evidence (ADMIN only)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Operational incident recorded in audit trail',
+  })
+  recordOperationalIncident(
+    @Param('id') id: string,
+    @Body() dto: RecordOperationalIncidentDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.amendmentService.recordOperationalIncident(id, dto, user);
   }
 }

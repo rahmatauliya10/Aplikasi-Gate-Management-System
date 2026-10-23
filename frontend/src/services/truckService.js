@@ -26,6 +26,19 @@ const truckService = {
     return api.get(`/transactions/${id}`)
   },
 
+  uploadAttachment(transactionId, file, metadata = {}) {
+    const formData = new FormData()
+    formData.append('file', file)
+    Object.entries(metadata).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        formData.append(key, String(value))
+      }
+    })
+    return api.post(`/attachments/upload/${transactionId}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
   /**
    * Register new truck (gate check-in)
    * @param {Object} data - { licensePlate, driverName, origin, destination, cargo, doNumber }

@@ -387,18 +387,21 @@ try {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
         }
 
-        # Check GMS_ENVIRONMENT_ID
+        # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
         [string]$ActualEnvId = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_ENVIRONMENT_ID' OR key = 'ENVIRONMENT_ID' OR key = 'SYSTEM_ENVIRONMENT_ID' LIMIT 1), '');"
         if ([string]::IsNullOrWhiteSpace($ActualEnvId)) {
-            $ActualEnvId = $ExpectedEnvironmentId
+            throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_ENVIRONMENT_ID configured in AppSetting. Fail-closed: Cannot restore into unverified database without verified identity. NO DATABASE MUTATION OCCURRED."
         }
         if ($ExpectedEnvironmentId -and $ActualEnvId -ne $ExpectedEnvironmentId) {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Environment ID '$ExpectedEnvironmentId' does not match target database ID '$ActualEnvId'. NO DATABASE MUTATION OCCURRED."
         }
 
-        # Check GMS_INSTALLATION_UUID
+        # Check GMS_INSTALLATION_UUID (FAIL-CLOSED: Must be present on existing database)
         [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_INSTALLATION_UUID' OR key = 'INSTALLATION_UUID' LIMIT 1), '');"
-        if ($ExpectedInstallationUuid -and -not [string]::IsNullOrWhiteSpace($ActualInstallUuid) -and $ActualInstallUuid -ne $ExpectedInstallationUuid) {
+        if ([string]::IsNullOrWhiteSpace($ActualInstallUuid)) {
+            throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_INSTALLATION_UUID configured in AppSetting. Fail-closed: Existing environment restore requires a valid installation UUID. NO DATABASE MUTATION OCCURRED."
+        }
+        if ($ExpectedInstallationUuid -and $ActualInstallUuid -ne $ExpectedInstallationUuid) {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Installation UUID '$ExpectedInstallationUuid' does not match target UUID '$ActualInstallUuid'. NO DATABASE MUTATION OCCURRED."
         }
 
@@ -406,6 +409,17 @@ try {
         [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM \"AppSetting\" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
         if ($RestoreAllowedVal -ne "TRUE" -and $RestoreAllowedVal -ne "1") {
             throw "HARD FAIL: GMS_RESTORE_ALLOWED is set to '$RestoreAllowedVal' in AppSetting. Restore operation is NOT permitted on live database [$LiveDbName]. Set GMS_RESTORE_ALLOWED = TRUE in target database prior to executing restore. NO DATABASE MUTATION OCCURRED."
+        }
+
+        # STRICT PRODUCTION FAULT INJECTION GUARD
+        [string]$EffectiveFaultPhase = if ($FaultInjectionPhase) { $FaultInjectionPhase } else { $env:GMS_FAULT_INJECTION_PHASE }
+        if (-not [string]::IsNullOrWhiteSpace($EffectiveFaultPhase)) {
+            if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE" -and $env:CI -ne "true") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Fault injection (-FaultInjectionPhase '$EffectiveFaultPhase') is strictly prohibited on non-drill environments! No overrides permitted."
+            }
+            if ($ActualEnvId -like "GMS-PROD*" -and $env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE" -and $env:CI -ne "true") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] is identified as production ($ActualEnvId). Fault injection on production database is unconditionally blocked with zero overrides."
+            }
         }
 
         Write-Log "  Target DB Fingerprint Verified (Env: $ActualEnvId, UUID: $ActualInstallUuid, RESTORE_ALLOWED: TRUE) [PASS]" -Level "SUCCESS"

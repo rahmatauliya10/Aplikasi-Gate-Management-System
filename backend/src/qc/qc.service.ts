@@ -127,6 +127,12 @@ export class QcService {
   ) {
     const tx = await this.findTransactionWithAccess(transactionId, user);
 
+    if (tx.processType === 'GSP') {
+      throw new BadRequestException(
+        'Transaksi GSP wajib menggunakan alur Product Analysis (PA) laboratorium, bukan pemeriksaan kendaraan legacy.',
+      );
+    }
+
     const now = new Date();
     let nextStatus: TransactionStatus;
 
@@ -208,7 +214,13 @@ export class QcService {
       qcVehicleChecks: { where: { isCurrent: true } },
     });
 
-    if (!['GBJ', 'GBB', 'GSP'].includes(tx.processType))
+    if (tx.processType === 'GSP') {
+      throw new BadRequestException(
+        'Transaksi GSP wajib menggunakan alur Product Analysis (PA) laboratorium, bukan pemeriksaan kendaraan legacy.',
+      );
+    }
+
+    if (!['GBJ', 'GBB'].includes(tx.processType))
       throw new BadRequestException(
         'Invalid process type for preliminary QC sampling & vehicle inspection',
       );
@@ -229,7 +241,7 @@ export class QcService {
       return this.submitGbjVehicleCheck(tx as any, dto, userId);
     }
 
-    // ─── GBB/GSP legacy path (CAS-first, atomic ActivityLog) ───
+    // ─── GBB legacy path (CAS-first, atomic ActivityLog) ───
     const result = dto.result === 'PASS' ? 'PASS' : 'REJECT';
     const nextStatus =
       result === 'PASS' ? 'QC_VEHICLE_PASSED' : 'QC_VEHICLE_REJECTED';
@@ -666,9 +678,15 @@ export class QcService {
       incomingMaterialChecks: { where: { isCurrent: true } },
     });
 
-    if (!['GBB', 'GSP'].includes(tx.processType))
+    if (tx.processType === 'GSP') {
       throw new BadRequestException(
-        'Incoming check is only for GBB or GSP process types',
+        'Incoming material check tidak berlaku untuk GSP. GSP dialihkan langsung ke pembongkaran gudang setelah PA disetujui.',
+      );
+    }
+
+    if (tx.processType !== 'GBB')
+      throw new BadRequestException(
+        'Incoming check is only for GBB process type',
       );
     if (
       tx.status !== 'INCOMING_CHECK_IN_PROGRESS' &&

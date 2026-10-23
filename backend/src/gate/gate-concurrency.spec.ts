@@ -15,6 +15,13 @@ describe('PR-03: Gate Plate Normalization & Concurrency Protection', () => {
       findUnique: jest.fn(),
       create: jest.fn(),
     },
+    dailyArrivalCounter: {
+      upsert: jest
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve({ dateKey: '20261016', lastSeq: 1 }),
+        ),
+    },
     $transaction: jest.fn(),
     $executeRaw: jest.fn().mockResolvedValue(1),
   };

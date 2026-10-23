@@ -1,12 +1,18 @@
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import api from '../services/api'
+import {
+  evaluatePaExemption,
+  getAllowedReopenTargets,
+  getReopenMatrix,
+} from '../services/reopenPolicy'
 
-/**
- * P0-04 Frontend REOPEN Matrix UI Specification & Contract Test
- *
- * Validates the canonical REOPEN target options for process types (GBB/GSP vs GBJ).
- */
+vi.mock('../services/api', () => ({
+  default: {
+    get: vi.fn(),
+  },
+}))
 
-const REOPEN_ALLOWED_TARGETS = {
+const SERVER_MATRIX = {
   GBB: [
     'REGISTERED',
     'QC_VEHICLE_PENDING',
@@ -17,62 +23,89 @@ const REOPEN_ALLOWED_TARGETS = {
     'REGISTERED',
     'QC_VEHICLE_PENDING',
     'QC_VEHICLE_PASSED',
-    'INCOMING_CHECK_PENDING',
+    'PA_NOT_REQUIRED',
   ],
   GBJ: [
     'REGISTERED',
     'QC_VEHICLE_PENDING',
     'QC_VEHICLE_PASSED',
-  ]
+  ],
 }
 
-function getAllowedReopenTargets(processType) {
-  const norm = (processType || 'GBB').toUpperCase()
-  return REOPEN_ALLOWED_TARGETS[norm] || REOPEN_ALLOWED_TARGETS.GBB
-}
-
-describe('Frontend REOPEN Matrix Contract', () => {
-  it('should include Incoming QC stage for GBB process type', () => {
-    const targets = getAllowedReopenTargets('GBB')
-    expect(targets).toContain('INCOMING_CHECK_PENDING')
-    expect(targets).toContain('QC_VEHICLE_PASSED')
-    expect(targets).toHaveLength(4)
+describe('Frontend REOPEN matrix contract', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
   })
 
-  it('should include Incoming QC stage for GSP process type', () => {
-    const targets = getAllowedReopenTargets('GSP')
-    expect(targets).toContain('INCOMING_CHECK_PENDING')
-    expect(targets).toContain('QC_VEHICLE_PASSED')
-    expect(targets).toHaveLength(4)
+  it('loads the authoritative matrix from the backend endpoint', async () => {
+    api.get.mockResolvedValue({
+      data: { success: true, data: SERVER_MATRIX },
+    })
+
+    await expect(getReopenMatrix()).resolves.toEqual(SERVER_MATRIX)
+    expect(api.get).toHaveBeenCalledWith('/transactions/reopen-matrix')
   })
 
-  it('should EXCLUDE Incoming QC stage for GBJ process type', () => {
-    const targets = getAllowedReopenTargets('GBJ')
-    expect(targets).not.toContain('INCOMING_CHECK_PENDING')
-    expect(targets).toHaveLength(3)
-    expect(targets).toEqual([
+  it('fails closed when the backend response does not contain a matrix object', async () => {
+    api.get.mockResolvedValue({ data: null })
+
+    await expect(getReopenMatrix()).rejects.toThrow(
+      'Respons matriks target REOPEN tidak valid.'
+    )
+  })
+
+  it('preserves GBB and GBJ targets exactly as supplied by the server', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GBB')).toEqual(
+      SERVER_MATRIX.GBB
+    )
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GBJ')).toEqual(
+      SERVER_MATRIX.GBJ
+    )
+  })
+
+  it('fails closed for a missing GSP exemption result', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP')).toEqual([
       'REGISTERED',
       'QC_VEHICLE_PENDING',
-      'QC_VEHICLE_PASSED'
+      'QC_VEHICLE_PASSED',
     ])
   })
 
-  it('should build valid REOPEN payload with mandatory reopenTargetStatus and action', () => {
-    const action = 'REOPEN_WORKFLOW'
-    const reopenTargetStatus = 'QC_VEHICLE_PENDING'
-    const reasonCode = 'SALAH_INPUT_ANGKA'
-    const remark = 'Pilih target REOPEN secara eksplisit'
+  it('narrows non-exempt GSP targets without adding local stages', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP', { isExempt: false })).toEqual([
+      'REGISTERED',
+      'QC_VEHICLE_PENDING',
+      'QC_VEHICLE_PASSED',
+    ])
+  })
 
-    const payload = {
-      action,
-      reopenTargetStatus,
-      reasonCode,
-      remark,
-      expectedRevision: 1
+  it('narrows verified exempt GSP targets to REGISTERED and PA_NOT_REQUIRED', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'GSP', { isExempt: true })).toEqual([
+      'REGISTERED',
+      'PA_NOT_REQUIRED',
+    ])
+  })
+
+  it('rejects missing, inactive, mismatched, and PA-required catalog exemptions', () => {
+    const base = {
+      id: 'cat-solar-1',
+      name: 'Solar',
+      processType: 'GSP',
+      isActive: true,
+      isPaRequired: false,
+      policyVersion: 'SOP-GSP-2026.1',
     }
+    expect(evaluatePaExemption(null, { processType: 'GSP' }).isExempt).toBe(false)
+    expect(evaluatePaExemption({ ...base, isActive: false }, { processType: 'GSP' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GBB' }).isExempt).toBe(false)
+    expect(evaluatePaExemption({ ...base, isPaRequired: true }, { processType: 'GSP' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GSP', productCatalogId: 'other' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GSP', cargoSubType: 'Diesel Fuel' }).isExempt).toBe(false)
+    expect(evaluatePaExemption(base, { processType: 'GSP', cargoSubType: 'Solar' }).isExempt).toBe(true)
+  })
 
-    expect(payload.action).toBe('REOPEN_WORKFLOW')
-    expect(payload.reopenTargetStatus).toBe('QC_VEHICLE_PENDING')
-    expect(payload.items).toBeUndefined()
+  it('returns no targets when the process is absent instead of falling back locally', () => {
+    expect(getAllowedReopenTargets(SERVER_MATRIX, 'UNKNOWN')).toEqual([])
+    expect(getAllowedReopenTargets(null, 'GBB')).toEqual([])
   })
 })

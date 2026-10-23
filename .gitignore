@@ -12,6 +12,8 @@ dist
 dist-ssr
 *.local
 .env
+.env*
+*.env
 
 # Editor directories and files
 .vscode/*
@@ -40,4 +42,26 @@ backend/backups/nas/*
 # Deployment Runtime Tracker
 deploy/current_release.txt
 
+
+ 
+# Dev and scratch
+.vite/
+scratch/
+
+*.patch
+docker-compose.uat.yml
+
+# Local audit reports and screenshots
+artifacts/*.json
+artifacts/*.md
+artifacts/*.zip
+artifacts/evidence_pr27_hardening_20261015/
+artifacts/screenshots_20260924/
+artifacts/screenshots_phase6_uat_20261005/
+artifacts/screenshots_uat_20260929/
+artifacts/screenshots_uat_20261005/
+artifacts/screenshots_uat_operator_20261014/
+backend/artifacts/
+docs/audit/
+.claude/
 

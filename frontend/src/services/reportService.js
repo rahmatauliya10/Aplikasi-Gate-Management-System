@@ -1,33 +1,29 @@
-/**
- * ============================================
- * GMS - Report Service
- * ============================================
- * Handles: history reports, export data, analytics
- * Connects to: /reports/* endpoints
- * ============================================
- */
-
 import api from './api'
 
 const reportService = {
   /**
-   * Get truck history with filters
-   * @param {Object} params - { startDate, endDate, status, search, page, limit }
+   * Get the role-scoped operation history using server-side filters,
+   * pagination, and summary aggregation.
    */
-  getHistory(params) {
-    return api.get('/reports/history', { params })
+  getHistory(params, config = {}) {
+    return api.get('/reports/operation-history', { params, ...config })
   },
 
   /**
-   * Export report as file (CSV/PDF)
-   * @param {Object} params - { format: 'csv'|'pdf', startDate, endDate }
+   * Export the same filtered operation-history dataset without page limits.
    */
-  exportReport(params) {
-    return api.get('/reports/export', {
+  exportReport(params, config = {}) {
+    return api.get('/reports/operation-history/export', {
       params,
-      responseType: 'blob'
+      responseType: 'blob',
+      ...config,
     })
-  }
+  },
+
+  /** Backward-compatible terminal report endpoint. */
+  getLegacyHistory(params) {
+    return api.get('/reports/history', { params })
+  },
 }
 
 export default reportService
