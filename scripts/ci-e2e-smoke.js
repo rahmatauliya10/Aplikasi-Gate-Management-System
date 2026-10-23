@@ -1,10 +1,10 @@
 // ==============================================================================
-// GMS Cross-Stack E2E API & Complete Business Matrix Verification (P0-07)
+// SAFETY GUARD: STRICTLY RESTRICT TO VERIFIED ISOLATED TEST HARNESSES
 // ==============================================================================
-// Executed in CI to verify backend API health, authentication, full stack communication,
-// COMPLETE GBB/GSP/GBJ transaction lifecycles through COMPLETED state, and REOPEN
-// process matrix fail-closed enforcement (EXACT HTTP 400 on GBJ INCOMING_CHECK_PENDING target).
-// ==============================================================================
+if (process.env.NODE_ENV === 'production' && process.env.CI !== 'true' && process.env.GMS_TEST_HARNESS !== 'true') {
+  console.error('[CRITICAL SAFETY BLOCK] ci-e2e-smoke.js is a mutating end-to-end test suite and is strictly prohibited from running against production databases or production hosts. Use scripts/prod-smoke-readonly.js for production smoke testing.');
+  process.exit(1);
+}
 
 const http = require('http');
 const fs = require('fs');
@@ -20,12 +20,18 @@ function getAdminPassword() {
   const secretPath = path.resolve(__dirname, '../deploy/secrets/bootstrap_admin_password.txt');
   if (fs.existsSync(secretPath)) {
     try {
-      return fs.readFileSync(secretPath, 'utf8').trim();
+      const pass = fs.readFileSync(secretPath, 'utf8').trim();
+      if (pass) return pass;
     } catch (e) {
       // Ignore
     }
   }
-  return 'test-admin-password-12345';
+
+  if (process.env.CI === 'true' || process.env.GMS_TEST_HARNESS === 'true') {
+    return 'test-admin-password-12345';
+  }
+
+  throw new Error('[SECURITY ERROR] Admin credentials not provided via DEFAULT_ADMIN_PASSWORD or bootstrap file. Hardcoded fallback has been disabled to protect production environments.');
 }
 
 const ADMIN_PASSWORD = getAdminPassword();
