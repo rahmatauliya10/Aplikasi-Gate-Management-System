@@ -92,6 +92,8 @@ $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
 $FixtureManifest = Join-Path $ProjectRootDir "tests\fixtures\historical\historical_test_manifest.json"
 $PsExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { "pwsh.exe" } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell.exe" }
 
+$env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
+
 # Helper to ensure target DB has RESTORE_ALLOWED = TRUE before running promotion tests
 function Enable-TargetRestoreGate {
     param(
@@ -102,6 +104,7 @@ function Enable-TargetRestoreGate {
     try {
         & docker exec $Container psql -U $User -d $Database -c "INSERT INTO \"AppSetting\" (\"id\", \"key\", \"value\", \"createdAt\", \"updatedAt\") VALUES ('set-restore-gate', 'GMS_RESTORE_ALLOWED', 'TRUE', NOW(), NOW()) ON CONFLICT (\"key\") DO UPDATE SET \"value\" = 'TRUE';" 2>&1 | Out-Null
         & docker exec $Container psql -U $User -d $Database -c "INSERT INTO \"AppSetting\" (\"id\", \"key\", \"value\", \"createdAt\", \"updatedAt\") VALUES ('set-env-gate', 'GMS_ENVIRONMENT_ID', 'GMS-PROD-SJA-01', NOW(), NOW()) ON CONFLICT (\"key\") DO UPDATE SET \"value\" = 'GMS-PROD-SJA-01';" 2>&1 | Out-Null
+        & docker exec $Container psql -U $User -d $Database -c "INSERT INTO \"AppSetting\" (\"id\", \"key\", \"value\", \"createdAt\", \"updatedAt\") VALUES ('set-uuid-gate', 'GMS_INSTALLATION_UUID', '4f53a720-911b-4f9e-a89b-8321481dc901', NOW(), NOW()) ON CONFLICT (\"key\") DO UPDATE SET \"value\" = '4f53a720-911b-4f9e-a89b-8321481dc901';" 2>&1 | Out-Null
     } catch {}
 }
 

@@ -38,7 +38,7 @@ Petugas rilis (Release Engineer / SRE / Lead Dev) wajib mencentang seluruh gerba
 ### Tahap 2: Staging & UAT Validation
 - [ ] **UAT Sign-Off:** Lembar pengesahan UAT (`docs/UAT_TEST_PROTOCOL.md`) telah ditandatangani oleh PIC Operasional.
 - [ ] **Correction & Reopen Test:** Skenario koreksi data dan reopen workflow telah diverifikasi.
-- [ ] **DR Restore Drill Evidence:** Drill pemulihan NAS (`run-nas-restore-drill.ps1`) lulus dengan RTO ≤ 30 menit.
+- [ ] **DR Restore Drill Evidence:** Drill pemulihan NAS (`run-nas-restore-drill.ps1`) lulus dengan RTO target (Target Operasional: ≤ 30 Menit [PENDING IT APPROVAL]; Target default drill script: 600 detik / 10 menit).
 
 ### Tahap 3: Eksekusi Deployment (Zero-Rebuild)
 - [ ] **Pre-Deployment Backup:** Jalankan backup snapshot sebelum rilis:
@@ -60,33 +60,96 @@ Petugas rilis (Release Engineer / SRE / Lead Dev) wajib mencentang seluruh gerba
 
 ### Tahap 4: Post-Deployment Smoke & Health Verification
 - [ ] **API Health Readiness:** Akses `https://<FQDN>/api/health/readiness` -> HTTP `200 OK`.
-- [ ] **Cross-Stack Smoke Test:**
+- [ ] **Production Non-Mutating Smoke Test:**
   ```bash
-  node scripts/ci-e2e-smoke.js
+  node scripts/prod-smoke-readonly.js
   ```
 - [ ] **Health Monitor Registration:** Task Scheduler `GMS_Production_HealthMonitor` aktif setiap 5 menit.
 - [ ] **Release Evidence Archiving:** Berkas manifest dan log rilis diarsipkan ke `artifacts/release-proof/`.
 
 ---
 
-## 3. Standard Rollback Runbook (Rencana Kontingensi)
+## 3. Standard Operational Recovery Runbook (Pemisahan 4 Prosedur)
 
-Jika deployment mengalami kegagalan pada tahap migrasi, health probe, atau smoke test:
+> [!CAUTION]
+> **DILARANG** menjalankan script drill / fault-injection (`run-deployment-rollback-drill.ps1` atau `run-restore-failure-drill.ps1`) pada server produksi aktif! Script drill hanya boleh dijalankan di environment staging / test harness terisolasi.
 
+### Prosedur A: Deployment Normal Terkoordinasi
+Gunakan script deployment resmi yang otomatis membuat snapshot backup pre-deploy dan mengelola rollback bila startup container gagal:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
+  -TargetReleaseTag "v1.0.0" `
+  -PreviousReleaseTag "stable" `
+  -PreviousBackendDigest "sha256:<digest_lama>" `
+  -PreviousFrontendDigest "sha256:<digest_lama>" `
+  -PreviousMigratorDigest "sha256:<digest_lama>" `
+  -ComposeFile "docker-compose.prod.yml" `
+  -RequireDigest
+```
+
+### Prosedur B: Rollback Versi Aplikasi (Image-Only — Tanpa Perubahan Skema DB)
+Gunakan prosedur ini HANYA jika migrasi forward belum dijalankan atau tidak ada perubahan skema database:
 1. **Aktifkan Maintenance Mode (Write-Freeze):**
    ```bash
    touch maintenance.flag
    ```
-2. **Kembalikan Skema Database dari Pre-Deploy Backup:**
+2. **Jalankan Rollback Container ke Image Digest Stabil Sebelumnya:**
    ```powershell
-   powershell -ExecutionPolicy Bypass -File .\scripts\run-deployment-rollback-drill.ps1
+   powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
+     -RollbackOnly `
+     -NoSchemaChangeVerified `
+     -PreviousReleaseTag "stable" `
+     -PreviousBackendDigest "sha256:<digest_lama>" `
+     -PreviousFrontendDigest "sha256:<digest_lama>" `
+     -PreviousMigratorDigest "sha256:<digest_lama>" `
+     -ComposeFile "docker-compose.prod.yml"
    ```
-3. **Kembalikan Container Image ke Versi Stabil Sebelumnya:**
-   ```powershell
-   docker compose -f docker-compose.prod.yml up -d --no-build
-   ```
-4. **Hapus Maintenance Mode & Jalankan Smoke Test Ulang:**
+3. **Verifikasi Layanan & Nonaktifkan Maintenance Mode:**
    ```bash
+   node scripts/prod-smoke-readonly.js
    rm maintenance.flag
-   node scripts/ci-e2e-smoke.js
    ```
+
+### Prosedur C: Pemulihan Skema Database & Lampiran Fisik (Post-Migration Recovery)
+Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus dikembalikan ke snapshot pre-deploy:
+1. **Aktifkan Maintenance Mode (Write-Freeze) & Hentikan Penulis Data:**
+   ```bash
+   touch maintenance.flag
+   docker compose -f docker-compose.prod.yml stop backend
+   ```
+2. **Set Izin Restore pada Database Target:**
+   ```powershell
+   docker exec gate-system-postgres psql -U postgres -d gms -c "UPDATE \"AppSetting\" SET value = 'TRUE' WHERE key = 'GMS_RESTORE_ALLOWED';"
+   ```
+3. **Eksekusi Pemulihan Database & Lampiran melalui Operator Control Plane:**
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\gms-production-restore.ps1 `
+     -ManifestPath "backups\local\pre_deploy_backup_<ID>\manifest.json" `
+     -ExpectedEnvironmentId "GMS-PROD-SJA-01" `
+     -ExpectedInstallationUuid "<UUID_TARGET>" `
+     -LiveContainer "gate-system-postgres" `
+     -LiveDbName "gms" `
+     -Force
+   ```
+4. **Boot Container Versi Sebelumnya & Jalankan Smoke Test Aman:**
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
+     -RollbackOnly `
+     -RollbackManifestPath "backups\local\pre_deploy_backup_<ID>\manifest.json" `
+     -PreviousReleaseTag "stable" `
+     -PreviousBackendDigest "sha256:<digest_lama>" `
+     -PreviousFrontendDigest "sha256:<digest_lama>" `
+     -PreviousMigratorDigest "sha256:<digest_lama>" `
+     -ComposeFile "docker-compose.prod.yml"
+
+   node scripts/prod-smoke-readonly.js
+   rm maintenance.flag
+   ```
+
+### Prosedur D: Disaster Recovery Simulation & Rollback Drill (STAGING ONLY)
+Pengujian simulasi kegagalan dan fault injection HANYA diizinkan pada container pengujian terisolasi:
+```powershell
+# HANYA PADA ENVIRONMENT STAGING / TEST HARNESS DEDIKASI
+powershell -ExecutionPolicy Bypass -File .\scripts\run-deployment-rollback-drill.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\run-restore-failure-drill.ps1
+```
