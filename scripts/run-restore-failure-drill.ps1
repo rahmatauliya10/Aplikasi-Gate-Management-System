@@ -34,6 +34,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 [string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
 if (-not $ArtifactsDir) {
@@ -105,9 +106,11 @@ function Ensure-TargetPostgresContainer {
         [string]$User = "postgres",
         [string]$Port = "5436"
     )
-    $running = (& docker ps -q -f "name=^/${Container}$" 2>$null).ToString().Trim()
+    $rawRunning = & docker ps -q -f "name=^/${Container}$" 2>$null
+    $running = if ($rawRunning) { [string]$rawRunning.ToString().Trim() } else { "" }
     if (-not $running) {
-        $existing = (& docker ps -aq -f "name=^/${Container}$" 2>$null).ToString().Trim()
+        $rawExisting = & docker ps -aq -f "name=^/${Container}$" 2>$null
+        $existing = if ($rawExisting) { [string]$rawExisting.ToString().Trim() } else { "" }
         if ($existing) {
             Write-Log "Starting existing stopped PostgreSQL container ($Container)..."
             & docker start $Container 2>&1 | Out-Null
@@ -121,7 +124,8 @@ function Ensure-TargetPostgresContainer {
             if ($LASTEXITCODE -eq 0) { break }
         }
     }
-    $migExists = (& docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null).ToString().Trim()
+    $rawMig = & docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null
+    $migExists = if ($rawMig) { [string]$rawMig.ToString().Trim() } else { "" }
     if ([string]::IsNullOrWhiteSpace($migExists)) {
         [string]$DumpFile = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
         if (Test-Path -LiteralPath $DumpFile) {
@@ -181,7 +185,8 @@ function Get-DatabaseFingerprint {
     $Result = [ordered]@{}
 
     foreach ($Table in $Tables) {
-        $TableCheck = (& docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.`"$Table`"');" 2>&1).ToString().Trim()
+        $rawCheck = & docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.`"$Table`"');" 2>&1
+        $TableCheck = if ($rawCheck) { [string]$rawCheck.ToString().Trim() } else { "" }
         if ([string]::IsNullOrWhiteSpace($TableCheck) -or $TableCheck.Contains("ERROR")) {
             $Result[$Table] = "NON_EXISTENT"
             continue
@@ -206,7 +211,8 @@ FROM "$Table" t;
 
         $Hash = ""
         try {
-            $Hash = (& docker exec $Container psql -U $User -d $Database -t -A -c $Sql 2>&1).ToString().Trim()
+            $rawHash = & docker exec $Container psql -U $User -d $Database -t -A -c $Sql 2>&1
+            $Hash = if ($rawHash) { [string]$rawHash.ToString().Trim() } else { "" }
         } catch {
             throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
         }
@@ -289,7 +295,7 @@ try {
 
     [int]$p1Exit = 0
     try {
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -Force 2>&1 | Out-Null
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
         $p1Exit = $LASTEXITCODE
     } catch {
         $p1Exit = 1
@@ -331,7 +337,7 @@ try {
 
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "DURING_DB_PROMOTION"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "DURING_DB_PROMOTION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -Force 2>&1 | Out-Null
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "DURING_DB_PROMOTION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
         $p2Exit = $LASTEXITCODE
     } catch {
         $p2Exit = 1
@@ -387,7 +393,7 @@ try {
 
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "POST_DB_COMMIT"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "POST_DB_COMMIT" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -Force 2>&1 | Out-Null
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "POST_DB_COMMIT" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
         $p3Exit = $LASTEXITCODE
     } catch {
         $p3Exit = 1
@@ -443,7 +449,7 @@ try {
 
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "ATTACHMENT_SWAP"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -Force 2>&1 | Out-Null
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
         $p4Exit = $LASTEXITCODE
     } catch {
         $p4Exit = 1
@@ -495,7 +501,7 @@ try {
 
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "LIVE_VERIFICATION"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "LIVE_VERIFICATION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -Force 2>&1 | Out-Null
+        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "LIVE_VERIFICATION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
         $p5Exit = $LASTEXITCODE
     } catch {
         $p5Exit = 1

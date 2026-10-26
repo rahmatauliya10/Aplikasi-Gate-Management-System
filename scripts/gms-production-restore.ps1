@@ -26,7 +26,7 @@ param(
     [string]$PgUser = "postgres",
 
     [Parameter(Mandatory=$false)]
-    [string]$PgPass = "",
+    [string]$PgPass = if ($env:PGPASSWORD) { $env:PGPASSWORD } elseif ($env:POSTGRES_PASSWORD) { $env:POSTGRES_PASSWORD } else { "testpassword" },
 
     [Parameter(Mandatory=$false)]
     [string]$PgHost = "localhost",
@@ -52,6 +52,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 [string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
 [string]$LogDir = if ($IsWindows) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
@@ -192,7 +193,8 @@ try {
 
     # Exec-Query helper
     function Exec-StagingQuery([string]$sql) {
-        return (& docker exec $StagingContainer psql -t -A -U $PgUser -d $StagingDbName -c "$sql" 2>&1).ToString().Trim()
+        $raw = & docker exec $StagingContainer psql -t -A -U $PgUser -d $StagingDbName -c "$sql" 2>&1
+        return if ($raw) { [string]$raw.ToString().Trim() } else { "" }
     }
 
     Write-Log "Step 5: Verifying Schema Migrations & Invariants in Staging Database..."
@@ -343,7 +345,8 @@ try {
 
     # 7a. Atomic Live Database Promotion
     Write-Log "  7a. Promoting Staging Database to Live Production Database ($LiveDbName)..."
-    $LiveContainerId = (& docker ps -q -f "name=$LiveContainer" 2>&1).ToString().Trim()
+    $rawLive = & docker ps -q -f "name=$LiveContainer" 2>&1
+    $LiveContainerId = if ($rawLive) { [string]$rawLive.ToString().Trim() } else { "" }
 
     if ([string]::IsNullOrWhiteSpace($LiveContainerId)) {
         throw "Live database target container [$LiveContainer] not found or not running. Live database restoration aborted."
@@ -351,7 +354,8 @@ try {
 
     # Helper for live database queries
     function Exec-LiveDbQuery([string]$sql) {
-        return (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1).ToString().Trim()
+        $raw = & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        return if ($raw) { [string]$raw.ToString().Trim() } else { "" }
     }
 
     # --------------------------------------------------------------------------
@@ -433,7 +437,8 @@ try {
             }
 
             # 4. Check container labels and mounts to prevent drill against production volumes
-            [string]$inspectJson = (& docker inspect $LiveContainer 2>$null).ToString()
+            $rawInspect = & docker inspect $LiveContainer 2>$null
+            [string]$inspectJson = if ($rawInspect) { [string]$rawInspect.ToString() } else { "" }
             if ($inspectJson) {
                 if ($inspectJson -like "*prod-postgres-data*" -or $inspectJson -like "*production_postgres*") {
                     throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is bound to production data volumes! Fault injection is unconditionally blocked."
