@@ -35,9 +35,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
+[string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
 if (-not $ArtifactsDir) {
-    $ArtifactsDir = Join-Path -Path $ProjectRootDir -ChildPath "artifacts\release-proof"
+    $ArtifactsDir = Join-Path -Path $ProjectRootDir -ChildPath "artifacts/release-proof"
 }
 if (-not (Test-Path -Path $ArtifactsDir -PathType Container)) {
     New-Item -Path $ArtifactsDir -ItemType Directory -Force | Out-Null
@@ -89,7 +89,7 @@ function Record-Drill-Phase {
 }
 
 $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
-$FixtureManifest = Join-Path $ProjectRootDir "tests\fixtures\historical\historical_test_manifest.json"
+$FixtureManifest = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test_manifest.json"
 $PsExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { "pwsh.exe" } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell.exe" }
 
 $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
@@ -116,15 +116,15 @@ function Ensure-TargetPostgresContainer {
             & docker exec $Container pg_isready -U $User 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) { break }
         }
-        $migExists = (& docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null).ToString().Trim()
-        if ([string]::IsNullOrWhiteSpace($migExists)) {
-            [string]$DumpFile = Join-Path $ProjectRootDir "tests\fixtures\historical\historical_test.dump"
-            if (Test-Path -LiteralPath $DumpFile) {
-                Write-Log "Populating baseline historical test database into $Container ($Database)..."
-                & docker cp $DumpFile "${Container}:/tmp/baseline.dump" 2>&1 | Out-Null
-                & docker exec $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
-                & docker exec $Container rm -f /tmp/baseline.dump 2>&1 | Out-Null
-            }
+    }
+    $migExists = (& docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null).ToString().Trim()
+    if ([string]::IsNullOrWhiteSpace($migExists)) {
+        [string]$DumpFile = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
+        if (Test-Path -LiteralPath $DumpFile) {
+            Write-Log "Populating baseline historical test database into $Container ($Database)..."
+            & docker cp $DumpFile "${Container}:/tmp/baseline.dump" 2>&1 | Out-Null
+            & docker exec $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
+            & docker exec $Container rm -f /tmp/baseline.dump 2>&1 | Out-Null
         }
     }
 }
@@ -255,7 +255,7 @@ try {
     $TempCorruptDir = Join-Path $tempRoot ("gms_corrupt_test_" + [guid]::NewGuid().ToString("N"))
     New-Item -Path $TempCorruptDir -ItemType Directory -ErrorAction Stop | Out-Null
 
-    [string]$RealDumpPath = Join-Path $ProjectRootDir "tests\fixtures\historical\historical_test.dump"
+    [string]$RealDumpPath = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
     [string]$CorruptDumpPath = Join-Path $TempCorruptDir "corrupted_test.dump"
     [string]$CorruptManifestPath = Join-Path $TempCorruptDir "corrupt_manifest.json"
 
@@ -340,7 +340,7 @@ try {
 
     $DbRestoredP2 = (($DbBeforeP2 | ConvertTo-Json -Compress) -eq ($DbAfterP2 | ConvertTo-Json -Compress))
     $UploadsUnchangedP2 = ($UploadsBeforeP2 -eq $UploadsAfterP2)
-    $MaintenanceActiveP2 = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
+    $MaintenanceActiveP2 = (Test-Path (Join-Path $ProjectRootDir "maintenance/active")) -or (Test-Path (Join-Path $ProjectRootDir "maintenance.flag"))
 
     $p2Passed = ($p2Exit -ne 0) -and $DbRestoredP2 -and $UploadsUnchangedP2 -and $MaintenanceActiveP2
     $p2Details = if ($p2Passed) {
@@ -396,7 +396,7 @@ try {
 
     $DbRestored = (($DbBefore | ConvertTo-Json -Compress) -eq ($DbAfter | ConvertTo-Json -Compress))
     $UploadsRestored = ($UploadsBefore -eq $UploadsAfter)
-    $MaintenanceActive = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
+    $MaintenanceActive = (Test-Path (Join-Path $ProjectRootDir "maintenance/active")) -or (Test-Path (Join-Path $ProjectRootDir "maintenance.flag"))
 
     $p3Passed = ($p3Exit -ne 0) -and $DbRestored -and $UploadsRestored -and $MaintenanceActive
     $p3Details = if ($p3Passed) {
@@ -499,7 +499,7 @@ try {
         $env:GMS_FAULT_INJECTION_PHASE = ""
     }
 
-    $MaintenanceFlagActive = (Test-Path "$ProjectRootDir\maintenance\active") -or (Test-Path "$ProjectRootDir\maintenance.flag")
+    $MaintenanceFlagActive = (Test-Path (Join-Path $ProjectRootDir "maintenance/active")) -or (Test-Path (Join-Path $ProjectRootDir "maintenance.flag"))
     $p5Passed = ($p5Exit -ne 0) -and $MaintenanceFlagActive
     $p5Details = if ($p5Passed) {
         "Maintenance flag verified present upon live count/hash discrepancy to freeze write traffic in inconsistent state (ExitCode=$p5Exit)."
@@ -540,19 +540,28 @@ try {
 
     # Start ephemeral mock maintenance server on port 3001 if port is not running
     [string]$MockScript = Join-Path $PSScriptRoot "mock-maintenance-server.js"
+    [bool]$portInUse = $false
     try {
-        $tcpCheck = Test-NetConnection -ComputerName 127.0.0.1 -Port 3001 -WarningAction SilentlyContinue
-        if (-not $tcpCheck.TcpTestSucceeded) {
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = "node"
-            $psi.Arguments = "`"$MockScript`" 3001"
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow = $true
-            $mockProc = [System.Diagnostics.Process]::Start($psi)
-            Start-Sleep -Milliseconds 800
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $asyncRes = $tcpClient.BeginConnect("127.0.0.1", 3001, $null, $null)
+        $waitSuccess = $asyncRes.AsyncWaitHandle.WaitOne(400, $false)
+        if ($waitSuccess -and $tcpClient.Connected) {
+            $portInUse = $true
+            $tcpClient.EndConnect($asyncRes)
         }
+        $tcpClient.Close()
     } catch {
-        Write-Log "  Note on mock server spawn check: $_" -Level "WARN"
+        $portInUse = $false
+    }
+
+    if (-not $portInUse) {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "node"
+        $psi.Arguments = "`"$MockScript`" 3001"
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $mockProc = [System.Diagnostics.Process]::Start($psi)
+        Start-Sleep -Milliseconds 800
     }
 
     # Test 1: Real Server in Maintenance Mode MUST return HTTP 503 with MAINTENANCE_MODE
@@ -627,8 +636,10 @@ try {
         try { $mockProc.Kill() } catch {}
     }
     # Clean up test maintenance flags
-    if (Test-Path "$ProjectRootDir\maintenance\active") { Remove-Item "$ProjectRootDir\maintenance\active" -Force -ErrorAction SilentlyContinue }
-    if (Test-Path "$ProjectRootDir\maintenance.flag") { Remove-Item "$ProjectRootDir\maintenance.flag" -Force -ErrorAction SilentlyContinue }
+    [string]$mActive = Join-Path $ProjectRootDir "maintenance/active"
+    [string]$mFlag = Join-Path $ProjectRootDir "maintenance.flag"
+    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
 }
 
 # ------------------------------------------------------------------------------

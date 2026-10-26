@@ -53,7 +53,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
+[string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
 [string]$LogDir = if ($IsWindows) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
 [string]$LogFile = Join-Path -Path $LogDir -ChildPath "production_restore.log"
 [string]$RestoreEvidencePath = Join-Path -Path $LogDir -ChildPath "restore_evidence.json"
@@ -89,7 +89,7 @@ Write-Log "=====================================================================
 [string]$AttArchivePath = ""
 
 # Step 1: Resolve Backup Manifest & Artifact Paths
-[string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups\local"
+[string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups/local"
 if (-not $ManifestPath) {
     $LatestManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*_manifest.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $LatestManifest) {
