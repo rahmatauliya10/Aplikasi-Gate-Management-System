@@ -168,7 +168,8 @@
     "seed": "node dist/prisma/seed.js"
   },
   "overrides": {
-    "multer": "^2.4.0",
+    "body-parser": "^2.4.0",
+    "multer": "^2.5.0",
     "js-yaml": "^5.2.1",
     "deepmerge-ts": "^8.0.0",
     "proxy-addr": "^2.0.8"

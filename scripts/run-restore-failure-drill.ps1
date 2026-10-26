@@ -116,6 +116,16 @@ function Ensure-TargetPostgresContainer {
             & docker exec $Container pg_isready -U $User 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) { break }
         }
+        $migExists = (& docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null).ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($migExists)) {
+            [string]$DumpFile = Join-Path $ProjectRootDir "tests\fixtures\historical\historical_test.dump"
+            if (Test-Path -LiteralPath $DumpFile) {
+                Write-Log "Populating baseline historical test database into $Container ($Database)..."
+                & docker cp $DumpFile "${Container}:/tmp/baseline.dump" 2>&1 | Out-Null
+                & docker exec $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
+                & docker exec $Container rm -f /tmp/baseline.dump 2>&1 | Out-Null
+            }
+        }
     }
 }
 
@@ -167,23 +177,26 @@ function Get-DatabaseFingerprint {
     $Result = [ordered]@{}
 
     foreach ($Table in $Tables) {
+        $TableCheck = (& docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.`"$Table`"');" 2>&1).ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($TableCheck) -or $TableCheck.Contains("ERROR")) {
+            $Result[$Table] = "NON_EXISTENT"
+            continue
+        }
+
         $Sql = @"
-SELECT CASE 
-    WHEN to_regclass('public."$Table"') IS NULL THEN 'NON_EXISTENT'
-    ELSE COALESCE(
-        encode(
-            sha256(
-                string_agg(
-                    encode(sha256(row_to_json(t)::text::bytea), 'hex'),
-                    ','
-                    ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex')
-                )::bytea
-            ),
-            'hex'
+SELECT COALESCE(
+    encode(
+        sha256(
+            string_agg(
+                encode(sha256(row_to_json(t)::text::bytea), 'hex'),
+                ','
+                ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex')
+            )::bytea
         ),
-        'EMPTY'
-    )
-END
+        'hex'
+    ),
+    'EMPTY'
+)
 FROM "$Table" t;
 "@
 
