@@ -40,23 +40,30 @@ Petugas rilis (Release Engineer / SRE / Lead Dev) wajib mencentang seluruh gerba
 - [ ] **Correction & Reopen Test:** Skenario koreksi data dan reopen workflow telah diverifikasi.
 - [ ] **DR Restore Drill Evidence:** Drill pemulihan NAS (`run-nas-restore-drill.ps1`) lulus dengan RTO target (Target Operasional: ≤ 30 Menit [PENDING IT APPROVAL]; Target default drill script: 600 detik / 10 menit).
 
-### Tahap 3: Eksekusi Deployment (Zero-Rebuild)
-- [ ] **Pre-Deployment Backup:** Jalankan backup snapshot sebelum rilis:
-  ```bash
-  npm run db:backup:pre-deploy
-  ```
-- [ ] **Migration Checksum Reconciliation:**
-  ```bash
-  node scripts/check-migration-checksums.js
-  ```
-- [ ] **Prisma Migration Deploy:**
-  ```bash
-  npx prisma migrate deploy
-  ```
-- [ ] **Deploy Containers by Image Digest:** Jalankan container tanpa rebuild lokal:
+### Tahap 3: Eksekusi Deployment (Unified Zero-Rebuild Orchestrator)
+> [!IMPORTANT]
+> Seluruh eksekusi deployment diwajibkan melalui satu orchestrator resmi: `deploy-with-rollback.ps1`.
+> Dilarang menjalankan perintah migrasi atau backup secara manual terpisah pada saat deployment aktif untuk mencegah 'dual deployment paths'.
+
+- [ ] **Deployment Preflight & Execution:**
+  Jalankan orchestrator deployment resmi:
   ```powershell
-  docker compose -f docker-compose.prod.yml up -d --no-build
+  powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
+    -TargetReleaseTag "v1.0.0" `
+    -PreviousReleaseTag "stable" `
+    -PreviousBackendDigest "sha256:<digest_lama>" `
+    -PreviousFrontendDigest "sha256:<digest_lama>" `
+    -PreviousMigratorDigest "sha256:<digest_lama>" `
+    -ComposeFile "docker-compose.prod.yml" `
+    -RequireDigest
   ```
+  *Langkah internal yang diverifikasi secara otomatis oleh orchestrator:*
+  1. Validasi identitas target (`AppSetting` DB ID `GMS-PROD-SJA-01`, Installation UUID).
+  2. Pembuatan snapshot pre-deploy database & lampiran ke `backups/local/pre_deploy_backup_<ID>`.
+  3. Verifikasi exact migration checksum reconciliation.
+  4. Eksekusi database migration melalui container migrator terisolasi.
+  5. Deployment container aplikasi dengan image digest terverifikasi (`--no-build`).
+  6. Eksekusi smoke test otomatis pasca-boot.
 
 ### Tahap 4: Post-Deployment Smoke & Health Verification
 - [ ] **API Health Readiness:** Akses `https://<FQDN>/api/health/readiness` -> HTTP `200 OK`.
@@ -87,14 +94,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
   -RequireDigest
 ```
 
-### Prosedur B: Rollback Versi Aplikasi (Image-Only — Tanpa Perubahan Skema DB)
-Gunakan prosedur ini HANYA jika migrasi forward belum dijalankan atau tidak ada perubahan skema database:
+### Prosedur B: Rollback Versi Aplikasi (Image-Only — Terbukti Skema Kompatibel)
+Gunakan prosedur ini HANYA jika release manifest membuktikan tidak ada migrasi skema baru sejak versi sebelumnya:
 1. **Aktifkan Maintenance Mode (Write-Freeze):**
    ```bash
-   touch maintenance.flag
+   touch maintenance/active
    ```
 2. **Jalankan Rollback Container ke Image Digest Stabil Sebelumnya:**
    ```powershell
+   # Script secara ketat memvalidasi inventori migrasi database terhadap previous release manifest
    powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
      -RollbackOnly `
      -NoSchemaChangeVerified `
@@ -107,31 +115,22 @@ Gunakan prosedur ini HANYA jika migrasi forward belum dijalankan atau tidak ada 
 3. **Verifikasi Layanan & Nonaktifkan Maintenance Mode:**
    ```bash
    node scripts/prod-smoke-readonly.js
-   rm maintenance.flag
+   rm -f maintenance/active
    ```
 
 ### Prosedur C: Pemulihan Skema Database & Lampiran Fisik (Post-Migration Recovery)
 Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus dikembalikan ke snapshot pre-deploy:
-1. **Aktifkan Maintenance Mode (Write-Freeze) & Hentikan Penulis Data:**
-   ```bash
-   touch maintenance.flag
-   docker compose -f docker-compose.prod.yml stop backend
-   ```
-2. **Set Izin Restore pada Database Target:**
+
+> [!IMPORTANT]
+> **SINGLE ORCHESTRATOR MANDATE:** Seluruh pemulihan skema dan container versi stabil dieksekusi melalui **satu orchestrator pemulihan tunggal** (`deploy-with-rollback.ps1 -RollbackOnly`).
+> Operator **DILARANG** menjalankan `gms-production-restore.ps1` secara manual sebelum `deploy-with-rollback.ps1`. Orchestrator `deploy-with-rollback.ps1` secara otomatis memanggil restore database tepat satu kali pada fase `RESTORE_REQUIRED` dan secara ketat menolak restore ganda (`RESTORE_DONE`).
+
+1. **Set Izin Restore pada Database Target (Otorisasi Khusus PIC):**
    ```powershell
    docker exec gate-system-postgres psql -U postgres -d gms -c "UPDATE \"AppSetting\" SET value = 'TRUE' WHERE key = 'GMS_RESTORE_ALLOWED';"
    ```
-3. **Eksekusi Pemulihan Database & Lampiran melalui Operator Control Plane:**
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\scripts\gms-production-restore.ps1 `
-     -ManifestPath "backups\local\pre_deploy_backup_<ID>\manifest.json" `
-     -ExpectedEnvironmentId "GMS-PROD-SJA-01" `
-     -ExpectedInstallationUuid "<UUID_TARGET>" `
-     -LiveContainer "gate-system-postgres" `
-     -LiveDbName "gms" `
-     -Force
-   ```
-4. **Boot Container Versi Sebelumnya & Jalankan Smoke Test Aman:**
+
+2. **Eksekusi Pemulihan Terpadu (Single Orchestrator):**
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
      -RollbackOnly `
@@ -141,10 +140,24 @@ Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus
      -PreviousFrontendDigest "sha256:<digest_lama>" `
      -PreviousMigratorDigest "sha256:<digest_lama>" `
      -ComposeFile "docker-compose.prod.yml"
-
-   node scripts/prod-smoke-readonly.js
-   rm maintenance.flag
    ```
+   *Alur Otomatis yang Dilakukan Orchestrator:*
+   - `PRECHECK`: Memvalidasi integritas file backup, manifest, dan kesesuaian target environment.
+   - `FREEZE`: Mengaktifkan write-freeze `maintenance/active` dan menghentikan seluruh proses penulis data (`backend` & `migrator`).
+   - `RESTORE_REQUIRED`: Memanggil `gms-production-restore.ps1` tepat satu kali. Menolak restore kedua jika dipanggil ulang.
+   - `IMAGE_SWITCH`: Menghidupkan kembali container aplikasi dengan image digest stabil sebelumnya.
+   - `HEALTH_VERIFIED`: Menjalankan smoke test non-mutatif.
+
+3. **Verifikasi Akhir & Pembukaan Trafik:**
+   Trafik hanya dibuka setelah smoke test menghasilkan verdict `PASSED`:
+   ```bash
+   node scripts/prod-smoke-readonly.js
+   rm -f maintenance/active
+   ```
+
+> [!NOTE]
+> Prosedur `gms-production-restore.ps1` standalone hanya digunakan untuk skenario Disaster Recovery murni (misal: kerusakan disk data saat image aplikasi tidak mengalami perubahan/rollback).
+
 
 ### Prosedur D: Disaster Recovery Simulation & Rollback Drill (STAGING ONLY)
 Pengujian simulasi kegagalan dan fault injection HANYA diizinkan pada container pengujian terisolasi:
