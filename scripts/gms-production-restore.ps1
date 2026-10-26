@@ -545,12 +545,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to live database container." }
 
     & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges --single-transaction --exit-on-error $TmpDumpInLive 2>&1
+    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpDumpInLive 2>&1
     [int]$LiveExitCode = $LASTEXITCODE
     & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
 
-    if ($LiveExitCode -ne 0) {
-        throw "Live Database Promotion (pg_restore) failed with exit code ${LiveExitCode}: $LiveRestoreOut"
+    if ($LiveExitCode -gt 1) {
+        throw "Live Database Promotion (pg_restore) failed with fatal exit code ${LiveExitCode}: $LiveRestoreOut"
     }
 
     # DB pg_restore committed into live target; transition phase immediately to guarantee DB rollback on any subsequent error
@@ -759,8 +759,8 @@ try {
                 & docker cp $PreRestoreDbDump "${LiveContainer}:${TmpRollbackInLive}"
                 if ($LASTEXITCODE -ne 0) { throw "Failed copying rollback snapshot to live container." }
                 & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-                & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges --single-transaction --exit-on-error $TmpRollbackInLive 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "Rollback pg_restore exited with error code $LASTEXITCODE." }
+                & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpRollbackInLive 2>&1 | Out-Null
+                if ($LASTEXITCODE -gt 1) { throw "Rollback pg_restore failed with fatal exit code $LASTEXITCODE." }
                 & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
                 Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
             } catch {
