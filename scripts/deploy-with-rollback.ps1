@@ -275,18 +275,45 @@ function Execute-Rollback {
 
         # Execute read-only smoke test
         [string]$SmokeScript = Join-Path $PSScriptRoot "prod-smoke-readonly.js"
+        [string]$SmokeEvidenceFile = Join-Path $WorkspaceRoot "artifacts\release-proof\prod-smoke-evidence.json"
+        [bool]$SmokePassedVerdictProven = $false
+
         if (Test-Path $SmokeScript) {
-            Write-Host "  Executing post-rollback non-mutating smoke verification..." -ForegroundColor Cyan
-            & node $SmokeScript
-            if ($LASTEXITCODE -ne 0) {
-                throw "Post-rollback smoke verification FAILED with exit code $LASTEXITCODE! Traffic remains frozen in maintenance mode."
+            Write-Host "  Executing post-rollback non-mutating smoke verification (--require-passed)..." -ForegroundColor Cyan
+            if (Test-Path $SmokeEvidenceFile) {
+                Remove-Item $SmokeEvidenceFile -Force -ErrorAction SilentlyContinue
             }
+
+            & node $SmokeScript --require-passed
+            [int]$smokeExit = $LASTEXITCODE
+            if ($smokeExit -ne 0) {
+                throw "Post-rollback smoke verification FAILED with exit code $smokeExit! Traffic remains frozen in maintenance mode."
+            }
+
+            # Strictly require proven PASSED verdict from evidence artifact
+            if (-not (Test-Path $SmokeEvidenceFile)) {
+                throw "CRITICAL RECOVERY GATE BLOCKED: Smoke test exited 0 but evidence artifact was not generated at $SmokeEvidenceFile. Traffic cannot be unfrozen without verified proof."
+            }
+
+            try {
+                $smokeEvidenceObj = Get-Content $SmokeEvidenceFile -Raw | ConvertFrom-Json
+                if ($smokeEvidenceObj.overallVerdict -ne "PASSED") {
+                    throw "CRITICAL RECOVERY GATE BLOCKED: Smoke evidence verdict is '$($smokeEvidenceObj.overallVerdict)', NOT 'PASSED'. Traffic remains strictly frozen in maintenance mode."
+                }
+                $SmokePassedVerdictProven = $true
+                Write-Host "  [PASS] Post-rollback smoke test verdict verified PASSED (100% of required & authenticated probes)." -ForegroundColor Green
+            } catch {
+                throw "CRITICAL RECOVERY GATE BLOCKED: Failed validating smoke test evidence verdict: $_"
+            }
+        } else {
+            # If smoke script is not present, rollback cannot prove health
+            throw "CRITICAL RECOVERY GATE BLOCKED: Smoke script '$SmokeScript' is missing. Cannot verify post-rollback health."
         }
 
-        $RollbackSucceeded = $true
+        $RollbackSucceeded = [bool]$SmokePassedVerdictProven
         Write-Host "[GMS RECOVERY ORCHESTRATOR - COMPLETED] Production environment successfully rolled back and restored to stable release [$PrevTag] with 100% verified health." -ForegroundColor Green
     } finally {
-        if ($RollbackSucceeded) {
+        if ($RollbackSucceeded -and $SmokePassedVerdictProven) {
             Write-Host "  Deactivating maintenance freeze; opening traffic..." -ForegroundColor Green
             if (Test-Path -Path $MaintActive) {
                 Remove-Item -Path $MaintActive -Force -ErrorAction SilentlyContinue
@@ -295,7 +322,7 @@ function Execute-Rollback {
                 Remove-Item -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Force -ErrorAction SilentlyContinue
             }
         } else {
-            Write-Host "[GMS CRITICAL ALERT] Rollback failed or incomplete! Maintenance flag ($MaintActive) retained to freeze write traffic and protect system integrity." -ForegroundColor Red
+            Write-Host "[GMS CRITICAL ALERT] Rollback failed, incomplete, or smoke verdict not PASSED! Maintenance flag ($MaintActive) retained to freeze write traffic and protect system integrity." -ForegroundColor Red
         }
     }
 }
@@ -318,7 +345,7 @@ if ($RollbackOnly) {
     if (-not $RollbackManifestPath -and $NoSchemaChangeVerified) {
         Write-Host "[GMS Rollback Guard] -NoSchemaChangeVerified specified for image-only rollback. Verifying exact database schema compatibility against previous release manifest..." -ForegroundColor Cyan
         
-        # 1. Resolve previous release manifest to get authoritative migration inventory
+        # 1. Resolve previous release manifest to get authoritative migration inventory (Fail-Closed)
         [string]$PrevManifestPath = ""
         if ($TargetManifestPath -and (Test-Path $TargetManifestPath)) {
             try {
@@ -340,43 +367,100 @@ if ($RollbackOnly) {
             }
         }
 
-        # 2. Query live database applied migrations
+        # FAIL-CLOSED: A valid previous release manifest is MANDATORY
+        if (-not $PrevManifestPath -or -not (Test-Path $PrevManifestPath)) {
+            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Previous release manifest was not found. An authoritative previous release manifest with an explicit migration inventory is MANDATORY when using -NoSchemaChangeVerified. Full database recovery via -RollbackManifestPath is required."
+        }
+
+        # 2. Extract expected migrations and checksums from manifest
+        Write-Host "  Loading authoritative migration inventory from previous manifest: $PrevManifestPath" -ForegroundColor Cyan
+        $prevManObj = Get-Content $PrevManifestPath -Raw | ConvertFrom-Json
+        [string[]]$expectedMigrations = @()
+        $expectedChecksumMap = @{}
+
+        if ($prevManObj.migrationInventory) {
+            foreach ($item in $prevManObj.migrationInventory) {
+                $name = if ($item.migration_name) { [string]$item.migration_name } elseif ($item.name) { [string]$item.name } else { "" }
+                if ($name) {
+                    $expectedMigrations += $name
+                    $ck = if ($item.checksum) { [string]$item.checksum } elseif ($item.migration_checksum) { [string]$item.migration_checksum } else { "" }
+                    if ($ck) { $expectedChecksumMap[$name] = $ck.Trim().ToLower() }
+                }
+            }
+        } elseif ($prevManObj.migrations) {
+            foreach ($item in $prevManObj.migrations) {
+                if ($item -is [string]) {
+                    $expectedMigrations += $item
+                } elseif ($item.migration_name) {
+                    $name = [string]$item.migration_name
+                    $expectedMigrations += $name
+                    if ($item.checksum) { $expectedChecksumMap[$name] = [string]$item.checksum.ToString().Trim().ToLower() }
+                } elseif ($item.name) {
+                    $name = [string]$item.name
+                    $expectedMigrations += $name
+                    if ($item.checksum) { $expectedChecksumMap[$name] = [string]$item.checksum.ToString().Trim().ToLower() }
+                }
+            }
+        }
+
+        if ($expectedMigrations.Count -eq 0) {
+            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Previous release manifest at '$PrevManifestPath' does not contain an explicit migration inventory list ('migrationInventory' or 'migrations' missing or empty). Cannot verify schema compatibility without migration records. Full database recovery via -RollbackManifestPath is MANDATORY."
+        }
+
+        # 3. Query live database applied migrations and checksums
         $livePg = (& docker ps -q -f "name=gate-system-postgres" 2>$null).ToString().Trim()
         if (-not $livePg) {
             throw "[CRITICAL SCHEMA CHECK FAILED] Target database container [gate-system-postgres] is not running. Cannot verify schema compatibility for image-only rollback."
         }
 
-        [string]$appliedMigrationsRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c "SELECT migration_name FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL ORDER BY started_at ASC;" 2>$null).ToString().Trim()
-        [string[]]$appliedMigrations = if ($appliedMigrationsRaw) { $appliedMigrationsRaw -split "`r?`n" } else { @() }
+        [string]$appliedRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c "SELECT migration_name || '|' || COALESCE(checksum, '') FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL ORDER BY started_at ASC;" 2>$null).ToString().Trim()
+        if ([string]::IsNullOrWhiteSpace($appliedRaw)) {
+            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Target live database contains 0 applied migrations or _prisma_migrations is unreadable."
+        }
 
-        if ($PrevManifestPath -and (Test-Path $PrevManifestPath)) {
-            Write-Host "  Comparing live migration inventory against previous manifest: $PrevManifestPath" -ForegroundColor Cyan
-            $prevManObj = Get-Content $PrevManifestPath -Raw | ConvertFrom-Json
-            [string[]]$expectedMigrations = @()
-            if ($prevManObj.migrations) {
-                $expectedMigrations = [string[]]$prevManObj.migrations
-            } elseif ($prevManObj.migrationInventory) {
-                $expectedMigrations = [string[]]($prevManObj.migrationInventory | ForEach-Object { $_.migration_name })
-            }
+        [string[]]$appliedLines = $appliedRaw -split "`r?`n"
+        [string[]]$appliedMigrations = @()
+        $appliedChecksumMap = @{}
 
-            if ($expectedMigrations.Count -gt 0) {
-                # Check for forward migrations applied in live DB that previous release does not know about
-                [string[]]$unaccountedMigrations = $appliedMigrations | Where-Object { $expectedMigrations -notcontains $_ }
-                if ($unaccountedMigrations.Count -gt 0) {
-                    throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED! Live database contains $($unaccountedMigrations.Count) migration(s) not present in previous release manifest [$($unaccountedMigrations -join ', ')]. Old container image is NOT compatible with forward-migrated schema. Full database recovery via -RollbackManifestPath is MANDATORY."
-                }
-                Write-Host "  [PASS] Exact migration inventory matches previous release ($($appliedMigrations.Count) migrations verified compatible)." -ForegroundColor Green
+        foreach ($line in $appliedLines) {
+            if ($line.Contains("|")) {
+                $parts = $line.Split("|")
+                $mName = $parts[0].Trim()
+                $mHash = $parts[1].Trim().ToLower()
+                $appliedMigrations += $mName
+                $appliedChecksumMap[$mName] = $mHash
             } else {
-                Write-Host "  [WARN] Previous manifest does not contain explicit migration inventory list. Verified live migration count: $($appliedMigrations.Count)." -ForegroundColor Yellow
-            }
-        } else {
-            # If no manifest exists, check whether migrations directory has more migrations than live DB
-            [string]$migrationsDir = Join-Path $WorkspaceRoot "backend\prisma\migrations"
-            if (Test-Path $migrationsDir) {
-                $dirCount = (Get-ChildItem -Path $migrationsDir -Directory | Where-Object { Test-Path (Join-Path $_.FullName "migration.sql") }).Count
-                Write-Host "  Live applied migrations: $($appliedMigrations.Count), Disk migration definitions: $dirCount" -ForegroundColor Cyan
+                $mName = $line.Trim()
+                if ($mName) { $appliedMigrations += $mName }
             }
         }
+
+        # Check for forward migrations applied in live DB that previous release does not know about
+        [string[]]$unaccountedMigrations = $appliedMigrations | Where-Object { $expectedMigrations -notcontains $_ }
+        if ($unaccountedMigrations.Count -gt 0) {
+            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED! Live database contains $($unaccountedMigrations.Count) forward migration(s) not present in previous release manifest [$($unaccountedMigrations -join ', ')]. Old container image is NOT compatible with forward-migrated schema. Full database recovery via -RollbackManifestPath is MANDATORY."
+        }
+
+        # Check for missing migrations required by previous release
+        [string[]]$missingInLive = $expectedMigrations | Where-Object { $appliedMigrations -notcontains $_ }
+        if ($missingInLive.Count -gt 0) {
+            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED! Live database is missing $($missingInLive.Count) migration(s) expected by previous release manifest [$($missingInLive -join ', ')]. Full database recovery via -RollbackManifestPath is MANDATORY."
+        }
+
+        # Check checksums for all migrations where previous manifest recorded checksums
+        [int]$checksumsVerified = 0
+        foreach ($mName in $expectedChecksumMap.Keys) {
+            $expectedCk = $expectedChecksumMap[$mName]
+            $actualCk = if ($appliedChecksumMap.ContainsKey($mName)) { $appliedChecksumMap[$mName] } else { "" }
+            if ($expectedCk -and $actualCk -and ($expectedCk -ne $actualCk)) {
+                throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED! Migration checksum mismatch detected for migration '$mName' (Live: $actualCk, Manifest: $expectedCk). Schema drift or altered migration detected. Full database recovery via -RollbackManifestPath is MANDATORY."
+            }
+            if ($expectedCk -and $actualCk) {
+                $checksumsVerified++
+            }
+        }
+
+        Write-Host "  [PASS] Exact migration inventory matches previous release ($($appliedMigrations.Count) migrations verified, $checksumsVerified checksums verified 100% identical)." -ForegroundColor Green
     }
     [bool]$dbRollbackRequired = [bool](-not [string]::IsNullOrWhiteSpace($RollbackManifestPath))
     try {
@@ -450,7 +534,7 @@ try {
     Write-Host "[GMS Preflight] Creating mandatory pre-deployment backup..." -ForegroundColor Cyan
     $PredeployBackupLog = & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator node scripts/run-predeploy-backup.js 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "Pre-deployment backup script terminated with error code $LASTEXITCODE: $PredeployBackupLog"
+        throw "Pre-deployment backup script terminated with error code ${LASTEXITCODE}: $PredeployBackupLog"
     }
 
     # Step 1.4: Strict Extraction of Captured Backup ID from Node.js standard output
@@ -586,11 +670,28 @@ try {
         } else { "NONE" }
     }
 
+    # Query live applied migration inventory for the release manifest (Fail-Closed)
+    [array]$LiveMigrationInventory = @()
+    try {
+        [string]$invRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c "SELECT migration_name || '|' || COALESCE(checksum, '') FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL ORDER BY started_at ASC;" 2>$null).ToString().Trim()
+        if ($invRaw) {
+            $invLines = $invRaw -split "`r?`n"
+            foreach ($line in $invLines) {
+                if ($line.Contains("|")) {
+                    $p = $line.Split("|")
+                    $LiveMigrationInventory += @{ migration_name = $p[0].Trim(); checksum = $p[1].Trim().ToLower() }
+                }
+            }
+        }
+    } catch {}
+
     $ReleaseManifest = @{
         release = $TargetReleaseTag
         gitSha = $TargetReleaseTag
         schemaVersion = "1.0.0"
         migrationChecksumsVerified = $true
+        migrationInventory = $LiveMigrationInventory
+        migrations = ($LiveMigrationInventory | ForEach-Object { $_.migration_name })
         preDeployBackupId = $PreDeployBackupId
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
         backend = @{

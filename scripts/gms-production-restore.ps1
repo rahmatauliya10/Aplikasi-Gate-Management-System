@@ -26,7 +26,7 @@ param(
     [string]$PgUser = "postgres",
 
     [Parameter(Mandatory=$false)]
-    [string]$PgPass = if ($env:PGPASSWORD) { $env:PGPASSWORD } elseif ($env:POSTGRES_PASSWORD) { $env:POSTGRES_PASSWORD } else { "testpassword" },
+    [string]$PgPass = "",
 
     [Parameter(Mandatory=$false)]
     [string]$PgHost = "localhost",
@@ -55,7 +55,8 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 
 [string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
-[string]$LogDir = if ($IsWindows) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
+[bool]$IsWinPlatform = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+[string]$LogDir = if ($IsWinPlatform) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
 [string]$LogFile = Join-Path -Path $LogDir -ChildPath "production_restore.log"
 [string]$RestoreEvidencePath = Join-Path -Path $LogDir -ChildPath "restore_evidence.json"
 [string]$UploadDir = if ($env:UPLOAD_DIR) { $env:UPLOAD_DIR } else { Join-Path -Path $ProjectRootDir -ChildPath "uploads" }
@@ -131,25 +132,70 @@ if ($ActualDumpHash -ne $ExpectedDumpHash) {
 }
 Write-Log "  Dump file SHA-256 checksum verified [PASS] ($ActualDumpHash)" -Level "SUCCESS"
 
-[string]$AttArchiveFileName = $ManifestData.artifacts.attachmentsArchive
+[string]$AttArchiveFileName = ""
+if ($ManifestData.artifacts.PSObject.Properties['attachmentsArchive']) {
+    $AttArchiveFileName = [string]$ManifestData.artifacts.attachmentsArchive
+}
 if ($AttArchiveFileName) {
     $AttArchivePath = Join-Path -Path (Split-Path -Path $ManifestPath -Parent) -ChildPath $AttArchiveFileName
     if (-not (Test-Path -Path $AttArchivePath)) {
         throw "Companion physical attachment archive ($AttArchiveFileName) missing from backup directory."
     }
     [string]$ActualAttArchiveHash = (Get-FileHash -Path $AttArchivePath -Algorithm SHA256).Hash.ToLower()
-    [string]$ExpectedAttArchiveHash = $ManifestData.checksums.attachmentsArchive.ToLower()
-    if ($ActualAttArchiveHash -ne $ExpectedAttArchiveHash) {
+    [string]$ExpectedAttArchiveHash = if ($ManifestData.checksums.PSObject.Properties['attachmentsArchive']) { [string]$ManifestData.checksums.attachmentsArchive.ToLower() } else { "" }
+    if ($ExpectedAttArchiveHash -and $ActualAttArchiveHash -ne $ExpectedAttArchiveHash) {
         throw "Attachment Archive SHA-256 Checksum Mismatch! Expected: $ExpectedAttArchiveHash, Actual: $ActualAttArchiveHash. Aborting restore."
     }
     Write-Log "  Attachment archive SHA-256 checksum verified [PASS] ($ActualAttArchiveHash)" -Level "SUCCESS"
 }
 
 if (-not $PgPass) {
-    $PgPass = "gms_ephemeral_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 16)
+    if ($env:PGPASSWORD) {
+        $PgPass = $env:PGPASSWORD
+    } elseif ($env:POSTGRES_PASSWORD) {
+        $PgPass = $env:POSTGRES_PASSWORD
+    } else {
+        $PgPass = "gms_ephemeral_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 16)
+    }
 }
 
-# Step 3: Enter Maintenance Mode / Application Write Freeze
+# Step 1.5: Target Environment & Fault-Injection Preflight Validation
+Write-Log "Step 1.5: Validating Target Infrastructure & Security Governance Preflight..."
+[string]$EffectiveFaultPhasePreflight = if ($FaultInjectionPhase) { $FaultInjectionPhase } else { $env:GMS_FAULT_INJECTION_PHASE }
+if (-not [string]::IsNullOrWhiteSpace($EffectiveFaultPhasePreflight)) {
+    # 1. Unconditional rejection of production targets
+    if ($LiveDbName -like "*prod*" -or $LiveContainer -like "*prod*" -or ($ExpectedEnvironmentId -and $ExpectedEnvironmentId -like "*PROD*")) {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] or container [$LiveContainer] is identified as PRODUCTION. Fault injection (-FaultInjectionPhase '$EffectiveFaultPhasePreflight') is UNCONDITIONALLY PROHIBITED on production targets under ALL circumstances. CI or drill flags cannot override this."
+    }
+
+    # 2. Require verified isolated drill environment
+    if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE") {
+        throw "CRITICAL GOVERNANCE VIOLATION: Fault injection (-FaultInjectionPhase '$EffectiveFaultPhasePreflight') requires verified isolated drill environment (GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE). Target environment is not authorized."
+    }
+
+    # 3. Check container labels and mounts to prevent drill against production volumes
+    $rawInspectPreflight = & docker inspect $LiveContainer 2>$null
+    [string]$inspectJsonPreflight = if ($rawInspectPreflight) { [string]$rawInspectPreflight.ToString() } else { "" }
+    if ($inspectJsonPreflight) {
+        if ($inspectJsonPreflight -like "*prod-postgres-data*" -or $inspectJsonPreflight -like "*production_postgres*") {
+            throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is bound to production data volumes! Fault injection is unconditionally blocked."
+        }
+    }
+}
+
+# Verify target container exists and is running
+$rawLivePreflight = ""
+try {
+    $rawOut = & docker ps -q -f "name=^/${LiveContainer}$" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $rawOut) {
+        $rawLivePreflight = [string]$rawOut.ToString().Trim()
+    }
+} catch {}
+if ([string]::IsNullOrWhiteSpace($rawLivePreflight)) {
+    throw "HARD FAIL: Live target container [$LiveContainer] is not running or unreachable. Cannot proceed with restore."
+}
+
+# Step 2: Enter Maintenance Mode / Application Write Freeze
 Write-Log "Step 2: Enabling Maintenance Mode & Application Write Freeze..."
 [string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
 Set-Content -Path $MaintFlagPath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE" -Encoding utf8
@@ -481,7 +527,7 @@ try {
     & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
 
     if ($LiveExitCode -ne 0) {
-        throw "Live Database Promotion (pg_restore) failed with exit code $LiveExitCode: $LiveRestoreOut"
+        throw "Live Database Promotion (pg_restore) failed with exit code ${LiveExitCode}: $LiveRestoreOut"
     }
 
     # DB pg_restore committed into live target; transition phase immediately to guarantee DB rollback on any subsequent error

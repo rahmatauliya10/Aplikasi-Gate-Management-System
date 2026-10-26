@@ -48,7 +48,8 @@ if (-not (Test-Path -Path $LocalBackupDir -PathType Container)) {
     New-Item -Path $LocalBackupDir -ItemType Directory -Force | Out-Null
 }
 
-[string]$LogDir = if ($IsWindows) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
+[bool]$IsWinPlatform = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+[string]$LogDir = if ($IsWinPlatform) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
 if (-not (Test-Path -Path $LogDir -PathType Container)) {
     New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
 }
@@ -331,15 +332,23 @@ try {
         throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
     }
 
+    # Clean up any leftover maintenance flag before Phase 2 test
+    $mActive = Join-Path $ProjectRootDir "maintenance/active"
+    $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
+    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
+
     Enable-TargetRestoreGate -Container $LiveContainer -Database $LiveDbName -User $PgUser
     $DbBeforeP2 = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
     $UploadsBeforeP2 = Get-UploadsFingerprint -UploadsDirectory $UploadDir
 
+    $p2Output = ""
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "DURING_DB_PROMOTION"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "DURING_DB_PROMOTION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
+        $p2Output = & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "DURING_DB_PROMOTION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-String
         $p2Exit = $LASTEXITCODE
     } catch {
+        $p2Output = $_.ToString()
         $p2Exit = 1
     } finally {
         $env:GMS_FAULT_INJECTION_PHASE = ""
@@ -356,7 +365,7 @@ try {
     $p2Details = if ($p2Passed) {
         "DURING_DB_PROMOTION fault caught cleanly without StrictMode error -> DB compensated -> Uploads unchanged -> Maintenance active."
     } else {
-        "Phase 2 check failed: ExitCode=$p2Exit, DbRestored=$DbRestoredP2, UploadsUnchanged=$UploadsUnchangedP2, MaintenanceActive=$MaintenanceActiveP2"
+        "Phase 2 check failed: ExitCode=$p2Exit, DbRestored=$DbRestoredP2, UploadsUnchanged=$UploadsUnchangedP2, MaintenanceActive=$MaintenanceActiveP2. Output: $p2Output"
     }
 
     Record-Drill-Phase -PhaseName "Phase 2: During-DB-Promotion Compensation" `
@@ -387,15 +396,23 @@ try {
         throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
     }
 
+    # Clean up any leftover maintenance flag before Phase 3 test
+    $mActive = Join-Path $ProjectRootDir "maintenance/active"
+    $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
+    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
+
     Enable-TargetRestoreGate -Container $LiveContainer -Database $LiveDbName -User $PgUser
     $DbBefore = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
     $UploadsBefore = Get-UploadsFingerprint -UploadsDirectory $UploadDir
 
+    $p3Output = ""
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "POST_DB_COMMIT"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "POST_DB_COMMIT" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
+        $p3Output = & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "POST_DB_COMMIT" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-String
         $p3Exit = $LASTEXITCODE
     } catch {
+        $p3Output = $_.ToString()
         $p3Exit = 1
     } finally {
         $env:GMS_FAULT_INJECTION_PHASE = ""
@@ -412,7 +429,7 @@ try {
     $p3Details = if ($p3Passed) {
         "Operator detected failure (ExitCode=$p3Exit) -> DB 16 entities 100% restored identical -> Physical attachments 100% restored -> Maintenance mode strictly active."
     } else {
-        "Phase 3 check failed: ExitCode=$p3Exit, DbRestored=$DbRestored, UploadsRestored=$UploadsRestored, MaintenanceActive=$MaintenanceActive"
+        "Phase 3 check failed: ExitCode=$p3Exit, DbRestored=$DbRestored, UploadsRestored=$UploadsRestored, MaintenanceActive=$MaintenanceActive. Output: $p3Output"
     }
 
     Record-Drill-Phase -PhaseName "Phase 3: Post-DB-Commit Compensation" `
@@ -443,15 +460,23 @@ try {
         throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
     }
 
+    # Clean up any leftover maintenance flag before Phase 4 test
+    $mActive = Join-Path $ProjectRootDir "maintenance/active"
+    $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
+    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
+
     Enable-TargetRestoreGate -Container $LiveContainer -Database $LiveDbName -User $PgUser
     $DbBeforeP4 = Get-DatabaseFingerprint -Container $LiveContainer -Database $LiveDbName -User $PgUser
     $UploadsBeforeP4 = Get-UploadsFingerprint -UploadsDirectory $UploadDir
 
+    $p4Output = ""
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "ATTACHMENT_SWAP"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
+        $p4Output = & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "ATTACHMENT_SWAP" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-String
         $p4Exit = $LASTEXITCODE
     } catch {
+        $p4Output = $_.ToString()
         $p4Exit = 1
     } finally {
         $env:GMS_FAULT_INJECTION_PHASE = ""
@@ -467,7 +492,7 @@ try {
     $p4Details = if ($p4Passed) {
         "Atomic rename and staging upload rollback verified: live uploads tree and DB preserved/reverted upon attachment promotion exception (ExitCode=$p4Exit)."
     } else {
-        "Failure: Attachment promotion fault was not handled fail-closed (ExitCode=$p4Exit, UploadsPreserved=$UploadsPreservedP4, DbPreserved=$DbPreservedP4)."
+        "Failure: Attachment promotion fault was not handled fail-closed (ExitCode=$p4Exit, UploadsPreserved=$UploadsPreservedP4, DbPreserved=$DbPreservedP4). Output: $p4Output"
     }
 
     Record-Drill-Phase -PhaseName "Phase 4: Attachment Swap Rollback" `
@@ -497,13 +522,21 @@ try {
         throw "MANDATORY FIXTURE MISSING: Historical test manifest not found ($FixtureManifest). Rehearsal drill cannot proceed."
     }
 
+    # Clean up any leftover maintenance flag before Phase 5 test
+    $mActive = Join-Path $ProjectRootDir "maintenance/active"
+    $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
+    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
+
     Enable-TargetRestoreGate -Container $LiveContainer -Database $LiveDbName -User $PgUser
 
+    $p5Output = ""
     try {
         $env:GMS_FAULT_INJECTION_PHASE = "LIVE_VERIFICATION"
-        & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "LIVE_VERIFICATION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-Null
+        $p5Output = & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $FixtureManifest -FaultInjectionPhase "LIVE_VERIFICATION" -ExpectedEnvironmentId "GMS-DRILL-SJA-01" -PgPass "testpassword" -LiveContainer $LiveContainer -Force 2>&1 | Out-String
         $p5Exit = $LASTEXITCODE
     } catch {
+        $p5Output = $_.ToString()
         $p5Exit = 1
     } finally {
         $env:GMS_FAULT_INJECTION_PHASE = ""
@@ -514,7 +547,7 @@ try {
     $p5Details = if ($p5Passed) {
         "Maintenance flag verified present upon live count/hash discrepancy to freeze write traffic in inconsistent state (ExitCode=$p5Exit)."
     } else {
-        "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze (ExitCode=$p5Exit, MaintenanceFlagActive=$MaintenanceFlagActive)."
+        "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze (ExitCode=$p5Exit, MaintenanceFlagActive=$MaintenanceFlagActive). Output: $p5Output"
     }
 
     Record-Drill-Phase -PhaseName "Phase 5: Maintenance Freeze on Discrepancy" `

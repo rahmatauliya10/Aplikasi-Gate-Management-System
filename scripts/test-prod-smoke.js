@@ -23,7 +23,7 @@ const smokeScript = path.join(projectRoot, 'scripts/prod-smoke-readonly.js');
 
 let testFailures = 0;
 
-function runSmokeSubprocess(envVars = {}) {
+function runSmokeSubprocess(envVars = {}, extraArgs = []) {
   return new Promise((resolve) => {
     const mergedEnv = {
       ...process.env,
@@ -33,7 +33,7 @@ function runSmokeSubprocess(envVars = {}) {
       ...envVars,
     };
 
-    const child = spawn(process.execPath, [smokeScript], {
+    const child = spawn(process.execPath, [smokeScript, ...extraArgs], {
       env: mergedEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -287,9 +287,49 @@ async function runTests() {
     }
   }
 
+  // ----------------------------------------------------------------------------
+  // Case 8: Fail-Closed --require-passed gate: PARTIAL verdict MUST exit 1
+  // ----------------------------------------------------------------------------
+  {
+    console.log('Test 8: Fail-Closed Gate - PARTIAL verdict with --require-passed MUST exit 1...');
+    const apiServer = await createMockServer(defaultApiHandler, 9091);
+    const frontendServer = await createMockServer(defaultFrontendHandler, 9092);
+
+    const result = await runSmokeSubprocess({ SMOKE_ACCESS_TOKEN: '' }, ['--require-passed']);
+    await closeServer(apiServer);
+    await closeServer(frontendServer);
+
+    if (result.status === 1 && result.stdout.includes('HARD FAIL-CLOSED') && result.stdout.includes('Verdict: [PARTIAL]')) {
+      console.log('  [PASS] Smoke test strictly exited 1 on PARTIAL when --require-passed is active (traffic opening prevented).\n');
+    } else {
+      console.error(`  [FAIL] Expected exit 1 for PARTIAL with --require-passed, got code: ${result.status}\nOutput: ${result.stdout}`);
+      testFailures++;
+    }
+  }
+
+  // ----------------------------------------------------------------------------
+  // Case 9: Pass-Through --require-passed gate: PASSED verdict MUST exit 0
+  // ----------------------------------------------------------------------------
+  {
+    console.log('Test 9: Pass-Through Gate - PASSED verdict with --require-passed MUST exit 0...');
+    const apiServer = await createMockServer(defaultApiHandler, 9091);
+    const frontendServer = await createMockServer(defaultFrontendHandler, 9092);
+
+    const result = await runSmokeSubprocess({ SMOKE_ACCESS_TOKEN: 'valid_token_123' }, ['--require-passed']);
+    await closeServer(apiServer);
+    await closeServer(frontendServer);
+
+    if (result.status === 0 && result.stdout.includes('Verdict: [PASSED]') && result.stdout.includes('PASSED 100%')) {
+      console.log('  [PASS] Smoke test cleanly exited 0 on proven PASSED verdict with --require-passed (traffic unfreeze authorized).\n');
+    } else {
+      console.error(`  [FAIL] Expected exit 0 for PASSED with --require-passed, got code: ${result.status}\nOutput: ${result.stdout}`);
+      testFailures++;
+    }
+  }
+
   console.log('==============================================================================');
   if (testFailures === 0) {
-    console.log('SUCCESS: All 7 mock smoke test negative & positive scenarios PASSED!');
+    console.log('SUCCESS: All 9 mock smoke test negative & positive scenarios PASSED!');
     console.log('==============================================================================\n');
     process.exit(0);
   } else {

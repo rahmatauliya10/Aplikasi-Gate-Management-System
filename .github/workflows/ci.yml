@@ -416,13 +416,24 @@ jobs:
           mkdir -p artifacts/release-proof backups/local
           node tests/fixtures/historical/generate-test-fixtures.js
 
-      - name: Execute 6-Phase DR Failure-Injection & Operator Restore Drill
+      - name: Execute Smoke Test Strict Assertion Suite (P1-03)
+        run: |
+          set -Eeuo pipefail
+          node scripts/test-prod-smoke.js
+
+      - name: Execute Target Guard Policy & Integration Suite (P1-04)
+        run: |
+          set -Eeuo pipefail
+          node scripts/test-target-guard.js
+
+      - name: Execute 6-Phase DR Failure-Injection & Operator Restore Drill (P1-01)
         env:
           NODE_ENV: test
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
           PGPASSWORD: testpassword
         run: |
           set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/run-restore-failure-drill.ps1
           node scripts/ci-restore-failure-drill.js
 
       - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
@@ -850,6 +861,20 @@ jobs:
           # 1. Versioned Release Manifest with actual image digests/IDs
           node -e "
             const fs = require('fs');
+            const crypto = require('crypto');
+            const migrationDirs = fs.existsSync('backend/prisma/migrations')
+              ? fs.readdirSync('backend/prisma/migrations', { withFileTypes: true })
+                  .filter(d => d.isDirectory() && /^\d{14}_/.test(d.name))
+                  .map(d => d.name)
+                  .sort()
+              : [];
+            const migrationInventory = migrationDirs.map(m => {
+              const sqlFile = 'backend/prisma/migrations/' + m + '/migration.sql';
+              const checksum = fs.existsSync(sqlFile)
+                ? crypto.createHash('sha256').update(fs.readFileSync(sqlFile)).digest('hex')
+                : '';
+              return { migration_name: m, checksum };
+            });
             const manifest = {
               manifestType: 'CI_TEST_EVIDENCE',
               release: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
@@ -858,7 +883,9 @@ jobs:
               testedMergeSha: process.env.TESTED_MERGE_SHA || process.env.GITHUB_SHA || 'local-sha',
               timestamp: '$CI_TIMESTAMP',
               backend: { image: 'gms-backend', digest: '$BACKEND_IMAGE_ID', ciLocalImageId: '$BACKEND_IMAGE_ID' },
-              frontend: { image: 'gms-frontend', digest: '$FRONTEND_IMAGE_ID', ciLocalImageId: '$FRONTEND_IMAGE_ID' }
+              frontend: { image: 'gms-frontend', digest: '$FRONTEND_IMAGE_ID', ciLocalImageId: '$FRONTEND_IMAGE_ID' },
+              migrations: migrationDirs,
+              migrationInventory: migrationInventory
             };
             fs.writeFileSync('deploy/release_manifest.json', JSON.stringify(manifest, null, 2), 'utf8');
             if (process.env.GITHUB_SHA) {

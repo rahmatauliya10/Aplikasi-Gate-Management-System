@@ -31,6 +31,7 @@ const OFFICIAL_CORS_ORIGIN = (process.env.CORS_ORIGIN || 'http://localhost:8081'
 const SMOKE_TOKEN = process.env.SMOKE_ACCESS_TOKEN || '';
 const STRICT_AUTH = process.env.SMOKE_STRICT_AUTH === 'true' || process.argv.includes('--strict-auth');
 const REQUIRE_NAS = process.env.SMOKE_REQUIRE_NAS === 'true' || process.argv.includes('--require-nas');
+const REQUIRE_PASSED = process.env.SMOKE_REQUIRE_PASSED === 'true' || process.argv.includes('--require-passed');
 
 const results = [];
 let hasRequiredFailure = false;
@@ -371,6 +372,10 @@ async function run() {
     log('CRITICAL: Production smoke test FAILED on required checks!', 'ERROR');
     process.exit(1);
   } else if (overallVerdict === 'PARTIAL') {
+    if (REQUIRE_PASSED) {
+      log('HARD FAIL-CLOSED: Smoke verdict is PARTIAL but --require-passed is active. Traffic unfreezing strictly requires a 100% PASSED verdict (no pending authentication probes). Exiting with code 1.', 'ERROR');
+      process.exit(1);
+    }
     log('PARTIAL PASS: All required infrastructure & security checks PASSED. Authenticated check is PENDING human credential.', 'WARN');
     process.exit(0);
   } else {
