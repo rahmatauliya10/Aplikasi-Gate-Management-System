@@ -42,6 +42,10 @@ if (-not $ArtifactsDir) {
 if (-not (Test-Path -Path $ArtifactsDir -PathType Container)) {
     New-Item -Path $ArtifactsDir -ItemType Directory -Force | Out-Null
 }
+[string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups/local"
+if (-not (Test-Path -Path $LocalBackupDir -PathType Container)) {
+    New-Item -Path $LocalBackupDir -ItemType Directory -Force | Out-Null
+}
 
 [string]$LogDir = if ($IsWindows) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
 if (-not (Test-Path -Path $LogDir -PathType Container)) {

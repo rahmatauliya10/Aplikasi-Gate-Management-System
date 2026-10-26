@@ -413,7 +413,7 @@ jobs:
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
         run: |
           set -Eeuo pipefail
-          mkdir -p artifacts/release-proof
+          mkdir -p artifacts/release-proof backups/local
           node tests/fixtures/historical/generate-test-fixtures.js
 
       - name: Execute 6-Phase DR Failure-Injection & Operator Restore Drill

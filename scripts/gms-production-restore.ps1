@@ -90,6 +90,9 @@ Write-Log "=====================================================================
 
 # Step 1: Resolve Backup Manifest & Artifact Paths
 [string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups/local"
+if (-not (Test-Path -Path $LocalBackupDir -PathType Container)) {
+    New-Item -Path $LocalBackupDir -ItemType Directory -Force | Out-Null
+}
 if (-not $ManifestPath) {
     $LatestManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*_manifest.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $LatestManifest) {
