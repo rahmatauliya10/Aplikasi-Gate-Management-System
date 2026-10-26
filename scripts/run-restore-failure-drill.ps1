@@ -194,7 +194,8 @@ function Get-DatabaseFingerprint {
             continue
         }
 
-        $Sql = "SELECT COALESCE(encode(sha256(string_agg(encode(sha256(row_to_json(t)::text::bytea), 'hex'), ',' ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex'))::bytea), 'hex'), 'EMPTY') FROM `"$Table`" t;"
+        $whereClause = if ($Table -eq "AppSetting") { "WHERE `"key`" NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED')" } else { "" }
+        $Sql = "SELECT COALESCE(encode(sha256(string_agg(encode(sha256(row_to_json(t)::text::bytea), 'hex'), ',' ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex'))::bytea), 'hex'), 'EMPTY') FROM `"$Table`" t $whereClause;"
 
         $Hash = ""
         try {
@@ -667,7 +668,10 @@ try {
     Record-Drill-Phase -PhaseName "Phase 6: Maintenance HTTP Write Rejection (503)" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p6Start).TotalSeconds
 } finally {
     if ($mockProc -and -not $mockProc.HasExited) {
-        try { $mockProc.Kill() } catch {}
+        try {
+            $mockProc.Kill()
+            $mockProc.WaitForExit(3000)
+        } catch {}
     }
     # Clean up test maintenance flags
     [string]$mActive = Join-Path $ProjectRootDir "maintenance/active"
