@@ -509,6 +509,9 @@ async function main() {
     phaseResults
   };
 
+  const nodeEvidenceJsonPath = path.join(artifactsDir, 'restore-failure-drill-evidence-node.json');
+  fs.writeFileSync(nodeEvidenceJsonPath, JSON.stringify(evidenceReport, null, 2), 'utf8');
+
   const evidenceJsonPath = path.join(artifactsDir, 'restore-failure-drill-evidence.json');
   fs.writeFileSync(evidenceJsonPath, JSON.stringify(evidenceReport, null, 2), 'utf8');
 

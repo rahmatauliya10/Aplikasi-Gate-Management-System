@@ -426,7 +426,7 @@ jobs:
           node scripts/ci-restore-failure-drill.js
           if command -v pwsh &> /dev/null; then
             echo "Executing PowerShell operator DR drill..."
-            pwsh -ExecutionPolicy Bypass -File scripts/run-restore-failure-drill.ps1 || true
+            pwsh -ExecutionPolicy Bypass -File scripts/run-restore-failure-drill.ps1
           fi
 
       - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
