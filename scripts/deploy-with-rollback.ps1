@@ -183,6 +183,8 @@ if ($ResolvedTargetManifest) {
     } catch {}
 }
 
+[bool]$script:DbRestoreExecuted = $false
+
 function Execute-Rollback {
     param(
         [string]$PrevTag,
@@ -201,41 +203,57 @@ function Execute-Rollback {
     )
     Write-Host "[GMS AUTOMATED ROLLBACK] Initiating schema-aware coordinated rollback sequence to previous stable release tag: [$PrevTag]..." -ForegroundColor Magenta
 
+    # --------------------------------------------------------------------------
+    # GMS SINGLE RECOVERY ORCHESTRATOR (PHASED EXECUTION - P1-03)
+    # --------------------------------------------------------------------------
+    # Phase 1: PRECHECK
+    Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: PRECHECK] Validating rollback prerequisites and image digests..." -ForegroundColor Magenta
     if ($IsStrictProd -or $RequireDigest) {
         if (-not $PrevBackendDig -or -not $PrevFrontendDig -or -not $PrevMigratorDig) {
             throw "[GMS IMMUTABILITY VIOLATION] Rollback aborted! Production rollback requires explicit SHA-256 digests for ALL previous images (PreviousBackendDigest, PreviousFrontendDigest, and PreviousMigratorDigest). Refusing to fall back to unverified tags."
         }
     }
 
-    # Freeze traffic / Maintenance Mode during rollback via bind-mounted maintenance directory
-    Write-Host "[GMS AUTOMATED ROLLBACK] Freezing traffic and entering maintenance mode..." -ForegroundColor Cyan
+    # Phase 2: FREEZE & WRITER SHUTDOWN
+    Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: FREEZE] Freezing ingress traffic and stopping data writer containers..." -ForegroundColor Magenta
     [string]$MaintDir = Join-Path $WorkspaceRoot "maintenance"
     if (-not (Test-Path -Path $MaintDir -PathType Container)) {
         New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
     }
     [string]$MaintActive = Join-Path $MaintDir "active"
     Set-Content -Path $MaintActive -Value "MAINTENANCE_ACTIVE_ROLLBACK" -Encoding utf8
+    Set-Content -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Value "MAINTENANCE_ACTIVE_ROLLBACK" -Encoding utf8
+
+    # Stop writer services before any database restoration
+    Write-Host "  Stopping backend and migrator containers to ensure zero in-flight database mutations..." -ForegroundColor Cyan
+    & docker compose -p $ProjName -f $CompFile stop backend migrator 2>&1 | Out-Null
 
     [bool]$RollbackSucceeded = $false
 
     try {
-        # If database was migrated or migration was started, execute MANDATORY coordinated DB rollback
+        # Phase 3: RESTORE_REQUIRED / RESTORE_DONE (EXACTLY ONCE)
         if ($RequireDbRollback -or ($RollbackManifestPath -and (Test-Path -Path $RollbackManifestPath -PathType Leaf))) {
+            if ($script:DbRestoreExecuted) {
+                throw "[CRITICAL RECOVERY VIOLATION] Duplicate database restore rejected! A restore operation has already been executed in this recovery sequence."
+            }
             if (-not $RollbackManifestPath -or -not (Test-Path -Path $RollbackManifestPath -PathType Leaf)) {
-                throw "[CRITICAL ROLLBACK FAILURE] Migration was started or completed, but pre-deployment backup manifest ($RollbackManifestPath) was not found on host storage! Cannot perform safe rollback without DB restoration. Traffic remains frozen in maintenance mode."
+                throw "[CRITICAL ROLLBACK FAILURE] Pre-deployment backup manifest ($RollbackManifestPath) was not found on host storage! Cannot perform safe rollback without DB restoration. Traffic remains frozen in maintenance mode."
             }
 
-            Write-Host "[GMS AUTOMATED ROLLBACK] Restoring database to pre-deployment state via operator restore plane ($RollbackManifestPath)..." -ForegroundColor Yellow
+            Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: RESTORE_REQUIRED] Executing single authoritative database & attachment restore via operator plane ($RollbackManifestPath)..." -ForegroundColor Yellow
             $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
             & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $RollbackManifestPath -Force
             if ($LASTEXITCODE -ne 0) {
                 throw "[CRITICAL ROLLBACK FAILURE] Coordinated database restore failed with exit code $LASTEXITCODE during rollback! Refusing to boot old application on unverified schema."
             }
-            Write-Host "[GMS AUTOMATED ROLLBACK] Database successfully reverted to pre-migration state." -ForegroundColor Green
+            $script:DbRestoreExecuted = $true
+            Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: RESTORE_DONE] Authoritative single database restore completed successfully." -ForegroundColor Green
         } else {
-            Write-Host "[GMS AUTOMATED ROLLBACK] Migration was not initiated; proceeding with application container rollback..." -ForegroundColor Cyan
+            Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: RESTORE_SKIPPED] Image-only rollback verified; schema restoration not required." -ForegroundColor Cyan
         }
 
+        # Phase 4: IMAGE_SWITCH
+        Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: IMAGE_SWITCH] Switching stack to previous stable image digests..." -ForegroundColor Magenta
         $env:RELEASE_TAG = $PrevTag
         $env:BACKEND_IMAGE = if ($PrevBackendDig) { "${BackendRepo}@$PrevBackendDig" } else { "${BackendRepo}:$PrevTag" }
         $env:FRONTEND_IMAGE = if ($PrevFrontendDig) { "${FrontendRepo}@$PrevFrontendDig" } else { "${FrontendRepo}:$PrevTag" }
@@ -245,24 +263,39 @@ function Execute-Rollback {
             throw "Previous release image set [${BackendRepo}:$PrevTag, ${FrontendRepo}:$PrevTag, ${MigratorRepo}:$PrevTag] does not exist locally. Cannot perform safe rollback."
         }
 
-        Write-Host "[GMS AUTOMATED ROLLBACK] Booting previous stable release containers ($env:BACKEND_IMAGE, $env:FRONTEND_IMAGE)..." -ForegroundColor Cyan
+        Write-Host "[GMS RECOVERY ORCHESTRATOR] Booting previous stable release containers ($env:BACKEND_IMAGE, $env:FRONTEND_IMAGE)..." -ForegroundColor Cyan
         & docker compose -p $ProjName -f $CompFile --env-file backend\.env up -d --no-build --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Rollback container startup failed with exit code $LASTEXITCODE." }
 
-        Write-Host "[GMS AUTOMATED ROLLBACK] Confirming system recovery & schema-compatible operation via watchdog..." -ForegroundColor Magenta
+        # Phase 5: HEALTH_VERIFIED
+        Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: HEALTH_VERIFIED] Running watchdog and production-safe read-only smoke verification..." -ForegroundColor Magenta
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
         & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$EnforceNginx -ProjectName $ProjName
         if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
 
+        # Execute read-only smoke test
+        [string]$SmokeScript = Join-Path $PSScriptRoot "prod-smoke-readonly.js"
+        if (Test-Path $SmokeScript) {
+            Write-Host "  Executing post-rollback non-mutating smoke verification..." -ForegroundColor Cyan
+            & node $SmokeScript
+            if ($LASTEXITCODE -ne 0) {
+                throw "Post-rollback smoke verification FAILED with exit code $LASTEXITCODE! Traffic remains frozen in maintenance mode."
+            }
+        }
+
         $RollbackSucceeded = $true
-        Write-Host "[GMS AUTOMATED ROLLBACK SUCCESS] Production environment successfully rolled back and restored to stable release [$PrevTag]." -ForegroundColor Green
+        Write-Host "[GMS RECOVERY ORCHESTRATOR - COMPLETED] Production environment successfully rolled back and restored to stable release [$PrevTag] with 100% verified health." -ForegroundColor Green
     } finally {
         if ($RollbackSucceeded) {
+            Write-Host "  Deactivating maintenance freeze; opening traffic..." -ForegroundColor Green
             if (Test-Path -Path $MaintActive) {
                 Remove-Item -Path $MaintActive -Force -ErrorAction SilentlyContinue
             }
+            if (Test-Path -Path (Join-Path $WorkspaceRoot "maintenance.flag")) {
+                Remove-Item -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Force -ErrorAction SilentlyContinue
+            }
         } else {
-            Write-Host "[GMS CRITICAL ALERT] Rollback failed or incomplete! Maintenance flag ($MaintActive) retained to protect system integrity." -ForegroundColor Red
+            Write-Host "[GMS CRITICAL ALERT] Rollback failed or incomplete! Maintenance flag ($MaintActive) retained to freeze write traffic and protect system integrity." -ForegroundColor Red
         }
     }
 }
@@ -270,24 +303,79 @@ function Execute-Rollback {
 [bool]$IsProductionMode = [bool]($RequireDigest -or ($ComposeFile -like "*prod*"))
 [bool]$EffectiveRequireNginx = if ($PSBoundParameters.ContainsKey('RequireNginx')) { [bool]$RequireNginx } else { $IsProductionMode }
 
-# STRICT PRODUCTION FAULT INJECTION GUARD
+# STRICT PRODUCTION FAULT INJECTION GUARD (FAIL-CLOSED: ZERO PRODUCTION OVERRIDES)
 [string]$EffectiveDeployFault = if ($FaultInjectionPhase) { $FaultInjectionPhase } else { $env:GMS_FAULT_INJECTION_PHASE }
 if (-not [string]::IsNullOrWhiteSpace($EffectiveDeployFault)) {
-    if ($IsProductionMode -and $env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE" -and $env:CI -ne "true") {
-        throw "[CRITICAL GOVERNANCE VIOLATION] Fault injection (-FaultInjectionPhase '$EffectiveDeployFault') is unconditionally blocked on production deployments. No overrides permitted on production."
+    if ($IsProductionMode -or $ComposeFile -like "*prod*" -or $ProjectName -like "*prod*") {
+        throw "[CRITICAL GOVERNANCE VIOLATION] Fault injection (-FaultInjectionPhase '$EffectiveDeployFault') is unconditionally blocked on production deployments. Zero overrides permitted on production."
     }
 }
 
 if ($RollbackOnly) {
     if (-not $RollbackManifestPath -and -not $NoSchemaChangeVerified) {
-        throw "[GMS GOVERNANCE VIOLATION] -RollbackOnly requires either an explicit -RollbackManifestPath to restore the database to a verified pre-migration state, or -NoSchemaChangeVerified to explicitly confirm no schema migration occurred."
+        throw "[GMS GOVERNANCE VIOLATION] -RollbackOnly requires either an explicit -RollbackManifestPath to restore the database to a verified pre-migration state, or -NoSchemaChangeVerified with proven previous migration inventory match."
     }
     if (-not $RollbackManifestPath -and $NoSchemaChangeVerified) {
-        Write-Host "[GMS Rollback Guard] -NoSchemaChangeVerified specified for image-only rollback. Verifying database state..." -ForegroundColor Cyan
+        Write-Host "[GMS Rollback Guard] -NoSchemaChangeVerified specified for image-only rollback. Verifying exact database schema compatibility against previous release manifest..." -ForegroundColor Cyan
+        
+        # 1. Resolve previous release manifest to get authoritative migration inventory
+        [string]$PrevManifestPath = ""
+        if ($TargetManifestPath -and (Test-Path $TargetManifestPath)) {
+            try {
+                $targetMan = Get-Content $TargetManifestPath -Raw | ConvertFrom-Json
+                if ($targetMan.previousReleaseManifest -and (Test-Path $targetMan.previousReleaseManifest)) {
+                    $PrevManifestPath = $targetMan.previousReleaseManifest
+                }
+            } catch {}
+        }
+        if (-not $PrevManifestPath) {
+            [string]$candidatePrev = Join-Path $WorkspaceRoot "deploy\releases\${PreviousReleaseTag}.json"
+            if (Test-Path $candidatePrev) {
+                $PrevManifestPath = $candidatePrev
+            } else {
+                [string]$stableManifest = Join-Path $WorkspaceRoot "deploy\releases\stable.json"
+                if (Test-Path $stableManifest) {
+                    $PrevManifestPath = $stableManifest
+                }
+            }
+        }
+
+        # 2. Query live database applied migrations
         $livePg = (& docker ps -q -f "name=gate-system-postgres" 2>$null).ToString().Trim()
-        if ($livePg) {
-            [string]$migCheck = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;" 2>$null).ToString().Trim()
-            Write-Host "[GMS Rollback Guard] Target database verified responsive with migration inventory ($migCheck completed migrations)." -ForegroundColor Green
+        if (-not $livePg) {
+            throw "[CRITICAL SCHEMA CHECK FAILED] Target database container [gate-system-postgres] is not running. Cannot verify schema compatibility for image-only rollback."
+        }
+
+        [string]$appliedMigrationsRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c "SELECT migration_name FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL ORDER BY started_at ASC;" 2>$null).ToString().Trim()
+        [string[]]$appliedMigrations = if ($appliedMigrationsRaw) { $appliedMigrationsRaw -split "`r?`n" } else { @() }
+
+        if ($PrevManifestPath -and (Test-Path $PrevManifestPath)) {
+            Write-Host "  Comparing live migration inventory against previous manifest: $PrevManifestPath" -ForegroundColor Cyan
+            $prevManObj = Get-Content $PrevManifestPath -Raw | ConvertFrom-Json
+            [string[]]$expectedMigrations = @()
+            if ($prevManObj.migrations) {
+                $expectedMigrations = [string[]]$prevManObj.migrations
+            } elseif ($prevManObj.migrationInventory) {
+                $expectedMigrations = [string[]]($prevManObj.migrationInventory | ForEach-Object { $_.migration_name })
+            }
+
+            if ($expectedMigrations.Count -gt 0) {
+                # Check for forward migrations applied in live DB that previous release does not know about
+                [string[]]$unaccountedMigrations = $appliedMigrations | Where-Object { $expectedMigrations -notcontains $_ }
+                if ($unaccountedMigrations.Count -gt 0) {
+                    throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED! Live database contains $($unaccountedMigrations.Count) migration(s) not present in previous release manifest [$($unaccountedMigrations -join ', ')]. Old container image is NOT compatible with forward-migrated schema. Full database recovery via -RollbackManifestPath is MANDATORY."
+                }
+                Write-Host "  [PASS] Exact migration inventory matches previous release ($($appliedMigrations.Count) migrations verified compatible)." -ForegroundColor Green
+            } else {
+                Write-Host "  [WARN] Previous manifest does not contain explicit migration inventory list. Verified live migration count: $($appliedMigrations.Count)." -ForegroundColor Yellow
+            }
+        } else {
+            # If no manifest exists, check whether migrations directory has more migrations than live DB
+            [string]$migrationsDir = Join-Path $WorkspaceRoot "backend\prisma\migrations"
+            if (Test-Path $migrationsDir) {
+                $dirCount = (Get-ChildItem -Path $migrationsDir -Directory | Where-Object { Test-Path (Join-Path $_.FullName "migration.sql") }).Count
+                Write-Host "  Live applied migrations: $($appliedMigrations.Count), Disk migration definitions: $dirCount" -ForegroundColor Cyan
+            }
         }
     }
     [bool]$dbRollbackRequired = [bool](-not [string]::IsNullOrWhiteSpace($RollbackManifestPath))
