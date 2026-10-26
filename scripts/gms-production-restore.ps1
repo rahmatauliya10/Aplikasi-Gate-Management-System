@@ -231,11 +231,13 @@ try {
     & docker cp $DumpFilePath "${StagingContainer}:${TmpDumpInContainer}"
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to staging container." }
 
+    & docker exec $StagingContainer psql -U $PgUser -d $StagingDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
     $RestoreOut = & docker exec $StagingContainer pg_restore --username=$PgUser --dbname=$StagingDbName --no-owner --no-privileges $TmpDumpInContainer 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "pg_restore failed with exit code $LASTEXITCODE. Output: $RestoreOut"
-    }
+    [int]$StagingExitCode = $LASTEXITCODE
     & docker exec $StagingContainer rm -f $TmpDumpInContainer 2>&1 | Out-Null
+    if ($StagingExitCode -gt 1) {
+        throw "pg_restore failed with fatal exit code ${StagingExitCode}. Output: $RestoreOut"
+    }
 
     # Exec-Query helper
     function Exec-StagingQuery([string]$sql) {
@@ -759,9 +761,10 @@ try {
                 & docker cp $PreRestoreDbDump "${LiveContainer}:${TmpRollbackInLive}"
                 if ($LASTEXITCODE -ne 0) { throw "Failed copying rollback snapshot to live container." }
                 & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-                & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpRollbackInLive 2>&1 | Out-Null
-                if ($LASTEXITCODE -gt 1) { throw "Rollback pg_restore failed with fatal exit code $LASTEXITCODE." }
+                $RollbackRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpRollbackInLive 2>&1
+                [int]$RollbackExitCode = $LASTEXITCODE
                 & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
+                if ($RollbackExitCode -gt 1) { throw "Rollback pg_restore failed with fatal exit code ${RollbackExitCode}: $RollbackRestoreOut" }
                 Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
             } catch {
                 Write-Log "  CRITICAL ROLLBACK ERROR: Automatic live DB rollback failed: $_" -Level "ERROR"

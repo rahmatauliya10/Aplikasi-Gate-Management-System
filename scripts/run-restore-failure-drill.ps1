@@ -132,6 +132,7 @@ function Ensure-TargetPostgresContainer {
         if (Test-Path -LiteralPath $DumpFile) {
             Write-Log "Populating baseline historical test database into $Container ($Database)..."
             & docker cp $DumpFile "${Container}:/tmp/baseline.dump" 2>&1 | Out-Null
+            & docker exec $Container psql -U $User -d $Database -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
             & docker exec $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
             & docker exec $Container rm -f /tmp/baseline.dump 2>&1 | Out-Null
         }
