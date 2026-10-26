@@ -411,14 +411,30 @@ try {
             throw "HARD FAIL: GMS_RESTORE_ALLOWED is set to '$RestoreAllowedVal' in AppSetting. Restore operation is NOT permitted on live database [$LiveDbName]. Set GMS_RESTORE_ALLOWED = TRUE in target database prior to executing restore. NO DATABASE MUTATION OCCURRED."
         }
 
-        # STRICT PRODUCTION FAULT INJECTION GUARD
+        # STRICT PRODUCTION FAULT INJECTION GUARD (FAIL-CLOSED: ZERO PRODUCTION OVERRIDES)
         [string]$EffectiveFaultPhase = if ($FaultInjectionPhase) { $FaultInjectionPhase } else { $env:GMS_FAULT_INJECTION_PHASE }
         if (-not [string]::IsNullOrWhiteSpace($EffectiveFaultPhase)) {
-            if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE" -and $env:CI -ne "true") {
-                throw "CRITICAL GOVERNANCE VIOLATION: Fault injection (-FaultInjectionPhase '$EffectiveFaultPhase') is strictly prohibited on non-drill environments! No overrides permitted."
+            # 1. Unconditional rejection of production database identity (NO CI OR DRILL OVERRIDES)
+            if ($ActualEnvId -like "*PROD*" -or $LiveDbName -like "*prod*" -or $LiveContainer -like "*prod*") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] is identified as PRODUCTION ($ActualEnvId, container: $LiveContainer). Fault injection (-FaultInjectionPhase '$EffectiveFaultPhase') is UNCONDITIONALLY PROHIBITED on production targets under ALL circumstances. CI or drill flags cannot override this."
             }
-            if ($ActualEnvId -like "GMS-PROD*" -and $env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE" -and $env:CI -ne "true") {
-                throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] is identified as production ($ActualEnvId). Fault injection on production database is unconditionally blocked with zero overrides."
+
+            # 2. Require verified isolated drill environment
+            if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Fault injection (-FaultInjectionPhase '$EffectiveFaultPhase') requires verified isolated drill environment (GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE). Target environment ($ActualEnvId) is not authorized."
+            }
+
+            # 3. Environment ID must be explicitly designated for testing/drill
+            if ($ActualEnvId -notlike "*DRILL*" -and $ActualEnvId -notlike "*STAGING*" -and $ActualEnvId -notlike "*TEST*" -and $ActualEnvId -notlike "*DEV*") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Fault injection is prohibited on environment with ID '$ActualEnvId'. Only DRILL, STAGING, TEST, or DEV environment IDs may execute fault injection."
+            }
+
+            # 4. Check container labels and mounts to prevent drill against production volumes
+            [string]$inspectJson = (& docker inspect $LiveContainer 2>$null).ToString()
+            if ($inspectJson) {
+                if ($inspectJson -like "*prod-postgres-data*" -or $inspectJson -like "*production_postgres*") {
+                    throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is bound to production data volumes! Fault injection is unconditionally blocked."
+                }
             }
         }
 
