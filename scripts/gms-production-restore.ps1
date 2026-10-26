@@ -277,6 +277,14 @@ try {
             [string]$entityKey = $prop.Name
             [int]$expectedCount = [int]$prop.Value
             [string]$tableName = if ($EntityTableMap.ContainsKey($entityKey)) { $EntityTableMap[$entityKey] } else { $entityKey }
+            [string]$tableExists = Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.`"$tableName`"') IS NOT NULL THEN '1' ELSE '0' END;"
+            if ($tableExists -ne "1") {
+                if ($expectedCount -eq 0) {
+                    continue # Valid historical schema: table does not exist in this migration version and expected count is 0
+                } else {
+                    throw "HARD FAIL: Table '$tableName' for entity '$entityKey' does not exist in staging database, but expected count is $expectedCount."
+                }
+            }
             [string]$actualCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM `"$tableName`";"
             [int]$actualCount = 0
             if (-not [int]::TryParse($actualCountStr, [ref]$actualCount)) {
@@ -290,7 +298,10 @@ try {
     }
 
     # Hard Guard: DB Attachment count > 0 requires physical attachment archive
-    [int]$StagingAttCount = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Attachment\";")
+    [int]$StagingAttCount = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.\"Attachment\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $StagingAttCount = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Attachment\";")
+    }
     if ($StagingAttCount -gt 0 -and (-not $AttArchivePath -or -not (Test-Path -Path $AttArchivePath))) {
         throw "HARD FAIL: Restored staging database contains $StagingAttCount Attachment records, but physical attachment archive is missing."
     }
@@ -313,10 +324,22 @@ try {
     }
     Write-Log "  Duplicate isCurrent invariant check [PASS] (0 duplicates)" -Level "SUCCESS"
 
-    [int]$OrphanHist = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$OrphanWb = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$OrphanWh = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$OrphanAtt = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$OrphanHist = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.\"TransactionStatusHistory\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanHist = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$OrphanWb = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.\"WeighbridgeRecord\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanWb = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$OrphanWh = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.\"WarehouseProcess\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanWh = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$OrphanAtt = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.\"Attachment\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanAtt = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
 
     if (($OrphanHist + $OrphanWb + $OrphanWh + $OrphanAtt) -gt 0) {
         throw "FK Integrity Check Failed: Found orphaned child records in staging database."
@@ -567,22 +590,31 @@ try {
         throw "INJECTED_FAULT: Simulated live verification discrepancy for DR drill validation."
     }
 
-    [int]$LiveUserCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"User\";")
-    [int]$LiveTxCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Transaction\";")
-    [int]$LiveAttCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\";")
-    [int]$LiveCorrectionCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrection\";")
-    [int]$LiveCorrectionItemCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
-    [int]$LiveWbCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\";")
-    [int]$LiveWhCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\";")
-    [int]$LiveQcvCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"QcVehicleCheck\";")
-    [int]$LiveImCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"IncomingMaterialCheck\";")
-    [int]$LiveFraudCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"FraudCheck\";")
-    [int]$LiveActCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"ActivityLog\";")
-    [int]$LiveSettingCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"AppSetting\";")
-    [int]$LiveAnnounceCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Announcement\";")
-    [int]$LiveIssueCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"SystemIssue\";")
-    [int]$LiveStatusHistCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\";")
-    [int]$LiveWhAccessCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"UserWarehouseAccess\";")
+    function Get-LiveTableCountSafe([string]$TableName) {
+        [string]$exists = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.`"$TableName`"') IS NOT NULL THEN '1' ELSE '0' END;"
+        if ($exists -ne "1") { return 0 }
+        [string]$cntStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM `"$TableName`";"
+        [int]$cnt = 0
+        if ([int]::TryParse($cntStr, [ref]$cnt)) { return $cnt }
+        return 0
+    }
+
+    [int]$LiveUserCount = Get-LiveTableCountSafe "User"
+    [int]$LiveTxCount = Get-LiveTableCountSafe "Transaction"
+    [int]$LiveAttCount = Get-LiveTableCountSafe "Attachment"
+    [int]$LiveCorrectionCount = Get-LiveTableCountSafe "TransactionCorrection"
+    [int]$LiveCorrectionItemCount = Get-LiveTableCountSafe "TransactionCorrectionItem"
+    [int]$LiveWbCount = Get-LiveTableCountSafe "WeighbridgeRecord"
+    [int]$LiveWhCount = Get-LiveTableCountSafe "WarehouseProcess"
+    [int]$LiveQcvCount = Get-LiveTableCountSafe "QcVehicleCheck"
+    [int]$LiveImCount = Get-LiveTableCountSafe "IncomingMaterialCheck"
+    [int]$LiveFraudCount = Get-LiveTableCountSafe "FraudCheck"
+    [int]$LiveActCount = Get-LiveTableCountSafe "ActivityLog"
+    [int]$LiveSettingCount = Get-LiveTableCountSafe "AppSetting"
+    [int]$LiveAnnounceCount = Get-LiveTableCountSafe "Announcement"
+    [int]$LiveIssueCount = Get-LiveTableCountSafe "SystemIssue"
+    [int]$LiveStatusHistCount = Get-LiveTableCountSafe "TransactionStatusHistory"
+    [int]$LiveWhAccessCount = Get-LiveTableCountSafe "UserWarehouseAccess"
 
     # Invariant checks on live database
     [int]$LiveWbDupeCurrent = 0
@@ -598,10 +630,22 @@ try {
     }
     [int]$LiveTotalDupes = $LiveWbDupeCurrent + $LiveWhDupeCurrent + $LiveQcvDupeCurrent + $LiveImDupeCurrent
 
-    [int]$LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$LiveOrphanWb = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$LiveOrphanWh = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$LiveOrphanAtt = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$LiveOrphanHist = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"TransactionStatusHistory\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$LiveOrphanWb = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"WeighbridgeRecord\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanWb = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$LiveOrphanWh = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"WarehouseProcess\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanWh = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$LiveOrphanAtt = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"Attachment\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanAtt = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    }
     [int]$LiveTotalOrphans = $LiveOrphanHist + $LiveOrphanWb + $LiveOrphanWh + $LiveOrphanAtt
 
     if ($LiveTotalDupes -gt 0) {

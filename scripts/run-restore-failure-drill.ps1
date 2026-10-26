@@ -193,26 +193,11 @@ function Get-DatabaseFingerprint {
             continue
         }
 
-        $Sql = @"
-SELECT COALESCE(
-    encode(
-        sha256(
-            string_agg(
-                encode(sha256(row_to_json(t)::text::bytea), 'hex'),
-                ','
-                ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex')
-            )::bytea
-        ),
-        'hex'
-    ),
-    'EMPTY'
-)
-FROM "$Table" t;
-"@
+        $Sql = "SELECT COALESCE(encode(sha256(string_agg(encode(sha256(row_to_json(t)::text::bytea), 'hex'), ',' ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex'))::bytea), 'hex'), 'EMPTY') FROM `"$Table`" t;"
 
         $Hash = ""
         try {
-            $rawHash = & docker exec $Container psql -U $User -d $Database -t -A -c $Sql 2>&1
+            $rawHash = & docker exec $Container psql -U $User -d $Database -t -A -c "$Sql" 2>&1
             $Hash = if ($rawHash) { [string]$rawHash.ToString().Trim() } else { "" }
         } catch {
             throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
@@ -254,6 +239,11 @@ function Get-UploadsFingerprint {
         $Sha.ComputeHash($Bytes)
     ).Replace("-", "").ToLower()
 }
+
+# ------------------------------------------------------------------------------
+# Initialize Target Container Preflight
+# ------------------------------------------------------------------------------
+Enable-TargetRestoreGate -Container $LiveContainer -Database $LiveDbName -User $PgUser
 
 # ------------------------------------------------------------------------------
 # Phase 1: Pre-promotion Checksum Corruption Test
