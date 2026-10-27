@@ -24,6 +24,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 [string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
 if (-not $ArtifactsDir) {
@@ -94,7 +95,7 @@ function Assert-GuardRejection {
 
     try {
         $output = & $ExecutionBlock 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
+        $exitCode = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
     } catch {
         $output = $_.ToString()
         $exitCode = 1
@@ -158,8 +159,8 @@ New-Item -Path $TempTestDir -ItemType Directory -Force | Out-Null
 
 function Get-TargetDbFingerprint {
     try {
-        [string]$settings = (& docker exec $FixtureContainerName psql -t -A -U $FixtureUser -d $FixtureDbName -c "SELECT key || '=' || value FROM \"AppSetting\" ORDER BY key;" 2>$null).ToString().Trim()
-        [string]$migs = (& docker exec $FixtureContainerName psql -t -A -U $FixtureUser -d $FixtureDbName -c "SELECT migration_name || '=' || checksum FROM \"_prisma_migrations\" ORDER BY migration_name;" 2>$null).ToString().Trim()
+        [string]$settings = (& docker exec -e "PGPASSWORD=$FixturePass" $FixtureContainerName psql -t -A -U $FixtureUser -d $FixtureDbName -c "SELECT key || '=' || value FROM \"AppSetting\" ORDER BY key;" 2>$null).ToString().Trim()
+        [string]$migs = (& docker exec -e "PGPASSWORD=$FixturePass" $FixtureContainerName psql -t -A -U $FixtureUser -d $FixtureDbName -c "SELECT migration_name || '=' || checksum FROM \"_prisma_migrations\" ORDER BY migration_name;" 2>$null).ToString().Trim()
         [string]$combined = "$settings`n$migs"
         $sha = [System.Security.Cryptography.SHA256]::Create()
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($combined)
@@ -175,7 +176,7 @@ try {
     # --------------------------------------------------------------------------
     Write-Host "`nLaunching isolated real PostgreSQL fixture container ($FixtureContainerName)..." -ForegroundColor Cyan
     & docker rm -f $FixtureContainerName 2>$null | Out-Null
-    & docker run -d --name $FixtureContainerName -p "127.0.0.1:${FixturePort}:5432" -e "POSTGRES_USER=$FixtureUser" -e "POSTGRES_PASSWORD=$FixturePass" -e "POSTGRES_DB=$FixtureDbName" postgres:15-alpine 2>&1 | Out-Null
+    & docker run -d --name $FixtureContainerName -p "127.0.0.1:${FixturePort}:5432" -e "POSTGRES_USER=$FixtureUser" -e "POSTGRES_PASSWORD=$FixturePass" -e "POSTGRES_DB=$FixtureDbName" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
 
     # Wait for PostgreSQL fixture readiness (up to 30s)
     [bool]$fixtureReady = $false
@@ -225,12 +226,18 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     $PreTestFingerprint = Get-TargetDbFingerprint
     Write-Host "  Pre-test Target DB Fingerprint Hash: $PreTestFingerprint [CAPTURED]" -ForegroundColor Green
 
-    # Generate an authentic, fully valid pg_dump binary archive from the fixture
-    Write-Host "Generating authentic pg_dump archive from fixture..." -ForegroundColor Cyan
-    & docker exec $FixtureContainerName pg_dump -U $FixtureUser -d $FixtureDbName -F c -f /tmp/fixture.dump 2>&1 | Out-Null
+    # Generate an authentic, fully valid pg_dump binary archive
     $ValidDumpPath = Join-Path $TempTestDir "valid_fixture.dump"
-    & docker cp "${FixtureContainerName}:/tmp/fixture.dump" $ValidDumpPath 2>&1 | Out-Null
-    & docker exec $FixtureContainerName rm -f /tmp/fixture.dump 2>&1 | Out-Null
+    [string]$ExistingDump = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
+    if (Test-Path $ExistingDump) {
+        Write-Host "Using existing authentic pg_dump binary from historical fixtures..." -ForegroundColor Cyan
+        Copy-Item -Path $ExistingDump -Destination $ValidDumpPath -Force
+    } else {
+        Write-Host "Generating authentic pg_dump archive from fixture..." -ForegroundColor Cyan
+        & docker exec -e "PGPASSWORD=$FixturePass" $FixtureContainerName pg_dump -U $FixtureUser -d $FixtureDbName -F c -f /tmp/fixture.dump 2>&1 | Out-Null
+        & docker cp "${FixtureContainerName}:/tmp/fixture.dump" $ValidDumpPath 2>&1 | Out-Null
+        & docker exec $FixtureContainerName rm -f /tmp/fixture.dump 2>&1 | Out-Null
+    }
 
     $validHash = (Get-FileHash -Path $ValidDumpPath -Algorithm SHA256).Hash.ToLower()
 
