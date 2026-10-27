@@ -2,7 +2,7 @@
 # GMS Target Guard & Fault-Injection Policy Integration Test Suite (P1-02/P1-04)
 # ==============================================================================
 # Executes REAL PowerShell invocations against scripts/gms-production-restore.ps1
-# using an ISOLATED REAL POSTGRESQL CONTAINER FIXTURE (gms-target-guard-fixture)
+# using an ISOLATED REAL POSTGRESQL CONTAINER TARGET (gate-system-postgres on port 5436)
 # to prove fail-closed guarantees across 9 target guard scenarios:
 #   1. Missing / Unreachable Target Container -> REJECT (Container Missing Guard)
 #   2. Real Container Target with Wrong Environment ID -> REJECT (FINGERPRINT MISMATCH)
@@ -140,28 +140,26 @@ function Assert-GuardRejection {
 }
 
 # ------------------------------------------------------------------------------
-# 1. Setup Isolated Temporary Test Directory & Manifests
+# 1. Setup Isolated Target Database Container (Matching DR Drill Topology)
 # ------------------------------------------------------------------------------
-$TempTestDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gms_guard_test_" + [guid]::NewGuid().ToString("N"))
-New-Item -Path $TempTestDir -ItemType Directory -Force | Out-Null
-
-[string]$FixtureContainerName = "gms-target-guard-fixture"
-[string]$FixturePort = "5438"
-[string]$FixtureDbName = "gms"
-[string]$FixtureUser = "postgres"
-[string]$FixturePass = "guardfixturepass123"
+[string]$TargetContainer = "gate-system-postgres"
+[string]$TargetPort = "5436"
+[string]$TargetDb = "gms"
+[string]$TargetUser = "postgres"
+[string]$TargetPass = "testpassword"
 
 [string]$KnownEnvId = "GMS-DRILL-SJA-01"
-[string]$KnownInstallUuid = "c8b4e720-9f12-4a6c-942b-586b24d77301"
+[string]$KnownInstallUuid = "4f53a720-911b-4f9e-a89b-8321481dc901"
 
 [string]$PreTestFingerprint = ""
 [string]$PostTestFingerprint = ""
 
 function Get-TargetDbFingerprint {
     try {
-        [string]$settings = (& docker exec -e "PGPASSWORD=$FixturePass" $FixtureContainerName psql -t -A -U $FixtureUser -d $FixtureDbName -c "SELECT key || '=' || value FROM \"AppSetting\" ORDER BY key;" 2>$null).ToString().Trim()
-        [string]$migs = (& docker exec -e "PGPASSWORD=$FixturePass" $FixtureContainerName psql -t -A -U $FixtureUser -d $FixtureDbName -c "SELECT migration_name || '=' || checksum FROM \"_prisma_migrations\" ORDER BY migration_name;" 2>$null).ToString().Trim()
-        [string]$combined = "$settings`n$migs"
+        [string]$settings = (& docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT key || '=' || value FROM \"AppSetting\" WHERE key NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') ORDER BY key;" 2>$null).ToString().Trim()
+        [string]$migs = (& docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT migration_name || '=' || checksum FROM \"_prisma_migrations\" ORDER BY migration_name;" 2>$null).ToString().Trim()
+        [string]$users = (& docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT CASE WHEN to_regclass('public.\"User\"') IS NOT NULL THEN (SELECT COUNT(*)::text FROM \"User\") ELSE '0' END;" 2>$null).ToString().Trim()
+        [string]$combined = "$settings`n$migs`n$users"
         $sha = [System.Security.Cryptography.SHA256]::Create()
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($combined)
         return [System.BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLower()
@@ -170,114 +168,87 @@ function Get-TargetDbFingerprint {
     }
 }
 
+$TempTestDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gms_guard_test_" + [guid]::NewGuid().ToString("N"))
+New-Item -Path $TempTestDir -ItemType Directory -Force | Out-Null
+
 try {
-    # --------------------------------------------------------------------------
-    # 2. Spawn Isolated Real PostgreSQL Fixture Container
-    # --------------------------------------------------------------------------
-    Write-Host "`nLaunching isolated real PostgreSQL fixture container ($FixtureContainerName)..." -ForegroundColor Cyan
-    & docker rm -f $FixtureContainerName 2>$null | Out-Null
-    & docker run -d --name $FixtureContainerName -p "127.0.0.1:${FixturePort}:5432" -e "POSTGRES_USER=$FixtureUser" -e "POSTGRES_PASSWORD=$FixturePass" -e "POSTGRES_DB=$FixtureDbName" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
-
-    # Wait for PostgreSQL fixture readiness (up to 30s)
-    [bool]$fixtureReady = $false
-    for ($i = 0; $i -lt 30; $i++) {
-        Start-Sleep -Seconds 1
-        & docker exec $FixtureContainerName pg_isready -U $FixtureUser -d $FixtureDbName 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { $fixtureReady = $true; break }
+    # Ensure target postgres container is running
+    Write-Host "`nEnsuring isolated PostgreSQL target container ($TargetContainer on port $TargetPort)..." -ForegroundColor Cyan
+    $rawRunning = & docker ps -q -f "name=^/${TargetContainer}$" 2>$null
+    $running = if ($rawRunning) { [string]$rawRunning.ToString().Trim() } else { "" }
+    if (-not $running) {
+        $rawExisting = & docker ps -aq -f "name=^/${TargetContainer}$" 2>$null
+        $existing = if ($rawExisting) { [string]$rawExisting.ToString().Trim() } else { "" }
+        if ($existing) {
+            Write-Host "  Starting existing stopped PostgreSQL container ($TargetContainer)..."
+            & docker start $TargetContainer 2>&1 | Out-Null
+        } else {
+            Write-Host "  Launching isolated drill PostgreSQL container ($TargetContainer on port $TargetPort)..."
+            & docker run -d --name $TargetContainer -p "127.0.0.1:${TargetPort}:5432" -e "POSTGRES_DB=$TargetDb" -e "POSTGRES_USER=$TargetUser" -e "POSTGRES_PASSWORD=$TargetPass" postgres:15-alpine 2>&1 | Out-Null
+        }
+        for ($i = 0; $i -lt 30; $i++) {
+            Start-Sleep -Seconds 1
+            & docker exec $TargetContainer pg_isready -U $TargetUser 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
+        }
     }
-    if (-not $fixtureReady) {
-        throw "Target guard fixture PostgreSQL failed to become ready within 30 seconds."
+
+    # Ensure baseline schema from historical dump is present
+    $rawMig = & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null
+    $migExists = if ($rawMig) { [string]$rawMig.ToString().Trim() } else { "" }
+    if ([string]::IsNullOrWhiteSpace($migExists)) {
+        [string]$HistoricalDump = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
+        if (-not (Test-Path $HistoricalDump)) {
+            Write-Host "  Generating baseline historical test fixtures..." -ForegroundColor Cyan
+            node (Join-Path $ProjectRootDir "tests/fixtures/historical/generate-test-fixtures.js")
+        }
+        if (Test-Path $HistoricalDump) {
+            Write-Host "  Populating baseline historical database into $TargetContainer..." -ForegroundColor Cyan
+            & docker cp $HistoricalDump "${TargetContainer}:/tmp/baseline.dump" 2>&1 | Out-Null
+            & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
+            & docker exec $TargetContainer pg_restore -U $TargetUser -d $TargetDb --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
+            & docker exec $TargetContainer rm -f /tmp/baseline.dump 2>&1 | Out-Null
+        }
     }
 
-    # Initialize Schema and Identifiers on the Real Container Target
-    Write-Host "Initializing schema and security governance records on fixture database..." -ForegroundColor Cyan
-    $InitSql = @"
-CREATE TABLE IF NOT EXISTS public."_prisma_migrations" (
-    id VARCHAR(36) PRIMARY KEY,
-    checksum VARCHAR(64) NOT NULL,
-    finished_at TIMESTAMPTZ,
-    migration_name VARCHAR(255) NOT NULL,
-    logs TEXT,
-    rolled_back_at TIMESTAMPTZ,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    applied_steps_count INTEGER NOT NULL DEFAULT 1
-);
-INSERT INTO public."_prisma_migrations" (id, checksum, finished_at, migration_name, applied_steps_count)
-VALUES ('test-mig-001', 'b2091e708e2f79c3d3f11c50122adc3c9bd237e20f9f47b82c235244e1eb8f76', now(), '20260714030729_init', 1)
-ON CONFLICT (id) DO NOTHING;
+    # Initialize Security Governance and Identification Records
+    Write-Host "Initializing target identity governance records on $TargetContainer..." -ForegroundColor Cyan
+    & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "CREATE TABLE IF NOT EXISTS \"AppSetting\" (\"id\" VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text, \"key\" VARCHAR(255) UNIQUE NOT NULL, \"value\" TEXT NOT NULL, \"createdAt\" TIMESTAMPTZ NOT NULL DEFAULT now(), \"updatedAt\" TIMESTAMPTZ NOT NULL DEFAULT now());" 2>&1 | Out-Null
+    & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "INSERT INTO \"AppSetting\" (\"key\", \"value\") VALUES ('GMS_ENVIRONMENT_ID', '$KnownEnvId'), ('GMS_INSTALLATION_UUID', '$KnownInstallUuid'), ('GMS_RESTORE_ALLOWED', 'FALSE') ON CONFLICT (\"key\") DO UPDATE SET \"value\" = EXCLUDED.\"value\";" 2>&1 | Out-Null
 
-CREATE TABLE IF NOT EXISTS public."AppSetting" (
-    id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    key VARCHAR(100) UNIQUE NOT NULL,
-    value TEXT NOT NULL,
-    description TEXT,
-    createdAt TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updatedAt TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-INSERT INTO public."AppSetting" ("key", "value") VALUES
-  ('GMS_ENVIRONMENT_ID', '$KnownEnvId'),
-  ('GMS_INSTALLATION_UUID', '$KnownInstallUuid'),
-  ('GMS_RESTORE_ALLOWED', 'FALSE')
-ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
-"@
-    & docker exec -i $FixtureContainerName psql -U $FixtureUser -d $FixtureDbName -c "$InitSql" 2>&1 | Out-Null
-
+    # Capture initial database fingerprint
     $PreTestFingerprint = Get-TargetDbFingerprint
     Write-Host "  Pre-test Target DB Fingerprint Hash: $PreTestFingerprint [CAPTURED]" -ForegroundColor Green
 
-    # Generate an authentic, fully valid pg_dump binary archive
-    $ValidDumpPath = Join-Path $TempTestDir "valid_fixture.dump"
-    [string]$ExistingDump = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
-    if (Test-Path $ExistingDump) {
-        Write-Host "Using existing authentic pg_dump binary from historical fixtures..." -ForegroundColor Cyan
-        Copy-Item -Path $ExistingDump -Destination $ValidDumpPath -Force
-    } else {
-        Write-Host "Generating authentic pg_dump archive from fixture..." -ForegroundColor Cyan
-        & docker exec -e "PGPASSWORD=$FixturePass" $FixtureContainerName pg_dump -U $FixtureUser -d $FixtureDbName -F c -f /tmp/fixture.dump 2>&1 | Out-Null
-        & docker cp "${FixtureContainerName}:/tmp/fixture.dump" $ValidDumpPath 2>&1 | Out-Null
-        & docker exec $FixtureContainerName rm -f /tmp/fixture.dump 2>&1 | Out-Null
+    # Locate authoritative historical rehearsal manifest
+    [string]$AuthoritativeManifest = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test_manifest.json"
+    if (-not (Test-Path $AuthoritativeManifest)) {
+        Write-Host "  Generating authentic historical manifest..." -ForegroundColor Cyan
+        node (Join-Path $ProjectRootDir "tests/fixtures/historical/generate-test-fixtures.js")
     }
 
-    $validHash = (Get-FileHash -Path $ValidDumpPath -Algorithm SHA256).Hash.ToLower()
-
-    $ValidManifestPath = Join-Path $TempTestDir "valid_manifest.json"
-    $ValidManifestObj = @{
-        manifestType = "HISTORICAL_REHEARSAL_FIXTURE"
-        backupId = "BKP-GUARD-TEST-001"
-        createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        artifacts = @{
-            dump = "valid_fixture.dump"
-        }
-        checksums = @{
-            dump = $validHash
-        }
-    }
-    Set-Content -Path $ValidManifestPath -Value ($ValidManifestObj | ConvertTo-Json -Depth 5) -Encoding utf8
-
+    # Generate tampered manifest for Case 8
     $CorruptManifestPath = Join-Path $TempTestDir "corrupt_manifest.json"
+    $validData = Get-Content -Path $AuthoritativeManifest -Raw | ConvertFrom-Json
     $CorruptManifestObj = @{
-        manifestType = "HISTORICAL_REHEARSAL_FIXTURE"
+        manifestType = $validData.manifestType
         backupId = "BKP-GUARD-CORRUPT-001"
         createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        artifacts = @{
-            dump = "valid_fixture.dump"
-        }
+        artifacts = $validData.artifacts
         checksums = @{
             dump = "0000000000000000000000000000000000000000000000000000000000000000"
         }
     }
     Set-Content -Path $CorruptManifestPath -Value ($CorruptManifestObj | ConvertTo-Json -Depth 5) -Encoding utf8
 
-    # Set password for restore script to connect to fixture
-    $env:PGPASSWORD = $FixturePass
+    $env:PGPASSWORD = $TargetPass
 
     # --------------------------------------------------------------------------
     # Case 1: Missing / Unreachable Target Container (Dedicated Container Guard)
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 1: Target Container Missing / Unreachable" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $ValidManifestPath -LiveContainer "nonexistent_container_xyz999" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer "nonexistent_container_xyz999" -Force
         } `
         -ExpectedKeywords @("is not running or unreachable", "HARD FAIL: Live target container", "Cannot proceed with restore")
 
@@ -286,7 +257,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 2: Real Container Target with Mismatched Environment ID" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $ValidManifestPath -LiveContainer $FixtureContainerName -LiveDbName $FixtureDbName -PgUser $FixtureUser -PgPass $FixturePass -ExpectedEnvironmentId "GMS-UNEXPECTED-ENV-ID" -ExpectedInstallationUuid $KnownInstallUuid -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId "GMS-UNEXPECTED-ENV-ID" -ExpectedInstallationUuid $KnownInstallUuid -Force
         } `
         -ExpectedKeywords @("TARGET DATABASE FINGERPRINT MISMATCH", "Expected Environment ID 'GMS-UNEXPECTED-ENV-ID'")
 
@@ -295,7 +266,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 3: Real Container Target with Mismatched Installation UUID" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $ValidManifestPath -LiveContainer $FixtureContainerName -LiveDbName $FixtureDbName -PgUser $FixtureUser -PgPass $FixturePass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid "00000000-0000-0000-0000-000000000000" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid "00000000-0000-0000-0000-000000000000" -Force
         } `
         -ExpectedKeywords @("TARGET DATABASE FINGERPRINT MISMATCH", "Expected Installation UUID '00000000-0000-0000-0000-000000000000'")
 
@@ -304,7 +275,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 4: Real Container Target with RESTORE_ALLOWED = FALSE" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $ValidManifestPath -LiveContainer $FixtureContainerName -LiveDbName $FixtureDbName -PgUser $FixtureUser -PgPass $FixturePass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -Force
         } `
         -ExpectedKeywords @("GMS_RESTORE_ALLOWED is set to 'FALSE'", "Restore operation is NOT permitted")
 
@@ -314,7 +285,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     Assert-GuardRejection -TestName "Case 5: Real Container Target with Production ID + Fault Injection" `
         -ExecutionBlock {
             $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $ValidManifestPath -LiveContainer $FixtureContainerName -LiveDbName $FixtureDbName -PgUser $FixtureUser -PgPass $FixturePass -ExpectedEnvironmentId "GMS-PROD-SJA-01" -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId "GMS-PROD-SJA-01" -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
         } `
         -ExpectedKeywords @("PRODUCTION", "CRITICAL GOVERNANCE VIOLATION", "UNCONDITIONALLY PROHIBITED on production targets")
 
@@ -324,7 +295,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     Assert-GuardRejection -TestName "Case 6: Fault Injection Without GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE" `
         -ExecutionBlock {
             $env:GMS_ISOLATED_DRILL_ENVIRONMENT = ""
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $ValidManifestPath -LiveContainer $FixtureContainerName -LiveDbName $FixtureDbName -PgUser $FixtureUser -PgPass $FixturePass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
         } `
         -ExpectedKeywords @("requires verified isolated drill environment (GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE)", "CRITICAL GOVERNANCE VIOLATION")
 
@@ -334,7 +305,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     Assert-GuardRejection -TestName "Case 7: Production DB Name with Fault Injection" `
         -ExecutionBlock {
             $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $ValidManifestPath -LiveContainer $FixtureContainerName -LiveDbName "gms_prod" -PgUser $FixtureUser -PgPass $FixturePass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName "gms_prod" -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
         } `
         -ExpectedKeywords @("PRODUCTION", "CRITICAL GOVERNANCE VIOLATION", "UNCONDITIONALLY PROHIBITED on production targets")
 
@@ -343,7 +314,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 8: Corrupted Dump SHA-256 Checksum in Manifest Preflight" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -LiveContainer $FixtureContainerName -LiveDbName $FixtureDbName -PgUser $FixtureUser -PgPass $FixturePass -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -Force
         } `
         -ExpectedKeywords @("Dump File Checksum Mismatch", "SHA-256", "Preflight Check Failed")
 
@@ -352,7 +323,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 9: Non-Existent Manifest Path Rejection" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath (Join-Path $TempTestDir "missing_manifest.json") -LiveContainer $FixtureContainerName -LiveDbName $FixtureDbName -PgUser $FixtureUser -PgPass $FixturePass -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath (Join-Path $TempTestDir "missing_manifest.json") -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -Force
         } `
         -ExpectedKeywords @("Manifest File Not Found", "Preflight Check Failed", "HARD FAIL")
 
@@ -372,8 +343,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     Write-Host "  [PASS] Target database fingerprint verified 100% UNMUTATED (Zero Database Mutation Guarantee)!" -ForegroundColor Green
 
 } finally {
-    Write-Host "`nCleaning up target guard fixture container and temporary files..." -ForegroundColor Cyan
-    & docker rm -f $FixtureContainerName 2>$null | Out-Null
+    Write-Host "`nCleaning up temporary files and resetting maintenance flags..." -ForegroundColor Cyan
     if (Test-Path $TempTestDir) {
         Remove-Item -Path $TempTestDir -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -396,8 +366,8 @@ $EvidenceObj = @{
     timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
     status = if ($FailedTests -eq 0) { "PASSED" } else { "FAILED" }
     targetFixture = @{
-        container = $FixtureContainerName
-        port = $FixturePort
+        container = $TargetContainer
+        port = $TargetPort
         environmentId = $KnownEnvId
         installationUuid = $KnownInstallUuid
         preTestFingerprint = $PreTestFingerprint

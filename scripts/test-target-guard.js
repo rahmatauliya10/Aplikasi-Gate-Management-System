@@ -308,6 +308,18 @@ function runTests() {
     });
     if (psRes.status !== 0) {
       console.error(`\nPowerShell Target Guard Integration Suite failed with exit code ${psRes.status}`);
+      const evidencePath = path.join(projectRoot, 'artifacts/release-proof/target-guard-powershell-evidence.json');
+      if (fs.existsSync(evidencePath)) {
+        try {
+          const ev = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+          console.error('Evidence summary:', JSON.stringify(ev.summary, null, 2));
+          if (ev.cases) {
+            ev.cases.filter(c => c.status !== 'PASSED').forEach(c => {
+              console.error(`  [FAILED CASE] ${c.name} - exitCode: ${c.exitCode}, matchedKeyword: "${c.matchedKeyword}"`);
+            });
+          }
+        } catch {}
+      }
       process.exit(psRes.status || 1);
     }
     console.log('\nPowerShell Target Guard Integration Suite PASSED 100%!');
