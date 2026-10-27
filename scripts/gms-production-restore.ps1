@@ -195,6 +195,81 @@ if ([string]::IsNullOrWhiteSpace($rawLivePreflight)) {
     throw "HARD FAIL: Live target container [$LiveContainer] is not running or unreachable. Cannot proceed with restore."
 }
 
+# Helper for live database queries
+function Exec-LiveDbQuery([string]$sql) {
+    $raw = if ($PgPass) {
+        & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+    } else {
+        & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+    }
+    if (-not $raw) { return "" }
+    $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
+    return if ($cleanLines) { $cleanLines[-1].Trim() } else { "" }
+}
+
+# --------------------------------------------------------------------------
+# TARGET DATABASE FINGERPRINT & AUTHORIZATION GUARD (ZERO-FORCE BYPASS)
+# --------------------------------------------------------------------------
+Write-Log "  Verifying Target Database Fingerprint & Authorization Proof on [$LiveDbName]..."
+[string]$TableCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';"
+[int]$LiveTableCount = 0
+[int]::TryParse($TableCountStr, [ref]$LiveTableCount) | Out-Null
+
+if ($InitializeNewEnvironment) {
+    Write-Log "  -InitializeNewEnvironment switch detected. Verifying target database is 100% empty..."
+    if ($LiveTableCount -gt 0) {
+        [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"User\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"User\") ELSE 0 END;"
+        [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"_prisma_migrations\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"_prisma_migrations\") ELSE 0 END;"
+        [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"Transaction\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"Transaction\") ELSE 0 END;"
+        [int]$uCount = 0; [int]$mCount = 0; [int]$tCount = 0;
+        [int]::TryParse($LiveUserCountStr, [ref]$uCount) | Out-Null
+        [int]::TryParse($LiveMigCountStr, [ref]$mCount) | Out-Null
+        [int]::TryParse($LiveTxCountStr, [ref]$tCount) | Out-Null
+        if (($uCount + $mCount + $tCount) -gt 0) {
+            throw "HARD FAIL: -InitializeNewEnvironment REJECTED! Target database [$LiveDbName] is populated (Tables: $LiveTableCount, Migrations: $mCount, Users: $uCount, Tx: $tCount). Initialization is only permitted on 100% empty databases."
+        }
+    }
+    Write-Log "  Target database verified empty for fresh environment initialization [PASS]" -Level "SUCCESS"
+} else {
+    # Standard Production Restore: Enforce strict fingerprint validation
+    if ($LiveTableCount -eq 0) {
+        throw "HARD FAIL: Target database [$LiveDbName] has 0 tables and is not initialized. For fresh databases, use -InitializeNewEnvironment. NO DATABASE MUTATION OCCURRED."
+    }
+
+    [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"_prisma_migrations\"') IS NOT NULL THEN 1 ELSE 0 END;"
+    [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"AppSetting\"') IS NOT NULL THEN 1 ELSE 0 END;"
+
+    if ($hasMigrations -ne "1" -or $hasAppSettings -ne "1") {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
+    }
+
+    # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
+    [string]$ActualEnvId = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_ENVIRONMENT_ID' OR key = 'ENVIRONMENT_ID' OR key = 'SYSTEM_ENVIRONMENT_ID' LIMIT 1), '');"
+    if ([string]::IsNullOrWhiteSpace($ActualEnvId)) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_ENVIRONMENT_ID configured in AppSetting. Fail-closed: Cannot restore into unverified database without verified identity. NO DATABASE MUTATION OCCURRED."
+    }
+    if ($ExpectedEnvironmentId -and $ActualEnvId -ne $ExpectedEnvironmentId) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Environment ID '$ExpectedEnvironmentId' does not match target database ID '$ActualEnvId'. NO DATABASE MUTATION OCCURRED."
+    }
+
+    # Check GMS_INSTALLATION_UUID (FAIL-CLOSED: Must be present on existing database)
+    [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_INSTALLATION_UUID' OR key = 'INSTALLATION_UUID' LIMIT 1), '');"
+    if ([string]::IsNullOrWhiteSpace($ActualInstallUuid)) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_INSTALLATION_UUID configured in AppSetting. Fail-closed: Existing environment restore requires a valid installation UUID. NO DATABASE MUTATION OCCURRED."
+    }
+    if ($ExpectedInstallationUuid -and $ActualInstallUuid -ne $ExpectedInstallationUuid) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Installation UUID '$ExpectedInstallationUuid' does not match target UUID '$ActualInstallUuid'. NO DATABASE MUTATION OCCURRED."
+    }
+
+    # Check GMS_RESTORE_ALLOWED
+    [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM \"AppSetting\" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
+    if ($RestoreAllowedVal -ne "TRUE" -and $RestoreAllowedVal -ne "1") {
+        throw "HARD FAIL: GMS_RESTORE_ALLOWED is set to '$RestoreAllowedVal' in AppSetting. Restore operation is NOT permitted on live database [$LiveDbName]. Set GMS_RESTORE_ALLOWED = TRUE in target database prior to executing restore. NO DATABASE MUTATION OCCURRED."
+    }
+
+    Write-Log "  Target DB Fingerprint Verified (Env: $ActualEnvId, UUID: $ActualInstallUuid, RESTORE_ALLOWED: TRUE) [PASS]" -Level "SUCCESS"
+}
+
 # Step 2: Enter Maintenance Mode / Application Write Freeze
 Write-Log "Step 2: Enabling Maintenance Mode & Application Write Freeze..."
 [string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
@@ -214,14 +289,14 @@ Write-Log "  Maintenance flag created ($MaintFlagPath & $MaintActivePath) [PASS]
 try {
     # Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
     Write-Log "Step 3: Spawning Isolated Staging PostgreSQL Container ($StagingContainer)..."
-    & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" postgres:15-alpine 2>&1 | Out-Null
+    & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Failed launching isolated PostgreSQL staging container." }
 
     # Wait for PostgreSQL container readiness
     [bool]$ready = $false
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
-        & docker exec $StagingContainer pg_isready -U $PgUser 2>&1 | Out-Null
+        & docker exec $StagingContainer pg_isready -U $PgUser -d $StagingDbName 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { $ready = $true; break }
     }
     if (-not $ready) { throw "Staging PostgreSQL container failed to become ready within 30s." }

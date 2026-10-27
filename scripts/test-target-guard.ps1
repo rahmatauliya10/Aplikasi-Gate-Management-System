@@ -212,7 +212,7 @@ try {
         }
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Seconds 1
-            & docker exec $TargetContainer pg_isready -U $TargetUser 2>&1 | Out-Null
+            & docker exec $TargetContainer pg_isready -U $TargetUser -d $TargetDb 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) { break }
         }
     }
