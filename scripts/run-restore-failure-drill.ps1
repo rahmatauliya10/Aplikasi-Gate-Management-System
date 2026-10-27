@@ -224,8 +224,8 @@ function Get-UploadsFingerprint {
         return "EMPTY"
     }
 
-    $Files = Get-ChildItem -Path $UploadsDirectory -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName
-    if (-not $Files -or $Files.Count -eq 0) {
+    $Files = @(Get-ChildItem -Path $UploadsDirectory -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName)
+    if ($Files.Count -eq 0) {
         return "EMPTY"
     }
 
@@ -697,14 +697,14 @@ try {
 # ------------------------------------------------------------------------------
 # Summarize and Save Evidence Artifact
 # ------------------------------------------------------------------------------
-[bool]$AllDrillsPassed = ($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count -eq 0
+[bool]$AllDrillsPassed = @($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count -eq 0
 [double]$TotalDuration = ((Get-Date) - $DrillStartTime).TotalSeconds
 
 [double]$CalculatedRpoMinutes = 0.0
 if (Test-Path -Path $FixtureManifest) {
     try {
         $manObj = Get-Content -Path $FixtureManifest -Raw | ConvertFrom-Json
-        if ($manObj.createdAt) {
+        if ($manObj.PSObject.Properties['createdAt'] -and $manObj.createdAt) {
             $createdDate = [datetime]::Parse($manObj.createdAt)
             $CalculatedRpoMinutes = [math]::Round([math]::Max(0.0, ((Get-Date).ToUniversalTime() - $createdDate.ToUniversalTime()).TotalMinutes), 4)
         }
@@ -720,9 +720,9 @@ $DrillEvidenceObj = @{
     rpoDefinition = "Elapsed duration since fixture manifest creation to drill completion (rehearsal delta)"
     rtoSeconds = [math]::Round($TotalDuration, 2)
     drillsSummary = @{
-        totalPhases = $script:TestResults.Count
-        passedPhases = ($script:TestResults | Where-Object { $_.status -eq "PASSED" }).Count
-        failedPhases = ($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count
+        totalPhases = @($script:TestResults).Count
+        passedPhases = @($script:TestResults | Where-Object { $_.status -eq "PASSED" }).Count
+        failedPhases = @($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count
     }
     phaseResults = $script:TestResults
 }
