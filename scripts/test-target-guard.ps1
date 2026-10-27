@@ -84,29 +84,38 @@ function Assert-GuardRejection {
     Write-Host "`n[$script:TotalTests] Running: $TestName..." -ForegroundColor Yellow
     [datetime]$start = Get-Date
 
-    # Clean up maintenance flags before each assertion so previous failures do not leak
+    # Clean up maintenance flags and restore logs before each assertion so previous failures do not leak
     $mActive = Join-Path $ProjectRootDir "maintenance/active"
     $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
     if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
     if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
 
+    [string]$restoreLogFile = Join-Path $ProjectRootDir "artifacts/logs/production_restore.log"
+    if (Test-Path $restoreLogFile) { Remove-Item $restoreLogFile -Force -ErrorAction SilentlyContinue }
+
     [string]$output = ""
     [int]$exitCode = 0
 
     try {
-        $output = & $ExecutionBlock 2>&1 | Out-String
+        $output = & $ExecutionBlock *>&1 | Out-String
         $exitCode = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
     } catch {
         $output = $_.ToString()
         $exitCode = 1
     }
 
+    [string]$logContent = ""
+    if (Test-Path $restoreLogFile) {
+        $logContent = Get-Content -Path $restoreLogFile -Raw -ErrorAction SilentlyContinue
+    }
+    [string]$combinedOutput = "$output`n$logContent"
+
     [bool]$rejected = ($exitCode -ne 0)
     [bool]$keywordMatched = $false
     [string]$matchedKeyword = ""
 
     foreach ($kw in $ExpectedKeywords) {
-        if ($output.Contains($kw)) {
+        if ($combinedOutput.Contains($kw)) {
             $keywordMatched = $true
             $matchedKeyword = $kw
             break
@@ -123,7 +132,7 @@ function Assert-GuardRejection {
         $script:FailedTests++
         Write-Host "  [FAIL] $TestName" -ForegroundColor Red
         Write-Host "         ExitCode=$exitCode (Expected != 0), Keywords Searched: $($ExpectedKeywords -join ', ')" -ForegroundColor Red
-        Write-Host "         Output: $output" -ForegroundColor DarkGray
+        Write-Host "         Output: $combinedOutput" -ForegroundColor DarkGray
     }
 
     # Clean up maintenance flags after assertion
@@ -184,7 +193,7 @@ try {
             & docker start $TargetContainer 2>&1 | Out-Null
         } else {
             Write-Host "  Launching isolated drill PostgreSQL container ($TargetContainer on port $TargetPort)..."
-            & docker run -d --name $TargetContainer -p "127.0.0.1:${TargetPort}:5432" -e "POSTGRES_DB=$TargetDb" -e "POSTGRES_USER=$TargetUser" -e "POSTGRES_PASSWORD=$TargetPass" postgres:15-alpine 2>&1 | Out-Null
+            & docker run -d --name $TargetContainer -p "127.0.0.1:${TargetPort}:5432" -e "POSTGRES_DB=$TargetDb" -e "POSTGRES_USER=$TargetUser" -e "POSTGRES_PASSWORD=$TargetPass" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
         }
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Seconds 1
@@ -342,6 +351,10 @@ try {
 
     Write-Host "  [PASS] Target database fingerprint verified 100% UNMUTATED (Zero Database Mutation Guarantee)!" -ForegroundColor Green
 
+} catch {
+    Write-Host "FATAL ERROR IN TARGET GUARD TEST SUITE: $_" -ForegroundColor Red
+    Write-Host "StackTrace: $($_.ScriptStackTrace)" -ForegroundColor Red
+    $script:FailedTests++
 } finally {
     Write-Host "`nCleaning up temporary files and resetting maintenance flags..." -ForegroundColor Cyan
     if (Test-Path $TempTestDir) {
