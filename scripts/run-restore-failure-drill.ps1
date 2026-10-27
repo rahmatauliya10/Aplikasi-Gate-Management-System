@@ -188,7 +188,8 @@ function Get-DatabaseFingerprint {
 
     foreach ($Table in $Tables) {
         $rawCheck = & docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.`"$Table`"');" 2>&1
-        $TableCheck = if ($rawCheck) { [string]$rawCheck.ToString().Trim() } else { "" }
+        $tableLines = if ($rawCheck) { ($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' } } else { @() }
+        $TableCheck = if ($tableLines) { $tableLines[-1].Trim() } else { "" }
         if ([string]::IsNullOrWhiteSpace($TableCheck) -or $TableCheck.Contains("ERROR")) {
             $Result[$Table] = "NON_EXISTENT"
             continue
@@ -200,7 +201,8 @@ function Get-DatabaseFingerprint {
         $Hash = ""
         try {
             $rawHash = & docker exec $Container psql -U $User -d $Database -t -A -c "$Sql" 2>&1
-            $Hash = if ($rawHash) { [string]$rawHash.ToString().Trim() } else { "" }
+            $hashLines = if ($rawHash) { ($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' } } else { @() }
+            $Hash = if ($hashLines) { $hashLines[-1].Trim() } else { "" }
         } catch {
             throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
         }
@@ -596,7 +598,19 @@ try {
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
         $mockProc = [System.Diagnostics.Process]::Start($psi)
-        Start-Sleep -Milliseconds 800
+        for ($waitCount = 0; $waitCount -lt 30; $waitCount++) {
+            Start-Sleep -Milliseconds 200
+            try {
+                $tcpClient = New-Object System.Net.Sockets.TcpClient
+                $asyncRes = $tcpClient.BeginConnect("127.0.0.1", 3001, $null, $null)
+                if ($asyncRes.AsyncWaitHandle.WaitOne(300, $false) -and $tcpClient.Connected) {
+                    $tcpClient.EndConnect($asyncRes)
+                    $tcpClient.Close()
+                    break
+                }
+                $tcpClient.Close()
+            } catch {}
+        }
     }
 
     # Test 1: Real Server in Maintenance Mode MUST return HTTP 503 with MAINTENANCE_MODE
@@ -721,6 +735,14 @@ Set-Content -Path $EvidenceJsonPath -Value ($DrillEvidenceObj | ConvertTo-Json -
 Set-Content -Path $LegacyEvidencePath -Value ($DrillEvidenceObj | ConvertTo-Json -Depth 5) -Encoding utf8
 
 Write-Log "Saved DR drill evidence artifact to $EvidenceJsonPath"
+
+Write-Host "=============================================================================="
+Write-Host "DR FAILURE-INJECTION DRILL RESULTS BREAKDOWN (6 PHASES):"
+foreach ($r in $script:TestResults) {
+    Write-Host "  [$($r.status)] $($r.phase) ($($r.durationSeconds)s): $($r.details)"
+}
+Write-Host "=============================================================================="
+
 if ($AllDrillsPassed) {
     Write-Log "SUCCESS: All 6 DR failure-injection phases PASSED with verified fail-closed guarantees." -Level "SUCCESS"
     exit 0

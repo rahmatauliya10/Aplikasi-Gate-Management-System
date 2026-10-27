@@ -242,7 +242,9 @@ try {
     # Exec-Query helper
     function Exec-StagingQuery([string]$sql) {
         $raw = & docker exec $StagingContainer psql -t -A -U $PgUser -d $StagingDbName -c "$sql" 2>&1
-        return if ($raw) { [string]$raw.ToString().Trim() } else { "" }
+        if (-not $raw) { return "" }
+        $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
+        return if ($cleanLines) { $cleanLines[-1].Trim() } else { "" }
     }
 
     Write-Log "Step 5: Verifying Schema Migrations & Invariants in Staging Database..."
@@ -426,7 +428,9 @@ try {
     # Helper for live database queries
     function Exec-LiveDbQuery([string]$sql) {
         $raw = & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
-        return if ($raw) { [string]$raw.ToString().Trim() } else { "" }
+        if (-not $raw) { return "" }
+        $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
+        return if ($cleanLines) { $cleanLines[-1].Trim() } else { "" }
     }
 
     # --------------------------------------------------------------------------

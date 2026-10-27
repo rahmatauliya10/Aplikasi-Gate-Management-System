@@ -426,7 +426,16 @@ jobs:
           set -Eeuo pipefail
           node scripts/test-target-guard.js
 
-      - name: Execute 6-Phase DR Failure-Injection & Operator Restore Drill (P1-01)
+      - name: Execute 6-Phase DR Failure-Injection Native Node CI Gate (P0-02)
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          PGPASSWORD: testpassword
+        run: |
+          set -Eeuo pipefail
+          node scripts/ci-restore-failure-drill.js
+
+      - name: Execute 6-Phase DR Failure-Injection & Operator PowerShell Drill (P1-01)
         env:
           NODE_ENV: test
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
@@ -434,7 +443,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           pwsh -ExecutionPolicy Bypass -File scripts/run-restore-failure-drill.ps1
-          node scripts/ci-restore-failure-drill.js
 
       - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
         if: always()
