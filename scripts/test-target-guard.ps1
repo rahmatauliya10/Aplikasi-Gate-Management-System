@@ -140,6 +140,8 @@ function Assert-GuardRejection {
         Write-Host "  [FAIL] $TestName" -ForegroundColor Red
         Write-Host "         ExitCode=$exitCode (Expected != 0), Keywords Searched: $($ExpectedKeywords -join ', ')" -ForegroundColor Red
         Write-Host "         Output: $combinedOutput" -ForegroundColor DarkGray
+        [string]$errPreview = if ($combinedOutput.Length -gt 300) { $combinedOutput.Substring(0, 300).Replace("`r", "").Replace("`n", " ") } else { $combinedOutput.Replace("`r", "").Replace("`n", " ") }
+        Write-Host "::error file=scripts/test-target-guard.ps1,title=GuardAssertionFailed::$TestName FAILED. ExitCode=$exitCode. Preview: $errPreview"
     }
 
     # Clean up maintenance flags after assertion
@@ -172,14 +174,20 @@ function Assert-GuardRejection {
 
 function Get-TargetDbFingerprint {
     try {
-        [string]$settings = (& docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT key || '=' || value FROM \"AppSetting\" WHERE key NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') ORDER BY key;" 2>$null).ToString().Trim()
-        [string]$migs = (& docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT migration_name || '=' || checksum FROM \"_prisma_migrations\" ORDER BY migration_name;" 2>$null).ToString().Trim()
-        [string]$users = (& docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT CASE WHEN to_regclass('public.\"User\"') IS NOT NULL THEN (SELECT COUNT(*)::text FROM \"User\") ELSE '0' END;" 2>$null).ToString().Trim()
+        $rawSettings = & docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT key || '=' || value FROM \"AppSetting\" WHERE key NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') ORDER BY key;" 2>$null
+        $rawMigs = & docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT migration_name || '=' || checksum FROM \"_prisma_migrations\" ORDER BY migration_name;" 2>$null
+        $rawUsers = & docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT CASE WHEN to_regclass('public.\"User\"') IS NOT NULL THEN (SELECT COUNT(*)::text FROM \"User\") ELSE '0' END;" 2>$null
+        
+        [string]$settings = if ($rawSettings) { ($rawSettings | Out-String).Trim() } else { "" }
+        [string]$migs = if ($rawMigs) { ($rawMigs | Out-String).Trim() } else { "" }
+        [string]$users = if ($rawUsers) { ($rawUsers | Out-String).Trim() } else { "0" }
+        
         [string]$combined = "$settings`n$migs`n$users"
         $sha = [System.Security.Cryptography.SHA256]::Create()
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($combined)
         return [System.BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLower()
     } catch {
+        Write-Host "WARNING: Get-TargetDbFingerprint failed: $_" -ForegroundColor Yellow
         return "UNKNOWN_FINGERPRINT"
     }
 }
@@ -371,6 +379,7 @@ try {
 } catch {
     Write-Host "FATAL ERROR IN TARGET GUARD TEST SUITE: $_" -ForegroundColor Red
     Write-Host "StackTrace: $($_.ScriptStackTrace)" -ForegroundColor Red
+    Write-Host "::error file=scripts/test-target-guard.ps1,title=GuardSuiteFatalError::$($_.ToString())"
     $script:FailedTests++
 } finally {
     Write-Host "`nCleaning up temporary files and resetting maintenance flags..." -ForegroundColor Cyan

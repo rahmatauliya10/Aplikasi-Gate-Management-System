@@ -309,6 +309,7 @@ function runTests() {
     if (psRes.status !== 0) {
       console.error(`\nPowerShell Target Guard Integration Suite failed with exit code ${psRes.status}`);
       const evidencePath = path.join(projectRoot, 'artifacts/release-proof/target-guard-powershell-evidence.json');
+      let failedCases = [];
       if (fs.existsSync(evidencePath)) {
         try {
           const ev = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
@@ -316,10 +317,15 @@ function runTests() {
           if (ev.cases) {
             ev.cases.filter(c => c.status !== 'PASSED').forEach(c => {
               console.error(`  [FAILED CASE] ${c.name} - exitCode: ${c.exitCode}, matchedKeyword: "${c.matchedKeyword}"`);
+              failedCases.push(`${c.name} (exit:${c.exitCode})`);
             });
           }
         } catch {}
       }
+      const failMsg = failedCases.length > 0
+        ? `Target Guard failed on: ${failedCases.join('; ')}`
+        : `PowerShell integration script exited with code ${psRes.status} (evidence not generated)`;
+      console.log(`::error file=scripts/test-target-guard.ps1,title=TargetGuardSuiteFailure::${failMsg}`);
       process.exit(psRes.status || 1);
     }
     console.log('\nPowerShell Target Guard Integration Suite PASSED 100%!');
