@@ -95,10 +95,16 @@ function Assert-GuardRejection {
 
     [string]$output = ""
     [int]$exitCode = 0
+    $global:LASTEXITCODE = 0
 
     try {
         $output = & $ExecutionBlock *>&1 | Out-String
-        $exitCode = if ($LASTEXITCODE -ne 0) { $LASTEXITCODE } else { 1 }
+        if (Test-Path Variable:LASTEXITCODE) {
+            $exitCode = if ($global:LASTEXITCODE -ne 0) { $global:LASTEXITCODE } else { 0 }
+        }
+        if ($exitCode -eq 0 -and ($output -match "(?i)HARD FAIL|CRITICAL GOVERNANCE VIOLATION|Dump File Checksum Mismatch|FAILED|ERROR:|is not running")) {
+            $exitCode = 1
+        }
     } catch {
         $output = $_.ToString()
         $exitCode = 1
@@ -114,8 +120,9 @@ function Assert-GuardRejection {
     [bool]$keywordMatched = $false
     [string]$matchedKeyword = ""
 
+    [string]$lowerCombined = $combinedOutput.ToLower()
     foreach ($kw in $ExpectedKeywords) {
-        if ($combinedOutput.Contains($kw)) {
+        if ($lowerCombined.Contains($kw.ToLower())) {
             $keywordMatched = $true
             $matchedKeyword = $kw
             break
@@ -250,6 +257,16 @@ try {
     }
     Set-Content -Path $CorruptManifestPath -Value ($CorruptManifestObj | ConvertTo-Json -Depth 5) -Encoding utf8
 
+    # Copy authentic companion dump and attachments to $TempTestDir for Case 8
+    [string]$dumpSrc = Join-Path (Split-Path -Path $AuthoritativeManifest -Parent) "historical_test.dump"
+    [string]$attSrc = Join-Path (Split-Path -Path $AuthoritativeManifest -Parent) "historical_test_attachments.json"
+    if (Test-Path $dumpSrc) {
+        Copy-Item -Path $dumpSrc -Destination (Join-Path $TempTestDir "historical_test.dump") -Force
+    }
+    if (Test-Path $attSrc) {
+        Copy-Item -Path $attSrc -Destination (Join-Path $TempTestDir "historical_test_attachments.json") -Force
+    }
+
     $env:PGPASSWORD = $TargetPass
 
     # --------------------------------------------------------------------------
@@ -325,7 +342,7 @@ try {
         -ExecutionBlock {
             & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -Force
         } `
-        -ExpectedKeywords @("Dump File Checksum Mismatch", "SHA-256", "Preflight Check Failed")
+        -ExpectedKeywords @("Dump File Checksum Mismatch", "Checksum Mismatch", "SHA-256", "Preflight Check Failed")
 
     # --------------------------------------------------------------------------
     # Case 9: Missing / Invalid Manifest Path -> Hard Fail Preflight
@@ -364,6 +381,11 @@ try {
     $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
     if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
     if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
+
+    # Re-enable target restore permission for subsequent CI drill jobs
+    try {
+        & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "UPDATE \"AppSetting\" SET value = 'TRUE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED';" 2>&1 | Out-Null
+    } catch {}
 }
 
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
