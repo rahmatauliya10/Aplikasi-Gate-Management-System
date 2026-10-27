@@ -96,11 +96,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
 
 ### Prosedur B: Rollback Versi Aplikasi (Image-Only — Terbukti Skema Kompatibel)
 Gunakan prosedur ini HANYA jika release manifest membuktikan tidak ada migrasi skema baru sejak versi sebelumnya:
-1. **Aktifkan Maintenance Mode (Write-Freeze):**
-   ```bash
-   touch maintenance/active
+
+1. **Siapkan Token Autentikasi Read-Only untuk Smoke Test:**
+   Agar pemeriksaan sesi terautentikasi pada smoke test menghasilkan verdict `PASSED` (bukan `PARTIAL`), siapkan token read-only operator:
+   ```powershell
+   # Mengambil token read-only otomatis dari instance lokal:
+   $env:SMOKE_ACCESS_TOKEN = (node scripts/generate-smoke-token.js)
    ```
+   *(Atau masukkan token JWT operator read-only yang valid secara langsung ke `$env:SMOKE_ACCESS_TOKEN`)*
+
 2. **Jalankan Rollback Container ke Image Digest Stabil Sebelumnya:**
+   Eksekusi orchestrator pemulihan tunggal:
    ```powershell
    # Script secara ketat memvalidasi inventori migrasi database terhadap previous release manifest
    powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
@@ -112,11 +118,14 @@ Gunakan prosedur ini HANYA jika release manifest membuktikan tidak ada migrasi s
      -PreviousMigratorDigest "sha256:<digest_lama>" `
      -ComposeFile "docker-compose.prod.yml"
    ```
-3. **Verifikasi Layanan & Nonaktifkan Maintenance Mode:**
-   ```bash
-   node scripts/prod-smoke-readonly.js
-   rm -f maintenance/active
-   ```
+
+3. **Otomatisasi Pembukaan Trafik (DILARANG Menghapus Flag Manual):**
+   - Orchestrator secara otomatis mengaktifkan write-freeze `maintenance/active`, menukar image container, menjalankan watchdog, dan mengeksekusi smoke test ketat (`node scripts/prod-smoke-readonly.js --require-passed`).
+   - File `maintenance/active` dan `maintenance.flag` **dihapus secara otomatis oleh orchestrator HANYA JIKA** smoke test membuktikan verdict `PASSED` (100% uji lulus termasuk authenticated session probe).
+   - > [!CAUTION]
+     > **DILARANG KERAS** menghapus file `maintenance/active` secara manual (`rm -f maintenance/active`). Jika smoke test menghasilkan verdict `PARTIAL` atau `FAILED`, pemeliharaan tetap aktif secara fail-closed untuk melindungi integritas transaksi dan data gudang pabrik.
+
+---
 
 ### Prosedur C: Pemulihan Skema Database & Lampiran Fisik (Post-Migration Recovery)
 Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus dikembalikan ke snapshot pre-deploy:
@@ -130,7 +139,12 @@ Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus
    docker exec gate-system-postgres psql -U postgres -d gms -c "UPDATE \"AppSetting\" SET value = 'TRUE' WHERE key = 'GMS_RESTORE_ALLOWED';"
    ```
 
-2. **Eksekusi Pemulihan Terpadu (Single Orchestrator):**
+2. **Siapkan Token Autentikasi Read-Only untuk Smoke Test:**
+   ```powershell
+   $env:SMOKE_ACCESS_TOKEN = (node scripts/generate-smoke-token.js)
+   ```
+
+3. **Eksekusi Pemulihan Terpadu (Single Orchestrator):**
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
      -RollbackOnly `
@@ -146,14 +160,10 @@ Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus
    - `FREEZE`: Mengaktifkan write-freeze `maintenance/active` dan menghentikan seluruh proses penulis data (`backend` & `migrator`).
    - `RESTORE_REQUIRED`: Memanggil `gms-production-restore.ps1` tepat satu kali. Menolak restore kedua jika dipanggil ulang.
    - `IMAGE_SWITCH`: Menghidupkan kembali container aplikasi dengan image digest stabil sebelumnya.
-   - `HEALTH_VERIFIED`: Menjalankan smoke test non-mutatif.
+   - `HEALTH_VERIFIED`: Menjalankan watchdog dan smoke test read-only (`node scripts/prod-smoke-readonly.js --require-passed`).
 
-3. **Verifikasi Akhir & Pembukaan Trafik:**
-   Trafik hanya dibuka setelah smoke test menghasilkan verdict `PASSED`:
-   ```bash
-   node scripts/prod-smoke-readonly.js
-   rm -f maintenance/active
-   ```
+4. **Pembukaan Trafik Otomatis Berbasis Bukti:**
+   Trafik dibuka (`maintenance/active` dicabut) **secara otomatis oleh orchestrator** HANYA setelah smoke test membuktikan verdict `PASSED`. Dilarang menghapus flag secara manual.
 
 > [!NOTE]
 > Prosedur `gms-production-restore.ps1` standalone hanya digunakan untuk skenario Disaster Recovery murni (misal: kerusakan disk data saat image aplikasi tidak mengalami perubahan/rollback).

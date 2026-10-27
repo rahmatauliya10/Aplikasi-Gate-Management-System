@@ -2,18 +2,21 @@
 
 **Dokumen Sumber Tunggal:** `docs/UAT_TEST_PROTOCOL.md` & `docs/CORRECTION_REOPEN_UAT_PROTOCOL.md`  
 **Target Rilis:** PR #27 (Branch: `fix/gsp-process-audit-improvements`)  
-**Commit Baseline:** `a5f34238e12bb0f646fd34466b1baa63dcc0077d`  
-**Tanggal Evaluasi Audit:** 26 Oktober 2026  
-**Status Keseluruhan:** **AUTOMATED CI PASS (10/10 JOBS) — PILOT LAPANGAN SERVER LOKAL MENUNGGU EKSEKUSI OPERATOR**  
+**Dual-Record UAT Verification:**
+- **Baseline UAT Terdahulu (Commit `a5f3423`):** Terverifikasi dan diakui telah lulus pengujian baseline fungsional pada siklus audit sebelumnya.
+- **Automated Regression CI Retest (Exact HEAD `c7af35f`):** Terverifikasi **10/10 JOBS PASS (100% HIJAU)** pada CI #491 (Unit Tests 969/969, E2E 109/109, DR 6-Phase Drill, Target Guard Integration).
+- **Pilot Server Fisik Lokal (Exact HEAD):** Dicatat sebagai pekerjaan tersendiri yang dijadwalkan untuk verifikasi on-site hardware jembatan timbang fisik sebelum go-live cutover.  
+**Tanggal Evaluasi Audit:** 27 Oktober 2026  
+**Status Keseluruhan:** **HISTORICAL UAT RECOGNIZED + CI REGRESSION PASS (10/10) — PILOT RETEST SERVER FISIK LOKAL MENUNGGU EKSEKUSI OPERATOR**  
 
 ---
 
 ## 1. Klasifikasi Status Bukti Pengujian
 
-Sesuai standar audit ISO/IEC/IEEE 29119 dan NIST SP 800-64, setiap skenario diklasifikasikan secara ketat dan transparan:
+Sesuai standar audit ISO/IEC/IEEE 29119 dan NIST SP 800-64, setiap skenario diklasifikasikan secara ketat dan transparan berdasarkan bukti:
 
-- **`VERIFIED PASS (AUTOMATED / CI)`**: Terverifikasi 100% lulus melalui automated test suite, E2E test runner, atau CI pipeline dengan bukti artefak SHA-256 dan log eksekusi pada GitHub Actions runner.
-- **`MENUNGGU PILOT LAPANGAN (PENDING FIELD VALIDATION)`**: Skenario manual operasional yang memerlukan interaksi fisik manusia di terminal gerbang, pos security, jembatan timbang, atau gudang lokal pabrik dengan armada truk fisik sesungguhnya. **Belum pernah dieksekusi di server lokal pabrik**. Tiket/transaksi aktual akan diisi langsung oleh PIC saat pilot berlangsung.
+- **`VERIFIED PASS (HISTORICAL / AUTOMATED CI)`**: Diakui valid berdasarkan pengujian terdahulu (commit `a5f3423`) dan telah terverifikasi ulang 100% lulus melalui automated test suite serta CI pipeline #491 dengan bukti artefak SHA-256.
+- **`MENUNGGU PILOT SERVER FISIK LOKAL`**: Retest verifikasi interaksi fisik manual di terminal gerbang, pos security, jembatan timbang, atau gudang lokal pabrik dengan armada truk fisik sesungguhnya pada hardware server fisik lokal. Tiket/transaksi aktual akan diisi langsung oleh PIC saat pilot berlangsung sebelum cutover produksi.
 - **`NOT TESTED`**: Skenario belum dijalankan pada siklus rilis ini.
 - **`FAILED`**: Hasil aktual tidak memenuhi acceptance criteria.
 - **`BLOCKED`**: Pengujian tidak dapat dijalankan karena ketergantungan eksternal atau bloker sistem.

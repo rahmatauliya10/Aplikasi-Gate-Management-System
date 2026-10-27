@@ -11,8 +11,11 @@
 # ==============================================================================
 
 param(
-    [Parameter(Mandatory=$true)]
-    [string]$TargetReleaseTag,
+    [Parameter(Mandatory=$false)]
+    [string]$TargetReleaseTag = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$SmokeAccessToken = "",
 
     [Parameter(Mandatory=$false)]
     [string]$PreviousReleaseTag = "stable",
@@ -84,6 +87,14 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if (-not $RollbackOnly -and [string]::IsNullOrWhiteSpace($TargetReleaseTag)) {
+    throw "Parameter -TargetReleaseTag is required for normal deployment mode. For rollback mode, specify -RollbackOnly."
+}
+
+if ($SmokeAccessToken -and -not $env:SMOKE_ACCESS_TOKEN) {
+    $env:SMOKE_ACCESS_TOKEN = $SmokeAccessToken
+}
 
 $WorkspaceRoot = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location -Path $WorkspaceRoot
@@ -389,9 +400,7 @@ if ($RollbackOnly) {
             }
         } elseif ($prevManObj.migrations) {
             foreach ($item in $prevManObj.migrations) {
-                if ($item -is [string]) {
-                    $expectedMigrations += $item
-                } elseif ($item.migration_name) {
+                if ($item.migration_name) {
                     $name = [string]$item.migration_name
                     $expectedMigrations += $name
                     if ($item.checksum) { $expectedChecksumMap[$name] = [string]$item.checksum.ToString().Trim().ToLower() }
@@ -404,7 +413,17 @@ if ($RollbackOnly) {
         }
 
         if ($expectedMigrations.Count -eq 0) {
-            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Previous release manifest at '$PrevManifestPath' does not contain an explicit migration inventory list ('migrationInventory' or 'migrations' missing or empty). Cannot verify schema compatibility without migration records. Full database recovery via -RollbackManifestPath is MANDATORY."
+            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Previous release manifest at '$PrevManifestPath' does not contain an explicit migration inventory list ('migrationInventory' missing or empty). Cannot verify schema compatibility without migration records. Full database recovery via -RollbackManifestPath is MANDATORY."
+        }
+
+        # FAIL-CLOSED: Every single migration in manifest MUST have a valid 64-char hex SHA-256 checksum
+        foreach ($mName in $expectedMigrations) {
+            if (-not $expectedChecksumMap.ContainsKey($mName) -or [string]::IsNullOrWhiteSpace($expectedChecksumMap[$mName])) {
+                throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Migration '$mName' in previous release manifest at '$PrevManifestPath' is missing an explicit checksum. Incomplete checksums are strictly prohibited for image-only rollback. Full database recovery via -RollbackManifestPath is MANDATORY."
+            }
+            if ($expectedChecksumMap[$mName] -notmatch '^[a-fA-F0-9]{64}$') {
+                throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Migration '$mName' in manifest at '$PrevManifestPath' has invalid checksum format '$($expectedChecksumMap[$mName])' (expected 64-hex SHA-256). Full database recovery via -RollbackManifestPath is MANDATORY."
+            }
         }
 
         # 3. Query live database applied migrations and checksums
@@ -431,7 +450,18 @@ if ($RollbackOnly) {
                 $appliedChecksumMap[$mName] = $mHash
             } else {
                 $mName = $line.Trim()
-                if ($mName) { $appliedMigrations += $mName }
+                if ($mName) {
+                    $appliedMigrations += $mName
+                    $appliedChecksumMap[$mName] = ""
+                }
+            }
+        }
+
+        # FAIL-CLOSED: Every applied migration in live database MUST have a valid 64-char hex checksum in _prisma_migrations
+        foreach ($mName in $appliedMigrations) {
+            $actHash = if ($appliedChecksumMap.ContainsKey($mName)) { $appliedChecksumMap[$mName] } else { "" }
+            if ([string]::IsNullOrWhiteSpace($actHash) -or $actHash -notmatch '^[a-fA-F0-9]{64}$') {
+                throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED (Fail-Closed)! Applied migration '$mName' in live database does not have a valid checksum in _prisma_migrations ('$actHash'). Full database recovery via -RollbackManifestPath is MANDATORY."
             }
         }
 
@@ -447,17 +477,19 @@ if ($RollbackOnly) {
             throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED! Live database is missing $($missingInLive.Count) migration(s) expected by previous release manifest [$($missingInLive -join ', ')]. Full database recovery via -RollbackManifestPath is MANDATORY."
         }
 
-        # Check checksums for all migrations where previous manifest recorded checksums
+        # Check checksums for all migrations: every expected migration must match live database checksum 100%
         [int]$checksumsVerified = 0
-        foreach ($mName in $expectedChecksumMap.Keys) {
+        foreach ($mName in $expectedMigrations) {
             $expectedCk = $expectedChecksumMap[$mName]
             $actualCk = if ($appliedChecksumMap.ContainsKey($mName)) { $appliedChecksumMap[$mName] } else { "" }
-            if ($expectedCk -and $actualCk -and ($expectedCk -ne $actualCk)) {
+            if ($expectedCk -ne $actualCk) {
                 throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Image-only rollback REJECTED! Migration checksum mismatch detected for migration '$mName' (Live: $actualCk, Manifest: $expectedCk). Schema drift or altered migration detected. Full database recovery via -RollbackManifestPath is MANDATORY."
             }
-            if ($expectedCk -and $actualCk) {
-                $checksumsVerified++
-            }
+            $checksumsVerified++
+        }
+
+        if ($checksumsVerified -ne $expectedMigrations.Count -or $expectedMigrations.Count -ne $appliedMigrations.Count) {
+            throw "[CRITICAL SCHEMA COMPATIBILITY VIOLATION] Incomplete checksum validation: verified $checksumsVerified of $($expectedMigrations.Count) expected migrations against $($appliedMigrations.Count) applied migrations. Full database recovery via -RollbackManifestPath is MANDATORY."
         }
 
         Write-Host "  [PASS] Exact migration inventory matches previous release ($($appliedMigrations.Count) migrations verified, $checksumsVerified checksums verified 100% identical)." -ForegroundColor Green

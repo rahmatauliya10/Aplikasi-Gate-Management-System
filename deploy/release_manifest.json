@@ -25,5 +25,160 @@
     "image": "ghcr.io/rahmatauliya10/gms-frontend",
     "digest": "sha256:dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b",
     "repoDigest": "ghcr.io/rahmatauliya10/gms-frontend@sha256:dd89dc734e7415d54223f47609c117a269d12643f10060a16ac455fc8da9be8b"
-  }
+  },
+  "migrationInventory": [
+    {
+      "migration_name": "20260714030729_init",
+      "checksum": "b2091e708e2f79c3d3f11c50122adc3c9bd237e20f9f47b82c235244e1eb8f76"
+    },
+    {
+      "migration_name": "20260715000000_add_account_password_security",
+      "checksum": "f99a3b8f405ee47e11d84d68bf5a82545928188abf59205c85b4d25387adc093"
+    },
+    {
+      "migration_name": "20260715031355_sync_indices",
+      "checksum": "b0909cdc06963c0e89045e34503884d392c132260b5eb8c544955fe551398c11"
+    },
+    {
+      "migration_name": "20260715034029_add_user_is_deleted",
+      "checksum": "2c5dd595ab091b1e819dddba9a35ae778174b7b8775c7327336cda95c187534d"
+    },
+    {
+      "migration_name": "20260715150000_add_user_profile_fields",
+      "checksum": "e8676d93f5fe4dbe4f46ac3eed0e119f733e5c34ce0068c6f9a6df4aec79bdb5"
+    },
+    {
+      "migration_name": "20260716041815_add_system_issue",
+      "checksum": "1d6264194ccf2c1a5920a87e952dac9fb28ca011bbf62e69fe4010e358b5ae27"
+    },
+    {
+      "migration_name": "20260804170000_add_unique_constraints_and_corrections",
+      "checksum": "e9c26605d2a2b19694094e726ab97c37505988d9a87a213d8376020649f7c835"
+    },
+    {
+      "migration_name": "20260806000000_add_revision_and_correction_items",
+      "checksum": "7e85e369d5c0e77fd4a1458f957cfcdb7685ff755e985ace83b2a39ccfb88641"
+    },
+    {
+      "migration_name": "20260807000000_repair_correction_enums_and_constraints",
+      "checksum": "77c3da635e4df1b05adf049c515953f1b34ce5f2c4f2b6059d3078a2d5043471"
+    },
+    {
+      "migration_name": "20260808000000_add_missing_columns_to_warehouse_and_incoming",
+      "checksum": "b007f50fa8e1519e5f74d940cc5cf2ece4ea564771d37bd9d7055504260575b7"
+    },
+    {
+      "migration_name": "20260809000000_reconcile_correction_enum_and_history",
+      "checksum": "5d4862d67e8549f2c59338d8f6209bbb0a4c26bd548caf97e89a9f1054e84315"
+    },
+    {
+      "migration_name": "20260810000000_add_versioning_fields",
+      "checksum": "8563a2f0da90140abc8016e603ecc59721d1729640211ac54deaec2c6f712070"
+    },
+    {
+      "migration_name": "20260810163000_partial_unique_is_current",
+      "checksum": "570f662cc2c9a672932ff58debb37aa75517a322da9bd5212671b058025dcb67"
+    },
+    {
+      "migration_name": "20260810180000_add_incoming_qc_start_at",
+      "checksum": "90e23dc2f9e5956c9befe6a7b6b449eb5832a61d0d832306c7f38f3f95b0f13b"
+    },
+    {
+      "migration_name": "20260811000000_fix_qc_process_scope_and_backfill",
+      "checksum": "8a9feddc9c97726d232efeff516ff4f8fe9a1ff9b752105be8347a0a286a4852"
+    },
+    {
+      "migration_name": "20260811010000_fix_atomic_workflow_state_machine",
+      "checksum": "f1a1193b1ca270dfc3a05d2a7946ed33b07caa803ada45d3fc2567334e15becc"
+    },
+    {
+      "migration_name": "20260811020000_production_readiness_versioning_and_invariants",
+      "checksum": "5ce2f0dd61a3a6530525fd52d0bc4ffcafade848f6a69a763e3b295f7f2b617e"
+    },
+    {
+      "migration_name": "20260811030000_secure_attachment_lineage",
+      "checksum": "e6c18a46827f6f728a3d0e8e0a7bfe4c458c516b982adc071973bd5024b3e4d4"
+    },
+    {
+      "migration_name": "20260821100000_void_metadata_and_fk_restrict",
+      "checksum": "f953927a847d2a410f442df76d3f8216ffba92407c242f8d0260615fc048e5b8"
+    },
+    {
+      "migration_name": "20260828000000_add_qc_vehicle_decision_mode",
+      "checksum": "575d389a01496e57c299d1f2374d10ac423fea890a2fe956dc530ad3978088a6"
+    },
+    {
+      "migration_name": "20260930000000_add_gsp_pa_and_statuses",
+      "checksum": "92e0bef8eef00f0c447fb71d00a4ae511543f5f8ed7a4e2b0d2439c41e0a9f58"
+    },
+    {
+      "migration_name": "20260930010000_add_pa_invalidation_fields",
+      "checksum": "da9dc3ea6457779574e7d225e481e9f9dc245a91dfcb431043364c43ef0a579d"
+    },
+    {
+      "migration_name": "20261006000000_add_gsp_analysis_profile",
+      "checksum": "717bea58c25fcec67cc1a864273a5ed73b1451f7e15f58da87a7a8dcd8dfa383"
+    },
+    {
+      "migration_name": "20261008000000_add_liter_to_warehouse_unit",
+      "checksum": "ba5ed555aec758402855cee5de74be2162e57b6a217d73d91f50405ae939fad9"
+    },
+    {
+      "migration_name": "20261008010000_add_gsp_uom_and_receiving_quantity",
+      "checksum": "d2ff124ddee1acbcc3997d22e559816e097e1cb80396a3a8a5027ec07174defc"
+    },
+    {
+      "migration_name": "20261014000000_add_waiting_gsp_disposition",
+      "checksum": "1b799e9a2c4a2cdd9a1a6994c2cff83a003ffafe7a2b69e9d851df27857c1c86"
+    },
+    {
+      "migration_name": "20261015000000_add_waiting_gsp_checklist_disposition",
+      "checksum": "cd55083e5e472b40d3551ab5b7ca81fab80d2b9bbf2538996afd414632a627e7"
+    },
+    {
+      "migration_name": "20261015010000_add_arrival_seq_and_delivery_checklist",
+      "checksum": "b7f6a6c8b31122b2602b218e5ae9441bec1cc8673886ada3092efb0cc59fa64b"
+    },
+    {
+      "migration_name": "20261015020000_add_user_reminder_states",
+      "checksum": "cb5a4cc748a3619f27a36f561e3cec20b150db000e775979a4edf5327e3f3129"
+    },
+    {
+      "migration_name": "20261020000000_add_pa_correction_lineage",
+      "checksum": "d9206981b9b2e2c43f4986bffe509b5e2d7853aa2e5b9e439b097f4e2003e0e8"
+    }
+  ],
+  "migrations": [
+    "20260714030729_init",
+    "20260715000000_add_account_password_security",
+    "20260715031355_sync_indices",
+    "20260715034029_add_user_is_deleted",
+    "20260715150000_add_user_profile_fields",
+    "20260716041815_add_system_issue",
+    "20260804170000_add_unique_constraints_and_corrections",
+    "20260806000000_add_revision_and_correction_items",
+    "20260807000000_repair_correction_enums_and_constraints",
+    "20260808000000_add_missing_columns_to_warehouse_and_incoming",
+    "20260809000000_reconcile_correction_enum_and_history",
+    "20260810000000_add_versioning_fields",
+    "20260810163000_partial_unique_is_current",
+    "20260810180000_add_incoming_qc_start_at",
+    "20260811000000_fix_qc_process_scope_and_backfill",
+    "20260811010000_fix_atomic_workflow_state_machine",
+    "20260811020000_production_readiness_versioning_and_invariants",
+    "20260811030000_secure_attachment_lineage",
+    "20260821100000_void_metadata_and_fk_restrict",
+    "20260828000000_add_qc_vehicle_decision_mode",
+    "20260930000000_add_gsp_pa_and_statuses",
+    "20260930010000_add_pa_invalidation_fields",
+    "20261006000000_add_gsp_analysis_profile",
+    "20261008000000_add_liter_to_warehouse_unit",
+    "20261008010000_add_gsp_uom_and_receiving_quantity",
+    "20261014000000_add_waiting_gsp_disposition",
+    "20261015000000_add_waiting_gsp_checklist_disposition",
+    "20261015010000_add_arrival_seq_and_delivery_checklist",
+    "20261015020000_add_user_reminder_states",
+    "20261020000000_add_pa_correction_lineage"
+  ],
+  "migrationChecksumsVerified": true
 }
