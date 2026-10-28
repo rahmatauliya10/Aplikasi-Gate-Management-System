@@ -202,13 +202,19 @@ if ([string]::IsNullOrWhiteSpace($rawLivePreflight)) {
 # Helper for live database queries
 function Exec-LiveDbQuery([string]$sql) {
     $raw = if ($PgPass) {
-        & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        $sql | & docker exec -i -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
     } else {
-        & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        $sql | & docker exec -i $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
     }
     if (-not $raw) { return "" }
     [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
-    if ($lines.Length -gt 0) { return ([string]$lines[-1]).Trim() }
+    if ($lines.Length -gt 0) {
+        [string]$lastLine = ([string]$lines[-1]).Trim()
+        if ($lastLine -match '^(psql:\s*error:|ERROR:|FATAL:)') {
+            throw "Database query error on [$LiveDbName]: $lastLine"
+        }
+        return $lastLine
+    }
     return ""
 }
 
@@ -216,7 +222,7 @@ function Exec-LiveDbQuery([string]$sql) {
 # TARGET DATABASE FINGERPRINT & AUTHORIZATION GUARD (ZERO-FORCE BYPASS)
 # --------------------------------------------------------------------------
 Write-Log "  Verifying Target Database Fingerprint & Authorization Proof on [$LiveDbName]..."
-[string]$TableCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';"
+[string]$TableCountStr = Exec-LiveDbQuery "SELECT count(*) FROM pg_stat_user_tables;"
 [int]$LiveTableCount = 0
 [int]::TryParse($TableCountStr, [ref]$LiveTableCount) | Out-Null
 
@@ -320,10 +326,16 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 
     # Exec-Query helper
     function Exec-StagingQuery([string]$sql) {
-        $raw = & docker exec $StagingContainer psql -t -A -U $PgUser -d $StagingDbName -c "$sql" 2>&1
+        $raw = $sql | & docker exec -i $StagingContainer psql -t -A -U $PgUser -d $StagingDbName 2>&1
         if (-not $raw) { return "" }
         [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
-        if ($lines.Length -gt 0) { return ([string]$lines[-1]).Trim() }
+        if ($lines.Length -gt 0) {
+            [string]$lastLine = ([string]$lines[-1]).Trim()
+            if ($lastLine -match '^(psql:\s*error:|ERROR:|FATAL:)') {
+                throw "Staging database query error: $lastLine"
+            }
+            return $lastLine
+        }
         return ""
     }
 

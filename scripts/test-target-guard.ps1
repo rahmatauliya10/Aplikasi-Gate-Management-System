@@ -174,9 +174,9 @@ function Assert-GuardRejection {
 
 function Get-TargetDbFingerprint {
     try {
-        $rawSettings = & docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT key || '=' || value FROM \"AppSetting\" WHERE key NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') ORDER BY key;" 2>$null
-        $rawMigs = & docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT migration_name || '=' || checksum FROM \"_prisma_migrations\" ORDER BY migration_name;" 2>$null
-        $rawUsers = & docker exec $TargetContainer psql -t -A -U $TargetUser -d $TargetDb -c "SELECT CASE WHEN to_regclass('public.\"User\"') IS NOT NULL THEN (SELECT COUNT(*)::text FROM \"User\") ELSE '0' END;" 2>$null
+        $rawSettings = "SELECT key || '=' || value FROM ""AppSetting"" WHERE key NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') ORDER BY key;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>$null
+        $rawMigs = "SELECT migration_name || '=' || checksum FROM ""_prisma_migrations"" ORDER BY migration_name;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>$null
+        $rawUsers = "SELECT CASE WHEN to_regclass('public.""User""') IS NOT NULL THEN (SELECT COUNT(*)::text FROM ""User"") ELSE '0' END;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>$null
         
         [string]$settings = if ($rawSettings) { ($rawSettings | Out-String).Trim() } else { "" }
         [string]$migs = if ($rawMigs) { ($rawMigs | Out-String).Trim() } else { "" }
@@ -217,28 +217,50 @@ try {
         }
     }
 
-    # Ensure baseline schema from historical dump is present
-    $rawMig = & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null
-    $migExists = if ($rawMig) { [string]$rawMig.ToString().Trim() } else { "" }
-    if ([string]::IsNullOrWhiteSpace($migExists)) {
-        [string]$HistoricalDump = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
-        if (-not (Test-Path $HistoricalDump)) {
-            Write-Host "  Generating baseline historical test fixtures..." -ForegroundColor Cyan
-            node (Join-Path $ProjectRootDir "tests/fixtures/historical/generate-test-fixtures.js")
-        }
-        if (Test-Path $HistoricalDump) {
-            Write-Host "  Populating baseline historical database into $TargetContainer..." -ForegroundColor Cyan
-            & docker cp $HistoricalDump "${TargetContainer}:/tmp/baseline.dump" 2>&1 | Out-Null
-            & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-            & docker exec $TargetContainer pg_restore -U $TargetUser -d $TargetDb --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
-            & docker exec $TargetContainer rm -f /tmp/baseline.dump 2>&1 | Out-Null
-        }
+    # Initialize baseline schema and security governance records
+    Write-Host "Initializing target identity governance and baseline schema on $TargetContainer..." -ForegroundColor Cyan
+    $initSql = @"
+CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+    "id" VARCHAR(36) PRIMARY KEY,
+    "checksum" VARCHAR(64) NOT NULL,
+    "finished_at" TIMESTAMPTZ,
+    "migration_name" VARCHAR(255) NOT NULL,
+    "logs" TEXT,
+    "rolled_back_at" TIMESTAMPTZ,
+    "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "applied_steps_count" INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS "AppSetting" (
+    "id" VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    "key" VARCHAR(255) UNIQUE NOT NULL,
+    "value" TEXT NOT NULL,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "User" (
+    "id" VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    "username" VARCHAR(255) UNIQUE NOT NULL,
+    "email" VARCHAR(255) UNIQUE NOT NULL,
+    "passwordHash" TEXT NOT NULL,
+    "role" VARCHAR(50) NOT NULL DEFAULT 'OPERATOR',
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO "_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "started_at", "applied_steps_count")
+VALUES 
+  ('m-init-01', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', now(), '20260714030729_init', now(), 1),
+  ('m-init-02', 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', now(), '20260715000000_add_account_password_security', now(), 1)
+ON CONFLICT ("id") DO NOTHING;
+INSERT INTO "AppSetting" ("key", "value") VALUES 
+  ('GMS_ENVIRONMENT_ID', '$KnownEnvId'),
+  ('GMS_INSTALLATION_UUID', '$KnownInstallUuid'),
+  ('GMS_RESTORE_ALLOWED', 'FALSE')
+ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
+"@
+    $initRes = $initSql | & docker exec -i $TargetContainer psql -U $TargetUser -d $TargetDb 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to initialize baseline target database: $initRes"
     }
-
-    # Initialize Security Governance and Identification Records
-    Write-Host "Initializing target identity governance records on $TargetContainer..." -ForegroundColor Cyan
-    & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "CREATE TABLE IF NOT EXISTS \"AppSetting\" (\"id\" VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid()::text, \"key\" VARCHAR(255) UNIQUE NOT NULL, \"value\" TEXT NOT NULL, \"createdAt\" TIMESTAMPTZ NOT NULL DEFAULT now(), \"updatedAt\" TIMESTAMPTZ NOT NULL DEFAULT now());" 2>&1 | Out-Null
-    & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "INSERT INTO \"AppSetting\" (\"key\", \"value\") VALUES ('GMS_ENVIRONMENT_ID', '$KnownEnvId'), ('GMS_INSTALLATION_UUID', '$KnownInstallUuid'), ('GMS_RESTORE_ALLOWED', 'FALSE') ON CONFLICT (\"key\") DO UPDATE SET \"value\" = EXCLUDED.\"value\";" 2>&1 | Out-Null
 
     # Capture initial database fingerprint
     $PreTestFingerprint = Get-TargetDbFingerprint
