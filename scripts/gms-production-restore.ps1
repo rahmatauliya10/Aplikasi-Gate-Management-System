@@ -201,20 +201,21 @@ if ([string]::IsNullOrWhiteSpace($rawLivePreflight)) {
 
 # Helper for live database queries
 function Exec-LiveDbQuery([string]$sql) {
+    $inputSql = $sql.Trim() + "`n"
     $raw = if ($PgPass) {
-        $sql | & docker exec -i -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
+        $inputSql | & docker exec -i -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
     } else {
-        $sql | & docker exec -i $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
+        $inputSql | & docker exec -i $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
     }
     if (-not $raw) { return "" }
     [string]$rawText = ($raw | Out-String)
     [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
     if ($lines.Length -gt 0) {
-        [string]$lastLine = ([string]$lines[-1]).Trim()
-        if ($lastLine -match '^(psql:\s*error:|ERROR:|FATAL:)') {
-            throw "Database query error on [$LiveDbName]: $lastLine"
+        $errLine = $lines | Where-Object { $_ -match '^(psql:\s*error:|ERROR:|FATAL:)' } | Select-Object -First 1
+        if ($errLine) {
+            throw "Database query error on [$LiveDbName]: $($lines -join ' -- ')"
         }
-        return $lastLine
+        return ([string]$lines[-1]).Trim()
     }
     return ""
 }
@@ -254,7 +255,7 @@ if ($InitializeNewEnvironment) {
     }
 
     # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
-    [string]$ActualEnvId = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_ENVIRONMENT_ID' OR key = 'ENVIRONMENT_ID' OR key = 'SYSTEM_ENVIRONMENT_ID' LIMIT 1), '');"
+    [string]$ActualEnvId = Exec-LiveDbQuery "SELECT value FROM \"AppSetting\" WHERE key IN ('GMS_ENVIRONMENT_ID', 'ENVIRONMENT_ID', 'SYSTEM_ENVIRONMENT_ID') LIMIT 1;"
     if ([string]::IsNullOrWhiteSpace($ActualEnvId)) {
         throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_ENVIRONMENT_ID configured in AppSetting. Fail-closed: Cannot restore into unverified database without verified identity. NO DATABASE MUTATION OCCURRED."
     }
@@ -263,7 +264,7 @@ if ($InitializeNewEnvironment) {
     }
 
     # Check GMS_INSTALLATION_UUID (FAIL-CLOSED: Must be present on existing database)
-    [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_INSTALLATION_UUID' OR key = 'INSTALLATION_UUID' LIMIT 1), '');"
+    [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT value FROM \"AppSetting\" WHERE key IN ('GMS_INSTALLATION_UUID', 'INSTALLATION_UUID') LIMIT 1;"
     if ([string]::IsNullOrWhiteSpace($ActualInstallUuid)) {
         throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_INSTALLATION_UUID configured in AppSetting. Fail-closed: Existing environment restore requires a valid installation UUID. NO DATABASE MUTATION OCCURRED."
     }
@@ -272,7 +273,8 @@ if ($InitializeNewEnvironment) {
     }
 
     # Check GMS_RESTORE_ALLOWED
-    [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM \"AppSetting\" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
+    [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT UPPER(value) FROM \"AppSetting\" WHERE key IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') LIMIT 1;"
+    if (-not $RestoreAllowedVal) { $RestoreAllowedVal = "FALSE" }
     if ($RestoreAllowedVal -ne "TRUE" -and $RestoreAllowedVal -ne "1") {
         throw "HARD FAIL: GMS_RESTORE_ALLOWED is set to '$RestoreAllowedVal' in AppSetting. Restore operation is NOT permitted on live database [$LiveDbName]. Set GMS_RESTORE_ALLOWED = TRUE in target database prior to executing restore. NO DATABASE MUTATION OCCURRED."
     }
@@ -325,16 +327,17 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 
     # Exec-Query helper
     function Exec-StagingQuery([string]$sql) {
-        $raw = $sql | & docker exec -i $StagingContainer psql -t -A -U $PgUser -d $StagingDbName 2>&1
+        $inputSql = $sql.Trim() + "`n"
+        $raw = $inputSql | & docker exec -i $StagingContainer psql -t -A -U $PgUser -d $StagingDbName 2>&1
         if (-not $raw) { return "" }
         [string]$rawText = ($raw | Out-String)
         [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
         if ($lines.Length -gt 0) {
-            [string]$lastLine = ([string]$lines[-1]).Trim()
-            if ($lastLine -match '^(psql:\s*error:|ERROR:|FATAL:)') {
-                throw "Staging database query error: $lastLine"
+            $errLine = $lines | Where-Object { $_ -match '^(psql:\s*error:|ERROR:|FATAL:)' } | Select-Object -First 1
+            if ($errLine) {
+                throw "Staging database query error: $($lines -join ' -- ')"
             }
-            return $lastLine
+            return ([string]$lines[-1]).Trim()
         }
         return ""
     }
