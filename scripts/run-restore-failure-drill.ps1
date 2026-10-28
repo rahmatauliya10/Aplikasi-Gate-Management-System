@@ -125,9 +125,10 @@ function Ensure-TargetPostgresContainer {
             if ($LASTEXITCODE -eq 0) { break }
         }
     }
-    $rawMig = & docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.\"_prisma_migrations\"');" 2>$null
-    $migExists = if ($rawMig) { [string]$rawMig.ToString().Trim() } else { "" }
-    if ([string]::IsNullOrWhiteSpace($migExists)) {
+    $rawMig = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '_prisma_migrations';`n") | & docker exec -i $Container psql -U $User -d $Database -t -A 2>$null
+    [string[]]$migLines = if ($rawMig) { @(($rawMig.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
+    $migExists = if ($migLines.Length -gt 0) { ([string]$migLines[-1]).Trim() } else { "" }
+    if ($migExists -ne "1") {
         [string]$DumpFile = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
         if (Test-Path -LiteralPath $DumpFile) {
             Write-Log "Populating baseline historical test database into $Container ($Database)..."
@@ -148,10 +149,19 @@ function Enable-TargetRestoreGate {
     )
     Ensure-TargetPostgresContainer -Container $Container -Database $Database -User $User -Port $DrillPort
     try {
-        & docker exec $Container psql -U $User -d $Database -c "CREATE TABLE IF NOT EXISTS \"AppSetting\" (\"id\" VARCHAR(36) PRIMARY KEY, \"key\" VARCHAR(255) UNIQUE NOT NULL, \"value\" TEXT NOT NULL, \"createdAt\" TIMESTAMPTZ NOT NULL DEFAULT now(), \"updatedAt\" TIMESTAMPTZ NOT NULL DEFAULT now());" 2>&1 | Out-Null
-        & docker exec $Container psql -U $User -d $Database -c "INSERT INTO \"AppSetting\" (\"id\", \"key\", \"value\", \"createdAt\", \"updatedAt\") VALUES ('set-restore-gate', 'GMS_RESTORE_ALLOWED', 'TRUE', NOW(), NOW()) ON CONFLICT (\"key\") DO UPDATE SET \"value\" = 'TRUE';" 2>&1 | Out-Null
-        & docker exec $Container psql -U $User -d $Database -c "INSERT INTO \"AppSetting\" (\"id\", \"key\", \"value\", \"createdAt\", \"updatedAt\") VALUES ('set-env-gate', 'GMS_ENVIRONMENT_ID', 'GMS-DRILL-SJA-01', NOW(), NOW()) ON CONFLICT (\"key\") DO UPDATE SET \"value\" = 'GMS-DRILL-SJA-01';" 2>&1 | Out-Null
-        & docker exec $Container psql -U $User -d $Database -c "INSERT INTO \"AppSetting\" (\"id\", \"key\", \"value\", \"createdAt\", \"updatedAt\") VALUES ('set-uuid-gate', 'GMS_INSTALLATION_UUID', '4f53a720-911b-4f9e-a89b-8321481dc901', NOW(), NOW()) ON CONFLICT (\"key\") DO UPDATE SET \"value\" = '4f53a720-911b-4f9e-a89b-8321481dc901';" 2>&1 | Out-Null
+        $initSql = @"
+CREATE TABLE IF NOT EXISTS "AppSetting" (
+    "id" VARCHAR(36) PRIMARY KEY,
+    "key" VARCHAR(255) UNIQUE NOT NULL,
+    "value" TEXT NOT NULL,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES ('set-restore-gate', 'GMS_RESTORE_ALLOWED', 'TRUE', NOW(), NOW()) ON CONFLICT ("key") DO UPDATE SET "value" = 'TRUE';
+INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES ('set-env-gate', 'GMS_ENVIRONMENT_ID', 'GMS-DRILL-SJA-01', NOW(), NOW()) ON CONFLICT ("key") DO UPDATE SET "value" = 'GMS-DRILL-SJA-01';
+INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES ('set-uuid-gate', 'GMS_INSTALLATION_UUID', '4f53a720-911b-4f9e-a89b-8321481dc901', NOW(), NOW()) ON CONFLICT ("key") DO UPDATE SET "value" = '4f53a720-911b-4f9e-a89b-8321481dc901';
+"@
+        ($initSql + "`n") | & docker exec -i $Container psql -U $User -d $Database 2>&1 | Out-Null
     } catch {}
 }
 
@@ -187,24 +197,24 @@ function Get-DatabaseFingerprint {
     $Result = [ordered]@{}
 
     foreach ($Table in $Tables) {
-        $rawCheck = & docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.`"$Table`"');" 2>&1
+        $rawCheck = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '$Table';`n") | & docker exec -i $Container psql -U $User -d $Database -t -A 2>&1
         [string[]]$tableLines = if ($rawCheck) { @(($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
         $TableCheck = if ($tableLines.Length -gt 0) { ([string]$tableLines[-1]).Trim() } else { "" }
-        if ([string]::IsNullOrWhiteSpace($TableCheck) -or $TableCheck.Contains("ERROR")) {
+        if ($TableCheck -ne "1") {
             $Result[$Table] = "NON_EXISTENT"
             continue
         }
 
-        $whereClause = if ($Table -eq "AppSetting") { "WHERE `"key`" NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED')" } else { "" }
-        $Sql = "SELECT COALESCE(encode(sha256(string_agg(encode(sha256(row_to_json(t)::text::bytea), 'hex'), ',' ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex'))::bytea), 'hex'), 'EMPTY') FROM `"$Table`" t $whereClause;"
+        $whereClause = if ($Table -eq "AppSetting") { "WHERE key NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED')" } else { "" }
+        $Sql = "SELECT COALESCE(encode(sha256(string_agg(encode(sha256(row_to_json(t)::text::bytea), 'hex'), ',' ORDER BY encode(sha256(row_to_json(t)::text::bytea), 'hex'))::bytea), 'hex'), 'EMPTY') FROM ""$Table"" t $whereClause;"
 
         $Hash = ""
         try {
-            $rawHash = & docker exec $Container psql -U $User -d $Database -t -A -c "$Sql" 2>&1
+            $rawHash = ($Sql + "`n") | & docker exec -i $Container psql -U $User -d $Database -t -A 2>&1
             [string[]]$hashLines = if ($rawHash) { @(($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
             $Hash = if ($hashLines.Length -gt 0) { ([string]$hashLines[-1]).Trim() } else { "" }
         } catch {
-            throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
+            throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $($_.ToString())"
         }
 
         if ([string]::IsNullOrWhiteSpace($Hash) -or $Hash.Contains("ERROR") -or $Hash.Contains("fatal") -or $Hash.Contains("could not connect")) {
@@ -305,7 +315,7 @@ try {
 
     Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details $p1Details -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds -EvidenceData @{ exitCode = $p1Exit; rejectedBeforeMutation = $p1Passed }
 } catch {
-    Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds
+    Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds
 } finally {
     if (-not [string]::IsNullOrWhiteSpace($TempCorruptDir) -and (Test-Path -LiteralPath $TempCorruptDir)) {
         Remove-Item -LiteralPath $TempCorruptDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -373,7 +383,7 @@ try {
             maintenanceActive = $MaintenanceActiveP2
         }
 } catch {
-    Record-Drill-Phase -PhaseName "Phase 2: During-DB-Promotion Compensation" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p2Start).TotalSeconds
+    Record-Drill-Phase -PhaseName "Phase 2: During-DB-Promotion Compensation" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p2Start).TotalSeconds
 }
 
 # ------------------------------------------------------------------------------
@@ -437,7 +447,7 @@ try {
             maintenanceActive = $MaintenanceActive
         }
 } catch {
-    Record-Drill-Phase -PhaseName "Phase 3: Post-DB-Commit Compensation" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds
+    Record-Drill-Phase -PhaseName "Phase 3: Post-DB-Commit Compensation" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds
 }
 
 # ------------------------------------------------------------------------------
@@ -499,7 +509,7 @@ try {
             databasePreserved = $DbPreservedP4
         }
 } catch {
-    Record-Drill-Phase -PhaseName "Phase 4: Attachment Swap Rollback" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds
+    Record-Drill-Phase -PhaseName "Phase 4: Attachment Swap Rollback" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds
 }
 
 # ------------------------------------------------------------------------------
@@ -553,7 +563,7 @@ try {
             maintenanceFreezeActive = $MaintenanceFlagActive
         }
 } catch {
-    Record-Drill-Phase -PhaseName "Phase 5: Maintenance Freeze on Discrepancy" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p5Start).TotalSeconds
+    Record-Drill-Phase -PhaseName "Phase 5: Maintenance Freeze on Discrepancy" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p5Start).TotalSeconds
 }
 
 # ------------------------------------------------------------------------------
@@ -679,7 +689,7 @@ try {
             networkErrorDistinguished = $networkErrorDistinguished
         }
 } catch {
-    Record-Drill-Phase -PhaseName "Phase 6: Maintenance HTTP Write Rejection (503)" -Passed $false -Details $_.Message -DurationSeconds ((Get-Date) - $p6Start).TotalSeconds
+    Record-Drill-Phase -PhaseName "Phase 6: Maintenance HTTP Write Rejection (503)" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p6Start).TotalSeconds
 } finally {
     if ($mockProc -and -not $mockProc.HasExited) {
         try {

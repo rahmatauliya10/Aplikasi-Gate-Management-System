@@ -343,7 +343,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     }
 
     Write-Log "Step 5: Verifying Schema Migrations & Invariants in Staging Database..."
-    [string]$MigrationCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
+    [string]$MigrationCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM ""_prisma_migrations"" WHERE finished_at IS NOT NULL;"
     [int]$MigrationCount = 0
     if (-not [int]::TryParse($MigrationCountStr, [ref]$MigrationCount) -or $MigrationCount -eq 0) {
         throw "Migration Check Failed: _prisma_migrations table missing or has 0 finished migrations."
@@ -484,7 +484,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         }
 
         # Reconcile DB Attachment table entries against physical files in Staging Directory
-        [string]$AttDbJson = Exec-StagingQuery "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', \"filePath\", 'sha256', sha256)), '[]'::json) FROM \"Attachment\";"
+        [string]$AttDbJson = Exec-StagingQuery "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', ""filePath"", 'sha256', sha256)), '[]'::json) FROM ""Attachment"";"
         if (-not [string]::IsNullOrWhiteSpace($AttDbJson) -and $AttDbJson -ne "[]") {
             $AttDbList = $AttDbJson | ConvertFrom-Json
             foreach ($att in $AttDbList) {
@@ -544,9 +544,9 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     if ($InitializeNewEnvironment) {
         Write-Log "  -InitializeNewEnvironment switch detected. Verifying target database is 100% empty..."
         if ($LiveTableCount -gt 0) {
-            [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"User\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"User\") ELSE 0 END;"
-            [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"_prisma_migrations\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"_prisma_migrations\") ELSE 0 END;"
-            [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"Transaction\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"Transaction\") ELSE 0 END;"
+            [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""User""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""User"") ELSE 0 END;"
+            [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""_prisma_migrations""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""_prisma_migrations"") ELSE 0 END;"
+            [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""Transaction""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""Transaction"") ELSE 0 END;"
             [int]$uCount = 0; [int]$mCount = 0; [int]$tCount = 0;
             [int]::TryParse($LiveUserCountStr, [ref]$uCount) | Out-Null
             [int]::TryParse($LiveMigCountStr, [ref]$mCount) | Out-Null
@@ -562,15 +562,15 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
             throw "HARD FAIL: Target database [$LiveDbName] has 0 tables and is not initialized. For fresh databases, use -InitializeNewEnvironment. NO DATABASE MUTATION OCCURRED."
         }
 
-        [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"_prisma_migrations\"') IS NOT NULL THEN 1 ELSE 0 END;"
-        [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"AppSetting\"') IS NOT NULL THEN 1 ELSE 0 END;"
+        [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""_prisma_migrations""') IS NOT NULL THEN 1 ELSE 0 END;"
+        [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""AppSetting""') IS NOT NULL THEN 1 ELSE 0 END;"
 
         if ($hasMigrations -ne "1" -or $hasAppSettings -ne "1") {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
         }
 
         # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
-        [string]$ActualEnvId = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_ENVIRONMENT_ID' OR key = 'ENVIRONMENT_ID' OR key = 'SYSTEM_ENVIRONMENT_ID' LIMIT 1), '');"
+        [string]$ActualEnvId = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM ""AppSetting"" WHERE key = 'GMS_ENVIRONMENT_ID' OR key = 'ENVIRONMENT_ID' OR key = 'SYSTEM_ENVIRONMENT_ID' LIMIT 1), '');"
         if ([string]::IsNullOrWhiteSpace($ActualEnvId)) {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_ENVIRONMENT_ID configured in AppSetting. Fail-closed: Cannot restore into unverified database without verified identity. NO DATABASE MUTATION OCCURRED."
         }
@@ -579,7 +579,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         }
 
         # Check GMS_INSTALLATION_UUID (FAIL-CLOSED: Must be present on existing database)
-        [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_INSTALLATION_UUID' OR key = 'INSTALLATION_UUID' LIMIT 1), '');"
+        [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM ""AppSetting"" WHERE key = 'GMS_INSTALLATION_UUID' OR key = 'INSTALLATION_UUID' LIMIT 1), '');"
         if ([string]::IsNullOrWhiteSpace($ActualInstallUuid)) {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_INSTALLATION_UUID configured in AppSetting. Fail-closed: Existing environment restore requires a valid installation UUID. NO DATABASE MUTATION OCCURRED."
         }
@@ -588,7 +588,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         }
 
         # Check GMS_RESTORE_ALLOWED
-        [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM \"AppSetting\" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
+        [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
         if ($RestoreAllowedVal -ne "TRUE" -and $RestoreAllowedVal -ne "1") {
             throw "HARD FAIL: GMS_RESTORE_ALLOWED is set to '$RestoreAllowedVal' in AppSetting. Restore operation is NOT permitted on live database [$LiveDbName]. Set GMS_RESTORE_ALLOWED = TRUE in target database prior to executing restore. NO DATABASE MUTATION OCCURRED."
         }
@@ -668,7 +668,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     }
 
     # Verify Live DB migration deployment
-    [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
+    [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM ""_prisma_migrations"" WHERE finished_at IS NOT NULL;"
     [int]$LiveMigCount = 0
     if (-not [int]::TryParse($LiveMigCountStr, [ref]$LiveMigCount) -or $LiveMigCount -eq 0) {
         throw "Post-Promotion Live DB Verification Error: _prisma_migrations empty or missing in live database."
@@ -729,28 +729,28 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     [int]$LiveImDupeCurrent = 0
     [string]$hasIsCurrentLive = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'WeighbridgeRecord' AND column_name = 'isCurrent';"
     if ($hasIsCurrentLive -eq "1") {
-        $LiveWbDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
-        $LiveWhDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-        $LiveQcvDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-        $LiveImDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+        $LiveWbDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"", ""type"" FROM ""WeighbridgeRecord"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"", ""type"" HAVING COUNT(*) > 1) d;")
+        $LiveWhDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""WarehouseProcess"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
+        $LiveQcvDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""QcVehicleCheck"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
+        $LiveImDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""IncomingMaterialCheck"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
     }
     [int]$LiveTotalDupes = $LiveWbDupeCurrent + $LiveWhDupeCurrent + $LiveQcvDupeCurrent + $LiveImDupeCurrent
 
     [int]$LiveOrphanHist = 0
-    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"TransactionStatusHistory\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
-        $LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""TransactionStatusHistory""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""TransactionStatusHistory"" h LEFT JOIN ""Transaction"" t ON h.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
     [int]$LiveOrphanWb = 0
-    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"WeighbridgeRecord\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
-        $LiveOrphanWb = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""WeighbridgeRecord""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanWb = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""WeighbridgeRecord"" r LEFT JOIN ""Transaction"" t ON r.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
     [int]$LiveOrphanWh = 0
-    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"WarehouseProcess\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
-        $LiveOrphanWh = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""WarehouseProcess""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanWh = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""WarehouseProcess"" w LEFT JOIN ""Transaction"" t ON w.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
     [int]$LiveOrphanAtt = 0
-    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"Attachment\"') IS NOT NULL AND to_regclass('public.\"Transaction\"') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
-        $LiveOrphanAtt = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""Attachment""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanAtt = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""Attachment"" a LEFT JOIN ""Transaction"" t ON a.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
     [int]$LiveTotalOrphans = $LiveOrphanHist + $LiveOrphanWb + $LiveOrphanWh + $LiveOrphanAtt
 
@@ -922,7 +922,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database for security
     if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
         try {
-            & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "UPDATE \"AppSetting\" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED';" 2>&1 | Out-Null
+            & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED';" 2>&1 | Out-Null
         } catch {}
     }
 
