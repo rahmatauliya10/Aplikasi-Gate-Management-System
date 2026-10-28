@@ -322,7 +322,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
         -ExecutionBlock {
             & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId "GMS-UNEXPECTED-ENV-ID" -ExpectedInstallationUuid $KnownInstallUuid -Force 2>&1
         } `
-        -ExpectedKeywords @("TARGET DATABASE FINGERPRINT MISMATCH", "Expected Environment ID 'GMS-UNEXPECTED-ENV-ID'")
+        -ExpectedKeywords @("Expected Environment ID 'GMS-UNEXPECTED-ENV-ID'", "does not match target database ID")
 
     # --------------------------------------------------------------------------
     # Case 3: Real Container Target with Mismatched Installation UUID -> REJECT
@@ -331,7 +331,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
         -ExecutionBlock {
             & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid "00000000-0000-0000-0000-000000000000" -Force 2>&1
         } `
-        -ExpectedKeywords @("TARGET DATABASE FINGERPRINT MISMATCH", "Expected Installation UUID '00000000-0000-0000-0000-000000000000'")
+        -ExpectedKeywords @("Expected Installation UUID '00000000-0000-0000-0000-000000000000'", "does not match target UUID")
 
     # --------------------------------------------------------------------------
     # Case 4: Real Container Target with RESTORE_ALLOWED = 'FALSE' -> REJECT

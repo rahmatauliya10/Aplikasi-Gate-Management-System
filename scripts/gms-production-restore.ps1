@@ -247,11 +247,9 @@ if ($InitializeNewEnvironment) {
         throw "HARD FAIL: Target database [$LiveDbName] has 0 tables and is not initialized. For fresh databases, use -InitializeNewEnvironment. NO DATABASE MUTATION OCCURRED."
     }
 
-    [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"_prisma_migrations\"') IS NOT NULL THEN 1 ELSE 0 END;"
-    [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"AppSetting\"') IS NOT NULL THEN 1 ELSE 0 END;"
-
-    if ($hasMigrations -ne "1" -or $hasAppSettings -ne "1") {
-        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
+    [string]$validTablesCount = Exec-LiveDbQuery "SELECT count(*) FROM pg_stat_user_tables WHERE relname IN ('_prisma_migrations', 'AppSetting');"
+    if ($validTablesCount -ne "2") {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing, found $validTablesCount/2). NO DATABASE MUTATION OCCURRED."
     }
 
     # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
