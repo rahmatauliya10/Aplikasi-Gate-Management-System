@@ -208,7 +208,8 @@ function Exec-LiveDbQuery([string]$sql) {
     }
     if (-not $raw) { return "" }
     $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
-    return if ($cleanLines) { $cleanLines[-1].Trim() } else { "" }
+    if ($cleanLines) { return $cleanLines[-1].Trim() }
+    return ""
 }
 
 # --------------------------------------------------------------------------
@@ -322,7 +323,8 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         $raw = & docker exec $StagingContainer psql -t -A -U $PgUser -d $StagingDbName -c "$sql" 2>&1
         if (-not $raw) { return "" }
         $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
-        return if ($cleanLines) { $cleanLines[-1].Trim() } else { "" }
+        if ($cleanLines) { return $cleanLines[-1].Trim() }
+        return ""
     }
 
     Write-Log "Step 5: Verifying Schema Migrations & Invariants in Staging Database..."
@@ -505,10 +507,15 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 
     # Helper for live database queries
     function Exec-LiveDbQuery([string]$sql) {
-        $raw = & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        $raw = if ($PgPass) {
+            & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        } else {
+            & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        }
         if (-not $raw) { return "" }
         $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
-        return if ($cleanLines) { $cleanLines[-1].Trim() } else { "" }
+        if ($cleanLines) { return $cleanLines[-1].Trim() }
+        return ""
     }
 
     # --------------------------------------------------------------------------
