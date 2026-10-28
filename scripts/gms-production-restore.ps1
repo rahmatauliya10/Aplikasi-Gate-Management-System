@@ -192,7 +192,7 @@ $rawLivePreflight = ""
 try {
     $rawOut = & docker ps -q -f "name=^/${LiveContainer}$" 2>$null
     if ($LASTEXITCODE -eq 0 -and $rawOut) {
-        $rawLivePreflight = [string]$rawOut.ToString().Trim()
+        $rawLivePreflight = ([string]($rawOut | Out-String)).Trim()
     }
 } catch {}
 if ([string]::IsNullOrWhiteSpace($rawLivePreflight)) {
@@ -207,7 +207,8 @@ function Exec-LiveDbQuery([string]$sql) {
         $sql | & docker exec -i $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
     }
     if (-not $raw) { return "" }
-    [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+    [string]$rawText = ($raw | Out-String)
+    [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
     if ($lines.Length -gt 0) {
         [string]$lastLine = ([string]$lines[-1]).Trim()
         if ($lastLine -match '^(psql:\s*error:|ERROR:|FATAL:)') {
@@ -326,7 +327,8 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     function Exec-StagingQuery([string]$sql) {
         $raw = $sql | & docker exec -i $StagingContainer psql -t -A -U $PgUser -d $StagingDbName 2>&1
         if (-not $raw) { return "" }
-        [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+        [string]$rawText = ($raw | Out-String)
+        [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
         if ($lines.Length -gt 0) {
             [string]$lastLine = ([string]$lines[-1]).Trim()
             if ($lastLine -match '^(psql:\s*error:|ERROR:|FATAL:)') {
