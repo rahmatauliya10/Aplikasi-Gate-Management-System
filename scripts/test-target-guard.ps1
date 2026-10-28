@@ -212,9 +212,16 @@ try {
         }
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Seconds 1
-            & docker exec $TargetContainer pg_isready -U $TargetUser -d $TargetDb 2>&1 | Out-Null
+            & docker exec $TargetContainer pg_isready -U $TargetUser 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) { break }
         }
+    }
+
+    # Ensure target database exists
+    $dbCheck = "SELECT 1 FROM pg_database WHERE datname = '$TargetDb';" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d postgres 2>$null
+    if ($dbCheck -ne "1") {
+        Write-Host "Creating target database [$TargetDb] on $TargetContainer..." -ForegroundColor Cyan
+        "CREATE DATABASE ""$TargetDb"";" | & docker exec -i $TargetContainer psql -U $TargetUser -d postgres 2>&1 | Out-Null
     }
 
     # Initialize baseline schema and security governance records
