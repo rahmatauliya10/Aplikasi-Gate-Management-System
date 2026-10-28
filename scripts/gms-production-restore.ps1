@@ -207,8 +207,8 @@ function Exec-LiveDbQuery([string]$sql) {
         & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
     }
     if (-not $raw) { return "" }
-    $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
-    if ($cleanLines) { return $cleanLines[-1].Trim() }
+    [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+    if ($lines.Length -gt 0) { return ([string]$lines[-1]).Trim() }
     return ""
 }
 
@@ -322,8 +322,8 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     function Exec-StagingQuery([string]$sql) {
         $raw = & docker exec $StagingContainer psql -t -A -U $PgUser -d $StagingDbName -c "$sql" 2>&1
         if (-not $raw) { return "" }
-        $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
-        if ($cleanLines) { return $cleanLines[-1].Trim() }
+        [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+        if ($lines.Length -gt 0) { return ([string]$lines[-1]).Trim() }
         return ""
     }
 
@@ -513,8 +513,8 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
             & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
         }
         if (-not $raw) { return "" }
-        $cleanLines = ($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }
-        if ($cleanLines) { return $cleanLines[-1].Trim() }
+        [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+        if ($lines.Length -gt 0) { return ([string]$lines[-1]).Trim() }
         return ""
     }
 

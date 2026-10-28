@@ -188,8 +188,8 @@ function Get-DatabaseFingerprint {
 
     foreach ($Table in $Tables) {
         $rawCheck = & docker exec $Container psql -U $User -d $Database -t -A -c "SELECT to_regclass('public.`"$Table`"');" 2>&1
-        $tableLines = if ($rawCheck) { ($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' } } else { @() }
-        $TableCheck = if ($tableLines) { $tableLines[-1].Trim() } else { "" }
+        [string[]]$tableLines = if ($rawCheck) { @(($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
+        $TableCheck = if ($tableLines.Length -gt 0) { ([string]$tableLines[-1]).Trim() } else { "" }
         if ([string]::IsNullOrWhiteSpace($TableCheck) -or $TableCheck.Contains("ERROR")) {
             $Result[$Table] = "NON_EXISTENT"
             continue
@@ -201,8 +201,8 @@ function Get-DatabaseFingerprint {
         $Hash = ""
         try {
             $rawHash = & docker exec $Container psql -U $User -d $Database -t -A -c "$Sql" 2>&1
-            $hashLines = if ($rawHash) { ($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' } } else { @() }
-            $Hash = if ($hashLines) { $hashLines[-1].Trim() } else { "" }
+            [string[]]$hashLines = if ($rawHash) { @(($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
+            $Hash = if ($hashLines.Length -gt 0) { ([string]$hashLines[-1]).Trim() } else { "" }
         } catch {
             throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $_"
         }
