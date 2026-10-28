@@ -140,7 +140,7 @@ function Assert-GuardRejection {
         Write-Host "  [FAIL] $TestName" -ForegroundColor Red
         Write-Host "         ExitCode=$exitCode (Expected != 0), Keywords Searched: $($ExpectedKeywords -join ', ')" -ForegroundColor Red
         Write-Host "         Output: $combinedOutput" -ForegroundColor DarkGray
-        [string]$errPreview = if ($combinedOutput.Length -gt 300) { $combinedOutput.Substring(0, 300).Replace("`r", "").Replace("`n", " ") } else { $combinedOutput.Replace("`r", "").Replace("`n", " ") }
+        [string]$errPreview = if ($combinedOutput.Length -gt 500) { $combinedOutput.Substring($combinedOutput.Length - 500).Replace("`r", "").Replace("`n", " ") } else { $combinedOutput.Replace("`r", "").Replace("`n", " ") }
         Write-Host "::error file=scripts/test-target-guard.ps1,title=GuardAssertionFailed::$TestName FAILED. ExitCode=$exitCode. Preview: $errPreview"
     }
 
@@ -282,7 +282,7 @@ try {
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 1: Target Container Missing / Unreachable" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer "nonexistent_container_xyz999" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer "nonexistent_container_xyz999" -Force 2>&1
         } `
         -ExpectedKeywords @("is not running or unreachable", "HARD FAIL: Live target container", "Cannot proceed with restore")
 
@@ -291,7 +291,7 @@ try {
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 2: Real Container Target with Mismatched Environment ID" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId "GMS-UNEXPECTED-ENV-ID" -ExpectedInstallationUuid $KnownInstallUuid -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId "GMS-UNEXPECTED-ENV-ID" -ExpectedInstallationUuid $KnownInstallUuid -Force 2>&1
         } `
         -ExpectedKeywords @("TARGET DATABASE FINGERPRINT MISMATCH", "Expected Environment ID 'GMS-UNEXPECTED-ENV-ID'")
 
@@ -300,7 +300,7 @@ try {
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 3: Real Container Target with Mismatched Installation UUID" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid "00000000-0000-0000-0000-000000000000" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid "00000000-0000-0000-0000-000000000000" -Force 2>&1
         } `
         -ExpectedKeywords @("TARGET DATABASE FINGERPRINT MISMATCH", "Expected Installation UUID '00000000-0000-0000-0000-000000000000'")
 
@@ -309,7 +309,7 @@ try {
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 4: Real Container Target with RESTORE_ALLOWED = FALSE" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -Force 2>&1
         } `
         -ExpectedKeywords @("GMS_RESTORE_ALLOWED is set to 'FALSE'", "Restore operation is NOT permitted")
 
@@ -319,7 +319,7 @@ try {
     Assert-GuardRejection -TestName "Case 5: Real Container Target with Production ID + Fault Injection" `
         -ExecutionBlock {
             $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId "GMS-PROD-SJA-01" -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId "GMS-PROD-SJA-01" -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force 2>&1
         } `
         -ExpectedKeywords @("PRODUCTION", "CRITICAL GOVERNANCE VIOLATION", "UNCONDITIONALLY PROHIBITED on production targets")
 
@@ -329,7 +329,7 @@ try {
     Assert-GuardRejection -TestName "Case 6: Fault Injection Without GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE" `
         -ExecutionBlock {
             $env:GMS_ISOLATED_DRILL_ENVIRONMENT = ""
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force 2>&1
         } `
         -ExpectedKeywords @("requires verified isolated drill environment (GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE)", "CRITICAL GOVERNANCE VIOLATION")
 
@@ -339,7 +339,7 @@ try {
     Assert-GuardRejection -TestName "Case 7: Production DB Name with Fault Injection" `
         -ExecutionBlock {
             $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName "gms_prod" -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $AuthoritativeManifest -LiveContainer $TargetContainer -LiveDbName "gms_prod" -PgUser $TargetUser -PgPass $TargetPass -ExpectedEnvironmentId $KnownEnvId -ExpectedInstallationUuid $KnownInstallUuid -FaultInjectionPhase "DURING_DB_PROMOTION" -Force 2>&1
         } `
         -ExpectedKeywords @("PRODUCTION", "CRITICAL GOVERNANCE VIOLATION", "UNCONDITIONALLY PROHIBITED on production targets")
 
@@ -348,7 +348,7 @@ try {
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 8: Corrupted Dump SHA-256 Checksum in Manifest Preflight" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $CorruptManifestPath -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -Force 2>&1
         } `
         -ExpectedKeywords @("Dump File Checksum Mismatch", "Checksum Mismatch", "SHA-256", "Preflight Check Failed")
 
@@ -357,7 +357,7 @@ try {
     # --------------------------------------------------------------------------
     Assert-GuardRejection -TestName "Case 9: Non-Existent Manifest Path Rejection" `
         -ExecutionBlock {
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath (Join-Path $TempTestDir "missing_manifest.json") -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath (Join-Path $TempTestDir "missing_manifest.json") -LiveContainer $TargetContainer -LiveDbName $TargetDb -PgUser $TargetUser -PgPass $TargetPass -Force 2>&1
         } `
         -ExpectedKeywords @("Manifest File Not Found", "Preflight Check Failed", "HARD FAIL")
 

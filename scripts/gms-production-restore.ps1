@@ -89,7 +89,11 @@ Write-Log "=====================================================================
 [string]$BackupId = ""
 [string]$ActualDumpHash = ""
 [string]$AttArchivePath = ""
+[string]$StagingContainer = ""
+[string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
+[string]$MaintActivePath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active"
 
+try {
 # Step 1: Resolve Backup Manifest & Artifact Paths
 [string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups/local"
 if (-not (Test-Path -Path $LocalBackupDir -PathType Container)) {
@@ -284,10 +288,9 @@ Set-Content -Path $MaintActivePath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE
 Write-Log "  Maintenance flag created ($MaintFlagPath & $MaintActivePath) [PASS]" -Level "SUCCESS"
 
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
-[string]$StagingContainer = "gms-restore-staging-" + $TimestampSuffix
+$StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 
-try {
-    # Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
+# Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
     Write-Log "Step 3: Spawning Isolated Staging PostgreSQL Container ($StagingContainer)..."
     & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Failed launching isolated PostgreSQL staging container." }
@@ -888,8 +891,10 @@ try {
         }
         Write-Log "Maintenance mode released & staging container destroyed."
     } else {
-        Write-Log "RESTORE FAILED OR INCOMPLETE! MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY." -Level "WARN"
-        Write-Log "Maintenance flags ($MaintFlagPath & $MaintActivePath) have been preserved." -Level "WARN"
+        if ((Test-Path -Path $MaintFlagPath) -or (Test-Path -Path $MaintActivePath)) {
+            Write-Log "RESTORE FAILED OR INCOMPLETE! MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY." -Level "WARN"
+            Write-Log "Maintenance flags ($MaintFlagPath & $MaintActivePath) have been preserved." -Level "WARN"
+        }
     }
 
     # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database for security
@@ -899,7 +904,9 @@ try {
         } catch {}
     }
 
-    & docker rm -f $StagingContainer 2>&1 | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($StagingContainer)) {
+        & docker rm -f $StagingContainer 2>&1 | Out-Null
+    }
 }
 
 exit 0
