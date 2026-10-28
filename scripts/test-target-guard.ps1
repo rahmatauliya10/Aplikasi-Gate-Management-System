@@ -210,11 +210,25 @@ try {
             Write-Host "  Launching isolated drill PostgreSQL container ($TargetContainer on port $TargetPort)..."
             & docker run -d --name $TargetContainer -p "127.0.0.1:${TargetPort}:5432" -e "POSTGRES_DB=$TargetDb" -e "POSTGRES_USER=$TargetUser" -e "POSTGRES_PASSWORD=$TargetPass" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
         }
-        for ($i = 0; $i -lt 30; $i++) {
-            Start-Sleep -Seconds 1
-            & docker exec $TargetContainer pg_isready -U $TargetUser 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) { break }
+    }
+
+    # Wait for PostgreSQL container to be fully operational and accepting queries
+    Write-Host "Waiting for target PostgreSQL server to be fully operational and accepting queries..." -ForegroundColor Cyan
+    $isReady = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        Start-Sleep -Seconds 1
+        $readyCheck = "SELECT 1;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d postgres 2>$null
+        if ($readyCheck -and $readyCheck.Trim() -eq "1") {
+            Start-Sleep -Milliseconds 500
+            $secondCheck = "SELECT 1;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d postgres 2>$null
+            if ($secondCheck -and $secondCheck.Trim() -eq "1") {
+                $isReady = $true
+                break
+            }
         }
+    }
+    if (-not $isReady) {
+        throw "Target PostgreSQL container ($TargetContainer) failed to become ready and stable within 30s."
     }
 
     # Ensure target database exists
@@ -264,7 +278,12 @@ INSERT INTO "AppSetting" ("key", "value") VALUES
   ('GMS_RESTORE_ALLOWED', 'FALSE')
 ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
 "@
-    $initRes = $initSql | & docker exec -i $TargetContainer psql -U $TargetUser -d $TargetDb 2>&1
+    $initRes = ""
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $initRes = $initSql | & docker exec -i $TargetContainer psql -U $TargetUser -d $TargetDb 2>&1
+        if ($LASTEXITCODE -eq 0) { break }
+        Start-Sleep -Seconds 1
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to initialize baseline target database: $initRes"
     }
