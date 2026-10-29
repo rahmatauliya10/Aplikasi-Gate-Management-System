@@ -1,0 +1,8 @@
+{
+  "manifestType": "PRODUCTION_RELEASE",
+  "release": "fixture-empty-inventory",
+  "gitSha": "0000000000000000000000000000000000000000",
+  "schemaVersion": "1.0.0",
+  "migrations": [],
+  "migrationInventory": []
+}

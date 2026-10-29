@@ -444,6 +444,21 @@ jobs:
           set -Eeuo pipefail
           pwsh -ExecutionPolicy Bypass -File scripts/run-restore-failure-drill.ps1
 
+      - name: Validate PowerShell Scripts AST Syntax Across Repository
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/verify-powershell-ast.ps1
+
+      - name: Execute Target Guard PowerShell Policy Verification (P0-C / P0-D)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-target-guard.ps1 -AllowSkipIfDockerUnavailable
+
+      - name: Execute CLI Rollback Syntax & Regression Suite (REL-01..REL-16)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-cli-rollback-syntax.ps1
+
       - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
         if: always()
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1

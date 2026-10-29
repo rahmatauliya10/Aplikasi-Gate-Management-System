@@ -204,7 +204,7 @@ try {
     & docker exec $RehearsalContainer rm -f $TmpDumpPath 2>&1 | Out-Null
 
     if ($RestoreExitCode -ne 0) {
-        throw "Historical pg_restore failed with exit code $RestoreExitCode: $RestoreOut"
+        throw "Historical pg_restore failed with exit code ${RestoreExitCode}: $RestoreOut"
     }
     Write-Log "pg_restore completed with exit code 0 (SUCCESS)."
 
