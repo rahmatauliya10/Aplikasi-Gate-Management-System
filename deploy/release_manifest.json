@@ -1,15 +1,17 @@
 {
   "manifestType": "PRODUCTION_RELEASE",
-  "release": "93d27810031bcf3dffdb571ff1827dc06381da22",
-  "gitSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
-  "ciPassedSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
-  "buildSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
-  "releaseSha": "93d27810031bcf3dffdb571ff1827dc06381da22",
-  "timestamp": "2026-08-18T07:57:00.000Z",
+  "release": "e8828382a5da1c7262fd59128a96d237052baee3",
+  "gitSha": "e8828382a5da1c7262fd59128a96d237052baee3",
+  "ciPassedSha": "e8828382a5da1c7262fd59128a96d237052baee3",
+  "buildSha": "e8828382a5da1c7262fd59128a96d237052baee3",
+  "releaseSha": "e8828382a5da1c7262fd59128a96d237052baee3",
+  "timestamp": "2026-10-28T09:00:00.000Z",
   "provenance": {
     "sourceShaEqualsTestedSha": true,
     "testedShaEqualsBuiltSha": true,
-    "builtShaEqualsReleaseSha": true
+    "builtShaEqualsReleaseSha": true,
+    "ciRunNumber": 510,
+    "ciStatus": "PASS"
   },
   "backend": {
     "image": "ghcr.io/rahmatauliya10/gms-backend",

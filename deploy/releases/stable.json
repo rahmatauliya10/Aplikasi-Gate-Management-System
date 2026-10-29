@@ -1,7 +1,13 @@
 {
   "manifestType": "PRODUCTION_RELEASE",
-  "release": "stable",
-  "gitSha": "stable",
+  "release": "v1.0.0-stable",
+  "gitSha": "e8828382a5da1c7262fd59128a96d237052baee3",
+  "provenance": {
+    "sourceCommit": "e8828382a5da1c7262fd59128a96d237052baee3",
+    "ciRunNumber": 510,
+    "ciStatus": "PASS",
+    "verifiedExactCommit": true
+  },
   "schemaVersion": "1.0.0",
   "migrationChecksumsVerified": true,
   "migrationInventory": [
