@@ -117,7 +117,7 @@ function Ensure-TargetPostgresContainer {
             & docker start $Container 2>&1 | Out-Null
         } else {
             Write-Log "Launching isolated drill PostgreSQL container ($Container on port $Port)..."
-            & docker run -d --name $Container -p "127.0.0.1:${Port}:5432" -e "POSTGRES_DB=$Database" -e "POSTGRES_USER=$User" -e "POSTGRES_PASSWORD=testpassword" postgres:15-alpine 2>&1 | Out-Null
+            & docker run -d --name $Container -p "127.0.0.1:${Port}:5432" -e "POSTGRES_DB=$Database" -e "POSTGRES_USER=$User" -e "POSTGRES_PASSWORD=testpassword" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
         }
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Seconds 1
@@ -125,7 +125,7 @@ function Ensure-TargetPostgresContainer {
             if ($LASTEXITCODE -eq 0) { break }
         }
     }
-    $rawMig = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '_prisma_migrations';`n") | & docker exec -i $Container psql -U $User -d $Database -t -A 2>$null
+    $rawMig = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '_prisma_migrations';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>$null
     [string[]]$migLines = if ($rawMig) { @(($rawMig.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
     $migExists = if ($migLines.Length -gt 0) { ([string]$migLines[-1]).Trim() } else { "" }
     if ($migExists -ne "1") {
@@ -133,8 +133,8 @@ function Ensure-TargetPostgresContainer {
         if (Test-Path -LiteralPath $DumpFile) {
             Write-Log "Populating baseline historical test database into $Container ($Database)..."
             & docker cp $DumpFile "${Container}:/tmp/baseline.dump" 2>&1 | Out-Null
-            & docker exec $Container psql -U $User -d $Database -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-            & docker exec $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
+            & docker exec -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
+            & docker exec -e "PGPASSWORD=testpassword" $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
             & docker exec $Container rm -f /tmp/baseline.dump 2>&1 | Out-Null
         }
     }
@@ -161,7 +161,7 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
 INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES ('set-env-gate', 'GMS_ENVIRONMENT_ID', 'GMS-DRILL-SJA-01', NOW(), NOW()) ON CONFLICT ("key") DO UPDATE SET "value" = 'GMS-DRILL-SJA-01';
 INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES ('set-uuid-gate', 'GMS_INSTALLATION_UUID', '4f53a720-911b-4f9e-a89b-8321481dc901', NOW(), NOW()) ON CONFLICT ("key") DO UPDATE SET "value" = '4f53a720-911b-4f9e-a89b-8321481dc901';
 "@
-        ($initSql + "`n") | & docker exec -i $Container psql -U $User -d $Database 2>&1 | Out-Null
+        ($initSql + "`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database 2>&1 | Out-Null
     } catch {}
 }
 
@@ -197,7 +197,7 @@ function Get-DatabaseFingerprint {
     $Result = [ordered]@{}
 
     foreach ($Table in $Tables) {
-        $rawCheck = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '$Table';`n") | & docker exec -i $Container psql -U $User -d $Database -t -A 2>&1
+        $rawCheck = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '$Table';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>&1
         [string[]]$tableLines = if ($rawCheck) { @(($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
         $TableCheck = if ($tableLines.Length -gt 0) { ([string]$tableLines[-1]).Trim() } else { "" }
         if ($TableCheck -ne "1") {
@@ -210,7 +210,7 @@ function Get-DatabaseFingerprint {
 
         $Hash = ""
         try {
-            $rawHash = ($Sql + "`n") | & docker exec -i $Container psql -U $User -d $Database -t -A 2>&1
+            $rawHash = ($Sql + "`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>&1
             [string[]]$hashLines = if ($rawHash) { @(($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
             $Hash = if ($hashLines.Length -gt 0) { ([string]$hashLines[-1]).Trim() } else { "" }
         } catch {

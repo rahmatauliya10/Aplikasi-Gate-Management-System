@@ -96,6 +96,7 @@ Write-Log "=====================================================================
 [string]$ActualDumpHash = ""
 [string]$AttArchivePath = ""
 [string]$StagingContainer = ""
+[string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
 [string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
 [string]$MaintActivePath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active"
 
@@ -255,9 +256,10 @@ if ($InitializeNewEnvironment) {
         throw "HARD FAIL: Target database [$LiveDbName] has 0 tables and is not initialized. For fresh databases, use -InitializeNewEnvironment. NO DATABASE MUTATION OCCURRED."
     }
 
-    [string]$validTablesCount = Exec-LiveDbQuery "SELECT count(*) FROM pg_stat_user_tables WHERE relname IN ('_prisma_migrations', 'AppSetting');"
-    if ($validTablesCount -ne "2") {
-        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing, found $validTablesCount/2). NO DATABASE MUTATION OCCURRED."
+    [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""_prisma_migrations""') IS NOT NULL THEN 1 ELSE 0 END;"
+    [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""AppSetting""') IS NOT NULL THEN 1 ELSE 0 END;"
+    if ($hasMigrations -ne "1" -or $hasAppSettings -ne "1") {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
     }
 
     # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
@@ -948,7 +950,11 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database with verification
     if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
         try {
-            $resetRaw = & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE \"AppSetting\" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM \"AppSetting\" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+            $resetRaw = if ($PgPass) {
+                & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+            } else {
+                & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+            }
             [string]$resetVal = ($resetRaw | Out-String).Trim()
             if ($resetVal -eq "FALSE") {
                 Write-Log "Auto-reset of GMS_RESTORE_ALLOWED to FALSE verified in target database [PASS]." -Level "SUCCESS"
