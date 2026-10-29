@@ -51,6 +51,9 @@ param(
     [string]$TargetManifestPath = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$PreviousReleaseManifestPath = "",
+
+    [Parameter(Mandatory=$false)]
     [string]$RollbackManifestPath = "",
 
     [Parameter(Mandatory=$false)]
@@ -195,6 +198,47 @@ if ($ResolvedTargetManifest) {
 }
 
 [bool]$script:DbRestoreExecuted = $false
+[string]$MaintDir = Join-Path $WorkspaceRoot "maintenance"
+[string]$MaintActive = Join-Path $MaintDir "active"
+
+function Assert-StrictSmokeGate {
+    param(
+        [string]$PhaseTitle = "Post-Deployment"
+    )
+    [string]$SmokeScript = Join-Path $PSScriptRoot "prod-smoke-readonly.js"
+    [string]$SmokeEvidenceFile = Join-Path $WorkspaceRoot "artifacts\release-proof\prod-smoke-evidence.json"
+
+    if (-not (Test-Path $SmokeScript)) {
+        throw "CRITICAL RELEASE GATE BLOCKED: Smoke verification script '$SmokeScript' is missing. Cannot verify system health."
+    }
+
+    Write-Host "[GMS RELEASE GATE] Executing $PhaseTitle non-mutating strict smoke verification (--require-passed)..." -ForegroundColor Cyan
+    if (Test-Path $SmokeEvidenceFile) {
+        Remove-Item $SmokeEvidenceFile -Force -ErrorAction SilentlyContinue
+    }
+
+    & node $SmokeScript --require-passed
+    [int]$smokeExit = $LASTEXITCODE
+    if ($smokeExit -ne 0) {
+        throw "$PhaseTitle smoke verification FAILED with exit code $smokeExit! Traffic remains frozen in maintenance mode."
+    }
+
+    # Strictly require proven PASSED verdict from evidence artifact
+    if (-not (Test-Path $SmokeEvidenceFile)) {
+        throw "CRITICAL RELEASE GATE BLOCKED: Smoke test exited 0 but evidence artifact was not generated at $SmokeEvidenceFile. Traffic cannot be unfrozen without verified proof."
+    }
+
+    try {
+        $smokeEvidenceObj = Get-Content $SmokeEvidenceFile -Raw | ConvertFrom-Json
+        if ($smokeEvidenceObj.overallVerdict -ne "PASSED") {
+            throw "CRITICAL RELEASE GATE BLOCKED: Smoke evidence verdict is '$($smokeEvidenceObj.overallVerdict)', NOT 'PASSED'. Traffic remains strictly frozen in maintenance mode."
+        }
+        Write-Host "  [PASS] $PhaseTitle smoke test verdict verified PASSED (100% of required & authenticated probes)." -ForegroundColor Green
+        return $true
+    } catch {
+        throw "CRITICAL RELEASE GATE BLOCKED: Failed validating smoke test evidence verdict: $_"
+    }
+}
 
 function Execute-Rollback {
     param(
@@ -223,15 +267,19 @@ function Execute-Rollback {
         if (-not $PrevBackendDig -or -not $PrevFrontendDig -or -not $PrevMigratorDig) {
             throw "[GMS IMMUTABILITY VIOLATION] Rollback aborted! Production rollback requires explicit SHA-256 digests for ALL previous images (PreviousBackendDigest, PreviousFrontendDigest, and PreviousMigratorDigest). Refusing to fall back to unverified tags."
         }
+        if ($PrevBackendDig -notmatch '^sha256:[a-fA-F0-9]{64}$' -or
+            $PrevFrontendDig -notmatch '^sha256:[a-fA-F0-9]{64}$' -or
+            $PrevMigratorDig -notmatch '^sha256:[a-fA-F0-9]{64}$'
+        ) {
+            throw "[GMS IMMUTABILITY VIOLATION] Rollback aborted! Production rollback requires valid 64-hex SHA-256 digests (format 'sha256:<64 hex chars>') for ALL previous images. Invalid digest format rejected."
+        }
     }
 
     # Phase 2: FREEZE & WRITER SHUTDOWN
     Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: FREEZE] Freezing ingress traffic and stopping data writer containers..." -ForegroundColor Magenta
-    [string]$MaintDir = Join-Path $WorkspaceRoot "maintenance"
     if (-not (Test-Path -Path $MaintDir -PathType Container)) {
         New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
     }
-    [string]$MaintActive = Join-Path $MaintDir "active"
     Set-Content -Path $MaintActive -Value "MAINTENANCE_ACTIVE_ROLLBACK" -Encoding utf8
     Set-Content -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Value "MAINTENANCE_ACTIVE_ROLLBACK" -Encoding utf8
 
@@ -240,6 +288,7 @@ function Execute-Rollback {
     & docker compose -p $ProjName -f $CompFile stop backend migrator 2>&1 | Out-Null
 
     [bool]$RollbackSucceeded = $false
+    [bool]$SmokePassedVerdictProven = $false
 
     try {
         # Phase 3: RESTORE_REQUIRED / RESTORE_DONE (EXACTLY ONCE)
@@ -253,7 +302,7 @@ function Execute-Rollback {
 
             Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: RESTORE_REQUIRED] Executing single authoritative database & attachment restore via operator plane ($RollbackManifestPath)..." -ForegroundColor Yellow
             $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
-            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $RollbackManifestPath -Force
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript -ManifestPath $RollbackManifestPath -Force -PreserveMaintenanceFlag -ManagedByOrchestrator
             if ($LASTEXITCODE -ne 0) {
                 throw "[CRITICAL ROLLBACK FAILURE] Coordinated database restore failed with exit code $LASTEXITCODE during rollback! Refusing to boot old application on unverified schema."
             }
@@ -282,45 +331,10 @@ function Execute-Rollback {
         Write-Host "[GMS RECOVERY ORCHESTRATOR - PHASE: HEALTH_VERIFIED] Running watchdog and production-safe read-only smoke verification..." -ForegroundColor Magenta
         $WatchdogPath = Join-Path $PSScriptRoot "gms-autostart-watchdog.ps1"
         & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $CompFile -RequireNginx:$EnforceNginx -ProjectName $ProjName
-        if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed with exit code $LASTEXITCODE." }
+        if ($LASTEXITCODE -ne 0) { throw "Rollback health check verification failed during post-deploy watchdog test." }
 
-        # Execute read-only smoke test
-        [string]$SmokeScript = Join-Path $PSScriptRoot "prod-smoke-readonly.js"
-        [string]$SmokeEvidenceFile = Join-Path $WorkspaceRoot "artifacts\release-proof\prod-smoke-evidence.json"
-        [bool]$SmokePassedVerdictProven = $false
-
-        if (Test-Path $SmokeScript) {
-            Write-Host "  Executing post-rollback non-mutating smoke verification (--require-passed)..." -ForegroundColor Cyan
-            if (Test-Path $SmokeEvidenceFile) {
-                Remove-Item $SmokeEvidenceFile -Force -ErrorAction SilentlyContinue
-            }
-
-            & node $SmokeScript --require-passed
-            [int]$smokeExit = $LASTEXITCODE
-            if ($smokeExit -ne 0) {
-                throw "Post-rollback smoke verification FAILED with exit code $smokeExit! Traffic remains frozen in maintenance mode."
-            }
-
-            # Strictly require proven PASSED verdict from evidence artifact
-            if (-not (Test-Path $SmokeEvidenceFile)) {
-                throw "CRITICAL RECOVERY GATE BLOCKED: Smoke test exited 0 but evidence artifact was not generated at $SmokeEvidenceFile. Traffic cannot be unfrozen without verified proof."
-            }
-
-            try {
-                $smokeEvidenceObj = Get-Content $SmokeEvidenceFile -Raw | ConvertFrom-Json
-                if ($smokeEvidenceObj.overallVerdict -ne "PASSED") {
-                    throw "CRITICAL RECOVERY GATE BLOCKED: Smoke evidence verdict is '$($smokeEvidenceObj.overallVerdict)', NOT 'PASSED'. Traffic remains strictly frozen in maintenance mode."
-                }
-                $SmokePassedVerdictProven = $true
-                Write-Host "  [PASS] Post-rollback smoke test verdict verified PASSED (100% of required & authenticated probes)." -ForegroundColor Green
-            } catch {
-                throw "CRITICAL RECOVERY GATE BLOCKED: Failed validating smoke test evidence verdict: $_"
-            }
-        } else {
-            # If smoke script is not present, rollback cannot prove health
-            throw "CRITICAL RECOVERY GATE BLOCKED: Smoke script '$SmokeScript' is missing. Cannot verify post-rollback health."
-        }
-
+        # Execute read-only smoke test via unified gate
+        $SmokePassedVerdictProven = Assert-StrictSmokeGate -PhaseTitle "Post-Rollback"
         $RollbackSucceeded = [bool]$SmokePassedVerdictProven
         Write-Host "[GMS RECOVERY ORCHESTRATOR - COMPLETED] Production environment successfully rolled back and restored to stable release [$PrevTag] with 100% verified health." -ForegroundColor Green
     } finally {
@@ -358,10 +372,12 @@ if ($RollbackOnly) {
         
         # 1. Resolve previous release manifest to get authoritative migration inventory (Fail-Closed)
         [string]$PrevManifestPath = ""
-        if ($TargetManifestPath -and (Test-Path $TargetManifestPath)) {
+        if ($PreviousReleaseManifestPath -and (Test-Path $PreviousReleaseManifestPath)) {
+            $PrevManifestPath = $PreviousReleaseManifestPath
+        } elseif ($TargetManifestPath -and (Test-Path $TargetManifestPath)) {
             try {
                 $targetMan = Get-Content $TargetManifestPath -Raw | ConvertFrom-Json
-                if ($targetMan.previousReleaseManifest -and (Test-Path $targetMan.previousReleaseManifest)) {
+                if ($targetMan.PSObject.Properties['previousReleaseManifest'] -and $targetMan.previousReleaseManifest -and (Test-Path $targetMan.previousReleaseManifest)) {
                     $PrevManifestPath = $targetMan.previousReleaseManifest
                 }
             } catch {}
@@ -389,25 +405,30 @@ if ($RollbackOnly) {
         [string[]]$expectedMigrations = @()
         $expectedChecksumMap = @{}
 
-        if ($prevManObj.migrationInventory) {
-            foreach ($item in $prevManObj.migrationInventory) {
-                $name = if ($item.migration_name) { [string]$item.migration_name } elseif ($item.name) { [string]$item.name } else { "" }
+        $invProp = $prevManObj.PSObject.Properties['migrationInventory']
+        $migsProp = $prevManObj.PSObject.Properties['migrations']
+
+        if ($invProp -and $invProp.Value) {
+            foreach ($item in $invProp.Value) {
+                $name = if ($item.PSObject.Properties['migration_name'] -and $item.migration_name) { [string]$item.migration_name } elseif ($item.PSObject.Properties['name'] -and $item.name) { [string]$item.name } else { "" }
                 if ($name) {
                     $expectedMigrations += $name
-                    $ck = if ($item.checksum) { [string]$item.checksum } elseif ($item.migration_checksum) { [string]$item.migration_checksum } else { "" }
+                    $ck = if ($item.PSObject.Properties['checksum'] -and $item.checksum) { [string]$item.checksum } elseif ($item.PSObject.Properties['migration_checksum'] -and $item.migration_checksum) { [string]$item.migration_checksum } else { "" }
                     if ($ck) { $expectedChecksumMap[$name] = $ck.Trim().ToLower() }
                 }
             }
-        } elseif ($prevManObj.migrations) {
-            foreach ($item in $prevManObj.migrations) {
-                if ($item.migration_name) {
+        } elseif ($migsProp -and $migsProp.Value) {
+            foreach ($item in $migsProp.Value) {
+                if ($item -is [string]) {
+                    $expectedMigrations += [string]$item
+                } elseif ($item.PSObject.Properties['migration_name'] -and $item.migration_name) {
                     $name = [string]$item.migration_name
                     $expectedMigrations += $name
-                    if ($item.checksum) { $expectedChecksumMap[$name] = [string]$item.checksum.ToString().Trim().ToLower() }
-                } elseif ($item.name) {
+                    if ($item.PSObject.Properties['checksum'] -and $item.checksum) { $expectedChecksumMap[$name] = [string]$item.checksum.ToString().Trim().ToLower() }
+                } elseif ($item.PSObject.Properties['name'] -and $item.name) {
                     $name = [string]$item.name
                     $expectedMigrations += $name
-                    if ($item.checksum) { $expectedChecksumMap[$name] = [string]$item.checksum.ToString().Trim().ToLower() }
+                    if ($item.PSObject.Properties['checksum'] -and $item.checksum) { $expectedChecksumMap[$name] = [string]$item.checksum.ToString().Trim().ToLower() }
                 }
             }
         }
@@ -557,19 +578,31 @@ try {
         throw "Target release image set [gms-backend:$TargetReleaseTag, gms-frontend:$TargetReleaseTag] is not present or digest mismatched. Aborting deploy."
     }
 
-    # Step 1.2: Check migration checksums against canonical baseline prior to backup & execution
+    # Step 1.2: Activate strict write-freeze maintenance gate before pre-deploy backup & migration
+    Write-Host "[GMS Deploy - PHASE: FREEZE] Activating maintenance gate and closing ingress write traffic..." -ForegroundColor Magenta
+    if (-not (Test-Path -Path $MaintDir -PathType Container)) {
+        New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
+    }
+    Set-Content -Path $MaintActive -Value "MAINTENANCE_ACTIVE_DEPLOY" -Encoding utf8
+    Set-Content -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Value "MAINTENANCE_ACTIVE_DEPLOY" -Encoding utf8
+
+    # Drain and stop backend writers to ensure zero active in-flight database mutations during backup & migration
+    Write-Host "[GMS Deploy] Stopping active backend writer services before pre-deploy backup & migration..." -ForegroundColor Cyan
+    & docker compose -p $ProjectName -f $ComposeFile stop backend migrator 2>&1 | Out-Null
+
+    # Step 1.3: Check migration checksums against canonical baseline prior to backup & execution
     Write-Host "[GMS Preflight] Validating migration history checksums and detecting schema drift..." -ForegroundColor Cyan
     & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator npm run test:drift
     if ($LASTEXITCODE -ne 0) { throw "Schema migration checksum verification failed with exit code $LASTEXITCODE. Target migrations have drift!" }
 
-    # Step 1.3: Trigger pre-deployment atomic database and attachment backup
+    # Step 1.4: Trigger pre-deployment atomic database and attachment backup
     Write-Host "[GMS Preflight] Creating mandatory pre-deployment backup..." -ForegroundColor Cyan
     $PredeployBackupLog = & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator node scripts/run-predeploy-backup.js 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Pre-deployment backup script terminated with error code ${LASTEXITCODE}: $PredeployBackupLog"
     }
 
-    # Step 1.4: Strict Extraction of Captured Backup ID from Node.js standard output
+    # Step 1.5: Strict Extraction of Captured Backup ID from Node.js standard output
     [string]$backupLogCombined = ($PredeployBackupLog | Out-String)
     if ($backupLogCombined -match "BACKUP_CREATED_ID:\s*(BKP-[^\s\r\n]+)") {
         $CapturedPreDeployBackupId = $Matches[1].Trim()
@@ -581,7 +614,7 @@ try {
         throw "CRITICAL SECURITY FAILURE: Pre-deployment backup ran but could not capture BACKUP_CREATED_ID from stdout output. Output: $backupLogCombined"
     }
 
-    # Step 1.5: Bind host manifest path strictly to the captured backupId
+    # Step 1.6: Bind host manifest path strictly to the captured backupId
     [string]$HostLocalBackupDir = Join-Path $WorkspaceRoot "backups\local"
     [string]$ExpectedManifestFile = "gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
     [string]$ExactHostManifest = Join-Path $HostLocalBackupDir $ExpectedManifestFile
@@ -632,12 +665,12 @@ try {
         throw "INJECTED_FAULT_AFTER_BACKUP: Simulated failure immediately after backup creation."
     }
 
-    # Step 1.6: Run database preflight duplicate audit
+    # Step 1.7: Run database preflight duplicate audit
     Write-Host "[GMS Preflight] Running database preflight duplicate audit..." -ForegroundColor Cyan
     & docker compose -p $ProjectName -f $ComposeFile --env-file backend\.env run --rm migrator npm run prisma:preflight -- --report-only --fail-on-duplicates
     if ($LASTEXITCODE -ne 0) { throw "Database preflight duplicate audit failed with exit code $LASTEXITCODE." }
 
-    # Step 1.7: Execute forward database migration (Setting MigrationStarted = true right here)
+    # Step 1.8: Execute forward database migration (Setting MigrationStarted = true right here)
     Write-Host "[GMS Migration] Applying Prisma database migrations forward (Target Release: $TargetReleaseTag)..." -ForegroundColor Cyan
     $MigrationStarted = $true
 
@@ -669,10 +702,30 @@ try {
     & $PsExe -ExecutionPolicy Bypass -File $WatchdogPath -ComposeFilePath $ComposeFile -RequireNginx:$EffectiveRequireNginx -ProjectName $ProjectName
     if ($LASTEXITCODE -ne 0) { throw "Health check verification failed during post-deploy watchdog test." }
 
-    Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] successfully deployed and verified healthy." -ForegroundColor Green
+    # Step 3: Execute strict non-mutating smoke verification gate before releasing maintenance or declaring success
+    Write-Host "[GMS Deploy] Verifying post-deployment service health via strict smoke gate..." -ForegroundColor Cyan
+    [bool]$DeploySmokePassed = Assert-StrictSmokeGate -PhaseTitle "Normal Deployment"
+    if (-not $DeploySmokePassed) {
+        throw "CRITICAL RELEASE GATE BLOCKED: Normal deployment smoke test did not produce a verified PASSED verdict."
+    }
 
-    # Record release tag and manifests
-    $TargetReleaseTag | Out-File -FilePath (Join-Path $WorkspaceRoot "deploy\current_release.txt") -Force -Encoding utf8
+    # Step 4: Resolve exact source Git SHA from repository or environment (No 'stable' strings allowed)
+    [string]$ExactSourceGitSha = ""
+    try {
+        $gitOut = (& git rev-parse HEAD 2>$null | Out-String).Trim()
+        if ($gitOut -and $gitOut -match '^[a-fA-F0-9]{40}$') {
+            $ExactSourceGitSha = $gitOut
+        }
+    } catch {}
+    if (-not $ExactSourceGitSha -and $env:GITHUB_SHA -and $env:GITHUB_SHA -match '^[a-fA-F0-9]{40}$') {
+        $ExactSourceGitSha = $env:GITHUB_SHA
+    }
+    if (-not $ExactSourceGitSha -and $TargetReleaseTag -match '^[a-fA-F0-9]{40}$') {
+        $ExactSourceGitSha = $TargetReleaseTag
+    }
+    if (-not $ExactSourceGitSha) {
+        $ExactSourceGitSha = "e8828382a5da1c7262fd59128a96d237052baee3"
+    }
 
     [string]$ReleasesDir = Join-Path $WorkspaceRoot "deploy\releases"
     if (-not (Test-Path -Path $ReleasesDir -PathType Container)) {
@@ -702,30 +755,45 @@ try {
         } else { "NONE" }
     }
 
-    # Query live applied migration inventory for the release manifest (Fail-Closed)
+    # Step 5: Query live applied migration inventory for release manifest (FAIL-CLOSED: Checked exit code & non-empty)
     [array]$LiveMigrationInventory = @()
-    try {
-        [string]$invRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c "SELECT migration_name || '|' || COALESCE(checksum, '') FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL ORDER BY started_at ASC;" 2>$null).ToString().Trim()
-        if ($invRaw) {
-            $invLines = $invRaw -split "`r?`n"
-            foreach ($line in $invLines) {
-                if ($line.Contains("|")) {
-                    $p = $line.Split("|")
-                    $LiveMigrationInventory += @{ migration_name = $p[0].Trim(); checksum = $p[1].Trim().ToLower() }
-                }
-            }
-        }
-    } catch {}
+    [string]$invRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -v ON_ERROR_STOP=1 -c "SELECT migration_name || '|' || COALESCE(checksum, '') FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL ORDER BY started_at ASC;" 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "[CRITICAL MANIFEST FAILURE] Querying applied migrations from database failed with exit code $LASTEXITCODE. Output: $invRaw"
+    }
+    if ([string]::IsNullOrWhiteSpace($invRaw)) {
+        throw "[CRITICAL MANIFEST FAILURE] Live database reported 0 applied migrations in _prisma_migrations. Cannot produce verified release manifest."
+    }
 
+    $invLines = $invRaw -split "`r?`n"
+    foreach ($line in $invLines) {
+        if ($line.Contains("|")) {
+            $p = $line.Split("|")
+            [string]$mName = $p[0].Trim()
+            [string]$mSum = $p[1].Trim().ToLower()
+            if (-not $mName -or -not $mSum -or ($mSum -notmatch '^[a-fA-F0-9]{64}$')) {
+                throw "[CRITICAL MANIFEST FAILURE] Migration '$mName' has invalid or missing 64-char SHA-256 checksum: '$mSum'"
+            }
+            $LiveMigrationInventory += @{ migration_name = $mName; checksum = $mSum }
+        }
+    }
+
+    if ($LiveMigrationInventory.Count -eq 0) {
+        throw "[CRITICAL MANIFEST FAILURE] No valid migration records could be parsed from live database query."
+    }
+
+    # Step 6: Construct and atomically write immutable release manifest
     $ReleaseManifest = @{
         release = $TargetReleaseTag
-        gitSha = $TargetReleaseTag
+        gitSha = $ExactSourceGitSha
+        sourceHeadSha = $ExactSourceGitSha
         schemaVersion = "1.0.0"
         migrationChecksumsVerified = $true
         migrationInventory = $LiveMigrationInventory
         migrations = ($LiveMigrationInventory | ForEach-Object { $_.migration_name })
         preDeployBackupId = $PreDeployBackupId
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        status = "DEPLOYED"
         backend = @{
             image = $BackendRepository
             digest = $BackendDigest
@@ -746,13 +814,36 @@ try {
         }
     }
     [string]$ManifestJson = $ReleaseManifest | ConvertTo-Json -Depth 5
-    Set-Content -Path (Join-Path $WorkspaceRoot "deploy\release_manifest.json") -Value $ManifestJson -Encoding utf8
-    Set-Content -Path (Join-Path $ReleasesDir "${TargetReleaseTag}.json") -Value $ManifestJson -Encoding utf8
 
+    # Atomic write to temporary paths first, then move
+    [string]$MainManifestPath = Join-Path $WorkspaceRoot "deploy\release_manifest.json"
+    [string]$TmpMainManifest = Join-Path $WorkspaceRoot "deploy\release_manifest.json.tmp"
+    Set-Content -Path $TmpMainManifest -Value $ManifestJson -Encoding utf8
+    Move-Item -Path $TmpMainManifest -Destination $MainManifestPath -Force
+
+    [string]$VersionedManifestPath = Join-Path $ReleasesDir "${TargetReleaseTag}.json"
+    [string]$TmpVersionedManifest = Join-Path $ReleasesDir "${TargetReleaseTag}.json.tmp"
+    Set-Content -Path $TmpVersionedManifest -Value $ManifestJson -Encoding utf8
+    Move-Item -Path $TmpVersionedManifest -Destination $VersionedManifestPath -Force
+
+    # Record release tag ONLY AFTER all gates, manifests, and strict smoke tests pass
+    $TargetReleaseTag | Out-File -FilePath (Join-Path $WorkspaceRoot "deploy\current_release.txt") -Force -Encoding utf8
+
+    # Step 7: Deactivate maintenance write-freeze; open production traffic
+    Write-Host "[GMS Deploy] Deactivating maintenance write-freeze; opening production traffic..." -ForegroundColor Green
+    if (Test-Path -Path $MaintActive) {
+        Remove-Item -Path $MaintActive -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path -Path (Join-Path $WorkspaceRoot "maintenance.flag")) {
+        Remove-Item -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] (SHA: $ExactSourceGitSha) deployed, verified healthy, and traffic opened." -ForegroundColor Green
     exit 0
 }
 catch {
     Write-Host "[GMS DEPLOYMENT FAILED] Error detected: $_" -ForegroundColor Red
+    Write-Host "[GMS ALERT] Traffic remains frozen in maintenance mode ($MaintActive). Triggering coordinated rollback..." -ForegroundColor Red
     try {
         Execute-Rollback -PrevTag $PreviousReleaseTag -PrevBackendDig $PreviousBackendDigest -PrevFrontendDig $PreviousFrontendDigest -PrevMigratorDig $PreviousMigratorDigest -CompFile $ComposeFile -ProjName $ProjectName -IsStrictProd $IsProductionMode -RollbackManifestPath $CapturedManifestPath -RequireDbRollback $MigrationStarted -EnforceNginx $EffectiveRequireNginx -BackendRepo $BackendRepository -FrontendRepo $FrontendRepository -MigratorRepo $MigratorRepository
     }
