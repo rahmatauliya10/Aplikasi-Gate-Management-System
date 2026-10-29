@@ -1,8 +1,8 @@
 # ==============================================================================
-# GMS Target Guard & Fault-Injection Policy Integration Test Suite (P1-02/P1-04)
+# GMS Target Guard & Fault-Injection Policy Integration Test Suite (P0-C / P0-D Hardened)
 # ==============================================================================
 # Executes REAL PowerShell invocations against scripts/gms-production-restore.ps1
-# using an ISOLATED REAL POSTGRESQL CONTAINER TARGET (gate-system-postgres on port 5436)
+# using an EPHEMERAL ISOLATED TARGET FIXTURE (gms-guard-fixture-<run-id>)
 # to prove fail-closed guarantees across 9 target guard scenarios:
 #   1. Missing / Unreachable Target Container -> REJECT (Container Missing Guard)
 #   2. Real Container Target with Wrong Environment ID -> REJECT (FINGERPRINT MISMATCH)
@@ -14,12 +14,18 @@
 #   8. Corrupted Checksum Manifest Preflight -> REJECT
 #   9. Non-existent Manifest File Path -> REJECT
 #
-# Proves ZERO MUTATION: Compares database fingerprint before and after all 9 negative tests.
+# Proves ZERO MUTATION: Compares full data, configuration, and environment fingerprint
+# before and after all 9 negative tests.
+# OPERATIONAL ISOLATION: Never interacts with, mutates, or starts operational 'gate-system-postgres'
+# Never deletes or modifies operational maintenance flags or operational AppSettings.
 # ==============================================================================
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$ArtifactsDir = ""
+    [string]$ArtifactsDir = "",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$AllowSkipIfDockerUnavailable
 )
 
 Set-StrictMode -Version Latest
@@ -38,10 +44,12 @@ $RestoreScript = Join-Path $PSScriptRoot "gms-production-restore.ps1"
 $PsExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { "pwsh.exe" } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell.exe" }
 
 Write-Host "==============================================================================" -ForegroundColor Cyan
-Write-Host "Starting Real PowerShell Integration Tests for Target Guards (P1-04)..." -ForegroundColor Cyan
+Write-Host "Starting Isolated Target Guard PowerShell Integration Suite (P0-C / P0-D)..." -ForegroundColor Cyan
 Write-Host "==============================================================================" -ForegroundColor Cyan
 
-# Check if Docker daemon is running
+# ------------------------------------------------------------------------------
+# Check Docker daemon availability (FAIL-CLOSED: Never claim false PASS)
+# ------------------------------------------------------------------------------
 [bool]$DockerAvailable = $false
 try {
     $rawDocker = & docker ps 2>&1
@@ -49,29 +57,77 @@ try {
 } catch {}
 
 if (-not $DockerAvailable) {
-    Write-Host "[WARN] Docker daemon is not available on this host. Skipping containerized fixture tests." -ForegroundColor Yellow
-    Write-Host "[INFO] Pure target guard policy specifications are verified via test-target-guard.js." -ForegroundColor Yellow
+    Write-Host "[WARN] Docker daemon is not available on this host. Cannot execute containerized assertions." -ForegroundColor Yellow
     $EvidenceObj = @{
-        reportTitle = "GMS Target Guard PowerShell Integration Test Evidence (P1-04 Real Target)"
-        engine = "PowerShell Integration with Real Staging Target Fixture"
+        reportTitle = "GMS Target Guard PowerShell Integration Test Evidence (P0-C / P0-D Hardened)"
+        engine = "PowerShell Integration with Isolated Ephemeral Target Fixture"
         timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        status = "PASSED"
-        note = "Docker daemon not running on local workstation; containerized assertions executed in CI runner."
+        status = "NOT_EXECUTED"
+        note = "Docker daemon not running on this host; containerized assertions NOT EXECUTED. Zero false PASS reported."
         summary = @{
             total = 9
-            passed = 9
+            passed = 0
             failed = 0
+            notExecuted = 9
         }
     }
     $EvidenceJsonPath = Join-Path $ArtifactsDir "target-guard-powershell-evidence.json"
     Set-Content -Path $EvidenceJsonPath -Value ($EvidenceObj | ConvertTo-Json -Depth 5) -Encoding utf8
-    exit 0
+    
+    if ($AllowSkipIfDockerUnavailable) {
+        Write-Host "::warning file=scripts/test-target-guard.ps1,title=DockerNotAvailable::Docker not available; target guard skipped with status NOT_EXECUTED."
+        exit 0
+    } else {
+        Write-Host "::error file=scripts/test-target-guard.ps1,title=DockerUnavailableRequiredGate::Docker daemon not available. Required integration test cannot pass without actual container execution."
+        exit 1
+    }
 }
+
+# ------------------------------------------------------------------------------
+# Operational Container Isolation Guard
+# ------------------------------------------------------------------------------
+[string]$operationalContainerId = ""
+try {
+    $rawOp = (& docker ps -a -q -f "name=^/gate-system-postgres$" 2>$null | Out-String).Trim()
+    if ($rawOp) { $operationalContainerId = $rawOp }
+} catch {}
+
+if ($operationalContainerId) {
+    Write-Host "[ISOLATION GUARD] Operational container 'gate-system-postgres' ($operationalContainerId) detected." -ForegroundColor Green
+    Write-Host "[ISOLATION GUARD] Test suite will spawn a completely isolated ephemeral fixture and NEVER touch 'gate-system-postgres'." -ForegroundColor Green
+}
+
+# Generate unique run ID and fixture parameters
+[string]$TestRunId = [guid]::NewGuid().ToString("N").Substring(0, 8)
+[string]$TargetContainer = "gms-guard-fixture-$TestRunId"
+[string]$TargetDb = "gms_guard_$TestRunId"
+[string]$TargetUser = "postgres"
+[string]$TargetPass = "testpassword"
+[string]$KnownEnvId = "GMS-DRILL-SJA-01"
+[string]$KnownInstallUuid = "4f53a720-911b-4f9e-a89b-8321481dc901"
+
+# Determine an available ephemeral port
+function Get-AvailablePort {
+    param([int]$DefaultPort = 5439)
+    try {
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+        $listener.Start()
+        $p = ($listener.LocalEndpoint).Port
+        $listener.Stop()
+        return $p.ToString()
+    } catch {
+        return $DefaultPort.ToString()
+    }
+}
+[string]$TargetPort = Get-AvailablePort -DefaultPort 5439
 
 [int]$TotalTests = 0
 [int]$PassedTests = 0
 [int]$FailedTests = 0
 [array]$TestResults = @()
+
+$TempTestDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gms_guard_test_" + $TestRunId)
+New-Item -Path $TempTestDir -ItemType Directory -Force | Out-Null
 
 function Assert-GuardRejection {
     param(
@@ -83,15 +139,6 @@ function Assert-GuardRejection {
     $script:TotalTests++
     Write-Host "`n[$script:TotalTests] Running: $TestName..." -ForegroundColor Yellow
     [datetime]$start = Get-Date
-
-    # Clean up maintenance flags and restore logs before each assertion so previous failures do not leak
-    $mActive = Join-Path $ProjectRootDir "maintenance/active"
-    $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
-    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
-
-    [string]$restoreLogFile = Join-Path $ProjectRootDir "artifacts/logs/production_restore.log"
-    if (Test-Path $restoreLogFile) { Remove-Item $restoreLogFile -Force -ErrorAction SilentlyContinue }
 
     [string]$output = ""
     [int]$exitCode = 0
@@ -110,17 +157,11 @@ function Assert-GuardRejection {
         $exitCode = 1
     }
 
-    [string]$logContent = ""
-    if (Test-Path $restoreLogFile) {
-        $logContent = Get-Content -Path $restoreLogFile -Raw -ErrorAction SilentlyContinue
-    }
-    [string]$combinedOutput = "$output`n$logContent"
-
     [bool]$rejected = ($exitCode -ne 0)
     [bool]$keywordMatched = $false
     [string]$matchedKeyword = ""
 
-    [string]$lowerCombined = $combinedOutput.ToLower()
+    [string]$lowerCombined = $output.ToLower()
     foreach ($kw in $ExpectedKeywords) {
         if ($lowerCombined.Contains($kw.ToLower())) {
             $keywordMatched = $true
@@ -139,14 +180,10 @@ function Assert-GuardRejection {
         $script:FailedTests++
         Write-Host "  [FAIL] $TestName" -ForegroundColor Red
         Write-Host "         ExitCode=$exitCode (Expected != 0), Keywords Searched: $($ExpectedKeywords -join ', ')" -ForegroundColor Red
-        Write-Host "         Output: $combinedOutput" -ForegroundColor DarkGray
-        [string]$errPreview = if ($combinedOutput.Length -gt 500) { $combinedOutput.Substring($combinedOutput.Length - 500).Replace("`r", "").Replace("`n", " ") } else { $combinedOutput.Replace("`r", "").Replace("`n", " ") }
+        Write-Host "         Output: $output" -ForegroundColor DarkGray
+        [string]$errPreview = if ($output.Length -gt 500) { $output.Substring($output.Length - 500).Replace("`r", "").Replace("`n", " ") } else { $output.Replace("`r", "").Replace("`n", " ") }
         Write-Host "::error file=scripts/test-target-guard.ps1,title=GuardAssertionFailed::$TestName FAILED. ExitCode=$exitCode. Preview: $errPreview"
     }
-
-    # Clean up maintenance flags after assertion
-    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
 
     $script:TestResults += @{
         name = $TestName
@@ -158,80 +195,83 @@ function Assert-GuardRejection {
 }
 
 # ------------------------------------------------------------------------------
-# 1. Setup Isolated Target Database Container (Matching DR Drill Topology)
+# Robust Fail-Closed Fingerprint Engine (Data + Config + Environment)
 # ------------------------------------------------------------------------------
-[string]$TargetContainer = "gate-system-postgres"
-[string]$TargetPort = "5436"
-[string]$TargetDb = "gms"
-[string]$TargetUser = "postgres"
-[string]$TargetPass = "testpassword"
-
-[string]$KnownEnvId = "GMS-DRILL-SJA-01"
-[string]$KnownInstallUuid = "4f53a720-911b-4f9e-a89b-8321481dc901"
-
-[string]$PreTestFingerprint = ""
-[string]$PostTestFingerprint = ""
-
 function Get-TargetDbFingerprint {
     try {
-        $rawSettings = "SELECT key || '=' || value FROM ""AppSetting"" WHERE key NOT IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') ORDER BY key;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>$null
-        $rawMigs = "SELECT migration_name || '=' || checksum FROM ""_prisma_migrations"" ORDER BY migration_name;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>$null
-        $rawUsers = "SELECT CASE WHEN to_regclass('public.""User""') IS NOT NULL THEN (SELECT COUNT(*)::text FROM ""User"") ELSE '0' END;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>$null
-        
-        [string]$settings = if ($rawSettings) { ($rawSettings | Out-String).Trim() } else { "" }
-        [string]$migs = if ($rawMigs) { ($rawMigs | Out-String).Trim() } else { "" }
-        [string]$users = if ($rawUsers) { ($rawUsers | Out-String).Trim() } else { "0" }
-        
-        [string]$combined = "$settings`n$migs`n$users"
+        # 1. All AppSettings (including GMS_RESTORE_ALLOWED and RESTORE_ALLOWED)
+        $rawSettings = "SELECT key || '=' || COALESCE(value, '') FROM ""AppSetting"" ORDER BY key;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "AppSetting query failed: $rawSettings" }
+
+        # 2. Migration inventory and checksums
+        $rawMigs = "SELECT migration_name || '=' || COALESCE(checksum, '') FROM ""_prisma_migrations"" ORDER BY migration_name;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "_prisma_migrations query failed: $rawMigs" }
+
+        # 3. Schema table listing and row count checks
+        $rawTables = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Table listing query failed: $rawTables" }
+
+        $rawUsers = "SELECT CASE WHEN to_regclass('public.""User""') IS NOT NULL THEN (SELECT COUNT(*)::text FROM ""User"") ELSE '0' END;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d $TargetDb 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "User count query failed: $rawUsers" }
+
+        # 4. Environment fingerprint (Container ID, Image, Labels)
+        $rawInspect = & docker inspect --format="{{.Id}}|{{.Image}}" $TargetContainer 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "Container inspect failed: $rawInspect" }
+
+        [string]$settings = ($rawSettings | Out-String).Trim()
+        [string]$migs = ($rawMigs | Out-String).Trim()
+        [string]$tables = ($rawTables | Out-String).Trim()
+        [string]$users = ($rawUsers | Out-String).Trim()
+        [string]$envMeta = ($rawInspect | Out-String).Trim()
+
+        [string]$combined = "$settings`n$migs`n$tables`n$users`n$envMeta"
         $sha = [System.Security.Cryptography.SHA256]::Create()
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($combined)
         return [System.BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLower()
     } catch {
-        Write-Host "WARNING: Get-TargetDbFingerprint failed: $_" -ForegroundColor Yellow
-        return "UNKNOWN_FINGERPRINT"
+        Write-Host "ERROR: Get-TargetDbFingerprint failed (Fail-Closed): $_" -ForegroundColor Red
+        throw "Target DB Fingerprint acquisition failed fail-closed: $_"
     }
 }
 
-$TempTestDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gms_guard_test_" + [guid]::NewGuid().ToString("N"))
-New-Item -Path $TempTestDir -ItemType Directory -Force | Out-Null
+[string]$PreTestFingerprint = ""
+[string]$PostTestFingerprint = ""
 
 try {
-    # Ensure target postgres container is running
-    Write-Host "`nEnsuring isolated PostgreSQL target container ($TargetContainer on port $TargetPort)..." -ForegroundColor Cyan
-    $rawRunning = & docker ps -q -f "name=^/${TargetContainer}$" 2>$null
-    $running = if ($rawRunning) { [string]$rawRunning.ToString().Trim() } else { "" }
-    if (-not $running) {
-        $rawExisting = & docker ps -aq -f "name=^/${TargetContainer}$" 2>$null
-        $existing = if ($rawExisting) { [string]$rawExisting.ToString().Trim() } else { "" }
-        if ($existing) {
-            Write-Host "  Starting existing stopped PostgreSQL container ($TargetContainer)..."
-            & docker start $TargetContainer 2>&1 | Out-Null
-        } else {
-            Write-Host "  Launching isolated drill PostgreSQL container ($TargetContainer on port $TargetPort)..."
-            & docker run -d --name $TargetContainer -p "127.0.0.1:${TargetPort}:5432" -e "POSTGRES_DB=$TargetDb" -e "POSTGRES_USER=$TargetUser" -e "POSTGRES_PASSWORD=$TargetPass" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
-        }
+    # --------------------------------------------------------------------------
+    # 1. Spawn Ephemeral Isolated Fixture Container
+    # --------------------------------------------------------------------------
+    Write-Host "`nSpawning isolated ephemeral fixture container ($TargetContainer on port $TargetPort)..." -ForegroundColor Cyan
+    $runOut = & docker run -d --name $TargetContainer `
+        --label "gms.test.fixture=true" `
+        --label "gms.test.run_id=$TestRunId" `
+        --label "gms.test.owner=test-target-guard.ps1" `
+        -p "127.0.0.1:${TargetPort}:5432" `
+        -e "POSTGRES_DB=$TargetDb" `
+        -e "POSTGRES_USER=$TargetUser" `
+        -e "POSTGRES_PASSWORD=$TargetPass" `
+        -e "POSTGRES_HOST_AUTH_METHOD=trust" `
+        postgres:15-alpine 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to start isolated test fixture container: $runOut"
     }
 
-    # Wait for PostgreSQL container to be fully operational and accepting queries
-    Write-Host "Waiting for target PostgreSQL server to be fully operational and accepting queries..." -ForegroundColor Cyan
+    # Wait for PostgreSQL container readiness
+    Write-Host "Waiting for isolated fixture PostgreSQL container to become ready..." -ForegroundColor Cyan
     $isReady = $false
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
         $readyCheck = "SELECT 1;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d postgres 2>$null
         if ($readyCheck -and $readyCheck.Trim() -eq "1") {
-            Start-Sleep -Milliseconds 500
-            $secondCheck = "SELECT 1;" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d postgres 2>$null
-            if ($secondCheck -and $secondCheck.Trim() -eq "1") {
-                $isReady = $true
-                break
-            }
+            $isReady = $true
+            break
         }
     }
     if (-not $isReady) {
-        throw "Target PostgreSQL container ($TargetContainer) failed to become ready and stable within 30s."
+        throw "Target PostgreSQL container ($TargetContainer) failed to become ready within 30s."
     }
 
-    # Ensure target database exists
+    # Ensure fixture database exists
     $dbCheck = "SELECT 1 FROM pg_database WHERE datname = '$TargetDb';" | & docker exec -i $TargetContainer psql -t -A -U $TargetUser -d postgres 2>$null
     if ($dbCheck -ne "1") {
         Write-Host "Creating target database [$TargetDb] on $TargetContainer..." -ForegroundColor Cyan
@@ -288,7 +328,9 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
         throw "Failed to initialize baseline target database: $initRes"
     }
 
-    # Capture initial database fingerprint
+    # --------------------------------------------------------------------------
+    # 2. Capture Initial Full Fingerprint (Fail-Closed)
+    # --------------------------------------------------------------------------
     $PreTestFingerprint = Get-TargetDbFingerprint
     Write-Host "  Pre-test Target DB Fingerprint Hash: $PreTestFingerprint [CAPTURED]" -ForegroundColor Green
 
@@ -299,7 +341,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
         node (Join-Path $ProjectRootDir "tests/fixtures/historical/generate-test-fixtures.js")
     }
 
-    # Generate tampered manifest for Case 8
+    # Generate tampered manifest for Case 8 in temp directory
     $CorruptManifestPath = Join-Path $TempTestDir "corrupt_manifest.json"
     $validData = Get-Content -Path $AuthoritativeManifest -Raw | ConvertFrom-Json
     $CorruptManifestObj = @{
@@ -430,19 +472,16 @@ ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value";
     Write-Host "::error file=scripts/test-target-guard.ps1,title=GuardSuiteFatalError::$($_.ToString())"
     $script:FailedTests++
 } finally {
-    Write-Host "`nCleaning up temporary files and resetting maintenance flags..." -ForegroundColor Cyan
+    Write-Host "`nCleaning up isolated test fixture..." -ForegroundColor Cyan
     if (Test-Path $TempTestDir) {
         Remove-Item -Path $TempTestDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    $mActive = Join-Path $ProjectRootDir "maintenance/active"
-    $mFlag = Join-Path $ProjectRootDir "maintenance.flag"
-    if (Test-Path $mActive) { Remove-Item $mActive -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $mFlag) { Remove-Item $mFlag -Force -ErrorAction SilentlyContinue }
 
-    # Re-enable target restore permission for subsequent CI drill jobs
-    try {
-        & docker exec $TargetContainer psql -U $TargetUser -d $TargetDb -c "UPDATE \"AppSetting\" SET value = 'TRUE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED';" 2>&1 | Out-Null
-    } catch {}
+    # Destroy ONLY the ephemeral test fixture container created by this test run
+    if ($TargetContainer -and $TargetContainer -ne "gate-system-postgres" -and $TargetContainer.StartsWith("gms-guard-fixture-")) {
+        Write-Host "  Destroying isolated test fixture container ($TargetContainer)..."
+        & docker rm -f $TargetContainer 2>&1 | Out-Null
+    }
 }
 
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
@@ -453,13 +492,14 @@ Write-Host "  Failed Tests: $FailedTests" -ForegroundColor $(if ($FailedTests -e
 Write-Host "==============================================================================" -ForegroundColor Cyan
 
 $EvidenceObj = @{
-    reportTitle = "GMS Target Guard PowerShell Integration Test Evidence (P1-04 Real Target)"
-    engine = "PowerShell Integration with Real Staging Target Fixture"
+    reportTitle = "GMS Target Guard PowerShell Integration Test Evidence (P0-C / P0-D Hardened)"
+    engine = "PowerShell Integration with Isolated Ephemeral Target Fixture"
     timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-    status = if ($FailedTests -eq 0) { "PASSED" } else { "FAILED" }
+    status = if ($FailedTests -eq 0 -and $PassedTests -eq 9) { "PASSED" } else { "FAILED" }
     targetFixture = @{
         container = $TargetContainer
         port = $TargetPort
+        database = $TargetDb
         environmentId = $KnownEnvId
         installationUuid = $KnownInstallUuid
         preTestFingerprint = $PreTestFingerprint
@@ -478,10 +518,10 @@ $EvidenceJsonPath = Join-Path $ArtifactsDir "target-guard-powershell-evidence.js
 Set-Content -Path $EvidenceJsonPath -Value ($EvidenceObj | ConvertTo-Json -Depth 5) -Encoding utf8
 Write-Host "Saved target guard integration evidence to $EvidenceJsonPath"
 
-if ($FailedTests -eq 0) {
-    Write-Host "SUCCESS: All real PowerShell target guard assertions against real staging container PASSED!" -ForegroundColor Green
+if ($FailedTests -eq 0 -and $PassedTests -eq 9) {
+    Write-Host "SUCCESS: All real PowerShell target guard assertions against isolated staging container PASSED!" -ForegroundColor Green
     exit 0
 } else {
-    Write-Host "ERROR: One or more target guard assertions FAILED!" -ForegroundColor Red
+    Write-Host "ERROR: Target guard assertions FAILED or incomplete (Passed: $PassedTests/9)!" -ForegroundColor Red
     exit 1
 }
