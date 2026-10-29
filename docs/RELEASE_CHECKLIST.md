@@ -97,13 +97,17 @@ powershell -ExecutionPolicy Bypass -File .\scripts\deploy-with-rollback.ps1 `
 ### Prosedur B: Rollback Versi Aplikasi (Image-Only — Terbukti Skema Kompatibel)
 Gunakan prosedur ini HANYA jika release manifest membuktikan tidak ada migrasi skema baru sejak versi sebelumnya:
 
-1. **Siapkan Token Autentikasi Read-Only untuk Smoke Test:**
-   Agar pemeriksaan sesi terautentikasi pada smoke test menghasilkan verdict `PASSED` (bukan `PARTIAL`), siapkan token read-only operator:
+1. **Siapkan Token Autentikasi Read-Only untuk Smoke Test (Administrative Provisioning):**
+   > [!NOTE]
+   > `prod-smoke-readonly.js` adalah runner uji 100% non-mutatif (GET/HEAD/OPTIONS).
+   > Memanggil endpoint login backend memperbarui `lastLoginAt`, `refreshTokenHash`, dan menambahkan audit log `LOGIN_SUCCESS`. Oleh karena itu, penerbitan token dipisahkan sebagai langkah provisioning administratif oleh operator/IT:
    ```powershell
-   # Mengambil token read-only otomatis dari instance lokal:
+   # Sediakan kredensial akun khusus read-only (tanpa fallback hardcoded):
+   $env:SMOKE_OPERATOR_USER = "operator_readonly"
+   $env:SMOKE_OPERATOR_PASSWORD = "PasswordKhususReadOnly123!"
    $env:SMOKE_ACCESS_TOKEN = (node scripts/generate-smoke-token.js)
    ```
-   *(Atau masukkan token JWT operator read-only yang valid secara langsung ke `$env:SMOKE_ACCESS_TOKEN`)*
+   *(Atau masukkan token JWT operator read-only yang valid dan telah disetujui IT secara langsung ke `$env:SMOKE_ACCESS_TOKEN`)*
 
 2. **Jalankan Rollback Container ke Image Digest Stabil Sebelumnya:**
    Eksekusi orchestrator pemulihan tunggal:
@@ -141,6 +145,8 @@ Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus
 
 2. **Siapkan Token Autentikasi Read-Only untuk Smoke Test:**
    ```powershell
+   $env:SMOKE_OPERATOR_USER = "operator_readonly"
+   $env:SMOKE_OPERATOR_PASSWORD = "PasswordKhususReadOnly123!"
    $env:SMOKE_ACCESS_TOKEN = (node scripts/generate-smoke-token.js)
    ```
 

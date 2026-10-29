@@ -284,7 +284,7 @@ async function run() {
     return 'Unauthorized origin strictly rejected without CORS allowance header';
   }, { isRequired: true });
 
-  // 9. Authenticated Read-Only Business Probe (Strict Non-Mutating Contract)
+  // 9. Authenticated Read-Only Session Contract (GET /api/auth/me)
   await recordCheck('Authenticated Read-Only Session Contract (GET /api/auth/me)', async () => {
     if (SMOKE_TOKEN) {
       const res = await makeRequest(`${API_BASE_URL}/api/auth/me`, {
@@ -299,10 +299,26 @@ async function run() {
       } catch {
         throw new Error('Response is not valid JSON');
       }
-      const username = meJson.data?.username || meJson.username || 'verified_user';
+      const userData = meJson.data || meJson;
+      const username = userData.username || 'verified_user';
+      const role = userData.role;
+      const isActive = userData.isActive;
+
+      if (isActive === false) {
+        throw new Error(`Authenticated smoke user '${username}' is marked INACTIVE in database`);
+      }
+      if (!role) {
+        throw new Error(`Authenticated smoke user '${username}' returned undefined or empty role`);
+      }
+
+      const expectedRole = process.env.SMOKE_EXPECTED_ROLE;
+      if (expectedRole && role !== expectedRole) {
+        throw new Error(`Role mismatch: Expected role '${expectedRole}', but token holder has role '${role}'`);
+      }
+
       return {
         status: 'PASSED',
-        detail: `Authenticated session verified for user: ${username} (Read-only contract satisfied)`,
+        detail: `Authenticated session verified for user: ${username} [role: ${role}, active: ${isActive}] (Read-only contract satisfied)`,
       };
     } else {
       if (STRICT_AUTH) {
@@ -310,7 +326,38 @@ async function run() {
       }
       return {
         status: 'PENDING',
-        detail: 'PENDING OPERATOR TOKEN: No SMOKE_ACCESS_TOKEN supplied. Authenticated check deferred to human verification to maintain zero-mutation guarantee.',
+        detail: 'PENDING OPERATOR TOKEN: No SMOKE_ACCESS_TOKEN supplied. Authenticated check deferred to maintain zero-mutation guarantee.',
+      };
+    }
+  }, { isRequired: STRICT_AUTH });
+
+  // 10. Authenticated Read-Only Business Query (GET /api/transactions/active)
+  await recordCheck('Authenticated Read-Only Business Query (GET /api/transactions/active)', async () => {
+    if (SMOKE_TOKEN) {
+      const res = await makeRequest(`${API_BASE_URL}/api/transactions/active`, {
+        headers: { Authorization: `Bearer ${SMOKE_TOKEN}` },
+      });
+      if (res.statusCode !== 200) {
+        throw new Error(`Authenticated GET /api/transactions/active returned HTTP ${res.statusCode}`);
+      }
+      let txJson;
+      try {
+        txJson = JSON.parse(res.body);
+      } catch {
+        throw new Error('Response is not valid JSON');
+      }
+      const txCount = Array.isArray(txJson.data) ? txJson.data.length : (Array.isArray(txJson) ? txJson.length : 'unknown');
+      return {
+        status: 'PASSED',
+        detail: `Active transaction registry query verified. Found ${txCount} active transaction(s) (100% read-only probe)`,
+      };
+    } else {
+      if (STRICT_AUTH) {
+        throw new Error('Strict auth gate enforced (--strict-auth), but SMOKE_ACCESS_TOKEN was not supplied');
+      }
+      return {
+        status: 'PENDING',
+        detail: 'PENDING OPERATOR TOKEN: No SMOKE_ACCESS_TOKEN supplied. Business query probe deferred.',
       };
     }
   }, { isRequired: STRICT_AUTH });
