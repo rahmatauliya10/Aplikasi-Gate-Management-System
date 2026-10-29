@@ -47,6 +47,12 @@ param(
     [string]$FaultInjectionPhase = "",
 
     [Parameter(Mandatory=$false)]
+    [switch]$PreserveMaintenanceFlag,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$ManagedByOrchestrator,
+
+    [Parameter(Mandatory=$false)]
     [switch]$Force
 )
 
@@ -583,9 +589,24 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         if ([string]::IsNullOrWhiteSpace($ActualInstallUuid)) {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_INSTALLATION_UUID configured in AppSetting. Fail-closed: Existing environment restore requires a valid installation UUID. NO DATABASE MUTATION OCCURRED."
         }
-        if ($ExpectedInstallationUuid -and $ActualInstallUuid -ne $ExpectedInstallationUuid) {
-            throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Installation UUID '$ExpectedInstallationUuid' does not match target UUID '$ActualInstallUuid'. NO DATABASE MUTATION OCCURRED."
+        [string]$EffectiveExpectedUuid = $ExpectedInstallationUuid
+        if (-not $EffectiveExpectedUuid -and $ManifestData.installationUuid) {
+            $EffectiveExpectedUuid = [string]$ManifestData.installationUuid
         }
+        if (-not $EffectiveExpectedUuid -and ($ActualEnvId -like "*PROD*" -or $ExpectedEnvironmentId -like "*PROD*")) {
+            throw "HARD FAIL: Production restore strictly requires an explicit -ExpectedInstallationUuid (or installationUuid in manifest) to prevent restoring onto an unverified target. Refusing unverified target."
+        }
+        if ($EffectiveExpectedUuid -and $ActualInstallUuid -ne $EffectiveExpectedUuid) {
+            throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Installation UUID '$EffectiveExpectedUuid' does not match target UUID '$ActualInstallUuid'. NO DATABASE MUTATION OCCURRED."
+        }
+
+        # Verify Docker host context
+        try {
+            $dockerContext = (& docker context show 2>$null).ToString().Trim()
+            if ($dockerContext) {
+                Write-Log "  Verified Docker host context: $dockerContext"
+            }
+        } catch {}
 
         # Check GMS_RESTORE_ALLOWED
         [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
@@ -903,15 +924,20 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     }
     exit 1
 } finally {
-    # Step 8: Maintenance Mode Teardown & Container Cleanup (Fail-Closed)
+    # Step 8: Maintenance Mode Teardown & Container Cleanup (Single Ownership / Fail-Closed)
+    [bool]$PreserveMaint = [bool]($PreserveMaintenanceFlag -or $ManagedByOrchestrator)
     if ($RestoreSucceeded) {
-        if (Test-Path -Path $MaintFlagPath) {
-            Remove-Item -Path $MaintFlagPath -Force -ErrorAction SilentlyContinue
+        if ($PreserveMaint) {
+            Write-Log "Maintenance mode preserved by orchestrator (-PreserveMaintenanceFlag / -ManagedByOrchestrator). Maintenance remains ACTIVE until post-rollback verification." -Level "INFO"
+        } else {
+            if (Test-Path -Path $MaintFlagPath) {
+                Remove-Item -Path $MaintFlagPath -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-Path -Path $MaintActivePath) {
+                Remove-Item -Path $MaintActivePath -Force -ErrorAction SilentlyContinue
+            }
+            Write-Log "Maintenance mode released & staging container destroyed."
         }
-        if (Test-Path -Path $MaintActivePath) {
-            Remove-Item -Path $MaintActivePath -Force -ErrorAction SilentlyContinue
-        }
-        Write-Log "Maintenance mode released & staging container destroyed."
     } else {
         if ((Test-Path -Path $MaintFlagPath) -or (Test-Path -Path $MaintActivePath)) {
             Write-Log "RESTORE FAILED OR INCOMPLETE! MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY." -Level "WARN"
@@ -919,11 +945,19 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         }
     }
 
-    # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database for security
+    # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database with verification
     if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
         try {
-            & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED';" 2>&1 | Out-Null
-        } catch {}
+            $resetRaw = & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE \"AppSetting\" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM \"AppSetting\" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+            [string]$resetVal = ($resetRaw | Out-String).Trim()
+            if ($resetVal -eq "FALSE") {
+                Write-Log "Auto-reset of GMS_RESTORE_ALLOWED to FALSE verified in target database [PASS]." -Level "SUCCESS"
+            } else {
+                Write-Log "WARNING: Could not verify GMS_RESTORE_ALLOWED reset to FALSE (query returned: $resetVal)" -Level "WARN"
+            }
+        } catch {
+            Write-Log "ERROR: Failed executing auto-reset query for GMS_RESTORE_ALLOWED: $_" -Level "ERROR"
+        }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($StagingContainer)) {
