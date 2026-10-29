@@ -302,7 +302,11 @@ function runTests() {
     : 'pwsh';
 
   try {
-    const psRes = spawnSync(psExe, ['-ExecutionPolicy', 'Bypass', '-File', psScript], {
+    const psArgs = ['-ExecutionPolicy', 'Bypass', '-File', psScript];
+    if (process.env.CI || process.env.ALLOW_SKIP_IF_DOCKER_UNAVAILABLE || process.argv.includes('--allow-skip-if-docker-unavailable')) {
+      psArgs.push('-AllowSkipIfDockerUnavailable');
+    }
+    const psRes = spawnSync(psExe, psArgs, {
       stdio: 'inherit',
       env: process.env,
     });

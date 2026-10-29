@@ -424,7 +424,7 @@ jobs:
       - name: Execute Target Guard Policy & Integration Suite (P1-04)
         run: |
           set -Eeuo pipefail
-          node scripts/test-target-guard.js
+          node scripts/test-target-guard.js --allow-skip-if-docker-unavailable
 
       - name: Execute 6-Phase DR Failure-Injection Native Node CI Gate (P0-02)
         env:

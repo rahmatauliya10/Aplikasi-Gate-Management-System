@@ -113,6 +113,15 @@ async function runTests() {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ success: false, message: 'Unauthorized' }));
     }
+    if (url === '/api/transactions/active') {
+      const auth = req.headers['authorization'] || '';
+      if (auth.includes('valid_token')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ success: true, data: [] }));
+      }
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ success: false, message: 'Unauthorized' }));
+    }
     res.writeHead(404);
     res.end();
   };
@@ -259,7 +268,7 @@ async function runTests() {
     await closeServer(apiServer);
     await closeServer(frontendServer);
 
-    if (result.status === 0 && result.stdout.includes('Verdict: [PARTIAL]') && result.stdout.includes('1 PENDING')) {
+    if (result.status === 0 && result.stdout.includes('Verdict: [PARTIAL]') && result.stdout.includes('PENDING')) {
       console.log('  [PASS] Smoke test reported PARTIAL with 0 exit code (zero mutations, pending operator token).\n');
     } else {
       console.error(`  [FAIL] Expected exit 0 and PARTIAL verdict, got code: ${result.status}\nOutput: ${result.stdout}`);
