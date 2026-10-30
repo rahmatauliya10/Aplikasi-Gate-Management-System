@@ -102,12 +102,12 @@ Gunakan prosedur ini HANYA jika release manifest membuktikan tidak ada migrasi s
    > `prod-smoke-readonly.js` adalah runner uji 100% non-mutatif (GET/HEAD/OPTIONS).
    > Memanggil endpoint login backend memperbarui `lastLoginAt`, `refreshTokenHash`, dan menambahkan audit log `LOGIN_SUCCESS`. Oleh karena itu, penerbitan token dipisahkan sebagai langkah provisioning administratif oleh operator/IT:
    ```powershell
-   # Sediakan kredensial akun khusus read-only (tanpa fallback hardcoded):
+   # Sediakan kredensial akun khusus read-only dari password manager/vault (tanpa hardcoded string):
    $env:SMOKE_OPERATOR_USER = "operator_readonly"
-   $env:SMOKE_OPERATOR_PASSWORD = "PasswordKhususReadOnly123!"
+   $env:SMOKE_OPERATOR_PASSWORD = "<OPERATOR_READONLY_PASSWORD>"  # Ambil dari password vault perusahaan
    $env:SMOKE_ACCESS_TOKEN = (node scripts/generate-smoke-token.js)
    ```
-   *(Atau masukkan token JWT operator read-only yang valid dan telah disetujui IT secara langsung ke `$env:SMOKE_ACCESS_TOKEN`)*
+   *(Atau secara langsung masukkan token JWT bertaraf least-privilege read-only yang valid ke `$env:SMOKE_ACCESS_TOKEN`)*
 
 2. **Jalankan Rollback Container ke Image Digest Stabil Sebelumnya:**
    Eksekusi orchestrator pemulihan tunggal:
@@ -146,7 +146,7 @@ Gunakan prosedur ini jika migrasi forward telah terjadi dan skema database harus
 2. **Siapkan Token Autentikasi Read-Only untuk Smoke Test:**
    ```powershell
    $env:SMOKE_OPERATOR_USER = "operator_readonly"
-   $env:SMOKE_OPERATOR_PASSWORD = "PasswordKhususReadOnly123!"
+   $env:SMOKE_OPERATOR_PASSWORD = "<OPERATOR_READONLY_PASSWORD>"  # Ambil dari password vault perusahaan
    $env:SMOKE_ACCESS_TOKEN = (node scripts/generate-smoke-token.js)
    ```
 
