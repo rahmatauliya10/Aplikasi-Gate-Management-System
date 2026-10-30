@@ -126,8 +126,11 @@ function Ensure-TargetPostgresContainer {
         }
     }
     $rawMig = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '_prisma_migrations';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>$null
-    [string[]]$migLines = if ($rawMig) { @(($rawMig.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
-    $migExists = if ($migLines.Length -gt 0) { ([string]$migLines[-1]).Trim() } else { "" }
+    [string]$migExists = ""
+    if ($rawMig) {
+        $migLines = @(($rawMig.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+        if ((@($migLines)).Count -gt 0) { $migExists = ([string]$migLines[-1]).Trim() }
+    }
     if ($migExists -ne "1") {
         [string]$DumpFile = Join-Path $ProjectRootDir "tests/fixtures/historical/historical_test.dump"
         if (Test-Path -LiteralPath $DumpFile) {
@@ -198,8 +201,11 @@ function Get-DatabaseFingerprint {
 
     foreach ($Table in $Tables) {
         $rawCheck = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '$Table';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>&1
-        [string[]]$tableLines = if ($rawCheck) { @(($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
-        $TableCheck = if ($tableLines.Length -gt 0) { ([string]$tableLines[-1]).Trim() } else { "" }
+        $TableCheck = ""
+        if ($rawCheck) {
+            $tableLines = @(($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+            if ((@($tableLines)).Count -gt 0) { $TableCheck = ([string]$tableLines[-1]).Trim() }
+        }
         if ($TableCheck -ne "1") {
             $Result[$Table] = "NON_EXISTENT"
             continue
@@ -211,8 +217,10 @@ function Get-DatabaseFingerprint {
         $Hash = ""
         try {
             $rawHash = ($Sql + "`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>&1
-            [string[]]$hashLines = if ($rawHash) { @(($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' }) } else { @() }
-            $Hash = if ($hashLines.Length -gt 0) { ([string]$hashLines[-1]).Trim() } else { "" }
+            if ($rawHash) {
+                $hashLines = @(($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+                if ((@($hashLines)).Count -gt 0) { $Hash = ([string]$hashLines[-1]).Trim() }
+            }
         } catch {
             throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $($_.ToString())"
         }

@@ -217,7 +217,7 @@ function Exec-LiveDbQuery([string]$sql) {
     if (-not $raw) { return "" }
     [string]$rawText = ($raw | Out-String)
     [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
-    if ($lines.Length -gt 0) {
+    if ((@($lines)).Count -gt 0) {
         $errLine = $lines | Where-Object { $_ -match '^(psql:\s*error:|ERROR:|FATAL:)' } | Select-Object -First 1
         if ($errLine) {
             throw "Database query error on [$LiveDbName]: $($lines -join ' -- ')"
@@ -340,7 +340,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         if (-not $raw) { return "" }
         [string]$rawText = ($raw | Out-String)
         [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
-        if ($lines.Length -gt 0) {
+        if ((@($lines)).Count -gt 0) {
             $errLine = $lines | Where-Object { $_ -match '^(psql:\s*error:|ERROR:|FATAL:)' } | Select-Object -First 1
             if ($errLine) {
                 throw "Staging database query error: $($lines -join ' -- ')"
@@ -537,7 +537,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         }
         if (-not $raw) { return "" }
         [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
-        if ($lines.Length -gt 0) { return ([string]$lines[-1]).Trim() }
+        if ((@($lines)).Count -gt 0) { return ([string]$lines[-1]).Trim() }
         return ""
     }
 
