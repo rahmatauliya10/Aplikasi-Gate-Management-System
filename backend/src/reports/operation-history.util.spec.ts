@@ -1,0 +1,319 @@
+import 'reflect-metadata';
+import {
+  getOperationHistoryDurations,
+  getOperationHistoryFraud,
+  normalizeOperationHistoryTransaction,
+} from './operation-history.util';
+
+describe('operation history normalization', () => {
+  it('distinguishes missing timestamps from zero duration', () => {
+    const durations = getOperationHistoryDurations({
+      createdAt: '2026-01-01T00:00:00.000Z',
+      gateInAt: '2026-01-01T00:00:00.000Z',
+      weighInAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    expect(durations.waitingIn).toBe(0);
+    expect(durations.total).toBeNull();
+    expect(durations.dataQuality).toContain('MISSING_TIMESTAMP');
+  });
+
+  it('sums complete vehicle and incoming QC pairs without mixing endpoints', () => {
+    const durations = getOperationHistoryDurations({
+      qcVehicleChecks: [
+        {
+          id: 'vehicle-current',
+          isCurrent: true,
+          isVoided: false,
+          revision: 2,
+          startedAt: '2026-01-01T00:00:00.000Z',
+          completedAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+      incomingMaterialChecks: [
+        {
+          id: 'incoming-current',
+          isCurrent: true,
+          isVoided: false,
+          revision: 1,
+          startedAt: '2026-01-01T02:00:00.000Z',
+          completedAt: '2026-01-01T02:30:00.000Z',
+        },
+      ],
+    });
+
+    expect(durations.qc).toBe(90);
+    expect(durations.dataQuality).not.toContain('PARTIAL_QC_TIMESTAMP');
+  });
+
+  it('returns null with a quality flag for partial QC instead of mixing endpoints', () => {
+    const durations = getOperationHistoryDurations({
+      qcVehicleChecks: [
+        {
+          isCurrent: true,
+          isVoided: false,
+          revision: 1,
+          startedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      qcEndAt: '2026-01-01T01:00:00.000Z',
+    });
+
+    expect(durations.qc).toBeNull();
+    expect(durations.dataQuality).toContain('PARTIAL_QC_TIMESTAMP');
+  });
+
+  it('uses a complete transaction warehouse pair only when no current child exists', () => {
+    const durations = getOperationHistoryDurations({
+      warehouseProcesses: [
+        {
+          isCurrent: true,
+          isVoided: false,
+          revision: 2,
+          startAt: '2026-01-01T03:00:00.000Z',
+        },
+      ],
+      warehouseStartAt: '2026-01-01T00:00:00.000Z',
+      warehouseEndAt: '2026-01-01T02:00:00.000Z',
+    });
+
+    expect(durations.warehouse).toBeNull();
+    expect(durations.waitingOut).toBeNull();
+    expect(durations.dataQuality).toContain('PARTIAL_WAREHOUSE_TIMESTAMP');
+  });
+
+  it('marks inverted timestamps as invalid rather than clamping them to zero', () => {
+    const durations = getOperationHistoryDurations({
+      createdAt: '2026-01-01T01:00:00.000Z',
+      gateInAt: '2026-01-01T01:00:00.000Z',
+      weighInAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    expect(durations.waitingIn).toBeNull();
+    expect(durations.dataQuality).toContain('INVERTED_TIMESTAMP');
+  });
+
+  it('selects the latest FraudCheck by calculatedAt, not revision', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 100,
+      actualWeight: 95,
+      fraudChecks: [
+        {
+          id: 'old',
+          revision: 1,
+          warehouseActualWeight: 80,
+          calculatedAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'new',
+          revision: 2,
+          warehouseActualWeight: 105,
+          calculatedAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(fraud.roll).toBe(105);
+  });
+
+  it('does not present rejected transactions as SAFE or as zero deviation', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'QC_VEHICLE_REJECTED',
+      netWeight: 100,
+      actualWeight: 100,
+      fraudChecks: [],
+    });
+
+    expect(fraud.status).toBe('PENDING');
+    expect(fraud.deviationPercent).toBeNull();
+    expect(fraud.diff).toBeNull();
+    expect(fraud.dataQuality).toContain('REJECTED_NOT_EVALUATED');
+  });
+
+  it('preserves true zero values without converting missing values to zero', () => {
+    const missing = getOperationHistoryFraud({ status: 'COMPLETED' });
+    expect(missing.net).toBeNull();
+    expect(missing.roll).toBeNull();
+    expect(missing.deviationPercent).toBeNull();
+
+    const zero = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 0,
+      actualWeight: 0,
+    });
+    expect(zero.net).toBeNull();
+    expect(zero.roll).toBeNull();
+    expect(zero.dataQuality).toContain('INVALID_WEIGHT');
+  });
+
+  it.each([
+    [98, 'SAFE'],
+    [97, 'WARNING'],
+    [94, 'CRITICAL'],
+    [98.01, 'SAFE'],
+    [97.99, 'WARNING'],
+  ])('uses producer fallback boundaries for roll ratio %s', (roll, status) => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 100,
+      actualWeight: roll,
+    });
+
+    expect(fraud.status).toBe(status);
+  });
+
+  it('preserves a persisted verdict when projection weights are unavailable', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      fraudChecks: [
+        {
+          id: 'persisted-critical',
+          riskLevel: 'CRITICAL',
+          deviationPercent: 7,
+          calculatedAt: '2026-01-01T01:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(fraud.status).toBe('CRITICAL');
+    expect(fraud.deviationPercent).toBe(7);
+    expect(fraud.net).toBeNull();
+    expect(fraud.roll).toBeNull();
+  });
+
+  it.each([
+    ['GBB', 120, 40, 80],
+    ['GSP', 120, 40, 80],
+    ['GBJ', 40, 120, 80],
+  ])(
+    'maps %s weighbridge IN/OUT records to the process-aware gross/tare contract',
+    (processType, inWeight, outWeight, expectedNet) => {
+      const normalized = normalizeOperationHistoryTransaction({
+        processType,
+        netWeight: null,
+        actualWeight: 80,
+        weighbridgeRecords: [
+          {
+            id: `${processType}-in`,
+            type: 'IN',
+            isCurrent: true,
+            revision: 1,
+            weight: inWeight,
+          },
+          {
+            id: `${processType}-out`,
+            type: 'OUT',
+            isCurrent: true,
+            revision: 1,
+            weight: outWeight,
+          },
+        ],
+      });
+
+      expect(normalized.weights.gross).toBe(
+        processType === 'GBJ' ? outWeight : inWeight,
+      );
+      expect(normalized.weights.tare).toBe(
+        processType === 'GBJ' ? inWeight : outWeight,
+      );
+      expect(normalized.fraud.net).toBe(expectedNet);
+    },
+  );
+
+  it('uses GBJ root gross/tare fields with the same mapping when weighbridge records are absent', () => {
+    const normalized = normalizeOperationHistoryTransaction({
+      processType: 'GBJ',
+      grossWeight: 120,
+      tareWeight: 40,
+      netWeight: null,
+      actualWeight: 80,
+      weighbridgeRecords: [],
+    });
+
+    expect(normalized.weights).toEqual({
+      gross: 120,
+      tare: 40,
+      net: 80,
+      rollWeight: 80,
+    });
+  });
+
+  it.each([0, -10])(
+    'falls back to transaction netWeight when FraudCheck netWeight is %s and records INVALID_WEIGHT',
+    (fraudNet) => {
+      const fraud = getOperationHistoryFraud({
+        status: 'COMPLETED',
+        netWeight: 100,
+        actualWeight: 93,
+        fraudChecks: [
+          {
+            id: 'fc-non-positive-net',
+            riskLevel: 'CRITICAL',
+            netWeight: fraudNet,
+            deviationPercent: 7,
+          },
+        ],
+      });
+
+      expect(fraud.net).toBe(100);
+      expect(fraud.roll).toBe(93);
+      expect(fraud.deviationPercent).toBe(7);
+      expect(fraud.dataQuality).toContain('INVALID_WEIGHT');
+    },
+  );
+
+  it('evaluates rejection from the current QC child revision and ignores superseded rejected revisions', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 100,
+      actualWeight: 98,
+      qcVehicleChecks: [
+        {
+          id: 'qc-rev1-old',
+          revision: 1,
+          isCurrent: false,
+          result: 'REJECT',
+        },
+        {
+          id: 'qc-rev2-active',
+          revision: 2,
+          isCurrent: true,
+          result: 'PASS',
+        },
+      ],
+      fraudChecks: [],
+    });
+
+    expect(fraud.status).toBe('SAFE');
+    expect(fraud.deviationPercent).toBe(2);
+    expect(fraud.dataQuality).not.toContain('REJECTED_NOT_EVALUATED');
+  });
+
+  it('rejects transaction when the current QC child revision is REJECT even if previous revision was PASS', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 100,
+      actualWeight: 98,
+      qcVehicleChecks: [
+        {
+          id: 'qc-rev1-old',
+          revision: 1,
+          isCurrent: false,
+          result: 'PASS',
+        },
+        {
+          id: 'qc-rev2-active',
+          revision: 2,
+          isCurrent: true,
+          result: 'REJECT',
+        },
+      ],
+      fraudChecks: [],
+    });
+
+    expect(fraud.status).toBe('PENDING');
+    expect(fraud.deviationPercent).toBeNull();
+    expect(fraud.dataQuality).toContain('REJECTED_NOT_EVALUATED');
+  });
+});

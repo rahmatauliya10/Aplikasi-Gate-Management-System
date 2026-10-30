@@ -74,6 +74,8 @@ Write-Log "=====================================================================
 Write-Log "Starting GMS Coordinated Deployment Rollback Operator Drill (P0-03)..."
 Write-Log "=============================================================================="
 
+$env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
+
 [datetime]$DrillStartTime = Get-Date
 
 # ------------------------------------------------------------------------------

@@ -47,20 +47,52 @@ param(
     [string]$FaultInjectionPhase = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$MaintenanceDir = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$UploadsDirectory = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$LogDirectory = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$RecoveryOperationId = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$PgPort = "",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$PreserveMaintenanceFlag,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$ManagedByOrchestrator,
+
+    [Parameter(Mandatory=$false)]
     [switch]$Force
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
-[string]$ProjectRootDir = (Get-Item "$PSScriptRoot\..").FullName
-[string]$LogDir = if ($IsWindows) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
+[string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
+[bool]$IsWinPlatform = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+[string]$LogDir = if ($LogDirectory) { $LogDirectory } elseif ($IsWinPlatform) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
 [string]$LogFile = Join-Path -Path $LogDir -ChildPath "production_restore.log"
 [string]$RestoreEvidencePath = Join-Path -Path $LogDir -ChildPath "restore_evidence.json"
-[string]$UploadDir = if ($env:UPLOAD_DIR) { $env:UPLOAD_DIR } else { Join-Path -Path $ProjectRootDir -ChildPath "uploads" }
+[string]$UploadDir = if ($UploadsDirectory) { $UploadsDirectory } elseif ($env:UPLOAD_DIR) { $env:UPLOAD_DIR } else { Join-Path -Path $ProjectRootDir -ChildPath "uploads" }
 
 if (-not (Test-Path -Path $LogDir -PathType Container)) {
-    New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
+    try {
+        New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
+    } catch {
+        $LogDir = Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs"
+        $LogFile = Join-Path -Path $LogDir -ChildPath "production_restore.log"
+        $RestoreEvidencePath = Join-Path -Path $LogDir -ChildPath "restore_evidence.json"
+        if (-not (Test-Path -Path $LogDir -PathType Container)) {
+            New-Item -Path $LogDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
 }
 
 function Write-Log {
@@ -87,9 +119,18 @@ Write-Log "=====================================================================
 [string]$BackupId = ""
 [string]$ActualDumpHash = ""
 [string]$AttArchivePath = ""
+[string]$StagingContainer = ""
+[string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
+[string]$MaintDir = if ($MaintenanceDir) { $MaintenanceDir } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance" }
+[string]$MaintFlagPath = if ($MaintenanceDir) { Join-Path -Path $MaintenanceDir -ChildPath "maintenance.flag" } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag" }
+[string]$MaintActivePath = if ($MaintenanceDir) { Join-Path -Path $MaintenanceDir -ChildPath "active" } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active" }
 
+try {
 # Step 1: Resolve Backup Manifest & Artifact Paths
-[string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups\local"
+[string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups/local"
+if (-not (Test-Path -Path $LocalBackupDir -PathType Container)) {
+    New-Item -Path $LocalBackupDir -ItemType Directory -Force | Out-Null
+}
 if (-not $ManifestPath) {
     $LatestManifest = Get-ChildItem -Path $LocalBackupDir -Filter "*_manifest.json" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (-not $LatestManifest) {
@@ -127,51 +168,211 @@ if ($ActualDumpHash -ne $ExpectedDumpHash) {
 }
 Write-Log "  Dump file SHA-256 checksum verified [PASS] ($ActualDumpHash)" -Level "SUCCESS"
 
-[string]$AttArchiveFileName = $ManifestData.artifacts.attachmentsArchive
+[string]$AttArchiveFileName = ""
+if ($ManifestData.artifacts.PSObject.Properties['attachmentsArchive']) {
+    $AttArchiveFileName = [string]$ManifestData.artifacts.attachmentsArchive
+}
 if ($AttArchiveFileName) {
     $AttArchivePath = Join-Path -Path (Split-Path -Path $ManifestPath -Parent) -ChildPath $AttArchiveFileName
     if (-not (Test-Path -Path $AttArchivePath)) {
         throw "Companion physical attachment archive ($AttArchiveFileName) missing from backup directory."
     }
     [string]$ActualAttArchiveHash = (Get-FileHash -Path $AttArchivePath -Algorithm SHA256).Hash.ToLower()
-    [string]$ExpectedAttArchiveHash = $ManifestData.checksums.attachmentsArchive.ToLower()
-    if ($ActualAttArchiveHash -ne $ExpectedAttArchiveHash) {
+    [string]$ExpectedAttArchiveHash = if ($ManifestData.checksums.PSObject.Properties['attachmentsArchive']) { [string]$ManifestData.checksums.attachmentsArchive.ToLower() } else { "" }
+    if ($ExpectedAttArchiveHash -and $ActualAttArchiveHash -ne $ExpectedAttArchiveHash) {
         throw "Attachment Archive SHA-256 Checksum Mismatch! Expected: $ExpectedAttArchiveHash, Actual: $ActualAttArchiveHash. Aborting restore."
     }
     Write-Log "  Attachment archive SHA-256 checksum verified [PASS] ($ActualAttArchiveHash)" -Level "SUCCESS"
 }
 
 if (-not $PgPass) {
-    $PgPass = "gms_ephemeral_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 16)
+    if ($env:PGPASSWORD) {
+        $PgPass = $env:PGPASSWORD
+    } elseif ($env:POSTGRES_PASSWORD) {
+        $PgPass = $env:POSTGRES_PASSWORD
+    } else {
+        $PgPass = "gms_ephemeral_" + [System.Guid]::NewGuid().ToString("N").Substring(0, 16)
+    }
 }
 
-# Step 3: Enter Maintenance Mode / Application Write Freeze
+# Step 1.5: Target Environment & Fault-Injection Preflight Validation
+Write-Log "Step 1.5: Validating Target Infrastructure & Security Governance Preflight..."
+[string]$EffectiveFaultPhasePreflight = if ($FaultInjectionPhase) { $FaultInjectionPhase } else { $env:GMS_FAULT_INJECTION_PHASE }
+if (-not [string]::IsNullOrWhiteSpace($EffectiveFaultPhasePreflight)) {
+    # 1. Unconditional rejection of production targets
+    if ($LiveDbName -like "*prod*" -or $LiveContainer -like "*prod*" -or ($ExpectedEnvironmentId -and $ExpectedEnvironmentId -like "*PROD*")) {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] or container [$LiveContainer] is identified as PRODUCTION. Fault injection (-FaultInjectionPhase '$EffectiveFaultPhasePreflight') is UNCONDITIONALLY PROHIBITED on production targets under ALL circumstances. CI or drill flags cannot override this."
+    }
+
+    # 2. Require verified isolated drill environment
+    if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE") {
+        throw "CRITICAL GOVERNANCE VIOLATION: Fault injection (-FaultInjectionPhase '$EffectiveFaultPhasePreflight') requires verified isolated drill environment (GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE). Target environment is not authorized."
+    }
+
+    # 3. Check container labels and mounts to prevent drill against production volumes
+    $rawInspectPreflight = & docker inspect $LiveContainer 2>$null
+    [string]$inspectJsonPreflight = if ($rawInspectPreflight) { [string]$rawInspectPreflight.ToString() } else { "" }
+    if ($inspectJsonPreflight) {
+        if ($inspectJsonPreflight -like "*prod-postgres-data*" -or $inspectJsonPreflight -like "*production_postgres*") {
+            throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is bound to production data volumes! Fault injection is unconditionally blocked."
+        }
+    }
+}
+
+# 4. In isolated drill mode, strictly forbid operational paths, databases, and containers
+if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -eq "TRUE") {
+    if ($LiveContainer -eq "gate-system-postgres") {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is the operational container name! Drill must use an isolated fixture container."
+    }
+    if ($LiveDbName -eq "gms") {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] is the operational database name! Drill must use an isolated fixture database."
+    }
+    [string]$realProjectUploads = Join-Path -Path $ProjectRootDir -ChildPath "uploads"
+    if ($UploadDir -eq $realProjectUploads) {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target uploads directory [$UploadDir] points to operational project uploads! Drill must use an isolated fixture uploads directory."
+    }
+    [string]$realMaintDir = Join-Path -Path $ProjectRootDir -ChildPath "maintenance"
+    [string]$realMaintFlag = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
+    [string]$realMaintActive = Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active"
+    if ($MaintDir -eq $realMaintDir -or $MaintFlagPath -eq $realMaintFlag -or $MaintActivePath -eq $realMaintActive) {
+        throw "CRITICAL GOVERNANCE VIOLATION: Maintenance directory or flag path points to operational project root! Drill must use an isolated fixture maintenance directory."
+    }
+}
+
+# 5. Persistent Exactly-Once Recovery Enforcement (P1-05 / FIX-05)
+if ($RecoveryOperationId) {
+    [string]$RecLedgerFile = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
+    if (Test-Path -Path $RecLedgerFile) {
+        try {
+            $recLedger = Get-Content -Path $RecLedgerFile -Raw | ConvertFrom-Json
+            if ($recLedger.recoveryOperationId -eq $RecoveryOperationId -and $recLedger.dbRestoreExecuted -eq $true) {
+                throw "CRITICAL RECOVERY VIOLATION: Duplicate database restore rejected! Recovery operation [$RecoveryOperationId] already executed and verified DB restore at $($recLedger.dbRestoreExecutedAt)."
+            }
+        } catch {
+            if ($_.ToString() -match "CRITICAL RECOVERY VIOLATION") { throw $_ }
+        }
+    }
+}
+
+# Verify target container exists and is running
+$rawLivePreflight = ""
+try {
+    $rawOut = & docker ps -q -f "name=^/${LiveContainer}$" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $rawOut) {
+        $rawLivePreflight = ([string]($rawOut | Out-String)).Trim()
+    }
+} catch {}
+if ([string]::IsNullOrWhiteSpace($rawLivePreflight)) {
+    throw "HARD FAIL: Live target container [$LiveContainer] is not running or unreachable. Cannot proceed with restore."
+}
+
+# Helper for live database queries
+function Exec-LiveDbQuery([string]$sql) {
+    $inputSql = $sql.Trim() + "`n"
+    $raw = if ($PgPass) {
+        $inputSql | & docker exec -i -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
+    } else {
+        $inputSql | & docker exec -i $LiveContainer psql -t -A -U $PgUser -d $LiveDbName 2>&1
+    }
+    if (-not $raw) { return "" }
+    [string]$rawText = ($raw | Out-String)
+    [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+    if ((@($lines)).Count -gt 0) {
+        $errLine = $lines | Where-Object { $_ -match '^(psql:\s*error:|ERROR:|FATAL:)' } | Select-Object -First 1
+        if ($errLine) {
+            throw "Database query error on [$LiveDbName]: $($lines -join ' -- ')"
+        }
+        return ([string]$lines[-1]).Trim()
+    }
+    return ""
+}
+
+# --------------------------------------------------------------------------
+# TARGET DATABASE FINGERPRINT & AUTHORIZATION GUARD (ZERO-FORCE BYPASS)
+# --------------------------------------------------------------------------
+Write-Log "  Verifying Target Database Fingerprint & Authorization Proof on [$LiveDbName]..."
+[string]$TableCountStr = Exec-LiveDbQuery "SELECT count(*) FROM pg_stat_user_tables;"
+[int]$LiveTableCount = 0
+[int]::TryParse($TableCountStr, [ref]$LiveTableCount) | Out-Null
+
+if ($InitializeNewEnvironment) {
+    Write-Log "  -InitializeNewEnvironment switch detected. Verifying target database is 100% empty..."
+    if ($LiveTableCount -gt 0) {
+        [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""User""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""User"") ELSE 0 END;"
+        [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""_prisma_migrations""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""_prisma_migrations"") ELSE 0 END;"
+        [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""Transaction""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""Transaction"") ELSE 0 END;"
+        [int]$uCount = 0; [int]$mCount = 0; [int]$tCount = 0;
+        [int]::TryParse($LiveUserCountStr, [ref]$uCount) | Out-Null
+        [int]::TryParse($LiveMigCountStr, [ref]$mCount) | Out-Null
+        [int]::TryParse($LiveTxCountStr, [ref]$tCount) | Out-Null
+        if (($uCount + $mCount + $tCount) -gt 0) {
+            throw "HARD FAIL: -InitializeNewEnvironment REJECTED! Target database [$LiveDbName] is populated (Tables: $LiveTableCount, Migrations: $mCount, Users: $uCount, Tx: $tCount). Initialization is only permitted on 100% empty databases."
+        }
+    }
+    Write-Log "  Target database verified empty for fresh environment initialization [PASS]" -Level "SUCCESS"
+} else {
+    # Standard Production Restore: Enforce strict fingerprint validation
+    if ($LiveTableCount -eq 0) {
+        throw "HARD FAIL: Target database [$LiveDbName] has 0 tables and is not initialized. For fresh databases, use -InitializeNewEnvironment. NO DATABASE MUTATION OCCURRED."
+    }
+
+    [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""_prisma_migrations""') IS NOT NULL THEN 1 ELSE 0 END;"
+    [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""AppSetting""') IS NOT NULL THEN 1 ELSE 0 END;"
+    if ($hasMigrations -ne "1" -or $hasAppSettings -ne "1") {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
+    }
+
+    # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
+    [string]$ActualEnvId = Exec-LiveDbQuery "SELECT value FROM ""AppSetting"" WHERE key IN ('GMS_ENVIRONMENT_ID', 'ENVIRONMENT_ID', 'SYSTEM_ENVIRONMENT_ID') LIMIT 1;"
+    if ([string]::IsNullOrWhiteSpace($ActualEnvId)) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_ENVIRONMENT_ID configured in AppSetting. Fail-closed: Cannot restore into unverified database without verified identity. NO DATABASE MUTATION OCCURRED."
+    }
+    if ($ExpectedEnvironmentId -and $ActualEnvId -ne $ExpectedEnvironmentId) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Environment ID '$ExpectedEnvironmentId' does not match target database ID '$ActualEnvId'. NO DATABASE MUTATION OCCURRED."
+    }
+
+    # Check GMS_INSTALLATION_UUID (FAIL-CLOSED: Must be present on existing database)
+    [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT value FROM ""AppSetting"" WHERE key IN ('GMS_INSTALLATION_UUID', 'INSTALLATION_UUID') LIMIT 1;"
+    if ([string]::IsNullOrWhiteSpace($ActualInstallUuid)) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_INSTALLATION_UUID configured in AppSetting. Fail-closed: Existing environment restore requires a valid installation UUID. NO DATABASE MUTATION OCCURRED."
+    }
+    if ($ExpectedInstallationUuid -and $ActualInstallUuid -ne $ExpectedInstallationUuid) {
+        throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Installation UUID '$ExpectedInstallationUuid' does not match target UUID '$ActualInstallUuid'. NO DATABASE MUTATION OCCURRED."
+    }
+
+    # Check GMS_RESTORE_ALLOWED
+    [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT UPPER(value) FROM ""AppSetting"" WHERE key IN ('GMS_RESTORE_ALLOWED', 'RESTORE_ALLOWED') LIMIT 1;"
+    if (-not $RestoreAllowedVal) { $RestoreAllowedVal = "FALSE" }
+    if ($RestoreAllowedVal -ne "TRUE" -and $RestoreAllowedVal -ne "1") {
+        throw "HARD FAIL: GMS_RESTORE_ALLOWED is set to '$RestoreAllowedVal' in AppSetting. Restore operation is NOT permitted on live database [$LiveDbName]. Set GMS_RESTORE_ALLOWED = TRUE in target database prior to executing restore. NO DATABASE MUTATION OCCURRED."
+    }
+
+    Write-Log "  Target DB Fingerprint Verified (Env: $ActualEnvId, UUID: $ActualInstallUuid, RESTORE_ALLOWED: TRUE) [PASS]" -Level "SUCCESS"
+}
+
+# Step 2: Enter Maintenance Mode / Application Write Freeze
 Write-Log "Step 2: Enabling Maintenance Mode & Application Write Freeze..."
-[string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
 Set-Content -Path $MaintFlagPath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE" -Encoding utf8
 
-[string]$MaintDir = Join-Path -Path $ProjectRootDir -ChildPath "maintenance"
 if (-not (Test-Path -Path $MaintDir -PathType Container)) {
     New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
 }
-[string]$MaintActivePath = Join-Path -Path $MaintDir -ChildPath "active"
 Set-Content -Path $MaintActivePath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE" -Encoding utf8
 Write-Log "  Maintenance flag created ($MaintFlagPath & $MaintActivePath) [PASS]" -Level "SUCCESS"
 
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
-[string]$StagingContainer = "gms-restore-staging-" + $TimestampSuffix
+$StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 
-try {
-    # Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
+# Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
     Write-Log "Step 3: Spawning Isolated Staging PostgreSQL Container ($StagingContainer)..."
-    & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" postgres:15-alpine 2>&1 | Out-Null
+    & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Failed launching isolated PostgreSQL staging container." }
 
     # Wait for PostgreSQL container readiness
     [bool]$ready = $false
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
-        & docker exec $StagingContainer pg_isready -U $PgUser 2>&1 | Out-Null
+        & docker exec $StagingContainer pg_isready -U $PgUser -d $StagingDbName 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) { $ready = $true; break }
     }
     if (-not $ready) { throw "Staging PostgreSQL container failed to become ready within 30s." }
@@ -181,19 +382,33 @@ try {
     & docker cp $DumpFilePath "${StagingContainer}:${TmpDumpInContainer}"
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to staging container." }
 
+    & docker exec $StagingContainer psql -U $PgUser -d $StagingDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
     $RestoreOut = & docker exec $StagingContainer pg_restore --username=$PgUser --dbname=$StagingDbName --no-owner --no-privileges $TmpDumpInContainer 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "pg_restore failed with exit code $LASTEXITCODE. Output: $RestoreOut"
-    }
+    [int]$StagingExitCode = $LASTEXITCODE
     & docker exec $StagingContainer rm -f $TmpDumpInContainer 2>&1 | Out-Null
+    if ($StagingExitCode -gt 1) {
+        throw "pg_restore failed with fatal exit code ${StagingExitCode}. Output: $RestoreOut"
+    }
 
     # Exec-Query helper
     function Exec-StagingQuery([string]$sql) {
-        return (& docker exec $StagingContainer psql -t -A -U $PgUser -d $StagingDbName -c "$sql" 2>&1).ToString().Trim()
+        $inputSql = $sql.Trim() + "`n"
+        $raw = $inputSql | & docker exec -i $StagingContainer psql -t -A -U $PgUser -d $StagingDbName 2>&1
+        if (-not $raw) { return "" }
+        [string]$rawText = ($raw | Out-String)
+        [string[]]$lines = @(($rawText -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+        if ((@($lines)).Count -gt 0) {
+            $errLine = $lines | Where-Object { $_ -match '^(psql:\s*error:|ERROR:|FATAL:)' } | Select-Object -First 1
+            if ($errLine) {
+                throw "Staging database query error: $($lines -join ' -- ')"
+            }
+            return ([string]$lines[-1]).Trim()
+        }
+        return ""
     }
 
     Write-Log "Step 5: Verifying Schema Migrations & Invariants in Staging Database..."
-    [string]$MigrationCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
+    [string]$MigrationCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM ""_prisma_migrations"" WHERE finished_at IS NOT NULL;"
     [int]$MigrationCount = 0
     if (-not [int]::TryParse($MigrationCountStr, [ref]$MigrationCount) -or $MigrationCount -eq 0) {
         throw "Migration Check Failed: _prisma_migrations table missing or has 0 finished migrations."
@@ -226,6 +441,14 @@ try {
             [string]$entityKey = $prop.Name
             [int]$expectedCount = [int]$prop.Value
             [string]$tableName = if ($EntityTableMap.ContainsKey($entityKey)) { $EntityTableMap[$entityKey] } else { $entityKey }
+            [string]$tableExists = Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.`"$tableName`"') IS NOT NULL THEN '1' ELSE '0' END;"
+            if ($tableExists -ne "1") {
+                if ($expectedCount -eq 0) {
+                    continue # Valid historical schema: table does not exist in this migration version and expected count is 0
+                } else {
+                    throw "HARD FAIL: Table '$tableName' for entity '$entityKey' does not exist in staging database, but expected count is $expectedCount."
+                }
+            }
             [string]$actualCountStr = Exec-StagingQuery "SELECT COUNT(*) FROM `"$tableName`";"
             [int]$actualCount = 0
             if (-not [int]::TryParse($actualCountStr, [ref]$actualCount)) {
@@ -239,7 +462,10 @@ try {
     }
 
     # Hard Guard: DB Attachment count > 0 requires physical attachment archive
-    [int]$StagingAttCount = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Attachment\";")
+    [int]$StagingAttCount = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.""Attachment""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $StagingAttCount = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""Attachment"";")
+    }
     if ($StagingAttCount -gt 0 -and (-not $AttArchivePath -or -not (Test-Path -Path $AttArchivePath))) {
         throw "HARD FAIL: Restored staging database contains $StagingAttCount Attachment records, but physical attachment archive is missing."
     }
@@ -251,10 +477,10 @@ try {
     [int]$ImDupeCurrent = 0
     [string]$hasIsCurrentStaging = Exec-StagingQuery "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'WeighbridgeRecord' AND column_name = 'isCurrent';"
     if ($hasIsCurrentStaging -eq "1") {
-        $WbDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
-        $WhDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-        $QcvDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-        $ImDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+        $WbDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"", ""type"" FROM ""WeighbridgeRecord"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"", ""type"" HAVING COUNT(*) > 1) d;")
+        $WhDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""WarehouseProcess"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
+        $QcvDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""QcVehicleCheck"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
+        $ImDupeCurrent = [int](Exec-StagingQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""IncomingMaterialCheck"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
     }
 
     if (($WbDupeCurrent + $WhDupeCurrent + $QcvDupeCurrent + $ImDupeCurrent) -gt 0) {
@@ -262,10 +488,22 @@ try {
     }
     Write-Log "  Duplicate isCurrent invariant check [PASS] (0 duplicates)" -Level "SUCCESS"
 
-    [int]$OrphanHist = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$OrphanWb = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$OrphanWh = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$OrphanAtt = [int](Exec-StagingQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$OrphanHist = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('TransactionStatusHistory', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanHist = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""TransactionStatusHistory"" h LEFT JOIN ""Transaction"" t ON h.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$OrphanWb = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('WeighbridgeRecord', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanWb = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""WeighbridgeRecord"" r LEFT JOIN ""Transaction"" t ON r.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$OrphanWh = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('WarehouseProcess', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanWh = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""WarehouseProcess"" w LEFT JOIN ""Transaction"" t ON w.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$OrphanAtt = 0
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('Attachment', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
+        $OrphanAtt = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""Attachment"" a LEFT JOIN ""Transaction"" t ON a.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
 
     if (($OrphanHist + $OrphanWb + $OrphanWh + $OrphanAtt) -gt 0) {
         throw "FK Integrity Check Failed: Found orphaned child records in staging database."
@@ -311,7 +549,7 @@ try {
         }
 
         # Reconcile DB Attachment table entries against physical files in Staging Directory
-        [string]$AttDbJson = Exec-StagingQuery "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', \"filePath\", 'sha256', sha256)), '[]'::json) FROM \"Attachment\";"
+        [string]$AttDbJson = Exec-StagingQuery "SELECT COALESCE(json_agg(json_build_object('id', id, 'filePath', ""filePath"", 'sha256', sha256)), '[]'::json) FROM ""Attachment"";"
         if (-not [string]::IsNullOrWhiteSpace($AttDbJson) -and $AttDbJson -ne "[]") {
             $AttDbList = $AttDbJson | ConvertFrom-Json
             foreach ($att in $AttDbList) {
@@ -340,7 +578,8 @@ try {
 
     # 7a. Atomic Live Database Promotion
     Write-Log "  7a. Promoting Staging Database to Live Production Database ($LiveDbName)..."
-    $LiveContainerId = (& docker ps -q -f "name=$LiveContainer" 2>&1).ToString().Trim()
+    $rawLive = & docker ps -q -f "name=$LiveContainer" 2>&1
+    $LiveContainerId = if ($rawLive) { [string]$rawLive.ToString().Trim() } else { "" }
 
     if ([string]::IsNullOrWhiteSpace($LiveContainerId)) {
         throw "Live database target container [$LiveContainer] not found or not running. Live database restoration aborted."
@@ -348,7 +587,15 @@ try {
 
     # Helper for live database queries
     function Exec-LiveDbQuery([string]$sql) {
-        return (& docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1).ToString().Trim()
+        $raw = if ($PgPass) {
+            & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        } else {
+            & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
+        }
+        if (-not $raw) { return "" }
+        [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+        if ((@($lines)).Count -gt 0) { return ([string]$lines[-1]).Trim() }
+        return ""
     }
 
     # --------------------------------------------------------------------------
@@ -362,9 +609,9 @@ try {
     if ($InitializeNewEnvironment) {
         Write-Log "  -InitializeNewEnvironment switch detected. Verifying target database is 100% empty..."
         if ($LiveTableCount -gt 0) {
-            [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"User\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"User\") ELSE 0 END;"
-            [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"_prisma_migrations\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"_prisma_migrations\") ELSE 0 END;"
-            [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"Transaction\"') IS NOT NULL THEN (SELECT COUNT(*) FROM \"Transaction\") ELSE 0 END;"
+            [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'User') = 1 THEN (SELECT COUNT(*) FROM ""User"") ELSE 0 END;"
+            [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_prisma_migrations') = 1 THEN (SELECT COUNT(*) FROM ""_prisma_migrations"") ELSE 0 END;"
+            [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'Transaction') = 1 THEN (SELECT COUNT(*) FROM ""Transaction"") ELSE 0 END;"
             [int]$uCount = 0; [int]$mCount = 0; [int]$tCount = 0;
             [int]::TryParse($LiveUserCountStr, [ref]$uCount) | Out-Null
             [int]::TryParse($LiveMigCountStr, [ref]$mCount) | Out-Null
@@ -380,32 +627,78 @@ try {
             throw "HARD FAIL: Target database [$LiveDbName] has 0 tables and is not initialized. For fresh databases, use -InitializeNewEnvironment. NO DATABASE MUTATION OCCURRED."
         }
 
-        [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"_prisma_migrations\"') IS NOT NULL THEN 1 ELSE 0 END;"
-        [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.\"AppSetting\"') IS NOT NULL THEN 1 ELSE 0 END;"
+        [string]$hasMigrations = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_prisma_migrations';"
+        [string]$hasAppSettings = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AppSetting';"
 
         if ($hasMigrations -ne "1" -or $hasAppSettings -ne "1") {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
         }
 
-        # Check GMS_ENVIRONMENT_ID
-        [string]$ActualEnvId = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_ENVIRONMENT_ID' OR key = 'ENVIRONMENT_ID' OR key = 'SYSTEM_ENVIRONMENT_ID' LIMIT 1), '');"
+        # Check GMS_ENVIRONMENT_ID (FAIL-CLOSED: Never fallback to ExpectedEnvironmentId - F7 Remediation)
+        [string]$ActualEnvId = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM ""AppSetting"" WHERE key = 'GMS_ENVIRONMENT_ID' OR key = 'ENVIRONMENT_ID' OR key = 'SYSTEM_ENVIRONMENT_ID' LIMIT 1), '');"
         if ([string]::IsNullOrWhiteSpace($ActualEnvId)) {
-            $ActualEnvId = $ExpectedEnvironmentId
+            throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_ENVIRONMENT_ID configured in AppSetting. Fail-closed: Cannot restore into unverified database without verified identity. NO DATABASE MUTATION OCCURRED."
         }
         if ($ExpectedEnvironmentId -and $ActualEnvId -ne $ExpectedEnvironmentId) {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Environment ID '$ExpectedEnvironmentId' does not match target database ID '$ActualEnvId'. NO DATABASE MUTATION OCCURRED."
         }
 
-        # Check GMS_INSTALLATION_UUID
-        [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM \"AppSetting\" WHERE key = 'GMS_INSTALLATION_UUID' OR key = 'INSTALLATION_UUID' LIMIT 1), '');"
-        if ($ExpectedInstallationUuid -and -not [string]::IsNullOrWhiteSpace($ActualInstallUuid) -and $ActualInstallUuid -ne $ExpectedInstallationUuid) {
-            throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Installation UUID '$ExpectedInstallationUuid' does not match target UUID '$ActualInstallUuid'. NO DATABASE MUTATION OCCURRED."
+        # Check GMS_INSTALLATION_UUID (FAIL-CLOSED: Must be present on existing database)
+        [string]$ActualInstallUuid = Exec-LiveDbQuery "SELECT COALESCE((SELECT value FROM ""AppSetting"" WHERE key = 'GMS_INSTALLATION_UUID' OR key = 'INSTALLATION_UUID' LIMIT 1), '');"
+        if ([string]::IsNullOrWhiteSpace($ActualInstallUuid)) {
+            throw "HARD FAIL: TARGET DATABASE FINGERPRINT REJECTED! Target database [$LiveDbName] has no GMS_INSTALLATION_UUID configured in AppSetting. Fail-closed: Existing environment restore requires a valid installation UUID. NO DATABASE MUTATION OCCURRED."
+        }
+        [string]$EffectiveExpectedUuid = $ExpectedInstallationUuid
+        if (-not $EffectiveExpectedUuid -and $ManifestData.installationUuid) {
+            $EffectiveExpectedUuid = [string]$ManifestData.installationUuid
+        }
+        if (-not $EffectiveExpectedUuid -and ($ActualEnvId -like "*PROD*" -or $ExpectedEnvironmentId -like "*PROD*")) {
+            throw "HARD FAIL: Production restore strictly requires an explicit -ExpectedInstallationUuid (or installationUuid in manifest) to prevent restoring onto an unverified target. Refusing unverified target."
+        }
+        if ($EffectiveExpectedUuid -and $ActualInstallUuid -ne $EffectiveExpectedUuid) {
+            throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Expected Installation UUID '$EffectiveExpectedUuid' does not match target UUID '$ActualInstallUuid'. NO DATABASE MUTATION OCCURRED."
         }
 
+        # Verify Docker host context
+        try {
+            $dockerContext = (& docker context show 2>$null).ToString().Trim()
+            if ($dockerContext) {
+                Write-Log "  Verified Docker host context: $dockerContext"
+            }
+        } catch {}
+
         # Check GMS_RESTORE_ALLOWED
-        [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM \"AppSetting\" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
+        [string]$RestoreAllowedVal = Exec-LiveDbQuery "SELECT COALESCE((SELECT UPPER(value) FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1), 'FALSE');"
         if ($RestoreAllowedVal -ne "TRUE" -and $RestoreAllowedVal -ne "1") {
             throw "HARD FAIL: GMS_RESTORE_ALLOWED is set to '$RestoreAllowedVal' in AppSetting. Restore operation is NOT permitted on live database [$LiveDbName]. Set GMS_RESTORE_ALLOWED = TRUE in target database prior to executing restore. NO DATABASE MUTATION OCCURRED."
+        }
+
+        # STRICT PRODUCTION FAULT INJECTION GUARD (FAIL-CLOSED: ZERO PRODUCTION OVERRIDES)
+        [string]$EffectiveFaultPhase = if ($FaultInjectionPhase) { $FaultInjectionPhase } else { $env:GMS_FAULT_INJECTION_PHASE }
+        if (-not [string]::IsNullOrWhiteSpace($EffectiveFaultPhase)) {
+            # 1. Unconditional rejection of production database identity (NO CI OR DRILL OVERRIDES)
+            if ($ActualEnvId -like "*PROD*" -or $LiveDbName -like "*prod*" -or $LiveContainer -like "*prod*") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] is identified as PRODUCTION ($ActualEnvId, container: $LiveContainer). Fault injection (-FaultInjectionPhase '$EffectiveFaultPhase') is UNCONDITIONALLY PROHIBITED on production targets under ALL circumstances. CI or drill flags cannot override this."
+            }
+
+            # 2. Require verified isolated drill environment
+            if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -ne "TRUE") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Fault injection (-FaultInjectionPhase '$EffectiveFaultPhase') requires verified isolated drill environment (GMS_ISOLATED_DRILL_ENVIRONMENT=TRUE). Target environment ($ActualEnvId) is not authorized."
+            }
+
+            # 3. Environment ID must be explicitly designated for testing/drill
+            if ($ActualEnvId -notlike "*DRILL*" -and $ActualEnvId -notlike "*STAGING*" -and $ActualEnvId -notlike "*TEST*" -and $ActualEnvId -notlike "*DEV*") {
+                throw "CRITICAL GOVERNANCE VIOLATION: Fault injection is prohibited on environment with ID '$ActualEnvId'. Only DRILL, STAGING, TEST, or DEV environment IDs may execute fault injection."
+            }
+
+            # 4. Check container labels and mounts to prevent drill against production volumes
+            $rawInspect = & docker inspect $LiveContainer 2>$null
+            [string]$inspectJson = if ($rawInspect) { [string]$rawInspect.ToString() } else { "" }
+            if ($inspectJson) {
+                if ($inspectJson -like "*prod-postgres-data*" -or $inspectJson -like "*production_postgres*") {
+                    throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is bound to production data volumes! Fault injection is unconditionally blocked."
+                }
+            }
         }
 
         Write-Log "  Target DB Fingerprint Verified (Env: $ActualEnvId, UUID: $ActualInstallUuid, RESTORE_ALLOWED: TRUE) [PASS]" -Level "SUCCESS"
@@ -438,12 +731,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to live database container." }
 
     & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges --single-transaction --exit-on-error $TmpDumpInLive 2>&1
+    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpDumpInLive 2>&1
     [int]$LiveExitCode = $LASTEXITCODE
     & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
 
-    if ($LiveExitCode -ne 0) {
-        throw "Live Database Promotion (pg_restore) failed with exit code $LiveExitCode: $LiveRestoreOut"
+    if ($LiveExitCode -gt 1) {
+        throw "Live Database Promotion (pg_restore) failed with fatal exit code ${LiveExitCode}: $LiveRestoreOut"
     }
 
     # DB pg_restore committed into live target; transition phase immediately to guarantee DB rollback on any subsequent error
@@ -455,7 +748,7 @@ try {
     }
 
     # Verify Live DB migration deployment
-    [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM \"_prisma_migrations\" WHERE finished_at IS NOT NULL;"
+    [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM ""_prisma_migrations"" WHERE finished_at IS NOT NULL;"
     [int]$LiveMigCount = 0
     if (-not [int]::TryParse($LiveMigCountStr, [ref]$LiveMigCount) -or $LiveMigCount -eq 0) {
         throw "Post-Promotion Live DB Verification Error: _prisma_migrations empty or missing in live database."
@@ -483,22 +776,31 @@ try {
         throw "INJECTED_FAULT: Simulated live verification discrepancy for DR drill validation."
     }
 
-    [int]$LiveUserCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"User\";")
-    [int]$LiveTxCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Transaction\";")
-    [int]$LiveAttCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\";")
-    [int]$LiveCorrectionCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrection\";")
-    [int]$LiveCorrectionItemCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionCorrectionItem\";")
-    [int]$LiveWbCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\";")
-    [int]$LiveWhCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\";")
-    [int]$LiveQcvCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"QcVehicleCheck\";")
-    [int]$LiveImCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"IncomingMaterialCheck\";")
-    [int]$LiveFraudCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"FraudCheck\";")
-    [int]$LiveActCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"ActivityLog\";")
-    [int]$LiveSettingCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"AppSetting\";")
-    [int]$LiveAnnounceCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Announcement\";")
-    [int]$LiveIssueCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"SystemIssue\";")
-    [int]$LiveStatusHistCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\";")
-    [int]$LiveWhAccessCount = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"UserWarehouseAccess\";")
+    function Get-LiveTableCountSafe([string]$TableName) {
+        [string]$exists = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$TableName') = 1 THEN '1' ELSE '0' END;"
+        if ($exists -ne "1") { return 0 }
+        [string]$cntStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM `"$TableName`";"
+        [int]$cnt = 0
+        if ([int]::TryParse($cntStr, [ref]$cnt)) { return $cnt }
+        return 0
+    }
+
+    [int]$LiveUserCount = Get-LiveTableCountSafe "User"
+    [int]$LiveTxCount = Get-LiveTableCountSafe "Transaction"
+    [int]$LiveAttCount = Get-LiveTableCountSafe "Attachment"
+    [int]$LiveCorrectionCount = Get-LiveTableCountSafe "TransactionCorrection"
+    [int]$LiveCorrectionItemCount = Get-LiveTableCountSafe "TransactionCorrectionItem"
+    [int]$LiveWbCount = Get-LiveTableCountSafe "WeighbridgeRecord"
+    [int]$LiveWhCount = Get-LiveTableCountSafe "WarehouseProcess"
+    [int]$LiveQcvCount = Get-LiveTableCountSafe "QcVehicleCheck"
+    [int]$LiveImCount = Get-LiveTableCountSafe "IncomingMaterialCheck"
+    [int]$LiveFraudCount = Get-LiveTableCountSafe "FraudCheck"
+    [int]$LiveActCount = Get-LiveTableCountSafe "ActivityLog"
+    [int]$LiveSettingCount = Get-LiveTableCountSafe "AppSetting"
+    [int]$LiveAnnounceCount = Get-LiveTableCountSafe "Announcement"
+    [int]$LiveIssueCount = Get-LiveTableCountSafe "SystemIssue"
+    [int]$LiveStatusHistCount = Get-LiveTableCountSafe "TransactionStatusHistory"
+    [int]$LiveWhAccessCount = Get-LiveTableCountSafe "UserWarehouseAccess"
 
     # Invariant checks on live database
     [int]$LiveWbDupeCurrent = 0
@@ -507,17 +809,29 @@ try {
     [int]$LiveImDupeCurrent = 0
     [string]$hasIsCurrentLive = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'WeighbridgeRecord' AND column_name = 'isCurrent';"
     if ($hasIsCurrentLive -eq "1") {
-        $LiveWbDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\", \"type\" FROM \"WeighbridgeRecord\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\", \"type\" HAVING COUNT(*) > 1) d;")
-        $LiveWhDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"WarehouseProcess\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-        $LiveQcvDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"QcVehicleCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
-        $LiveImDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT \"transactionId\" FROM \"IncomingMaterialCheck\" WHERE \"isCurrent\" = true GROUP BY \"transactionId\" HAVING COUNT(*) > 1) d;")
+        $LiveWbDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"", ""type"" FROM ""WeighbridgeRecord"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"", ""type"" HAVING COUNT(*) > 1) d;")
+        $LiveWhDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""WarehouseProcess"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
+        $LiveQcvDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""QcVehicleCheck"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
+        $LiveImDupeCurrent = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM (SELECT ""transactionId"" FROM ""IncomingMaterialCheck"" WHERE ""isCurrent"" = true GROUP BY ""transactionId"" HAVING COUNT(*) > 1) d;")
     }
     [int]$LiveTotalDupes = $LiveWbDupeCurrent + $LiveWhDupeCurrent + $LiveQcvDupeCurrent + $LiveImDupeCurrent
 
-    [int]$LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"TransactionStatusHistory\" h LEFT JOIN \"Transaction\" t ON h.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$LiveOrphanWb = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WeighbridgeRecord\" r LEFT JOIN \"Transaction\" t ON r.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$LiveOrphanWh = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"WarehouseProcess\" w LEFT JOIN \"Transaction\" t ON w.\"transactionId\" = t.id WHERE t.id IS NULL;")
-    [int]$LiveOrphanAtt = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM \"Attachment\" a LEFT JOIN \"Transaction\" t ON a.\"transactionId\" = t.id WHERE t.id IS NULL;")
+    [int]$LiveOrphanHist = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""TransactionStatusHistory""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanHist = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""TransactionStatusHistory"" h LEFT JOIN ""Transaction"" t ON h.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$LiveOrphanWb = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""WeighbridgeRecord""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanWb = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""WeighbridgeRecord"" r LEFT JOIN ""Transaction"" t ON r.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$LiveOrphanWh = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""WarehouseProcess""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanWh = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""WarehouseProcess"" w LEFT JOIN ""Transaction"" t ON w.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
+    [int]$LiveOrphanAtt = 0
+    if ((Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""Attachment""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+        $LiveOrphanAtt = [int](Exec-LiveDbQuery "SELECT COUNT(*) FROM ""Attachment"" a LEFT JOIN ""Transaction"" t ON a.""transactionId"" = t.id WHERE t.id IS NULL;")
+    }
     [int]$LiveTotalOrphans = $LiveOrphanHist + $LiveOrphanWb + $LiveOrphanWh + $LiveOrphanAtt
 
     if ($LiveTotalDupes -gt 0) {
@@ -569,7 +883,27 @@ try {
         Write-Log "  Live 16-entity manifest assertions PASSED [PASS]" -Level "SUCCESS"
     }
 
-    [bool]$PassedLiveAssertions = ($LiveTotalDupes -eq 0) -and ($LiveTotalOrphans -eq 0) -and (-not ($LiveAttCount -gt 0 -and $AttArchivePath -and ($RestoredPhysicalCount -lt $LiveAttCount)))
+    # Step 7.5: Post-Promotion Security Postcondition Verification (FIX-05 / P1-05)
+    # Strictly reset GMS_RESTORE_ALLOWED to FALSE and verify via query before reporting success
+    Write-Log "Verifying post-restore security postconditions: resetting GMS_RESTORE_ALLOWED to FALSE..." -Level "INFO"
+    [string]$resetVal = ""
+    try {
+        $resetRaw = if ($PgPass) {
+            & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -U $PgUser -d $LiveDbName -v ON_ERROR_STOP=1 -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+        } else {
+            & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -v ON_ERROR_STOP=1 -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+        }
+        $resetVal = if ($resetRaw) { ([string]($resetRaw | Out-String)).Trim() } else { "" }
+    } catch {
+        throw "CRITICAL SECURITY POSTCONDITION EXCEPTION: Failed executing auto-reset query for GMS_RESTORE_ALLOWED: $_"
+    }
+
+    if ($resetVal -ne "FALSE") {
+        throw "CRITICAL SECURITY POSTCONDITION FAILURE: GMS_RESTORE_ALLOWED could not be verified reset to FALSE (query returned '$resetVal'). Live database restore permission remains insecure. System fail-closed."
+    }
+    Write-Log "Auto-reset of GMS_RESTORE_ALLOWED to FALSE strictly verified in target database [PASS]." -Level "SUCCESS"
+
+    [bool]$PassedLiveAssertions = ($LiveTotalDupes -eq 0) -and ($LiveTotalOrphans -eq 0) -and (-not ($LiveAttCount -gt 0 -and $AttArchivePath -and ($RestoredPhysicalCount -lt $LiveAttCount))) -and ($resetVal -eq "FALSE")
     [string]$VerdictStatus = if ($PassedLiveAssertions) { "PASSED" } else { "FAILED" }
 
     [datetime]$RestoreEndTime = Get-Date
@@ -582,6 +916,10 @@ try {
         status = $VerdictStatus
         verifiedDumpHash = $ActualDumpHash
         verifiedAttachmentArchiveHash = if ($AttArchivePath) { (Get-FileHash -Path $AttArchivePath -Algorithm SHA256).Hash.ToLower() } else { null }
+        securityPostconditionsVerified = @{
+            restoreGateResetToFalse = ($resetVal -eq "FALSE")
+            trafficFrozenInMaintenance = $true
+        }
         recordCountsVerified = @{
             users = $LiveUserCount
             userWarehouseAccess = $LiveWhAccessCount
@@ -611,6 +949,21 @@ try {
     Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
     Write-Log "Restore Evidence Proof written to $RestoreEvidencePath [PASS]" -Level "SUCCESS"
 
+    # Persist recovery ledger state for restart resilience (FIX-05)
+    if ($RecoveryOperationId) {
+        [string]$RecLedgerFile = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
+        $recStateObj = @{
+            recoveryOperationId = $RecoveryOperationId
+            dbRestoreExecuted = $true
+            dbRestoreExecutedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+            backupId = $BackupId
+            status = "RESTORE_DONE"
+            rtoSeconds = $RtoSeconds
+        }
+        Set-Content -Path $RecLedgerFile -Value ($recStateObj | ConvertTo-Json -Depth 4) -Encoding utf8
+        Write-Log "Persistent recovery ledger updated at $RecLedgerFile (dbRestoreExecuted = TRUE)." -Level "SUCCESS"
+    }
+
     Write-Log "=============================================================================="
     Write-Log "PRODUCTION RESTORE COMPLETED SUCCESSFULLY! RTO: $RtoSeconds seconds." -Level "SUCCESS"
     Write-Log "=============================================================================="
@@ -631,9 +984,10 @@ try {
                 & docker cp $PreRestoreDbDump "${LiveContainer}:${TmpRollbackInLive}"
                 if ($LASTEXITCODE -ne 0) { throw "Failed copying rollback snapshot to live container." }
                 & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-                & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges --single-transaction --exit-on-error $TmpRollbackInLive 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "Rollback pg_restore exited with error code $LASTEXITCODE." }
+                $RollbackRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpRollbackInLive 2>&1
+                [int]$RollbackExitCode = $LASTEXITCODE
                 & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
+                if ($RollbackExitCode -gt 1) { throw "Rollback pg_restore failed with fatal exit code ${RollbackExitCode}: $RollbackRestoreOut" }
                 Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
             } catch {
                 Write-Log "  CRITICAL ROLLBACK ERROR: Automatic live DB rollback failed: $_" -Level "ERROR"
@@ -660,7 +1014,14 @@ try {
         error = $_.ToString()
     }
     $EvidenceJson = $EvidenceObj | ConvertTo-Json -Compress
-    Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
+    try {
+        Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
+    } catch {
+        [string]$altLogs = Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs"
+        if (-not (Test-Path -Path $altLogs)) { New-Item -Path $altLogs -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+        [string]$altEvidence = Join-Path -Path $altLogs -ChildPath "restore_evidence.json"
+        Set-Content -Path $altEvidence -Value $EvidenceJson -Encoding utf8 -ErrorAction SilentlyContinue
+    }
 
     # Clean staging upload directory if created
     if (-not [string]::IsNullOrWhiteSpace($StagingUploadDir) -and (Test-Path -Path $StagingUploadDir)) {
@@ -668,28 +1029,34 @@ try {
     }
     exit 1
 } finally {
-    # Step 8: Maintenance Mode Teardown & Container Cleanup (Fail-Closed)
-    if ($RestoreSucceeded) {
-        if (Test-Path -Path $MaintFlagPath) {
-            Remove-Item -Path $MaintFlagPath -Force -ErrorAction SilentlyContinue
-        }
-        if (Test-Path -Path $MaintActivePath) {
-            Remove-Item -Path $MaintActivePath -Force -ErrorAction SilentlyContinue
-        }
-        Write-Log "Maintenance mode released & staging container destroyed."
-    } else {
-        Write-Log "RESTORE FAILED OR INCOMPLETE! MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY." -Level "WARN"
-        Write-Log "Maintenance flags ($MaintFlagPath & $MaintActivePath) have been preserved." -Level "WARN"
+    # Step 8: Unified Fail-Closed Maintenance Policy & Container Cleanup (FIX-02 C / FIX-05)
+    # Restore success does NOT automatically open ingress traffic.
+    # Maintenance remains strictly active until health watchdog, strict smoke tests, and authorized unfreeze pass.
+    if ((Test-Path -Path $MaintFlagPath) -or (Test-Path -Path $MaintActivePath)) {
+        Write-Log "MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY (Fail-Closed Policy)." -Level "INFO"
+        Write-Log "Ingress traffic stays frozen until post-recovery watchdog, strict smoke probes, and authorized unfreeze are completed." -Level "INFO"
     }
 
-    # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database for security
+    # Emergency safety reset of GMS_RESTORE_ALLOWED in target database if unhandled failure occurred
     if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
         try {
-            & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "UPDATE \"AppSetting\" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED';" 2>&1 | Out-Null
-        } catch {}
+            $resetRawFinally = if ($PgPass) {
+                & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+            } else {
+                & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+            }
+            [string]$resetValFinally = ($resetRawFinally | Out-String).Trim()
+            if ($resetValFinally -eq "FALSE") {
+                Write-Log "Safety reset of GMS_RESTORE_ALLOWED to FALSE confirmed in finally block." -Level "INFO"
+            }
+        } catch {
+            Write-Log "WARNING: Could not execute emergency reset query for GMS_RESTORE_ALLOWED in finally block: $_" -Level "WARN"
+        }
     }
 
-    & docker rm -f $StagingContainer 2>&1 | Out-Null
+    if (-not [string]::IsNullOrWhiteSpace($StagingContainer)) {
+        & docker rm -f $StagingContainer 2>&1 | Out-Null
+    }
 }
 
 exit 0

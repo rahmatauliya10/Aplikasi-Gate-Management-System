@@ -8,6 +8,40 @@ import {
   DashboardDatePreset,
 } from './dto/get-dashboard-stats.dto';
 import { resolveDashboardDateBounds } from './utils/dashboard-date-range.util';
+import { getOperationHistoryDurations } from '../reports/operation-history.util';
+
+const formatFraudAlertDeviation = (fraudCheck: any): string => {
+  const persistedPercent = fraudCheck?.deviationPercent;
+  if (
+    persistedPercent !== null &&
+    persistedPercent !== undefined &&
+    persistedPercent !== '' &&
+    Number.isFinite(Number(persistedPercent))
+  ) {
+    return Number(persistedPercent).toFixed(2);
+  }
+
+  const deviationKg = fraudCheck?.deviationKg;
+  const netWeight = fraudCheck?.netWeight ?? fraudCheck?.transaction?.netWeight;
+  const actualWeight =
+    fraudCheck?.warehouseActualWeight ?? fraudCheck?.transaction?.actualWeight;
+  const denominator = [netWeight, actualWeight]
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .reduce((max, value) => Math.max(max, value), 0);
+
+  if (
+    deviationKg === null ||
+    deviationKg === undefined ||
+    deviationKg === '' ||
+    !Number.isFinite(Number(deviationKg)) ||
+    denominator <= 0
+  ) {
+    return '—';
+  }
+
+  return ((Math.abs(Number(deviationKg)) / denominator) * 100).toFixed(2);
+};
 
 @Injectable()
 export class DashboardService {
@@ -96,25 +130,50 @@ export class DashboardService {
           weighInAt: true,
           warehouseStartAt: true,
           warehouseEndAt: true,
+          createdAt: true,
           qcStartAt: true,
           qcEndAt: true,
           weighOutAt: true,
           gateOutAt: true,
           netWeight: true,
           actualWeight: true,
+          warehouseProcesses: {
+            where: { isCurrent: true },
+            select: {
+              id: true,
+              isCurrent: true,
+              revision: true,
+              createdAt: true,
+              startAt: true,
+              endAt: true,
+            },
+          },
           qcVehicleChecks: {
             where: { isCurrent: true },
-            select: { startedAt: true, completedAt: true },
+            select: {
+              id: true,
+              isCurrent: true,
+              revision: true,
+              createdAt: true,
+              startedAt: true,
+              completedAt: true,
+            },
           },
           incomingMaterialChecks: {
             where: { isCurrent: true },
-            select: { startedAt: true, completedAt: true },
+            select: {
+              id: true,
+              isCurrent: true,
+              revision: true,
+              createdAt: true,
+              startedAt: true,
+              completedAt: true,
+            },
           },
         },
       }),
       this.prisma.fraudCheck.findMany({
         where: {
-          riskLevel: { in: ['WARNING', 'CRITICAL'] as any },
           transaction: {
             ...dateFilter,
             ...scope,
@@ -131,65 +190,47 @@ export class DashboardService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [
+          { calculatedAt: 'desc' },
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ],
       }),
     ]);
 
-    // Calculate Average Stage Times (SLA)
-    let sumWaitingIn = 0,
-      sumWarehouse = 0,
-      sumQc = 0,
-      sumWaitingOut = 0,
-      sumTotalTat = 0;
-    const getDiffMins = (start: any, end: any) =>
-      start && end
-        ? Math.round(
-            (new Date(end).getTime() - new Date(start).getTime()) / 60000,
-          )
-        : 0;
-
-    completedTx.forEach((t) => {
-      sumWaitingIn += getDiffMins(t.gateInAt, t.weighInAt);
-      sumWarehouse += getDiffMins(t.warehouseStartAt, t.warehouseEndAt);
-
-      const v =
-        t.qcVehicleChecks && t.qcVehicleChecks.length > 0
-          ? t.qcVehicleChecks[0]
-          : null;
-      const inc =
-        t.incomingMaterialChecks && t.incomingMaterialChecks.length > 0
-          ? t.incomingMaterialChecks[0]
-          : null;
-
-      const hasVehicleQc = !!v?.startedAt && !!v?.completedAt;
-      const hasIncomingQc = !!inc?.startedAt && !!inc?.completedAt;
-
-      if (hasVehicleQc || hasIncomingQc) {
-        const vehicleQcDur =
-          v && v.startedAt && v.completedAt
-            ? getDiffMins(v.startedAt, v.completedAt)
-            : 0;
-        const incomingQcDur =
-          inc && inc.startedAt && inc.completedAt
-            ? getDiffMins(inc.startedAt, inc.completedAt)
-            : 0;
-        sumQc += vehicleQcDur + incomingQcDur;
-      } else {
-        sumQc += getDiffMins(t.qcStartAt, t.qcEndAt);
-      }
-
-      sumWaitingOut += getDiffMins(t.warehouseEndAt, t.weighOutAt);
-      sumTotalTat += getDiffMins(t.gateInAt, t.gateOutAt);
-    });
-
-    const completedCount = completedTx.length || 1;
-    const avgStageTimes = {
-      waitingIn: Math.round(sumWaitingIn / completedCount),
-      warehouse: Math.round(sumWarehouse / completedCount),
-      qc: Math.round(sumQc / completedCount),
-      waitingOut: Math.round(sumWaitingOut / completedCount),
+    // Use the same duration contract as operation-history reports. Missing or
+    // invalid stage evidence remains null and is excluded from that stage's
+    // denominator; a genuine zero-minute interval remains a valid zero.
+    const stageNames = ['waitingIn', 'warehouse', 'qc', 'waitingOut'] as const;
+    const stageValues: Record<(typeof stageNames)[number], number[]> = {
+      waitingIn: [],
+      warehouse: [],
+      qc: [],
+      waitingOut: [],
     };
-    const avgTotalTAT = Math.round(sumTotalTat / completedCount);
+    const totalValues: number[] = [];
+    completedTx.forEach((transaction) => {
+      const durations = getOperationHistoryDurations(transaction);
+      for (const stage of stageNames) {
+        const value = durations[stage];
+        if (typeof value === 'number') stageValues[stage].push(value);
+      }
+      if (typeof durations.total === 'number')
+        totalValues.push(durations.total);
+    });
+    const average = (values: number[]) =>
+      values.length > 0
+        ? Math.round(
+            values.reduce((sum, value) => sum + value, 0) / values.length,
+          )
+        : null;
+    const avgStageTimes = {
+      waitingIn: average(stageValues.waitingIn),
+      warehouse: average(stageValues.warehouse),
+      qc: average(stageValues.qc),
+      waitingOut: average(stageValues.waitingOut),
+    };
+    const avgTotalTAT = average(totalValues);
 
     // Calculate Fraud Stats
     const fraudStats = {
@@ -219,26 +260,19 @@ export class DashboardService {
     for (const f of fraudChecks) {
       const txKey =
         f.transactionId || f.transaction?.id || f.transaction?.plateNumber;
+      // The query is ordered latest-first, but severity is applied only after
+      // choosing the latest record for each transaction. An older CRITICAL must
+      // not survive when a newer persisted result is SAFE.
       if (txKey && !seenTx.has(txKey)) {
         seenTx.add(txKey);
+        if (!['WARNING', 'CRITICAL'].includes(String(f.riskLevel))) continue;
         activeFraudAlerts.push({
           id: f.id,
           plate: f.transaction?.plateNumber || '-',
           type: f.transaction?.processType || '-',
           net: f.transaction?.netWeight || 0,
           processed: f.transaction?.actualWeight || 0,
-          diffPercent: f.deviationPercent
-            ? f.deviationPercent.toFixed(2)
-            : f.deviationKg
-              ? (
-                  (f.deviationKg /
-                    Math.max(
-                      f.transaction?.netWeight || 1,
-                      f.transaction?.actualWeight || 1,
-                    )) *
-                  100
-                ).toFixed(2)
-              : '0.00',
+          diffPercent: formatFraudAlertDeviation(f),
           riskLevel: f.riskLevel,
         });
       }

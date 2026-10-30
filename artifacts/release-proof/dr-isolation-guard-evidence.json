@@ -1,0 +1,125 @@
+﻿{
+    "cases":  [
+                  {
+                      "description":  "Reject drill restore targeting operational container \u0027gate-system-postgres\u0027",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "operational container name"
+                                           ],
+                      "scenarioId":  "GUARD-01",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  1.72,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject drill restore targeting operational database \u0027gms\u0027",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "operational database name"
+                                           ],
+                      "scenarioId":  "GUARD-02",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  0.79,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject drill restore targeting operational project uploads directory",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "operational project uploads"
+                                           ],
+                      "scenarioId":  "GUARD-03",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  0.85,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject drill restore targeting operational project maintenance directory",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "operational project root"
+                                           ],
+                      "scenarioId":  "GUARD-04",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  1.42,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject fault injection when target database contains \u0027prod\u0027",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "identified as PRODUCTION"
+                                           ],
+                      "scenarioId":  "GUARD-05",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  0.97,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject fault injection when GMS_ISOLATED_DRILL_ENVIRONMENT is absent",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "verified isolated drill environment"
+                                           ],
+                      "scenarioId":  "GUARD-06",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  1.08,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject drill runner invocation when custom prefix attempts to match operational target",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "Ephemeral fixture identity must NOT match operational targets"
+                                           ],
+                      "scenarioId":  "GUARD-07",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  2.98,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject duplicate restore attempt when recovery operation ID was already executed",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL RECOVERY VIOLATION",
+                                               "Duplicate database restore rejected"
+                                           ],
+                      "scenarioId":  "GUARD-08",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  0.87,
+                      "status":  "PASSED"
+                  }
+              ],
+    "timestamp":  "2026-10-30T07:49:13.007Z",
+    "summary":  {
+                    "failed":  0,
+                    "total":  8,
+                    "passed":  8
+                },
+    "reportTitle":  "GMS DR Isolation Guard \u0026 Ephemeral Fixture Governance Test Evidence (FIX-01/FIX-02/FIX-05)",
+    "status":  "PASSED",
+    "engine":  "PowerShell Native Target Guard Verification Suite"
+}

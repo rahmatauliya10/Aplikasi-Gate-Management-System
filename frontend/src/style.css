@@ -1,12 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+@import '@material-design-icons/font/filled.css';
+@import '@material-design-icons/font/outlined.css';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================
-   GOOGLE FONTS — JetBrains Mono for mono text
-   ============================================ */
+/* Local Material Icons are bundled through the npm package above. */
 
 /* ============================================
    BASE — Futuristic Dark Foundation
@@ -29,8 +28,15 @@
     letter-spacing: -0.02em;
   }
 
-  p, span, label {
+  p, label {
     line-height: 1.6;
+  }
+
+  .material-icons,
+  .material-icons-outlined {
+    line-height: 1;
+    vertical-align: middle;
+    flex-shrink: 0;
   }
 }
 

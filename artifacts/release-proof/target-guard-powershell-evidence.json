@@ -1,0 +1,13 @@
+﻿{
+    "timestamp":  "2026-10-29T05:39:16.793Z",
+    "note":  "Docker daemon not running on this host; containerized assertions NOT EXECUTED. Zero false PASS reported.",
+    "summary":  {
+                    "notExecuted":  9,
+                    "failed":  0,
+                    "total":  9,
+                    "passed":  0
+                },
+    "reportTitle":  "GMS Target Guard PowerShell Integration Test Evidence (P0-C / P0-D Hardened)",
+    "status":  "NOT_EXECUTED",
+    "engine":  "PowerShell Integration with Isolated Ephemeral Target Fixture"
+}

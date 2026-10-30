@@ -245,7 +245,6 @@ describe('Dashboard Date Range Filter & Validation Suite', () => {
       expect(prisma.fraudCheck.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            riskLevel: { in: ['WARNING', 'CRITICAL'] },
             transaction: {
               createdAt: {
                 gte: expectedGte,
@@ -254,6 +253,11 @@ describe('Dashboard Date Range Filter & Validation Suite', () => {
               ...mockScope,
             },
           },
+          orderBy: [
+            { calculatedAt: 'desc' },
+            { createdAt: 'desc' },
+            { id: 'desc' },
+          ],
         }),
       );
     });

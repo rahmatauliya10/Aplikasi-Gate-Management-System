@@ -69,7 +69,7 @@ function Emit-Alert {
             } else {
                 [System.Diagnostics.EventLogEntryType]::Warning
             }
-            Write-EventLog -LogName Application -Source $EventSource -EventId 2001 -EntryType $EntryType -Message "[$Severity] GMS $Component: $Message" -ErrorAction SilentlyContinue
+            Write-EventLog -LogName Application -Source $EventSource -EventId 2001 -EntryType $EntryType -Message "[$Severity] GMS ${Component}: $Message" -ErrorAction SilentlyContinue
         } catch {}
     }
 }
