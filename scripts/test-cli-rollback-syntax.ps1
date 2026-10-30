@@ -13,6 +13,14 @@ $ErrorActionPreference = "Stop"
 $DeployScript = Join-Path $PSScriptRoot "deploy-with-rollback.ps1"
 $PsExe = if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { "pwsh.exe" } elseif (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell.exe" }
 
+# Cleanup any leftover test maintenance flags
+if (Test-Path (Join-Path $ProjectRootDir "maintenance.flag")) {
+    Remove-Item -Path (Join-Path $ProjectRootDir "maintenance.flag") -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path (Join-Path $ProjectRootDir "maintenance")) {
+    Remove-Item -Path (Join-Path $ProjectRootDir "maintenance") -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host "==============================================================================" -ForegroundColor Cyan
 Write-Host "Testing CLI Parameter Binding for deploy-with-rollback.ps1..." -ForegroundColor Cyan
 Write-Host "==============================================================================" -ForegroundColor Cyan
@@ -234,12 +242,48 @@ if ($res16.ExitCode -ne 0 -and ($res16.Output -match "Fault injection .* is unco
     Write-Host "  Output: $($res16.Output)" -ForegroundColor DarkGray
 }
 
+# 9. REL-17: Strict Production Immutability - Missing image digests must REJECT
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-17] Production deploy without SHA-256 digests must be REJECTED..." -ForegroundColor Yellow
+$res17 = Run-DeployScript -ScriptArguments @("-TargetReleaseTag", "v1.2.3", "-RequireDigest")
+if ($res17.ExitCode -ne 0 -and $res17.Output -match "GMS IMMUTABILITY VIOLATION") {
+    $script:PassedTests++
+    Write-Host "  [PASS] Correctly blocked production deploy without SHA-256 image digests." -ForegroundColor Green
+} else {
+    $script:FailedTests++
+    Write-Host "  [FAIL] Allowed production deploy without SHA-256 image digests!" -ForegroundColor Red
+    Write-Host "  ExitCode: $($res17.ExitCode)" -ForegroundColor DarkGray
+    Write-Host "  Output: $($res17.Output)" -ForegroundColor DarkGray
+}
+
+# 10. REL-18: Invalid Target Release Tag format must be REJECTED
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-18] TargetReleaseTag with invalid characters must be REJECTED..." -ForegroundColor Yellow
+$res18 = Run-DeployScript -ScriptArguments @("-TargetReleaseTag", "invalid;tag!#")
+if ($res18.ExitCode -ne 0 -and ($res18.Output -match "Invalid -TargetReleaseTag" -or $res18.Output -match "CRITICAL")) {
+    $script:PassedTests++
+    Write-Host "  [PASS] Correctly blocked deploy with invalid TargetReleaseTag characters." -ForegroundColor Green
+} else {
+    $script:FailedTests++
+    Write-Host "  [FAIL] Allowed deploy with invalid TargetReleaseTag characters!" -ForegroundColor Red
+    Write-Host "  ExitCode: $($res18.ExitCode)" -ForegroundColor DarkGray
+    Write-Host "  Output: $($res18.Output)" -ForegroundColor DarkGray
+}
+
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
 Write-Host "CLI Syntax & Regression Matrix Verification Summary:" -ForegroundColor Cyan
 Write-Host "  Total:  $TotalTests" -ForegroundColor Cyan
 Write-Host "  Passed: $PassedTests" -ForegroundColor Green
 Write-Host "  Failed: $FailedTests" -ForegroundColor $(if ($FailedTests -eq 0) { "Green" } else { "Red" })
 Write-Host "==============================================================================" -ForegroundColor Cyan
+
+# Cleanup any temporary test flags
+if (Test-Path (Join-Path $ProjectRootDir "maintenance.flag")) {
+    Remove-Item -Path (Join-Path $ProjectRootDir "maintenance.flag") -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path (Join-Path $ProjectRootDir "maintenance")) {
+    Remove-Item -Path (Join-Path $ProjectRootDir "maintenance") -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 if ($FailedTests -eq 0) {
     exit 0

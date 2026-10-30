@@ -95,6 +95,10 @@ if (-not $RollbackOnly -and [string]::IsNullOrWhiteSpace($TargetReleaseTag)) {
     throw "Parameter -TargetReleaseTag is required for normal deployment mode. For rollback mode, specify -RollbackOnly."
 }
 
+if ($TargetReleaseTag -and $TargetReleaseTag -notmatch '^[a-zA-Z0-9_\.\-]+$') {
+    throw "Invalid -TargetReleaseTag: [$TargetReleaseTag]. Must contain only alphanumeric, dot, underscore, or hyphen characters."
+}
+
 if ($SmokeAccessToken -and -not $env:SMOKE_ACCESS_TOKEN) {
     $env:SMOKE_ACCESS_TOKEN = $SmokeAccessToken
 }
@@ -285,7 +289,15 @@ function Execute-Rollback {
 
     # Stop writer services before any database restoration
     Write-Host "  Stopping backend and migrator containers to ensure zero in-flight database mutations..." -ForegroundColor Cyan
-    & docker compose -p $ProjName -f $CompFile stop backend migrator 2>&1 | Out-Null
+    $stopOut = & docker compose -p $ProjName -f $CompFile stop backend migrator 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [WARN] docker compose stop reported non-zero ($LASTEXITCODE): $stopOut" -ForegroundColor Yellow
+    }
+    $runningWriters = (& docker compose -p $ProjName -f $CompFile ps --services --filter "status=running" 2>$null | Where-Object { $_ -match '^(backend|migrator)$' })
+    if ($runningWriters) {
+        Write-Host "  [WARN] Writer services ($($runningWriters -join ', ')) still reported as running. Enforcing kill..." -ForegroundColor Yellow
+        & docker compose -p $ProjName -f $CompFile kill backend migrator 2>&1 | Out-Null
+    }
 
     [bool]$RollbackSucceeded = $false
     [bool]$SmokePassedVerdictProven = $false
@@ -528,22 +540,28 @@ if ($RollbackOnly) {
 
 # If still missing, inspect local image digest if available
 if (-not $BackendDigest) {
-    [string]$inspectBackend = & docker inspect --format="{{index .RepoDigests 0}}" "${BackendRepository}:$TargetReleaseTag" 2>$null
-    if ($inspectBackend -and $inspectBackend.Contains("@")) {
-        $BackendDigest = $inspectBackend.Split("@")[1]
-    }
+    try {
+        [string]$inspectBackend = (& docker inspect --format="{{index .RepoDigests 0}}" "${BackendRepository}:$TargetReleaseTag" 2>&1 | Out-String).Trim()
+        if ($inspectBackend -and $inspectBackend.Contains("@")) {
+            $BackendDigest = $inspectBackend.Split("@")[1]
+        }
+    } catch {}
 }
 if (-not $FrontendDigest) {
-    [string]$inspectFrontend = & docker inspect --format="{{index .RepoDigests 0}}" "${FrontendRepository}:$TargetReleaseTag" 2>$null
-    if ($inspectFrontend -and $inspectFrontend.Contains("@")) {
-        $FrontendDigest = $inspectFrontend.Split("@")[1]
-    }
+    try {
+        [string]$inspectFrontend = (& docker inspect --format="{{index .RepoDigests 0}}" "${FrontendRepository}:$TargetReleaseTag" 2>&1 | Out-String).Trim()
+        if ($inspectFrontend -and $inspectFrontend.Contains("@")) {
+            $FrontendDigest = $inspectFrontend.Split("@")[1]
+        }
+    } catch {}
 }
 if (-not $MigratorDigest) {
-    [string]$inspectMigrator = & docker inspect --format="{{index .RepoDigests 0}}" "${MigratorRepository}:$TargetReleaseTag" 2>$null
-    if ($inspectMigrator -and $inspectMigrator.Contains("@")) {
-        $MigratorDigest = $inspectMigrator.Split("@")[1]
-    }
+    try {
+        [string]$inspectMigrator = (& docker inspect --format="{{index .RepoDigests 0}}" "${MigratorRepository}:$TargetReleaseTag" 2>&1 | Out-String).Trim()
+        if ($inspectMigrator -and $inspectMigrator.Contains("@")) {
+            $MigratorDigest = $inspectMigrator.Split("@")[1]
+        }
+    } catch {}
 }
 
 # Strict Production Immutability Verification Gate
@@ -588,7 +606,30 @@ try {
 
     # Drain and stop backend writers to ensure zero active in-flight database mutations during backup & migration
     Write-Host "[GMS Deploy] Stopping active backend writer services before pre-deploy backup & migration..." -ForegroundColor Cyan
-    & docker compose -p $ProjectName -f $ComposeFile stop backend migrator 2>&1 | Out-Null
+    $stopOut = & docker compose -p $ProjectName -f $ComposeFile stop backend migrator 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to stop database writer services (backend, migrator): $stopOut"
+    }
+
+    # Verify no running containers matching writer services
+    $runningWriters = (& docker compose -p $ProjectName -f $ComposeFile ps --services --filter "status=running" 2>$null | Where-Object { $_ -match '^(backend|migrator)$' })
+    if ($runningWriters) {
+        throw "CRITICAL WRITER SHUTDOWN FAILURE: Writer services ($($runningWriters -join ', ')) are still reported as running after stop command."
+    }
+
+    # Active transaction drain check prior to backup and migration
+    Write-Host "[GMS Preflight] Verifying active transaction drain on PostgreSQL..." -ForegroundColor Cyan
+    try {
+        $drainSql = "SELECT count(*) FROM pg_stat_activity WHERE datname = 'gms' AND state = 'active' AND pid <> pg_backend_pid();"
+        $activeTxRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c $drainSql 2>$null | Out-String).Trim()
+        [int]$activeTxCount = 0
+        if ([int]::TryParse($activeTxRaw, [ref]$activeTxCount) -and $activeTxCount -gt 0) {
+            Write-Host "  Waiting for $activeTxCount active client transactions to drain..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        }
+    } catch {
+        Write-Host "  Notice: Transaction drain check skipped (PostgreSQL not reachable or not ready yet)." -ForegroundColor DarkGray
+    }
 
     # Step 1.3: Check migration checksums against canonical baseline prior to backup & execution
     Write-Host "[GMS Preflight] Validating migration history checksums and detecting schema drift..." -ForegroundColor Cyan
@@ -709,7 +750,7 @@ try {
         throw "CRITICAL RELEASE GATE BLOCKED: Normal deployment smoke test did not produce a verified PASSED verdict."
     }
 
-    # Step 4: Resolve exact source Git SHA from repository or environment (No 'stable' strings allowed)
+    # Step 4: Resolve exact source Git SHA from repository or environment (No fallback/hardcoded strings allowed)
     [string]$ExactSourceGitSha = ""
     try {
         $gitOut = (& git rev-parse HEAD 2>$null | Out-String).Trim()
@@ -720,11 +761,27 @@ try {
     if (-not $ExactSourceGitSha -and $env:GITHUB_SHA -and $env:GITHUB_SHA -match '^[a-fA-F0-9]{40}$') {
         $ExactSourceGitSha = $env:GITHUB_SHA
     }
+    if (-not $ExactSourceGitSha -and $env:GMS_RELEASE_COMMIT_SHA -and $env:GMS_RELEASE_COMMIT_SHA -match '^[a-fA-F0-9]{40}$') {
+        $ExactSourceGitSha = $env:GMS_RELEASE_COMMIT_SHA
+    }
     if (-not $ExactSourceGitSha -and $TargetReleaseTag -match '^[a-fA-F0-9]{40}$') {
         $ExactSourceGitSha = $TargetReleaseTag
     }
     if (-not $ExactSourceGitSha) {
-        $ExactSourceGitSha = "e8828382a5da1c7262fd59128a96d237052baee3"
+        # Check existing release manifest for provenance
+        [string]$existingManifestPath = Join-Path $WorkspaceRoot "deploy\release_manifest.json"
+        if (Test-Path -Path $existingManifestPath) {
+            try {
+                $existMf = Get-Content -Path $existingManifestPath -Raw | ConvertFrom-Json
+                [string]$candSha = if ($existMf.gitSha) { [string]$existMf.gitSha } elseif ($existMf.release) { [string]$existMf.release } else { "" }
+                if ($candSha -match '^[a-fA-F0-9]{40}$') {
+                    $ExactSourceGitSha = $candSha
+                }
+            } catch {}
+        }
+    }
+    if (-not $ExactSourceGitSha) {
+        throw "CRITICAL PROVENANCE FAILURE: Cannot resolve valid 40-character Git commit SHA for release provenance. Fallback hardcoded SHAs are strictly prohibited."
     }
 
     [string]$ReleasesDir = Join-Path $WorkspaceRoot "deploy\releases"
@@ -825,6 +882,12 @@ try {
     [string]$TmpVersionedManifest = Join-Path $ReleasesDir "${TargetReleaseTag}.json.tmp"
     Set-Content -Path $TmpVersionedManifest -Value $ManifestJson -Encoding utf8
     Move-Item -Path $TmpVersionedManifest -Destination $VersionedManifestPath -Force
+
+    # Atomically update stable.json with the newly verified release record
+    [string]$StableManifestPath = Join-Path $ReleasesDir "stable.json"
+    [string]$TmpStableManifest = Join-Path $ReleasesDir "stable.json.tmp"
+    Set-Content -Path $TmpStableManifest -Value $ManifestJson -Encoding utf8
+    Move-Item -Path $TmpStableManifest -Destination $StableManifestPath -Force
 
     # Record release tag ONLY AFTER all gates, manifests, and strict smoke tests pass
     $TargetReleaseTag | Out-File -FilePath (Join-Path $WorkspaceRoot "deploy\current_release.txt") -Force -Encoding utf8

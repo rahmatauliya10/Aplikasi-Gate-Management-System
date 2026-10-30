@@ -41,6 +41,8 @@ backend/backups/nas/*
 
 # Deployment Runtime Tracker
 deploy/current_release.txt
+maintenance/
+maintenance.flag
 
 
  
