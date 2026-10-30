@@ -424,7 +424,7 @@ jobs:
       - name: Execute Target Guard Policy & Integration Suite (P1-04)
         run: |
           set -Eeuo pipefail
-          node scripts/test-target-guard.js --allow-skip-if-docker-unavailable
+          node scripts/test-target-guard.js
 
       - name: Execute 6-Phase DR Failure-Injection Native Node CI Gate (P0-02)
         env:
@@ -452,12 +452,29 @@ jobs:
       - name: Execute Target Guard PowerShell Policy Verification (P0-C / P0-D)
         run: |
           set -Eeuo pipefail
-          pwsh -ExecutionPolicy Bypass -File scripts/test-target-guard.ps1 -AllowSkipIfDockerUnavailable
+          pwsh -ExecutionPolicy Bypass -File scripts/test-target-guard.ps1
 
-      - name: Execute CLI Rollback Syntax & Regression Suite (REL-01..REL-16)
+      - name: Execute DR Isolation Guard & Ephemeral Fixture Governance Suite (FIX-01 / FIX-02)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-dr-isolation-guard.ps1
+
+      - name: Execute CLI Rollback Syntax & Regression Suite (REL-01..REL-18)
         run: |
           set -Eeuo pipefail
           pwsh -ExecutionPolicy Bypass -File scripts/test-cli-rollback-syntax.ps1
+
+      - name: Verify Strict CI Drill & Target Guard Evidence (FIX-04)
+        run: |
+          set -Eeuo pipefail
+          node -e "
+            const fs = require('fs');
+            const drEv = JSON.parse(fs.readFileSync('artifacts/release-proof/dr-isolation-guard-evidence.json', 'utf8'));
+            if (drEv.status !== 'PASSED' || drEv.summary.failed !== 0) {
+              throw new Error('DR isolation guard evidence not PASSED: ' + JSON.stringify(drEv.summary));
+            }
+            console.log('DR isolation guard evidence verified: PASSED (8/8)');
+          "
 
       - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
         if: always()

@@ -75,6 +75,10 @@ if (-not $DockerAvailable) {
     Set-Content -Path $EvidenceJsonPath -Value ($EvidenceObj | ConvertTo-Json -Depth 5) -Encoding utf8
     
     if ($AllowSkipIfDockerUnavailable) {
+        if ($env:CI -eq "true") {
+            Write-Host "::error file=scripts/test-target-guard.ps1,title=DockerSkipProhibitedInCI::Skip switch (-AllowSkipIfDockerUnavailable) is strictly forbidden in CI environments (CI=true)."
+            exit 1
+        }
         Write-Host "::warning file=scripts/test-target-guard.ps1,title=DockerNotAvailable::Docker not available; target guard skipped with status NOT_EXECUTED."
         exit 0
     } else {
