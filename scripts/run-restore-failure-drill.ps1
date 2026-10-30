@@ -191,7 +191,7 @@ Write-Log "  Fixture Directory: $FixtureRoot"
 # ------------------------------------------------------------------------------
 try {
     Write-Log "Launching isolated PostgreSQL fixture container ($FixtureContainer)..."
-    & docker run -d `
+    $launchOut = & docker run -d `
         --name $FixtureContainer `
         --label "gms.test.fixture=true" `
         --label "gms.test.run_id=$RunId" `
@@ -200,10 +200,9 @@ try {
         -e "POSTGRES_DB=$FixtureDb" `
         -e "POSTGRES_USER=$FixtureUser" `
         -e "POSTGRES_PASSWORD=$FixturePass" `
-        postgres:16-alpine 2>&1 | Out-Null
-
+        postgres:15-alpine 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed launching isolated fixture container [$FixtureContainer]."
+        throw "Failed launching isolated fixture container [$FixtureContainer]: $launchOut"
     }
 
     # Strict ownership and mount verification
@@ -835,7 +834,9 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
             } catch {}
         }
     }
-
+} catch {
+    Write-Log "UNHANDLED DRILL RUNNER EXCEPTION: $_" -Level "ERROR"
+    Record-Drill-Phase -PhaseName "Drill Execution Runner" -Passed $false -Details "Unhandled exception: $_" -DurationSeconds ((Get-Date) - $DrillStartTime).TotalSeconds
 } finally {
     # --------------------------------------------------------------------------
     # STEP 4: Scoped Teardown of Run ID Ephemeral Resources ONLY (FIX-01 & FIX-02)

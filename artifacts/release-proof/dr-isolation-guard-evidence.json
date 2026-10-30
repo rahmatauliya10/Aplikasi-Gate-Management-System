@@ -11,7 +11,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.79,
+                      "durationSeconds":  1.72,
                       "status":  "PASSED"
                   },
                   {
@@ -25,7 +25,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.65,
+                      "durationSeconds":  0.79,
                       "status":  "PASSED"
                   },
                   {
@@ -39,7 +39,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.73,
+                      "durationSeconds":  0.85,
                       "status":  "PASSED"
                   },
                   {
@@ -53,7 +53,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.72,
+                      "durationSeconds":  1.42,
                       "status":  "PASSED"
                   },
                   {
@@ -67,7 +67,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.28,
+                      "durationSeconds":  0.97,
                       "status":  "PASSED"
                   },
                   {
@@ -81,7 +81,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.26,
+                      "durationSeconds":  1.08,
                       "status":  "PASSED"
                   },
                   {
@@ -95,7 +95,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.4,
+                      "durationSeconds":  2.98,
                       "status":  "PASSED"
                   },
                   {
@@ -109,11 +109,11 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.41,
+                      "durationSeconds":  0.87,
                       "status":  "PASSED"
                   }
               ],
-    "timestamp":  "2026-10-30T06:15:40.485Z",
+    "timestamp":  "2026-10-30T07:49:13.007Z",
     "summary":  {
                     "failed":  0,
                     "total":  8,

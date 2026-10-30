@@ -352,14 +352,11 @@ if ($InitializeNewEnvironment) {
 
 # Step 2: Enter Maintenance Mode / Application Write Freeze
 Write-Log "Step 2: Enabling Maintenance Mode & Application Write Freeze..."
-[string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
 Set-Content -Path $MaintFlagPath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE" -Encoding utf8
 
-[string]$MaintDir = Join-Path -Path $ProjectRootDir -ChildPath "maintenance"
 if (-not (Test-Path -Path $MaintDir -PathType Container)) {
     New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
 }
-[string]$MaintActivePath = Join-Path -Path $MaintDir -ChildPath "active"
 Set-Content -Path $MaintActivePath -Value "MAINTENANCE_ACTIVE_PRODUCTION_RESTORE" -Encoding utf8
 Write-Log "  Maintenance flag created ($MaintFlagPath & $MaintActivePath) [PASS]" -Level "SUCCESS"
 
