@@ -117,7 +117,7 @@ function Ensure-TargetPostgresContainer {
             & docker start $Container 2>&1 | Out-Null
         } else {
             Write-Log "Launching isolated drill PostgreSQL container ($Container on port $Port)..."
-            & docker run -d --name $Container -p "127.0.0.1:${Port}:5432" -e "POSTGRES_DB=$Database" -e "POSTGRES_USER=$User" -e "POSTGRES_PASSWORD=testpassword" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
+            & docker run -d --name $Container -p "127.0.0.1:${Port}:5432" -e "POSTGRES_DB=$Database" -e "POSTGRES_USER=$User" -e "POSTGRES_PASSWORD=testpassword" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:16-alpine 2>&1 | Out-Null
         }
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Seconds 1
@@ -136,8 +136,11 @@ function Ensure-TargetPostgresContainer {
         if (Test-Path -LiteralPath $DumpFile) {
             Write-Log "Populating baseline historical test database into $Container ($Database)..."
             & docker cp $DumpFile "${Container}:/tmp/baseline.dump" 2>&1 | Out-Null
-            & docker exec -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-            & docker exec -e "PGPASSWORD=testpassword" $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-Null
+            & docker exec -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO $User;" 2>&1 | Out-Null
+            $restoreRes = & docker exec -e "PGPASSWORD=testpassword" $Container pg_restore -U $User -d $Database --no-owner --no-privileges /tmp/baseline.dump 2>&1 | Out-String
+            if ($restoreRes -match "error:") {
+                Write-Log "pg_restore notice/output: $restoreRes" -Level "WARN"
+            }
             & docker exec $Container rm -f /tmp/baseline.dump 2>&1 | Out-Null
         }
     }
@@ -153,6 +156,20 @@ function Enable-TargetRestoreGate {
     Ensure-TargetPostgresContainer -Container $Container -Database $Database -User $User -Port $DrillPort
     try {
         $initSql = @"
+CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+    "id" VARCHAR(36) PRIMARY KEY,
+    "checksum" VARCHAR(64) NOT NULL,
+    "finished_at" TIMESTAMPTZ,
+    "migration_name" VARCHAR(255) NOT NULL,
+    "logs" TEXT,
+    "rolled_back_at" TIMESTAMPTZ,
+    "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "applied_steps_count" INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO "_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "applied_steps_count")
+VALUES ('m-init', '0000000000000000000000000000000000000000000000000000000000000000', NOW(), '20260714030729_init', 1)
+ON CONFLICT ("id") DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS "AppSetting" (
     "id" VARCHAR(36) PRIMARY KEY,
     "key" VARCHAR(255) UNIQUE NOT NULL,
