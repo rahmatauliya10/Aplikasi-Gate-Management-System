@@ -432,19 +432,19 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     Write-Log "  Duplicate isCurrent invariant check [PASS] (0 duplicates)" -Level "SUCCESS"
 
     [int]$OrphanHist = 0
-    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.""TransactionStatusHistory""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('TransactionStatusHistory', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
         $OrphanHist = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""TransactionStatusHistory"" h LEFT JOIN ""Transaction"" t ON h.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
     [int]$OrphanWb = 0
-    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.""WeighbridgeRecord""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('WeighbridgeRecord', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
         $OrphanWb = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""WeighbridgeRecord"" r LEFT JOIN ""Transaction"" t ON r.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
     [int]$OrphanWh = 0
-    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.""WarehouseProcess""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('WarehouseProcess', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
         $OrphanWh = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""WarehouseProcess"" w LEFT JOIN ""Transaction"" t ON w.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
     [int]$OrphanAtt = 0
-    if ((Exec-StagingQuery "SELECT CASE WHEN to_regclass('public.""Attachment""') IS NOT NULL AND to_regclass('public.""Transaction""') IS NOT NULL THEN '1' ELSE '0' END;") -eq "1") {
+    if ((Exec-StagingQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('Attachment', 'Transaction')) = 2 THEN '1' ELSE '0' END;") -eq "1") {
         $OrphanAtt = [int](Exec-StagingQuery "SELECT COUNT(*) FROM ""Attachment"" a LEFT JOIN ""Transaction"" t ON a.""transactionId"" = t.id WHERE t.id IS NULL;")
     }
 
@@ -552,9 +552,9 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     if ($InitializeNewEnvironment) {
         Write-Log "  -InitializeNewEnvironment switch detected. Verifying target database is 100% empty..."
         if ($LiveTableCount -gt 0) {
-            [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""User""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""User"") ELSE 0 END;"
-            [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""_prisma_migrations""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""_prisma_migrations"") ELSE 0 END;"
-            [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""Transaction""') IS NOT NULL THEN (SELECT COUNT(*) FROM ""Transaction"") ELSE 0 END;"
+            [string]$LiveUserCountStr = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'User') = 1 THEN (SELECT COUNT(*) FROM ""User"") ELSE 0 END;"
+            [string]$LiveMigCountStr = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_prisma_migrations') = 1 THEN (SELECT COUNT(*) FROM ""_prisma_migrations"") ELSE 0 END;"
+            [string]$LiveTxCountStr = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'Transaction') = 1 THEN (SELECT COUNT(*) FROM ""Transaction"") ELSE 0 END;"
             [int]$uCount = 0; [int]$mCount = 0; [int]$tCount = 0;
             [int]::TryParse($LiveUserCountStr, [ref]$uCount) | Out-Null
             [int]::TryParse($LiveMigCountStr, [ref]$mCount) | Out-Null
@@ -570,8 +570,8 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
             throw "HARD FAIL: Target database [$LiveDbName] has 0 tables and is not initialized. For fresh databases, use -InitializeNewEnvironment. NO DATABASE MUTATION OCCURRED."
         }
 
-        [string]$hasMigrations = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""_prisma_migrations""') IS NOT NULL THEN 1 ELSE 0 END;"
-        [string]$hasAppSettings = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.""AppSetting""') IS NOT NULL THEN 1 ELSE 0 END;"
+        [string]$hasMigrations = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_prisma_migrations';"
+        [string]$hasAppSettings = Exec-LiveDbQuery "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'AppSetting';"
 
         if ($hasMigrations -ne "1" -or $hasAppSettings -ne "1") {
             throw "HARD FAIL: TARGET DATABASE FINGERPRINT MISMATCH! Target database [$LiveDbName] does not contain valid GMS schema tables (_prisma_migrations or AppSetting missing). NO DATABASE MUTATION OCCURRED."
@@ -720,7 +720,7 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     }
 
     function Get-LiveTableCountSafe([string]$TableName) {
-        [string]$exists = Exec-LiveDbQuery "SELECT CASE WHEN to_regclass('public.`"$TableName`"') IS NOT NULL THEN '1' ELSE '0' END;"
+        [string]$exists = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$TableName') = 1 THEN '1' ELSE '0' END;"
         if ($exists -ne "1") { return 0 }
         [string]$cntStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM `"$TableName`";"
         [int]$cnt = 0

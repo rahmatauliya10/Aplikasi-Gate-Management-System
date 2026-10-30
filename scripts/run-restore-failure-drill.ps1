@@ -125,7 +125,7 @@ function Ensure-TargetPostgresContainer {
             if ($LASTEXITCODE -eq 0) { break }
         }
     }
-    $rawMig = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '_prisma_migrations';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>$null
+    $rawMig = ("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '_prisma_migrations';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>$null
     [string]$migExists = ""
     if ($rawMig) {
         $migLines = @(($rawMig.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
@@ -200,7 +200,7 @@ function Get-DatabaseFingerprint {
     $Result = [ordered]@{}
 
     foreach ($Table in $Tables) {
-        $rawCheck = ("SELECT count(*) FROM pg_stat_user_tables WHERE relname = '$Table';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>&1
+        $rawCheck = ("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$Table';`n") | & docker exec -i -e "PGPASSWORD=testpassword" $Container psql -U $User -d $Database -t -A 2>&1
         $TableCheck = ""
         if ($rawCheck) {
             $tableLines = @(($rawCheck.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
