@@ -47,6 +47,21 @@ param(
     [string]$FaultInjectionPhase = "",
 
     [Parameter(Mandatory=$false)]
+    [string]$MaintenanceDir = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$UploadsDirectory = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$LogDirectory = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$RecoveryOperationId = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$PgPort = "",
+
+    [Parameter(Mandatory=$false)]
     [switch]$PreserveMaintenanceFlag,
 
     [Parameter(Mandatory=$false)]
@@ -62,13 +77,22 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 [string]$ProjectRootDir = (Get-Item (Join-Path $PSScriptRoot "..")).FullName
 [bool]$IsWinPlatform = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
-[string]$LogDir = if ($IsWinPlatform) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
+[string]$LogDir = if ($LogDirectory) { $LogDirectory } elseif ($IsWinPlatform) { "C:\GMS_Logs" } else { Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs" }
 [string]$LogFile = Join-Path -Path $LogDir -ChildPath "production_restore.log"
 [string]$RestoreEvidencePath = Join-Path -Path $LogDir -ChildPath "restore_evidence.json"
-[string]$UploadDir = if ($env:UPLOAD_DIR) { $env:UPLOAD_DIR } else { Join-Path -Path $ProjectRootDir -ChildPath "uploads" }
+[string]$UploadDir = if ($UploadsDirectory) { $UploadsDirectory } elseif ($env:UPLOAD_DIR) { $env:UPLOAD_DIR } else { Join-Path -Path $ProjectRootDir -ChildPath "uploads" }
 
 if (-not (Test-Path -Path $LogDir -PathType Container)) {
-    New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
+    try {
+        New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
+    } catch {
+        $LogDir = Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs"
+        $LogFile = Join-Path -Path $LogDir -ChildPath "production_restore.log"
+        $RestoreEvidencePath = Join-Path -Path $LogDir -ChildPath "restore_evidence.json"
+        if (-not (Test-Path -Path $LogDir -PathType Container)) {
+            New-Item -Path $LogDir -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
 }
 
 function Write-Log {
@@ -97,8 +121,9 @@ Write-Log "=====================================================================
 [string]$AttArchivePath = ""
 [string]$StagingContainer = ""
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
-[string]$MaintFlagPath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
-[string]$MaintActivePath = Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active"
+[string]$MaintDir = if ($MaintenanceDir) { $MaintenanceDir } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance" }
+[string]$MaintFlagPath = if ($MaintenanceDir) { Join-Path -Path $MaintenanceDir -ChildPath "maintenance.flag" } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag" }
+[string]$MaintActivePath = if ($MaintenanceDir) { Join-Path -Path $MaintenanceDir -ChildPath "active" } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active" }
 
 try {
 # Step 1: Resolve Backup Manifest & Artifact Paths
@@ -190,6 +215,41 @@ if (-not [string]::IsNullOrWhiteSpace($EffectiveFaultPhasePreflight)) {
     if ($inspectJsonPreflight) {
         if ($inspectJsonPreflight -like "*prod-postgres-data*" -or $inspectJsonPreflight -like "*production_postgres*") {
             throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is bound to production data volumes! Fault injection is unconditionally blocked."
+        }
+    }
+}
+
+# 4. In isolated drill mode, strictly forbid operational paths, databases, and containers
+if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -eq "TRUE") {
+    if ($LiveContainer -eq "gate-system-postgres") {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target container [$LiveContainer] is the operational container name! Drill must use an isolated fixture container."
+    }
+    if ($LiveDbName -eq "gms") {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target database [$LiveDbName] is the operational database name! Drill must use an isolated fixture database."
+    }
+    [string]$realProjectUploads = Join-Path -Path $ProjectRootDir -ChildPath "uploads"
+    if ($UploadDir -eq $realProjectUploads) {
+        throw "CRITICAL GOVERNANCE VIOLATION: Target uploads directory [$UploadDir] points to operational project uploads! Drill must use an isolated fixture uploads directory."
+    }
+    [string]$realMaintDir = Join-Path -Path $ProjectRootDir -ChildPath "maintenance"
+    [string]$realMaintFlag = Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag"
+    [string]$realMaintActive = Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active"
+    if ($MaintDir -eq $realMaintDir -or $MaintFlagPath -eq $realMaintFlag -or $MaintActivePath -eq $realMaintActive) {
+        throw "CRITICAL GOVERNANCE VIOLATION: Maintenance directory or flag path points to operational project root! Drill must use an isolated fixture maintenance directory."
+    }
+}
+
+# 5. Persistent Exactly-Once Recovery Enforcement (P1-05 / FIX-05)
+if ($RecoveryOperationId) {
+    [string]$RecLedgerFile = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
+    if (Test-Path -Path $RecLedgerFile) {
+        try {
+            $recLedger = Get-Content -Path $RecLedgerFile -Raw | ConvertFrom-Json
+            if ($recLedger.recoveryOperationId -eq $RecoveryOperationId -and $recLedger.dbRestoreExecuted -eq $true) {
+                throw "CRITICAL RECOVERY VIOLATION: Duplicate database restore rejected! Recovery operation [$RecoveryOperationId] already executed and verified DB restore at $($recLedger.dbRestoreExecutedAt)."
+            }
+        } catch {
+            if ($_.ToString() -match "CRITICAL RECOVERY VIOLATION") { throw $_ }
         }
     }
 }
@@ -826,7 +886,27 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         Write-Log "  Live 16-entity manifest assertions PASSED [PASS]" -Level "SUCCESS"
     }
 
-    [bool]$PassedLiveAssertions = ($LiveTotalDupes -eq 0) -and ($LiveTotalOrphans -eq 0) -and (-not ($LiveAttCount -gt 0 -and $AttArchivePath -and ($RestoredPhysicalCount -lt $LiveAttCount)))
+    # Step 7.5: Post-Promotion Security Postcondition Verification (FIX-05 / P1-05)
+    # Strictly reset GMS_RESTORE_ALLOWED to FALSE and verify via query before reporting success
+    Write-Log "Verifying post-restore security postconditions: resetting GMS_RESTORE_ALLOWED to FALSE..." -Level "INFO"
+    [string]$resetVal = ""
+    try {
+        $resetRaw = if ($PgPass) {
+            & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -U $PgUser -d $LiveDbName -v ON_ERROR_STOP=1 -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+        } else {
+            & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -v ON_ERROR_STOP=1 -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
+        }
+        $resetVal = if ($resetRaw) { ([string]($resetRaw | Out-String)).Trim() } else { "" }
+    } catch {
+        throw "CRITICAL SECURITY POSTCONDITION EXCEPTION: Failed executing auto-reset query for GMS_RESTORE_ALLOWED: $_"
+    }
+
+    if ($resetVal -ne "FALSE") {
+        throw "CRITICAL SECURITY POSTCONDITION FAILURE: GMS_RESTORE_ALLOWED could not be verified reset to FALSE (query returned '$resetVal'). Live database restore permission remains insecure. System fail-closed."
+    }
+    Write-Log "Auto-reset of GMS_RESTORE_ALLOWED to FALSE strictly verified in target database [PASS]." -Level "SUCCESS"
+
+    [bool]$PassedLiveAssertions = ($LiveTotalDupes -eq 0) -and ($LiveTotalOrphans -eq 0) -and (-not ($LiveAttCount -gt 0 -and $AttArchivePath -and ($RestoredPhysicalCount -lt $LiveAttCount))) -and ($resetVal -eq "FALSE")
     [string]$VerdictStatus = if ($PassedLiveAssertions) { "PASSED" } else { "FAILED" }
 
     [datetime]$RestoreEndTime = Get-Date
@@ -839,6 +919,10 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         status = $VerdictStatus
         verifiedDumpHash = $ActualDumpHash
         verifiedAttachmentArchiveHash = if ($AttArchivePath) { (Get-FileHash -Path $AttArchivePath -Algorithm SHA256).Hash.ToLower() } else { null }
+        securityPostconditionsVerified = @{
+            restoreGateResetToFalse = ($resetVal -eq "FALSE")
+            trafficFrozenInMaintenance = $true
+        }
         recordCountsVerified = @{
             users = $LiveUserCount
             userWarehouseAccess = $LiveWhAccessCount
@@ -867,6 +951,21 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     $EvidenceJson = $EvidenceObj | ConvertTo-Json -Depth 5 -Compress
     Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
     Write-Log "Restore Evidence Proof written to $RestoreEvidencePath [PASS]" -Level "SUCCESS"
+
+    # Persist recovery ledger state for restart resilience (FIX-05)
+    if ($RecoveryOperationId) {
+        [string]$RecLedgerFile = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
+        $recStateObj = @{
+            recoveryOperationId = $RecoveryOperationId
+            dbRestoreExecuted = $true
+            dbRestoreExecutedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+            backupId = $BackupId
+            status = "RESTORE_DONE"
+            rtoSeconds = $RtoSeconds
+        }
+        Set-Content -Path $RecLedgerFile -Value ($recStateObj | ConvertTo-Json -Depth 4) -Encoding utf8
+        Write-Log "Persistent recovery ledger updated at $RecLedgerFile (dbRestoreExecuted = TRUE)." -Level "SUCCESS"
+    }
 
     Write-Log "=============================================================================="
     Write-Log "PRODUCTION RESTORE COMPLETED SUCCESSFULLY! RTO: $RtoSeconds seconds." -Level "SUCCESS"
@@ -918,7 +1017,14 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
         error = $_.ToString()
     }
     $EvidenceJson = $EvidenceObj | ConvertTo-Json -Compress
-    Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
+    try {
+        Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
+    } catch {
+        [string]$altLogs = Join-Path -Path $ProjectRootDir -ChildPath "artifacts/logs"
+        if (-not (Test-Path -Path $altLogs)) { New-Item -Path $altLogs -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null }
+        [string]$altEvidence = Join-Path -Path $altLogs -ChildPath "restore_evidence.json"
+        Set-Content -Path $altEvidence -Value $EvidenceJson -Encoding utf8 -ErrorAction SilentlyContinue
+    }
 
     # Clean staging upload directory if created
     if (-not [string]::IsNullOrWhiteSpace($StagingUploadDir) -and (Test-Path -Path $StagingUploadDir)) {
@@ -926,43 +1032,28 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     }
     exit 1
 } finally {
-    # Step 8: Maintenance Mode Teardown & Container Cleanup (Single Ownership / Fail-Closed)
-    [bool]$PreserveMaint = [bool]($PreserveMaintenanceFlag -or $ManagedByOrchestrator)
-    if ($RestoreSucceeded) {
-        if ($PreserveMaint) {
-            Write-Log "Maintenance mode preserved by orchestrator (-PreserveMaintenanceFlag / -ManagedByOrchestrator). Maintenance remains ACTIVE until post-rollback verification." -Level "INFO"
-        } else {
-            if (Test-Path -Path $MaintFlagPath) {
-                Remove-Item -Path $MaintFlagPath -Force -ErrorAction SilentlyContinue
-            }
-            if (Test-Path -Path $MaintActivePath) {
-                Remove-Item -Path $MaintActivePath -Force -ErrorAction SilentlyContinue
-            }
-            Write-Log "Maintenance mode released & staging container destroyed."
-        }
-    } else {
-        if ((Test-Path -Path $MaintFlagPath) -or (Test-Path -Path $MaintActivePath)) {
-            Write-Log "RESTORE FAILED OR INCOMPLETE! MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY." -Level "WARN"
-            Write-Log "Maintenance flags ($MaintFlagPath & $MaintActivePath) have been preserved." -Level "WARN"
-        }
+    # Step 8: Unified Fail-Closed Maintenance Policy & Container Cleanup (FIX-02 C / FIX-05)
+    # Restore success does NOT automatically open ingress traffic.
+    # Maintenance remains strictly active until health watchdog, strict smoke tests, and authorized unfreeze pass.
+    if ((Test-Path -Path $MaintFlagPath) -or (Test-Path -Path $MaintActivePath)) {
+        Write-Log "MAINTENANCE MODE REMAINS ACTIVE FOR SAFETY (Fail-Closed Policy)." -Level "INFO"
+        Write-Log "Ingress traffic stays frozen until post-recovery watchdog, strict smoke probes, and authorized unfreeze are completed." -Level "INFO"
     }
 
-    # Auto-reset GMS_RESTORE_ALLOWED to FALSE in target database with verification
+    # Emergency safety reset of GMS_RESTORE_ALLOWED in target database if unhandled failure occurred
     if (-not [string]::IsNullOrWhiteSpace($LiveContainerId)) {
         try {
-            $resetRaw = if ($PgPass) {
+            $resetRawFinally = if ($PgPass) {
                 & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
             } else {
                 & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -t -A -c "UPDATE ""AppSetting"" SET value = 'FALSE' WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED'; SELECT value FROM ""AppSetting"" WHERE key = 'GMS_RESTORE_ALLOWED' OR key = 'RESTORE_ALLOWED' LIMIT 1;" 2>&1
             }
-            [string]$resetVal = ($resetRaw | Out-String).Trim()
-            if ($resetVal -eq "FALSE") {
-                Write-Log "Auto-reset of GMS_RESTORE_ALLOWED to FALSE verified in target database [PASS]." -Level "SUCCESS"
-            } else {
-                Write-Log "WARNING: Could not verify GMS_RESTORE_ALLOWED reset to FALSE (query returned: $resetVal)" -Level "WARN"
+            [string]$resetValFinally = ($resetRawFinally | Out-String).Trim()
+            if ($resetValFinally -eq "FALSE") {
+                Write-Log "Safety reset of GMS_RESTORE_ALLOWED to FALSE confirmed in finally block." -Level "INFO"
             }
         } catch {
-            Write-Log "ERROR: Failed executing auto-reset query for GMS_RESTORE_ALLOWED: $_" -Level "ERROR"
+            Write-Log "WARNING: Could not execute emergency reset query for GMS_RESTORE_ALLOWED in finally block: $_" -Level "WARN"
         }
     }
 

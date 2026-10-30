@@ -1,28 +1,66 @@
 /**
- * Ephemeral Mock Maintenance Server for DR Phase 6 Verification
+ * Ephemeral Mock Maintenance Server for DR Phase 6 Verification (FIX-02 Hardened)
  *
- * Listens on 127.0.0.1 (default port 3001 or specified via PORT/argv).
- * Reads maintenance/active and maintenance.flag.
- * When maintenance is active, returns genuine HTTP 503 with code 'MAINTENANCE_MODE'.
- * When maintenance is inactive, returns HTTP 200 OK.
+ * Listens strictly on 127.0.0.1.
+ * Supports dynamic ports, custom isolated fixture maintenance directories,
+ * and ephemeral identity handshake to prevent interacting with operational services.
  */
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
-const port = parseInt(process.env.PORT || process.argv[2] || '3001', 10);
+const requestedPort = parseInt(process.env.PORT || process.argv[2] || '0', 10);
+const customMaintDir = process.env.MAINTENANCE_DIR || process.argv[3];
 const projectRoot = path.resolve(__dirname, '..');
 
+const maintDir = customMaintDir
+  ? path.resolve(customMaintDir)
+  : path.join(projectRoot, 'maintenance');
+
+const authToken =
+  process.env.MOCK_SERVER_AUTH_TOKEN ||
+  crypto.randomBytes(16).toString('hex');
+
+function isMaintenanceActive() {
+  const activeFile = path.join(maintDir, 'active');
+  const flagFileInDir = path.join(maintDir, 'maintenance.flag');
+  const flagFileParent = path.join(path.dirname(maintDir), 'maintenance.flag');
+
+  return (
+    fs.existsSync(activeFile) ||
+    fs.existsSync(flagFileInDir) ||
+    fs.existsSync(flagFileParent)
+  );
+}
+
 const server = http.createServer((req, res) => {
-  const maintActive =
-    fs.existsSync(path.join(projectRoot, 'maintenance/active')) ||
-    fs.existsSync(path.join(projectRoot, 'maintenance.flag'));
+  // Identity handshake probe for test runner verification
+  if (req.method === 'GET' && (req.url === '/_identity' || req.url === '/api/mock/identity')) {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'X-GMS-Server-Type': 'MOCK_MAINTENANCE_SERVER',
+      'X-GMS-Mock-Token': authToken,
+    });
+    return res.end(
+      JSON.stringify({
+        serverType: 'GMS_EPHEMERAL_MOCK_MAINTENANCE_SERVER',
+        pid: process.pid,
+        token: authToken,
+        maintenanceDir: maintDir,
+        maintenanceActive: isMaintenanceActive(),
+      })
+    );
+  }
+
+  const maintActive = isMaintenanceActive();
 
   if (maintActive) {
     res.writeHead(503, {
       'Content-Type': 'application/json',
       'X-GMS-Maintenance-Mode': 'TRUE',
+      'X-GMS-Server-Type': 'MOCK_MAINTENANCE_SERVER',
     });
     res.end(
       JSON.stringify({
@@ -32,7 +70,10 @@ const server = http.createServer((req, res) => {
       })
     );
   } else {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'X-GMS-Server-Type': 'MOCK_MAINTENANCE_SERVER',
+    });
     res.end(
       JSON.stringify({
         statusCode: 200,
@@ -43,8 +84,9 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`[MockMaintenanceServer] Listening on 127.0.0.1:${port}`);
+server.listen(requestedPort, '127.0.0.1', () => {
+  const actualPort = server.address().port;
+  console.log(`[MockMaintenanceServer] READY PORT=${actualPort} PID=${process.pid} TOKEN=${authToken}`);
 });
 
 process.on('SIGTERM', () => {
