@@ -2073,8 +2073,17 @@ export class DatabaseBackupService
             psqlArgs,
             { env: { ...process.env, PGPASSWORD: password } },
             (err) => {
-              if (err) reject(err);
-              else resolve();
+              if (err) {
+                reject(
+                  err instanceof Error
+                    ? err
+                    : new Error(
+                        err?.message || 'Failed executing psql command',
+                      ),
+                );
+              } else {
+                resolve();
+              }
             },
           );
           if (psqlProc.stdin) {
