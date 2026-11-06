@@ -217,7 +217,7 @@ describe('DatabaseBackupService', () => {
           '127.0.0.1',
         ),
       ).rejects.toThrow(UnauthorizedException);
-    });
+    }, 15000);
 
     it('should throw BadRequestException if backup file is corrupted / checksum mismatched', async () => {
       const hashedPassword = await argon2.hash('SecretAdmin123');

@@ -13,44 +13,49 @@
               </div>
               <StatusBadge :status="selectedTruck.status" class="shadow-sm" />
             </div>
-            
+
             <div class="grid grid-cols-2 gap-3 relative z-10">
               <div class="col-span-2 bg-slate-100/90 p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between hover:-translate-y-0.5 hover:border-slate-300 transition-all duration-300">
-                <span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.15em] mb-1.5">Plate Number</span>
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-[9px] font-black text-slate-500 uppercase tracking-[0.15em]">Plate Number</span>
+                  <span v-if="selectedTruck.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    #{{ String(selectedTruck.dailySequence).padStart(3, '0') }}
+                  </span>
+                </div>
                 <span class="text-xl font-black truncate font-mono tracking-widest text-slate-900">{{ getPlateNumber(selectedTruck) }}</span>
               </div>
-              
+
               <div class="bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-300 backdrop-blur-sm">
                 <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em] mb-1.5">Driver</span>
                 <span class="text-sm font-black text-slate-800 truncate">{{ selectedTruck.driverName }}</span>
               </div>
-              
+
               <div class="bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-300 backdrop-blur-sm">
                 <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em] mb-1.5">Vendor</span>
                 <span class="text-sm font-black text-slate-700 truncate">{{ getVendor(selectedTruck) }}</span>
               </div>
-              
+
               <div class="bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-300 backdrop-blur-sm">
                 <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em] mb-1.5">Delivery Note</span>
                 <span class="text-sm font-black text-slate-800 truncate">{{ selectedTruck.suratJalanNumber || '-' }}</span>
               </div>
-              
+
               <div class="bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] flex flex-col justify-between hover:-translate-y-0.5 transition-all duration-300 backdrop-blur-sm">
                 <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em] mb-1.5">PO Number</span>
                 <span class="text-sm font-black text-slate-800 truncate">{{ selectedTruck.poNumber || '-' }}</span>
               </div>
-              
+
               <div class="col-span-2 flex justify-between items-center bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] backdrop-blur-sm">
                 <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em]">Process</span>
                 <span class="text-sm font-black text-indigo-600">Loading</span>
               </div>
-              
+
               <div class="col-span-2 flex justify-between items-center bg-white/80 p-3.5 rounded-xl border border-slate-100 shadow-[0_2px_10px_rgba(0,0,0,0.02)] backdrop-blur-sm">
                 <span class="text-[9px] font-black text-slate-600 uppercase tracking-[0.15em]">Warehouse Out</span>
                 <span class="text-sm font-black text-slate-800 font-mono">{{ formatTime(getWarehouseEnd(selectedTruck)) }}</span>
               </div>
             </div>
-            
+
             <div class="mt-6 relative z-10">
               <button @click="showDetailsModal = true" class="relative w-full overflow-hidden flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl transition-all duration-300 text-xs font-black uppercase tracking-widest text-indigo-600 bg-[#E6F0FA] border border-[#CCE0F5] hover:border-indigo-300 hover:shadow-[0_4px_20px_rgba(74,139,223,0.2)] group">
                 <div class="absolute inset-0 bg-gradient-to-r from-transparent via-indigo-200/50 to-transparent -translate-x-full group-hover:animate-shimmer pointer-events-none"></div>
@@ -62,8 +67,8 @@
             <!-- Loading Phase: Weight + Delivery Note Input -->
             <div class="mt-6 space-y-4" v-if="selectedTruck.status === 'WAREHOUSE_IN_PROGRESS'">
               <transition name="fade-slide" mode="out-in">
-                <WeightInput v-if="capturedWeight === null" label="Input Actual Weight GBJ (KG)" @save="handleWeightCapture" />
-                
+                <WeightInput v-if="capturedWeight === null" :key="selectedTruck.id" label="Input Actual Weight GBJ (KG)" @dirty-change="pendingWeight = $event" @save="handleWeightCapture" />
+
                 <div v-else class="flex flex-col space-y-4">
                   <!-- Captured Weight Display -->
                   <div class="flex items-center justify-between p-4 bg-emerald-50 border border-emerald-200 rounded-xl shadow-[inset_0_2px_10px_rgba(16,185,129,0.05)]">
@@ -112,7 +117,7 @@
         <div class="flex flex-col h-[600px] ind-container overflow-hidden bg-slate-50 bg-opacity-40 backdrop-blur-xl border-slate-200 border-opacity-50 shadow-[0_20px_50px_rgba(0,0,0,0.05)] relative">
           <!-- Glossy Overlay -->
           <div class="absolute inset-0 bg-gradient-to-tr from-white/5 to-white/20 pointer-events-none"></div>
-          
+
           <div class="px-8 py-6 bg-white/60 backdrop-blur-md border-b border-slate-100 flex flex-wrap justify-between items-center gap-4 z-10 relative">
             <div class="flex items-center space-x-4">
               <div class="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center border border-indigo-100 shadow-inner group cursor-help">
@@ -144,10 +149,10 @@
               </div>
             </div>
           </div>
-          
+
           <div class="flex-1 overflow-y-auto p-6 space-y-5 hide-scrollbar relative">
             <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(#4A8BDF 1px, transparent 1px), linear-gradient(90deg, #4A8BDF 1px, transparent 1px); background-size: 30px 30px;"></div>
-            
+
             <transition-group name="list" tag="div" class="relative z-10 space-y-3">
               <div v-for="(truck, i) in paginatedGbjTrucks" :key="truck.id"
                 @click="selectTruck(truck)"
@@ -156,17 +161,22 @@
               >
                 <div class="absolute left-0 top-3 bottom-3 w-1 rounded-r-full transition-all duration-300 bg-[#4A8BDF]"
                   :style="{ opacity: selectedTruck?.id === truck.id ? '1' : '0.5' }"></div>
-                
+
                 <div class="flex justify-between items-start pl-3">
                   <div>
-                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">Arrival Time</div>
+                    <div class="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1 flex items-center space-x-1.5">
+                      <span>Arrival Time</span>
+                      <span v-if="truck.dailySequence" class="px-1.5 py-0.2 rounded text-[9px] font-black font-mono bg-indigo-50 text-indigo-700 border border-indigo-200">
+                        #{{ String(truck.dailySequence).padStart(3, '0') }}
+                      </span>
+                    </div>
                     <div class="text-base font-black text-slate-900 font-mono tracking-tight">{{ getPlateNumber(truck) }}</div>
                   </div>
                   <div class="px-2.5 py-1 rounded-lg text-[10px] font-black tracking-widest bg-slate-100 text-slate-600 font-mono border border-slate-200">
                     {{ formatTime(getEntryTimestamp(truck)) }}
                   </div>
                 </div>
-                
+
                 <div class="mt-4 flex justify-between items-end pl-3">
                   <div class="flex items-center space-x-2">
                     <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest"
@@ -180,7 +190,7 @@
                   </button>
                 </div>
               </div>
-              
+
               <div v-if="filteredGbjTrucks.length === 0" key="empty" class="flex flex-col items-center justify-center py-28 relative z-10">
                 <div class="relative mb-6">
                   <div class="w-24 h-24 rounded-3xl bg-slate-50 flex items-center justify-center animate-gentle-float border border-slate-100">
@@ -201,14 +211,14 @@
         </div>
       </div>
     </div>
-    
+
     <!-- Delivery Checklist Modal -->
     <teleport to="body">
       <transition name="modal">
-        <div v-if="showDeliveryModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4" @click.self="showDeliveryModal = false">
+        <div v-if="showDeliveryModal" class="fixed inset-0 z-[9999] flex items-center justify-center p-4" @click.self="handleCloseDeliveryModal">
           <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-md pointer-events-none"></div>
           <div class="relative w-[95vw] sm:max-w-3xl mx-auto max-h-[95vh] sm:max-h-[90vh] flex flex-col rounded-3xl shadow-2xl overflow-hidden" style="background:white;">
-            
+
             <!-- Header -->
             <div class="px-8 py-5 flex justify-between items-center bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
               <div class="flex items-center space-x-3">
@@ -220,11 +230,11 @@
                   <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Product & Document Inspection</p>
                 </div>
               </div>
-              <button @click="showDeliveryModal = false" class="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-slate-200 text-slate-500">
+              <button @click="handleCloseDeliveryModal" class="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-slate-200 text-slate-500">
                 <span class="material-icons text-lg">close</span>
               </button>
             </div>
-            
+
             <!-- Body -->
             <div class="p-8 overflow-y-auto" style="background:#FAFBFF;">
               <div class="space-y-8">
@@ -235,16 +245,60 @@
                     <label class="text-[11px] font-black text-slate-600 uppercase tracking-wider">Date</label>
                     <input type="text" :value="currentDateStr" disabled class="w-full h-12 px-4 bg-slate-50 rounded-xl text-sm font-bold text-slate-500 outline-none border border-slate-200" />
                   </div>
-                  
-                  <!-- Product Type Dropdown -->
-                  <div class="space-y-2">
-                    <label class="text-[11px] font-black text-slate-600 uppercase tracking-wider">Product Type</label>
-                    <div class="relative">
-                      <select v-model="deliveryForm.productType" class="w-full h-12 px-4 appearance-none bg-white rounded-xl text-sm font-bold text-slate-800 outline-none border border-slate-200 focus:border-[#A0006D]">
-                        <option value="" disabled>Select Product Type</option>
-                        <option v-for="pt in productTypes" :key="pt" :value="pt">{{ pt }}</option>
-                      </select>
-                      <span class="material-icons absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">expand_more</span>
+
+                  <!-- Product Types Section (1 mandatory, 2 optional, max 2) -->
+                  <div class="space-y-3 col-span-1 md:col-span-2 bg-slate-50/70 p-4 rounded-xl border border-slate-200">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center space-x-2">
+                        <span class="material-icons text-[#A0006D] text-[18px]">inventory_2</span>
+                        <label class="text-[11px] font-black text-slate-700 uppercase tracking-wider">Product Types (Maks 2 Jenis Produk)</label>
+                      </div>
+                      <button
+                        v-if="!showProductType2"
+                        type="button"
+                        @click="enableProductType2"
+                        class="text-[10px] font-black text-[#A0006D] hover:text-[#800057] uppercase tracking-wider flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-pink-50 border border-pink-200 hover:bg-pink-100 transition-all"
+                      >
+                        <span class="material-icons text-[14px]">add</span>
+                        <span>Tambah Jenis Produk 2</span>
+                      </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <!-- Product Type 1 (Wajib) -->
+                      <div class="space-y-1.5">
+                        <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Product Type 1 *</label>
+                        <div class="relative">
+                          <select v-model="deliveryForm.productType1" class="w-full h-11 px-4 appearance-none bg-white rounded-xl text-sm font-bold text-slate-800 outline-none border border-slate-200 focus:border-[#A0006D]">
+                            <option value="" disabled>Pilih Product Type 1</option>
+                            <option v-for="pt in availableProductTypes1" :key="pt" :value="pt">{{ pt }}</option>
+                          </select>
+                          <span class="material-icons absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-base">expand_more</span>
+                        </div>
+                      </div>
+
+                      <!-- Product Type 2 (Opsional) -->
+                      <div v-if="showProductType2" class="space-y-1.5">
+                        <div class="flex items-center justify-between">
+                          <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Product Type 2 (Opsional)</label>
+                          <button
+                            type="button"
+                            @click="removeProductType2"
+                            class="text-[10px] font-bold text-rose-600 hover:text-rose-800 flex items-center space-x-0.5"
+                            title="Hapus Product Type 2"
+                          >
+                            <span class="material-icons text-[13px]">delete</span>
+                            <span>Hapus</span>
+                          </button>
+                        </div>
+                        <div class="relative">
+                          <select v-model="deliveryForm.productType2" class="w-full h-11 px-4 appearance-none bg-white rounded-xl text-sm font-bold text-slate-800 outline-none border border-slate-200 focus:border-[#A0006D]">
+                            <option value="">Pilih Product Type 2 (Opsional)</option>
+                            <option v-for="pt in availableProductTypes2" :key="pt" :value="pt">{{ pt }}</option>
+                          </select>
+                          <span class="material-icons absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-base">expand_more</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -307,7 +361,7 @@
                 </div>
               </div>
             </div>
-            
+
             <!-- Footer -->
             <div class="px-8 py-5 border-t border-slate-100 bg-white sticky bottom-0 z-10">
               <button
@@ -329,7 +383,7 @@
     </teleport>
 
 
-    
+
     <TruckDetailsModal :is-open="showDetailsModal" :truck="selectedTruck" size="wide" @close="showDetailsModal = false" />
   </div>
 </template>
@@ -337,7 +391,7 @@
 <script setup>
 import { formatPlantTime } from '../utils/displayTime'
 import PageHeader from '../components/PageHeader.vue'
-import { ref, computed, watch, reactive, onMounted } from 'vue'
+import { ref, computed, watch, reactive } from 'vue'
 import { useTruckStore } from '../stores/truckStore'
 import { useWarehouseStore } from '../stores/warehouseStore'
 import { useToast } from '../composables/useToast'
@@ -347,6 +401,8 @@ import StepTimeline from '../components/StepTimeline.vue'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
 import WeightInput from '../components/WeightInput.vue'
 import Pagination from '../components/Pagination.vue'
+import { useUnsavedWarning } from '../composables/useUnsavedWarning'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 
 // Safety Helpers at the top
 const getPlateNumber = (truck) => {
@@ -390,13 +446,6 @@ const warehouseStore = useWarehouseStore()
 const toast = useToast()
 const { confirm } = useConfirm()
 
-onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[GBJProcess] Mount-time fetch failed, using store cache:', err.message)
-  }
-})
 
 const selectedTruck = ref(null)
 const showDetailsModal = ref(false)
@@ -425,14 +474,34 @@ watch(searchQuery, () => { currentPage.value = 1 })
 const sjInput = ref('')
 const capturedWeight = ref(null)
 
+const showProductType2 = ref(false)
+
 const deliveryForm = reactive({
-  productType: '',
+  productType1: '',
+  productType2: '',
   customer: '',
   productCondition: [false, false, false, false],
   documentAvailability: [false, false, false, false]
 })
 
 const productTypes = ['SIC 18 T', 'SIC 01 PC', 'SIC 25 BR', 'SIC 8590 SD', 'SIC 9010 M3', 'SIC 18 C1']
+
+const enableProductType2 = () => {
+  showProductType2.value = true
+}
+
+const removeProductType2 = () => {
+  showProductType2.value = false
+  deliveryForm.productType2 = ''
+}
+
+const availableProductTypes1 = computed(() => {
+  return productTypes.filter(p => !showProductType2.value || p !== deliveryForm.productType2)
+})
+
+const availableProductTypes2 = computed(() => {
+  return productTypes.filter(p => p !== deliveryForm.productType1)
+})
 
 const productConditionList = [
   { label: "Menggunakan pallet / Using pallet", optional: true },
@@ -456,16 +525,43 @@ const currentDateStr = computed(() => {
 const canSaveGBJ = computed(() => {
   const isWeightValid = capturedWeight.value !== null && capturedWeight.value > 0
   const isSjValid = sjInput.value.trim().length > 0
-  const isFormValid = deliveryForm.productType !== '' && deliveryForm.customer.trim().length > 0
-  
+  const isProduct1Valid = deliveryForm.productType1 !== ''
+  const isProduct2Valid = !showProductType2.value || !deliveryForm.productType2 || deliveryForm.productType2 !== deliveryForm.productType1
+  const isFormValid = isProduct1Valid && isProduct2Valid && deliveryForm.customer.trim().length > 0
+
   // Hanya item wajib yang harus bernilai true (item optional bebas true/false)
   const isProductConditionValid = productConditionList.every((item, idx) => item.optional || deliveryForm.productCondition[idx] === true)
   const isDocumentValid = documentList.every((item, idx) => item.optional || deliveryForm.documentAvailability[idx] === true)
-  
+
   return isWeightValid && isSjValid && isFormValid && isProductConditionValid && isDocumentValid
 })
 
 const showDeliveryModal = ref(false)
+
+const isFormDirty = computed(() => {
+  return showDeliveryModal.value && Boolean(
+    deliveryForm.productType1 ||
+    deliveryForm.customer ||
+    sjInput.value ||
+    capturedWeight.value
+  )
+})
+
+const pendingWeight = ref(false)
+const hasUnsavedTransaction = computed(() => pendingWeight.value || capturedWeight.value !== null ||
+  Boolean(sjInput.value || deliveryForm.productType1 || deliveryForm.productType2 || deliveryForm.customer) ||
+  deliveryForm.productCondition.some(Boolean) || deliveryForm.documentAvailability.some(Boolean))
+useUnsavedWarning(hasUnsavedTransaction)
+
+const handleCloseDeliveryModal = () => {
+  if (isFormDirty.value) {
+    if (!window.confirm('Perubahan formulir checklist belum disimpan. Apakah Anda yakin ingin menutup modal?')) {
+      return
+    }
+  }
+  showDeliveryModal.value = false
+}
+
 const startLoadingProcess = async () => {
   if (isProcessing.value) return;
   isProcessing.value = true;
@@ -478,15 +574,27 @@ const startLoadingProcess = async () => {
 }
 
 
-const selectTruck = (truck) => { 
-  selectedTruck.value = truck; 
-  sjInput.value = ''; 
-  capturedWeight.value = null; 
-  deliveryForm.productType = '';
+const selectTruck = (truck) => {
+  selectedTruck.value = truck;
+  sjInput.value = '';
+  capturedWeight.value = null;
+  deliveryForm.productType1 = '';
+  deliveryForm.productType2 = '';
+  showProductType2.value = false;
   deliveryForm.customer = '';
   deliveryForm.productCondition = [false, false, false, false];
   deliveryForm.documentAvailability = [false, false, false, false];
 }
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: gbjTrucks,
+  selectedTruck,
+  selectTruck: (truck) => { pendingWeight.value = false; showDetailsModal.value = false; showDeliveryModal.value = false; selectTruck(truck) },
+  revealTruck: (truck) => {
+    searchQuery.value = ''
+    currentPage.value = Math.floor(gbjTrucks.value.findIndex(t => t.id === truck.id) / 10) + 1
+  },
+})
 const formatTime = formatPlantTime
 
 const handleWeightCapture = (weight) => {
@@ -501,22 +609,27 @@ const handleFinalSave = async () => {
     return
   }
   if (isProcessing.value) return;
-  const ok = await confirm({ 
-    title: 'Loading Complete?', 
-    message: `Save ${capturedWeight.value}kg (IC) and Delivery Checklist for ${selectedTruck.value.plateNumber}?`, 
-    type: 'success', 
-    confirmText: 'Yes, Save' 
+  const ok = await confirm({
+    title: 'Loading Complete?',
+    message: `Save ${capturedWeight.value}kg (IC) and Delivery Checklist for ${selectedTruck.value.plateNumber}?`,
+    type: 'success',
+    confirmText: 'Yes, Save'
   })
   if (ok) {
     isProcessing.value = true;
     try {
       const truckId = selectedTruck.value.id
+      const selectedProducts = [deliveryForm.productType1]
+      if (showProductType2.value && deliveryForm.productType2) {
+        selectedProducts.push(deliveryForm.productType2)
+      }
       const payload = {
         actualWeight: capturedWeight.value,
         suratJalanNumber: sjInput.value,
         deliveryChecklist: {
           date: currentDateStr.value,
-          productType: deliveryForm.productType,
+          productTypes: selectedProducts,
+          productType: deliveryForm.productType1,
           customer: deliveryForm.customer,
           productCondition: [...deliveryForm.productCondition],
           documentAvailability: [...deliveryForm.documentAvailability]
@@ -531,7 +644,9 @@ const handleFinalSave = async () => {
       selectedTruck.value = null
       sjInput.value = ''
       capturedWeight.value = null
-      deliveryForm.productType = ''
+      deliveryForm.productType1 = ''
+      deliveryForm.productType2 = ''
+      showProductType2.value = false
       deliveryForm.customer = ''
       deliveryForm.productCondition = [false, false, false, false]
       deliveryForm.documentAvailability = [false, false, false, false]
@@ -539,4 +654,3 @@ const handleFinalSave = async () => {
   }
 }
 </script>
-

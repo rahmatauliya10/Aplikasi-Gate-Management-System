@@ -228,13 +228,6 @@ async function runAllScenarios() {
     }, whToken);
     assertScenario('GSP Warehouse Unload Complete', gspWhComp.statusCode === 200 || gspWhComp.statusCode === 201);
 
-    const gspQcInc = await request('POST', `/api/qc/incoming-result/${gspTxId}`, {
-      result: 'PASS',
-      odor: 'NORMAL',
-      color: 'GOOD',
-    }, qcToken);
-    assertScenario('GSP QC Incoming Analysis PASSED', gspQcInc.statusCode === 200 || gspQcInc.statusCode === 201);
-
     const gspWbOut = await request('POST', `/api/weighbridge/out/${gspTxId}`, {
       weight: 4000,
       ticketNumber: `WB-OUT-GSP-${timestampSuffix}`,

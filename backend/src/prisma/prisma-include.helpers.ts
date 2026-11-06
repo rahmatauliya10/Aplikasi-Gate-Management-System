@@ -7,7 +7,17 @@ export const IS_CURRENT_FILTER = { isCurrent: true };
 
 export const WHERE_IS_CURRENT = { where: IS_CURRENT_FILTER };
 
+const CURRENT_PA_INCLUDE = {
+  where: { isCurrent: true, isVoided: false },
+  orderBy: [{ testRound: 'desc' as const }, { revision: 'desc' as const }],
+  include: {
+    testedBy: { select: { id: true, name: true, role: true } },
+    dispositionBy: { select: { id: true, name: true, role: true } },
+  },
+};
+
 export const TRANSACTION_CURRENT_RELATIONS_INCLUDE = {
+  qcProductAnalyses: CURRENT_PA_INCLUDE,
   weighbridgeRecords: WHERE_IS_CURRENT,
   warehouseProcesses: WHERE_IS_CURRENT,
   qcVehicleChecks: {
@@ -27,6 +37,7 @@ export const TRANSACTION_CURRENT_RELATIONS_INCLUDE = {
 };
 
 export const GATE_DETAIL_CURRENT_RELATIONS_INCLUDE = {
+  qcProductAnalyses: CURRENT_PA_INCLUDE,
   statusHistory: { orderBy: { changedAt: 'asc' as const } },
   weighbridgeRecords: WHERE_IS_CURRENT,
   warehouseProcesses: WHERE_IS_CURRENT,
@@ -40,6 +51,7 @@ export const QC_HISTORY_CURRENT_RELATIONS_INCLUDE = {
 };
 
 export const REPORTS_CURRENT_RELATIONS_INCLUDE = {
+  qcProductAnalyses: CURRENT_PA_INCLUDE,
   statusHistory: { orderBy: { changedAt: 'desc' as const } },
   weighbridgeRecords: WHERE_IS_CURRENT,
   warehouseProcesses: WHERE_IS_CURRENT,

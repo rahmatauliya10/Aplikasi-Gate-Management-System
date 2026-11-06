@@ -142,9 +142,10 @@ export const useTruckStore = defineStore('truck', () => {
         error.value = null;
         try {
             const response = await truckService.correctOperationLog(id, correctionData);
-            const resultData = response.data?.data;
-            if (resultData && resultData.updatedTx) {
-                upsertTruck(resultData.updatedTx);
+            const resultData = response.data?.data || response.data;
+            const updatedTx = resultData?.updatedTx;
+            if (updatedTx) {
+                upsertTruck(updatedTx);
             }
             const notificationStore = useNotificationStore();
             notificationStore.addNotification('Operation Log Corrected', 'Operation log successfully corrected and audited by Admin.', 'success');

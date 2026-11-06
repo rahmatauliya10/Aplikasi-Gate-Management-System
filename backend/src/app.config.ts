@@ -5,6 +5,16 @@ import { json, urlencoded } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
 
+export function isOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[],
+  isProduction: boolean,
+): boolean {
+  if (!origin) return true; // non-browser / same-origin requests
+  if (allowedOrigins.includes(origin)) return true;
+  return !isProduction && allowedOrigins.includes('*');
+}
+
 export function configureApp(app: INestApplication) {
   // Maintenance Mode Guard / Application Write Freeze Middleware (P0-06)
   app.use((req: any, res: any, next: any) => {
@@ -60,26 +70,18 @@ export function configureApp(app: INestApplication) {
   // CORS Configuration - Strict in production, flexible in development
   const isProduction = process.env.NODE_ENV === 'production';
   const corsOrigin = process.env.CORS_ORIGIN || (isProduction ? '' : '*');
-  const allowedOrigins = corsOrigin.split(',').map((o) => o.trim());
+  const allowedOrigins = corsOrigin
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
 
   app.enableCors({
     origin: (
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) => {
-      if (!origin) {
+      if (isOriginAllowed(origin, allowedOrigins, isProduction)) {
         return callback(null, true);
-      }
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-      if (!isProduction) {
-        if (allowedOrigins.includes('*')) {
-          return callback(null, true);
-        }
-        if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-          return callback(null, true);
-        }
       }
       return callback(new Error('Not allowed by CORS'), false);
     },

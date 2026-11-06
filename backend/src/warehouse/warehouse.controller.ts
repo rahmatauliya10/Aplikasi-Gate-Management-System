@@ -39,6 +39,7 @@ import { StartWarehouseDto } from './dto/start-warehouse.dto';
 import { CompleteWarehouseDto } from './dto/complete-warehouse.dto';
 import { WarehouseQueryDto } from './dto/warehouse-query.dto';
 import { SubmitIncomingCheckDto } from './dto/submit-incoming-check.dto';
+import { SubmitChecklistDispositionDto } from './dto/submit-checklist-disposition.dto';
 
 @ApiTags('Warehouse')
 @ApiBearerAuth()
@@ -84,6 +85,32 @@ export class WarehouseController {
     @CurrentUser() user: JwtPayloadUser,
   ) {
     return this.warehouseService.startWarehouse(transactionId, dto, user);
+  }
+
+  @Post(':transactionId/checklist-disposition')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Submit pre-unload checklist disposition decision (ACCEPT_WITH_NOTE or REJECT)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Checklist disposition recorded successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation failed or transaction flow error',
+  })
+  submitChecklistDisposition(
+    @Param('transactionId') transactionId: string,
+    @Body() dto: SubmitChecklistDispositionDto,
+    @CurrentUser() user: JwtPayloadUser,
+  ) {
+    return this.warehouseService.submitChecklistDisposition(
+      transactionId,
+      dto,
+      user,
+    );
   }
 
   @Post('complete/:transactionId')

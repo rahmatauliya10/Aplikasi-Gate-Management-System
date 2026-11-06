@@ -92,6 +92,36 @@ describe('SettingsService', () => {
         }),
       );
     });
+
+    it('should reject self-grant on UTILITY_DISPOSITION_AUTHORIZED_USERS with ForbiddenException', async () => {
+      const dto = {
+        key: 'UTILITY_DISPOSITION_AUTHORIZED_USERS',
+        value: 'spv_utility, admin@gms.local, other_user',
+      };
+
+      await expect(service.upsert(dto, mockUser)).rejects.toThrow(
+        'Self-privilege escalation prohibited',
+      );
+    });
+
+    it('should allow setting UTILITY_DISPOSITION_AUTHORIZED_USERS for other users and log action', async () => {
+      const dto = {
+        key: 'UTILITY_DISPOSITION_AUTHORIZED_USERS',
+        value: 'spv_utility, manager_utility',
+      };
+      const mockResult = { id: 'set-util', ...dto };
+      mockPrisma.appSetting.upsert.mockResolvedValue(mockResult);
+
+      const result = await service.upsert(dto, mockUser);
+      expect(result.success).toBe(true);
+      expect(mockActivityLogsService.logAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'SETTING_UPSERT',
+          status: 'SUCCESS',
+          description: expect.stringContaining('by actor'),
+        }),
+      );
+    });
   });
 
   describe('remove', () => {

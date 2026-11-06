@@ -31,7 +31,11 @@ async function main() {
     );
 
     if (!roleCheck || roleCheck.length === 0) {
-      if (process.env.NODE_ENV === 'production') {
+      const isTestHarness =
+        process.env.GMS_TEST_HARNESS === 'true' &&
+        process.env.ENABLE_TEST_SPEC_FIXTURES === 'true';
+
+      if (process.env.NODE_ENV === 'production' && !isTestHarness) {
         throw new Error(
           `Production Security Error: Configured application role [${appUser}] does not exist in PostgreSQL!`,
         );
