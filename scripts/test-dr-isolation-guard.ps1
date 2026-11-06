@@ -371,6 +371,64 @@ try {
         } `
         -ExpectedKeywords @("CRITICAL GOVERNANCE VIOLATION", "non-local/remote endpoint")
 
+    # --------------------------------------------------------------------------
+    # Scenario 12: Rejection of concurrent execution when recovery.lock is held (P1 Operation Lock)
+    # --------------------------------------------------------------------------
+    Assert-GuardFailure `
+        -ScenarioId "GUARD-12" `
+        -Description "Reject concurrent disaster recovery execution when recovery.lock file stream is held" `
+        -Action {
+            $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
+            [string]$lockFile = Join-Path $TempMaintDir "recovery.lock"
+            $lockStream = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            try {
+                & $PsExe -ExecutionPolicy Bypass -File $RestoreScript `
+                    -ManifestPath $TempManifestPath `
+                    -LiveContainer "gms-fixture-container" `
+                    -LiveDbName "gms_fixture_db" `
+                    -MaintenanceDir $TempMaintDir `
+                    -UploadsDirectory $TempUploadsDir `
+                    -LogDirectory $TempLogsDir `
+                    -RecoveryOperationId "REC-DRILL-CONCURRENCY-01" `
+                    -Force 2>&1
+            } finally {
+                $lockStream.Close()
+                $lockStream.Dispose()
+                Remove-Item -Path $lockFile -Force -ErrorAction SilentlyContinue
+            }
+        } `
+        -ExpectedKeywords @("CRITICAL CONCURRENCY VIOLATION", "actively holding the lock")
+
+    # --------------------------------------------------------------------------
+    # Scenario 13: Rejection of restore when ledger is in state RESTORED (unverified)
+    # --------------------------------------------------------------------------
+    Assert-GuardFailure `
+        -ScenarioId "GUARD-13" `
+        -Description "Reject restore when ledger indicates previous recovery was left in state RESTORED without VERIFIED" `
+        -Action {
+            $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
+            [string]$unverifiedOpId = "REC-DRILL-UNVERIFIED-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
+            $ledgerData = @{
+                recoveryOperationId = $unverifiedOpId
+                backupId = "BACKUP-MOCK-GUARD-TEST"
+                status = "RESTORED"
+                updatedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                dbRestoreExecuted = $true
+            }
+            Set-Content -Path (Join-Path $TempMaintDir "recovery-state.json") -Value ($ledgerData | ConvertTo-Json) -Encoding utf8
+
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript `
+                -ManifestPath $TempManifestPath `
+                -LiveContainer "gms-fixture-container" `
+                -LiveDbName "gms_fixture_db" `
+                -MaintenanceDir $TempMaintDir `
+                -UploadsDirectory $TempUploadsDir `
+                -LogDirectory $TempLogsDir `
+                -RecoveryOperationId "REC-DRILL-NEW-OP" `
+                -Force 2>&1
+        } `
+        -ExpectedKeywords @("CRITICAL RECOVERY VIOLATION", "is in state RESTORED but has not completed verification")
+
 } finally {
     $env:GMS_ISOLATED_DRILL_ENVIRONMENT = ""
     if (Test-Path $TempTestDir) {

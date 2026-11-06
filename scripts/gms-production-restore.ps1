@@ -124,8 +124,24 @@ Write-Log "=====================================================================
 [string]$MaintDir = if ($MaintenanceDir) { $MaintenanceDir } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance" }
 [string]$MaintFlagPath = if ($MaintenanceDir) { Join-Path -Path $MaintenanceDir -ChildPath "maintenance.flag" } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance.flag" }
 [string]$MaintActivePath = if ($MaintenanceDir) { Join-Path -Path $MaintenanceDir -ChildPath "active" } else { Join-Path -Path $ProjectRootDir -ChildPath "maintenance/active" }
+[string]$LockFilePath = Join-Path -Path $MaintDir -ChildPath "recovery.lock"
+[System.IO.FileStream]$script:RecoveryLockStream = $null
 
 try {
+# Step 0.5: Mutual Exclusion Guard (P1 Operation Lock)
+if (-not (Test-Path -Path $MaintDir -PathType Container)) {
+    New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
+}
+try {
+    $script:RecoveryLockStream = [System.IO.File]::Open($LockFilePath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    $lockBytes = [System.Text.Encoding]::UTF8.GetBytes("PID=$PID`nRecoveryOperationId=$RecoveryOperationId`nTimestamp=$((Get-Date).ToUniversalTime().ToString('o'))`n")
+    $script:RecoveryLockStream.SetLength(0)
+    $script:RecoveryLockStream.Write($lockBytes, 0, $lockBytes.Length)
+    $script:RecoveryLockStream.Flush()
+} catch {
+    throw "CRITICAL CONCURRENCY VIOLATION: Another disaster recovery operation is actively holding the lock at [$LockFilePath]. Concurrent recovery executions are strictly prohibited."
+}
+
 # Step 1: Resolve Backup Manifest & Artifact Paths
 [string]$LocalBackupDir = Join-Path -Path $ProjectRootDir -ChildPath "backups/local"
 if (-not (Test-Path -Path $LocalBackupDir -PathType Container)) {
@@ -299,6 +315,10 @@ if (Test-Path -Path $RecLedgerFile) {
             throw "CRITICAL RECOVERY VIOLATION: Duplicate database restore rejected! Recovery operation [$RecoveryOperationId] already executed (status: $($recLedger.status)) at $($recLedger.updatedAt)."
         }
     }
+
+    if ($recLedger.status -eq "RESTORED") {
+        throw "CRITICAL RECOVERY VIOLATION: Previous recovery operation [$($recLedger.recoveryOperationId)] is in state RESTORED but has not completed verification (missing VERIFIED state). Automatic restore is prohibited. Manual verification or ledger reconciliation is required."
+    }
 }
 
 # Verify target container exists and is running
@@ -413,6 +433,59 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 # Step 2.1: Register PREPARED recovery state in persistent ledger
 Update-RecoveryLedger -State "PREPARED"
 
+function Invoke-AtomicPostgresRestore {
+    param(
+        [Parameter(Mandatory=$true)][string]$Container,
+        [Parameter(Mandatory=$true)][string]$DbName,
+        [Parameter(Mandatory=$true)][string]$User,
+        [Parameter(Mandatory=$true)][string]$DumpPathInContainer,
+        [Parameter(Mandatory=$false)][string]$Pass = "",
+        [Parameter(Mandatory=$false)][string]$Context = "Database"
+    )
+
+    Write-Log "  Executing atomic single-transaction restore for [$Context] on [$DbName]..."
+
+    # Detect PostgreSQL server version
+    [string]$versionNumStr = ""
+    try {
+        $vCmd = if ($Pass) {
+            "PGPASSWORD='$Pass' psql -t -A -U '$User' -d '$DbName' -c 'SHOW server_version_num;'"
+        } else {
+            "psql -t -A -U '$User' -d '$DbName' -c 'SHOW server_version_num;'"
+        }
+        $vOut = & docker exec $Container sh -c $vCmd 2>&1
+        $versionNumStr = ([string]($vOut | Out-String)).Trim()
+    } catch {}
+
+    [int]$serverVersionNum = 0
+    [int]::TryParse($versionNumStr, [ref]$serverVersionNum) | Out-Null
+    Write-Log "  Detected PostgreSQL server version: $serverVersionNum on [$Container]" -Level "INFO"
+
+    [string]$restoreOutput = ""
+    [int]$exitCode = 0
+
+    if ($serverVersionNum -ge 170000) {
+        Write-Log "  PostgreSQL 17+ detected: Running native atomic pg_restore with --single-transaction --exit-on-error..." -Level "INFO"
+        $envPrefix = if ($Pass) { "PGPASSWORD='$Pass' " } else { "" }
+        $restoreCmd = "${envPrefix}pg_restore --username='$User' --dbname='$DbName' --clean --if-exists --single-transaction --exit-on-error --no-owner --no-privileges '$DumpPathInContainer' 2>&1"
+        $restoreOutput = & docker exec $Container sh -c $restoreCmd
+        $exitCode = $LASTEXITCODE
+    } else {
+        Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Running sanitized atomic restore pipeline via psql --single-transaction ON_ERROR_STOP=1..." -Level "INFO"
+        $envPrefix = if ($Pass) { "PGPASSWORD='$Pass' " } else { "" }
+        $pipeCmd = "set -e -o pipefail; ${envPrefix}pg_restore --clean --if-exists --no-owner --no-privileges '$DumpPathInContainer' | sed '/transaction_timeout/d' | ${envPrefix}psql -U '$User' -d '$DbName' -v ON_ERROR_STOP=1 --single-transaction 2>&1"
+        $restoreOutput = & docker exec $Container sh -c $pipeCmd
+        $exitCode = $LASTEXITCODE
+    }
+
+    if ($exitCode -ne 0) {
+        throw "CRITICAL ATOMIC RESTORE FAILURE: [$Context] restore on [$DbName] failed with exit code ${exitCode}. Error output: $restoreOutput"
+    }
+
+    Write-Log "  [$Context] Atomic single-transaction restore verified successful (exit code: 0) [PASS]" -Level "SUCCESS"
+    return $restoreOutput
+}
+
 # Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
     Write-Log "Step 3: Spawning Isolated Staging PostgreSQL Container ($StagingContainer)..."
     & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
@@ -432,16 +505,10 @@ Update-RecoveryLedger -State "PREPARED"
     & docker cp $DumpFilePath "${StagingContainer}:${TmpDumpInContainer}"
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to staging container." }
 
-    & docker exec $StagingContainer psql -U $PgUser -d $StagingDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-    $RestoreOut = & docker exec $StagingContainer pg_restore --username=$PgUser --dbname=$StagingDbName --no-owner --no-privileges $TmpDumpInContainer 2>&1
-    [int]$StagingExitCode = $LASTEXITCODE
-    & docker exec $StagingContainer rm -f $TmpDumpInContainer 2>&1 | Out-Null
-    if ($StagingExitCode -ne 0) {
-        if ($StagingExitCode -eq 1 -and $RestoreOut -match 'unrecognized configuration parameter "transaction_timeout"' -and $RestoreOut -notmatch 'ERROR:(?!.*transaction_timeout)') {
-            Write-Log "  Notice: Non-fatal transaction_timeout ignored on older PostgreSQL server version." -Level "WARN"
-        } else {
-            throw "Staging Database pg_restore failed with exit code ${StagingExitCode}: $RestoreOut"
-        }
+    try {
+        [void](Invoke-AtomicPostgresRestore -Container $StagingContainer -DbName $StagingDbName -User $PgUser -DumpPathInContainer $TmpDumpInContainer -Pass $PgPass -Context "Staging Database")
+    } finally {
+        & docker exec $StagingContainer rm -f $TmpDumpInContainer 2>&1 | Out-Null
     }
 
     # Exec-Query helper
@@ -787,17 +854,10 @@ Update-RecoveryLedger -State "PREPARED"
     # Transition ledger state to RESTORING immediately before modifying live database
     Update-RecoveryLedger -State "RESTORING"
 
-    & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-    $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpDumpInLive 2>&1
-    [int]$LiveExitCode = $LASTEXITCODE
-    & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
-
-    if ($LiveExitCode -ne 0) {
-        if ($LiveExitCode -eq 1 -and $LiveRestoreOut -match 'unrecognized configuration parameter "transaction_timeout"' -and $LiveRestoreOut -notmatch 'ERROR:(?!.*transaction_timeout)') {
-            Write-Log "  Notice: Non-fatal transaction_timeout ignored on live DB." -Level "WARN"
-        } else {
-            throw "Live Database Promotion (pg_restore) failed with exit code ${LiveExitCode}: $LiveRestoreOut"
-        }
+    try {
+        [void](Invoke-AtomicPostgresRestore -Container $LiveContainer -DbName $LiveDbName -User $PgUser -DumpPathInContainer $TmpDumpInLive -Pass $PgPass -Context "Live Database Promotion")
+    } finally {
+        & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
     }
 
     # DB pg_restore committed into live target; transition phase immediately to guarantee DB rollback on any subsequent error
@@ -1038,18 +1098,12 @@ Update-RecoveryLedger -State "PREPARED"
                 [string]$TmpRollbackInLive = "/tmp/rollback_$DumpFileName"
                 & docker cp $PreRestoreDbDump "${LiveContainer}:${TmpRollbackInLive}"
                 if ($LASTEXITCODE -ne 0) { throw "Failed copying rollback snapshot to live container." }
-                & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
-                $RollbackRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpRollbackInLive 2>&1
-                [int]$RollbackExitCode = $LASTEXITCODE
-                & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
-                if ($RollbackExitCode -ne 0) {
-                    if ($RollbackExitCode -eq 1 -and $RollbackRestoreOut -match 'unrecognized configuration parameter "transaction_timeout"' -and $RollbackRestoreOut -notmatch 'ERROR:(?!.*transaction_timeout)') {
-                        Write-Log "  Notice: Non-fatal transaction_timeout ignored on rollback DB." -Level "WARN"
-                    } else {
-                        throw "Rollback pg_restore failed with fatal exit code ${RollbackExitCode}: $RollbackRestoreOut"
-                    }
+                try {
+                    [void](Invoke-AtomicPostgresRestore -Container $LiveContainer -DbName $LiveDbName -User $PgUser -DumpPathInContainer $TmpRollbackInLive -Pass $PgPass -Context "Live Database Rollback")
+                    Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
+                } finally {
+                    & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
                 }
-                Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
             } catch {
                 Write-Log "  CRITICAL ROLLBACK ERROR: Automatic live DB rollback failed: $_" -Level "ERROR"
             }
@@ -1117,6 +1171,15 @@ Update-RecoveryLedger -State "PREPARED"
 
     if (-not [string]::IsNullOrWhiteSpace($StagingContainer)) {
         & docker rm -f $StagingContainer 2>&1 | Out-Null
+    }
+
+    if ($script:RecoveryLockStream -ne $null) {
+        try {
+            $script:RecoveryLockStream.Close()
+            $script:RecoveryLockStream.Dispose()
+        } catch {}
+        $script:RecoveryLockStream = $null
+        Remove-Item -Path $LockFilePath -Force -ErrorAction SilentlyContinue
     }
 }
 

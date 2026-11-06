@@ -382,6 +382,61 @@ if ($rel21Error -match "CRITICAL PROVENANCE FAILURE" -and $rel21Success -eq $val
     Write-Host "  Success Result: $rel21Success" -ForegroundColor DarkGray
 }
 
+# 14. REL-22: Release provenance assertion binding (Git SHA -> Manifest/Image)
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-22] Release provenance assertion must reject mismatched manifest or image labels..." -ForegroundColor Yellow
+[string]$rel22ManifestMismatch = ""
+[string]$rel22ImageMismatch = ""
+[string]$rel22TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gms_rel22_test_" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+New-Item -Path $rel22TempDir -ItemType Directory -Force | Out-Null
+try {
+    [string]$dummyManifest = Join-Path $rel22TempDir "mismatched-manifest.json"
+    $manObj = @{
+        release = "v1.2.3"
+        gitSha = "1111111111111111111111111111111111111111"
+    }
+    Set-Content -Path $dummyManifest -Value ($manObj | ConvertTo-Json) -Encoding utf8
+
+    # Test Manifest mismatch
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha "2222222222222222222222222222222222222222" -TargetManifestPath $dummyManifest | Out-Null
+    } catch {
+        $rel22ManifestMismatch = $_.ToString()
+    }
+
+    # Test Image label mismatch via mock ImageInspector scriptblock
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha "2222222222222222222222222222222222222222" -BackendImageTag "gms-backend:v1.2.3" -ImageInspector {
+            param($tag)
+            return '{"org.opencontainers.image.revision": "3333333333333333333333333333333333333333"}'
+        } | Out-Null
+    } catch {
+        $rel22ImageMismatch = $_.ToString()
+    }
+
+    # Test Matching Provenance succeeds
+    [bool]$rel22Success = Assert-ReleaseProvenance -ExpectedGitSha "2222222222222222222222222222222222222222" -BackendImageTag "gms-backend:v1.2.3" -ImageInspector {
+        param($tag)
+        return '{"org.opencontainers.image.revision": "2222222222222222222222222222222222222222"}'
+    }
+
+    if ($rel22ManifestMismatch -match "CRITICAL PROVENANCE MISMATCH" -and $rel22ManifestMismatch -match "Target manifest gitSha" -and
+        $rel22ImageMismatch -match "CRITICAL PROVENANCE MISMATCH" -and $rel22ImageMismatch -match "Image label Git SHA" -and
+        $rel22Success -eq $true) {
+        $script:PassedTests++
+        Write-Host "  [PASS] Correctly enforced provenance assertion binding between Git SHA, manifest, and image labels." -ForegroundColor Green
+    } else {
+        $script:FailedTests++
+        Write-Host "  [FAIL] Release provenance assertion did not enforce expected checks!" -ForegroundColor Red
+        Write-Host "  Manifest Mismatch Error: $rel22ManifestMismatch" -ForegroundColor DarkGray
+        Write-Host "  Image Mismatch Error: $rel22ImageMismatch" -ForegroundColor DarkGray
+    }
+} finally {
+    if (Test-Path $rel22TempDir) {
+        Remove-Item -Path $rel22TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
 Write-Host "CLI Syntax & Regression Matrix Verification Summary:" -ForegroundColor Cyan
 Write-Host "  Total:  $TotalTests" -ForegroundColor Cyan

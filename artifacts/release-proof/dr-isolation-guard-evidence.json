@@ -11,7 +11,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.21,
+                      "durationSeconds":  7.77,
                       "status":  "PASSED"
                   },
                   {
@@ -25,7 +25,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.21,
+                      "durationSeconds":  5.69,
                       "status":  "PASSED"
                   },
                   {
@@ -39,7 +39,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.16,
+                      "durationSeconds":  14.52,
                       "status":  "PASSED"
                   },
                   {
@@ -53,7 +53,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.17,
+                      "durationSeconds":  12.51,
                       "status":  "PASSED"
                   },
                   {
@@ -67,7 +67,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.15,
+                      "durationSeconds":  12.75,
                       "status":  "PASSED"
                   },
                   {
@@ -81,7 +81,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.1,
+                      "durationSeconds":  8.28,
                       "status":  "PASSED"
                   },
                   {
@@ -95,7 +95,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.2,
+                      "durationSeconds":  5.8,
                       "status":  "PASSED"
                   },
                   {
@@ -109,7 +109,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.23,
+                      "durationSeconds":  4.03,
                       "status":  "PASSED"
                   },
                   {
@@ -123,7 +123,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.23,
+                      "durationSeconds":  4.12,
                       "status":  "PASSED"
                   },
                   {
@@ -137,7 +137,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.25,
+                      "durationSeconds":  3.97,
                       "status":  "PASSED"
                   },
                   {
@@ -151,15 +151,43 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.33,
+                      "durationSeconds":  3.85,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject concurrent disaster recovery execution when recovery.lock file stream is held",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL CONCURRENCY VIOLATION",
+                                               "actively holding the lock"
+                                           ],
+                      "scenarioId":  "GUARD-12",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  3.32,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject restore when ledger indicates previous recovery was left in state RESTORED without VERIFIED",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL RECOVERY VIOLATION",
+                                               "is in state RESTORED but has not completed verification"
+                                           ],
+                      "scenarioId":  "GUARD-13",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  3.58,
                       "status":  "PASSED"
                   }
               ],
-    "timestamp":  "2026-11-06T04:39:27.791Z",
+    "timestamp":  "2026-11-06T07:39:32.882Z",
     "summary":  {
                     "failed":  0,
-                    "total":  11,
-                    "passed":  11
+                    "total":  13,
+                    "passed":  13
                 },
     "reportTitle":  "GMS DR Isolation Guard \u0026 Ephemeral Fixture Governance Test Evidence (FIX-01/FIX-02/FIX-05)",
     "status":  "PASSED",

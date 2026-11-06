@@ -242,6 +242,65 @@ function Resolve-ReleaseGitSha {
     return $exactSha
 }
 
+function Assert-ReleaseProvenance {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ExpectedGitSha,
+        [Parameter(Mandatory=$false)]
+        [string]$TargetManifestPath = "",
+        [Parameter(Mandatory=$false)]
+        [string]$BackendImageTag = "",
+        [Parameter(Mandatory=$false)]
+        [scriptblock]$ImageInspector = $null
+    )
+    if (-not $ExpectedGitSha -or $ExpectedGitSha -notmatch '^[a-fA-F0-9]{40}$') {
+        throw "CRITICAL PROVENANCE FAILURE: Expected Git SHA is invalid or missing ($ExpectedGitSha)."
+    }
+
+    # If TargetManifestPath exists, verify the manifest's gitSha matches ExpectedGitSha
+    if ($TargetManifestPath -and (Test-Path -Path $TargetManifestPath -PathType Leaf)) {
+        try {
+            $manData = Get-Content -Path $TargetManifestPath -Raw | ConvertFrom-Json
+            if ($manData.gitSha -and $manData.gitSha.ToLower() -ne $ExpectedGitSha.ToLower()) {
+                throw "CRITICAL PROVENANCE MISMATCH: Target manifest gitSha [$($manData.gitSha)] does not match preflight Git SHA [$ExpectedGitSha]."
+            }
+        } catch {
+            if ($_.ToString() -match "CRITICAL PROVENANCE") { throw }
+            throw "CRITICAL PROVENANCE FAILURE: Failed validating release manifest provenance: $_"
+        }
+    }
+
+    # If BackendImageTag is provided, inspect Docker labels (org.opencontainers.image.revision, vcs-ref, com.gms.git-sha)
+    if ($BackendImageTag) {
+        try {
+            [string]$imageLabelsJson = if ($ImageInspector) {
+                (& $ImageInspector $BackendImageTag | Out-String).Trim()
+            } else {
+                (& docker inspect --format '{{json .Config.Labels}}' $BackendImageTag 2>$null | Out-String).Trim()
+            }
+            if ($imageLabelsJson -and $imageLabelsJson -ne "null" -and $imageLabelsJson -ne "{}") {
+                $labels = $imageLabelsJson | ConvertFrom-Json
+                [string]$labelSha = ""
+                if ($labels.psobject.Properties['org.opencontainers.image.revision']) {
+                    $labelSha = [string]$labels.'org.opencontainers.image.revision'
+                } elseif ($labels.psobject.Properties['com.gms.git-sha']) {
+                    $labelSha = [string]$labels.'com.gms.git-sha'
+                } elseif ($labels.psobject.Properties['vcs-ref']) {
+                    $labelSha = [string]$labels.'vcs-ref'
+                }
+                if ($labelSha -and $labelSha -match '^[a-fA-F0-9]{7,40}$') {
+                    if (-not $ExpectedGitSha.ToLower().StartsWith($labelSha.ToLower()) -and -not $labelSha.ToLower().StartsWith($ExpectedGitSha.ToLower())) {
+                        throw "CRITICAL PROVENANCE MISMATCH: Image label Git SHA [$labelSha] does not match preflight Git SHA [$ExpectedGitSha]."
+                    }
+                }
+            }
+        } catch {
+            if ($_.ToString() -match "CRITICAL PROVENANCE") { throw }
+        }
+    }
+    return $true
+}
+
 function Assert-TransactionDrain {
     param(
         [Parameter(Mandatory=$true)]
@@ -739,6 +798,11 @@ try {
     Write-Host "[GMS Preflight] Resolving and verifying release source Git SHA provenance..." -ForegroundColor Cyan
     $ExactSourceGitSha = Resolve-ReleaseGitSha -TargetReleaseTag $TargetReleaseTag
     Write-Host "  Source Git SHA verified: $ExactSourceGitSha [PASS]" -ForegroundColor Green
+
+    # Step 1.0b: Assert release provenance binding between preflight Git SHA and target manifest/images
+    Write-Host "[GMS Preflight] Asserting release provenance binding (Git SHA -> Manifest/Images)..." -ForegroundColor Cyan
+    [void](Assert-ReleaseProvenance -ExpectedGitSha $ExactSourceGitSha -TargetManifestPath $ResolvedTargetManifest -BackendImageTag "${BackendRepository}:${TargetReleaseTag}")
+    Write-Host "  Release provenance binding strictly confirmed [PASS]" -ForegroundColor Green
 
     # Step 1.1: Verify target image availability and immutability before altering any services
     Write-Host "[GMS Preflight] Validating image presence and digest immutability..." -ForegroundColor Cyan
