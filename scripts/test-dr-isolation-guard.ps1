@@ -284,8 +284,10 @@ try {
             [string]$dupOpId = "REC-DRILL-DUP-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
             $ledgerData = @{
                 recoveryOperationId = $dupOpId
+                backupId = "BACKUP-MOCK-GUARD-TEST"
+                status = "RESTORED"
+                updatedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
                 dbRestoreExecuted = $true
-                dbRestoreExecutedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
             }
             Set-Content -Path (Join-Path $TempMaintDir "recovery-state.json") -Value ($ledgerData | ConvertTo-Json) -Encoding utf8
 
@@ -300,6 +302,74 @@ try {
                 -Force 2>&1
         } `
         -ExpectedKeywords @("CRITICAL RECOVERY VIOLATION", "Duplicate database restore rejected")
+
+    # --------------------------------------------------------------------------
+    # Scenario 9: Rejection of restore when ledger was interrupted in state RESTORING (P1-04)
+    # --------------------------------------------------------------------------
+    Assert-GuardFailure `
+        -ScenarioId "GUARD-09" `
+        -Description "Reject restore when ledger indicates previous recovery was interrupted in state RESTORING" `
+        -Action {
+            $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
+            [string]$interruptedOpId = "REC-DRILL-INTR-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
+            $ledgerData = @{
+                recoveryOperationId = $interruptedOpId
+                backupId = "BACKUP-MOCK-GUARD-TEST"
+                status = "RESTORING"
+                updatedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                dbRestoreExecuted = $false
+            }
+            Set-Content -Path (Join-Path $TempMaintDir "recovery-state.json") -Value ($ledgerData | ConvertTo-Json) -Encoding utf8
+
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript `
+                -ManifestPath $TempManifestPath `
+                -LiveContainer "gms-fixture-container" `
+                -LiveDbName "gms_fixture_db" `
+                -MaintenanceDir $TempMaintDir `
+                -UploadsDirectory $TempUploadsDir `
+                -LogDirectory $TempLogsDir `
+                -RecoveryOperationId $interruptedOpId `
+                -Force 2>&1
+        } `
+        -ExpectedKeywords @("CRITICAL RECOVERY VIOLATION", "interrupted while in state RESTORING")
+
+    # --------------------------------------------------------------------------
+    # Scenario 10: Rejection of restore when ledger is corrupted (P1-04 Fail-Closed)
+    # --------------------------------------------------------------------------
+    Assert-GuardFailure `
+        -ScenarioId "GUARD-10" `
+        -Description "Reject restore fail-closed when recovery ledger is corrupted or invalid JSON" `
+        -Action {
+            $env:GMS_ISOLATED_DRILL_ENVIRONMENT = "TRUE"
+            Set-Content -Path (Join-Path $TempMaintDir "recovery-state.json") -Value "{ CORRUPTED_JSON_DATA_WITHOUT_CLOSING_BRACKET" -Encoding utf8
+
+            & $PsExe -ExecutionPolicy Bypass -File $RestoreScript `
+                -ManifestPath $TempManifestPath `
+                -LiveContainer "gms-fixture-container" `
+                -LiveDbName "gms_fixture_db" `
+                -MaintenanceDir $TempMaintDir `
+                -UploadsDirectory $TempUploadsDir `
+                -LogDirectory $TempLogsDir `
+                -RecoveryOperationId "REC-DRILL-TEST" `
+                -Force 2>&1
+        } `
+        -ExpectedKeywords @("CRITICAL RECOVERY VIOLATION", "Corrupted recovery ledger")
+
+    # --------------------------------------------------------------------------
+    # Scenario 11: Rejection of remote DOCKER_HOST in run-restore-failure-drill.ps1 (P1-06)
+    # --------------------------------------------------------------------------
+    Assert-GuardFailure `
+        -ScenarioId "GUARD-11" `
+        -Description "Reject drill runner invocation when DOCKER_HOST points to remote daemon" `
+        -Action {
+            $env:DOCKER_HOST = "tcp://192.168.1.100:2375"
+            try {
+                & $PsExe -ExecutionPolicy Bypass -File $DrillScript 2>&1
+            } finally {
+                $env:DOCKER_HOST = ""
+            }
+        } `
+        -ExpectedKeywords @("CRITICAL GOVERNANCE VIOLATION", "non-local/remote endpoint")
 
 } finally {
     $env:GMS_ISOLATED_DRILL_ENVIRONMENT = ""

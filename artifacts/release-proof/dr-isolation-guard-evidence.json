@@ -11,7 +11,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.12,
+                      "durationSeconds":  1.21,
                       "status":  "PASSED"
                   },
                   {
@@ -25,7 +25,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.11,
+                      "durationSeconds":  1.21,
                       "status":  "PASSED"
                   },
                   {
@@ -39,7 +39,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.07,
+                      "durationSeconds":  1.16,
                       "status":  "PASSED"
                   },
                   {
@@ -53,7 +53,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.09,
+                      "durationSeconds":  1.17,
                       "status":  "PASSED"
                   },
                   {
@@ -67,7 +67,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.04,
+                      "durationSeconds":  1.15,
                       "status":  "PASSED"
                   },
                   {
@@ -81,7 +81,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.09,
+                      "durationSeconds":  1.1,
                       "status":  "PASSED"
                   },
                   {
@@ -95,7 +95,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.16,
+                      "durationSeconds":  1.2,
                       "status":  "PASSED"
                   },
                   {
@@ -109,15 +109,57 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.09,
+                      "durationSeconds":  1.23,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject restore when ledger indicates previous recovery was interrupted in state RESTORING",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL RECOVERY VIOLATION",
+                                               "interrupted while in state RESTORING"
+                                           ],
+                      "scenarioId":  "GUARD-09",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  1.23,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject restore fail-closed when recovery ledger is corrupted or invalid JSON",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL RECOVERY VIOLATION",
+                                               "Corrupted recovery ledger"
+                                           ],
+                      "scenarioId":  "GUARD-10",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  1.25,
+                      "status":  "PASSED"
+                  },
+                  {
+                      "description":  "Reject drill runner invocation when DOCKER_HOST points to remote daemon",
+                      "exitCode":  1,
+                      "expectedKeywords":  [
+                                               "CRITICAL GOVERNANCE VIOLATION",
+                                               "non-local/remote endpoint"
+                                           ],
+                      "scenarioId":  "GUARD-11",
+                      "missingKeywords":  [
+
+                                          ],
+                      "durationSeconds":  1.33,
                       "status":  "PASSED"
                   }
               ],
-    "timestamp":  "2026-11-06T03:46:44.988Z",
+    "timestamp":  "2026-11-06T04:39:27.791Z",
     "summary":  {
                     "failed":  0,
-                    "total":  8,
-                    "passed":  8
+                    "total":  11,
+                    "passed":  11
                 },
     "reportTitle":  "GMS DR Isolation Guard \u0026 Ephemeral Fixture Governance Test Evidence (FIX-01/FIX-02/FIX-05)",
     "status":  "PASSED",

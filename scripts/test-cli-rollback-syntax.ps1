@@ -270,6 +270,118 @@ if ($res18.ExitCode -ne 0 -and ($res18.Output -match "Invalid -TargetReleaseTag"
     Write-Host "  Output: $($res18.Output)" -ForegroundColor DarkGray
 }
 
+# Dot-source functions from deploy-with-rollback.ps1 for unit validation
+. $DeployScript -ExportFunctionsOnly
+
+# 11. REL-19: Preflight stale backup pointer mismatch must be REJECTED (P0-02)
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-19] Outdated pointer in latest-predeploy.json must be REJECTED..." -ForegroundColor Yellow
+[string]$tempBackupTestDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gms_rel19_test_" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+New-Item -Path $tempBackupTestDir -ItemType Directory -Force | Out-Null
+try {
+    # Simulate latest-predeploy.json pointing to an OLD snapshot ID
+    [string]$stalePointer = Join-Path $tempBackupTestDir "latest-predeploy.json"
+    $stalePointerData = @{
+        backupId = "BKP-STALE-OLD-SNAPSHOT-123"
+        manifestFile = "gms_STALE-OLD-SNAPSHOT-123_manifest.json"
+    }
+    Set-Content -Path $stalePointer -Value ($stalePointerData | ConvertTo-Json) -Encoding utf8
+
+    # Also create the stale manifest file
+    [string]$staleManifest = Join-Path $tempBackupTestDir "gms_STALE-OLD-SNAPSHOT-123_manifest.json"
+    $staleManifestData = @{ backupId = "BKP-STALE-OLD-SNAPSHOT-123" }
+    Set-Content -Path $staleManifest -Value ($staleManifestData | ConvertTo-Json) -Encoding utf8
+
+    # Test that requesting a FRESH backup ID rejects the stale pointer
+    [string]$freshId = "BKP-FRESH-DEPLOY-RUN-456"
+    [string]$rel19Error = ""
+    try {
+        Resolve-PredeployBackupManifest -FreshBackupId $freshId -BackupDir $tempBackupTestDir | Out-Null
+    } catch {
+        $rel19Error = $_.ToString()
+    }
+
+    if ($rel19Error -match "CRITICAL BACKUP INTEGRITY VIOLATION" -and $rel19Error -match "stale backup") {
+        $script:PassedTests++
+        Write-Host "  [PASS] Correctly rejected stale pointer fallback when pointer ID does not match fresh backup ID." -ForegroundColor Green
+    } else {
+        $script:FailedTests++
+        Write-Host "  [FAIL] Failed to reject stale backup pointer!" -ForegroundColor Red
+        Write-Host "  Captured Error: $rel19Error" -ForegroundColor DarkGray
+    }
+} finally {
+    if (Test-Path $tempBackupTestDir) {
+        Remove-Item -Path $tempBackupTestDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# 12. REL-20: PostgreSQL client transaction drain must be FAIL-CLOSED on timeout or query failure (P1-03)
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-20] PostgreSQL transaction drain timeout and query error must FAIL-CLOSED..." -ForegroundColor Yellow
+[string]$rel20ErrorTimeout = ""
+try {
+    # Simulate DB query constantly reporting active/idle-in-transaction connections
+    Assert-TransactionDrain -DbContainer "mock-db" -TimeoutSeconds 2 -QueryExecutor {
+        param($cnt, $sql)
+        return "3"
+    }
+} catch {
+    $rel20ErrorTimeout = $_.ToString()
+}
+
+[string]$rel20ErrorQueryFail = ""
+try {
+    # Simulate query failure / network disconnection
+    Assert-TransactionDrain -DbContainer "mock-db" -TimeoutSeconds 2 -QueryExecutor {
+        param($cnt, $sql)
+        throw "psql connection refused"
+    }
+} catch {
+    $rel20ErrorQueryFail = $_.ToString()
+}
+
+if ($rel20ErrorTimeout -match "CRITICAL TRANSACTION DRAIN FAILURE" -and $rel20ErrorTimeout -match "timed out" -and
+    $rel20ErrorQueryFail -match "CRITICAL TRANSACTION DRAIN FAILURE" -and $rel20ErrorQueryFail -match "Cannot verify") {
+    $script:PassedTests++
+    Write-Host "  [PASS] Correctly enforced fail-closed termination on transaction drain timeout and query failure." -ForegroundColor Green
+} else {
+    $script:FailedTests++
+    Write-Host "  [FAIL] Transaction drain did not fail-closed!" -ForegroundColor Red
+    Write-Host "  Timeout Error: $rel20ErrorTimeout" -ForegroundColor DarkGray
+    Write-Host "  Query Failure Error: $rel20ErrorQueryFail" -ForegroundColor DarkGray
+}
+
+# 13. REL-21: Preflight source Git SHA provenance resolution enforcement (P1-05)
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-21] Preflight Git SHA resolution failure must REJECT deployment..." -ForegroundColor Yellow
+[string]$rel21Error = ""
+[string]$origGithubSha = $env:GITHUB_SHA
+[string]$origGmsSha = $env:GMS_RELEASE_COMMIT_SHA
+try {
+    $env:GITHUB_SHA = ""
+    $env:GMS_RELEASE_COMMIT_SHA = ""
+    # Simulate git returning empty/error, non-SHA tag, and no env vars
+    Resolve-ReleaseGitSha -TargetReleaseTag "v1.2.3" -GitExecutor { return "" }
+} catch {
+    $rel21Error = $_.ToString()
+} finally {
+    $env:GITHUB_SHA = $origGithubSha
+    $env:GMS_RELEASE_COMMIT_SHA = $origGmsSha
+}
+
+[string]$validSha = "0123456789abcdef0123456789abcdef01234567"
+[string]$rel21Success = Resolve-ReleaseGitSha -TargetReleaseTag "v1.2.3" -GitExecutor { return $validSha }
+
+if ($rel21Error -match "CRITICAL PROVENANCE FAILURE" -and $rel21Success -eq $validSha) {
+    $script:PassedTests++
+    Write-Host "  [PASS] Correctly enforced preflight 40-character Git SHA provenance resolution." -ForegroundColor Green
+} else {
+    $script:FailedTests++
+    Write-Host "  [FAIL] Git SHA provenance preflight check did not behave as expected!" -ForegroundColor Red
+    Write-Host "  Failure Error: $rel21Error" -ForegroundColor DarkGray
+    Write-Host "  Success Result: $rel21Success" -ForegroundColor DarkGray
+}
+
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
 Write-Host "CLI Syntax & Regression Matrix Verification Summary:" -ForegroundColor Cyan
 Write-Host "  Total:  $TotalTests" -ForegroundColor Cyan

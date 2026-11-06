@@ -1371,26 +1371,13 @@ export class DatabaseBackupService
         );
       }
 
-      await execFileAsync(
-        'pg_restore',
-        [
-          '--clean',
-          '--if-exists',
-          '--single-transaction',
-          '--exit-on-error',
-          '--no-owner',
-          '--no-acl',
-          '--host=' + host,
-          '--port=' + port,
-          '--username=' + username,
-          '--dbname=' + dbName,
-          dumpFilePath,
-        ],
-        {
-          shell: false,
-          env: { ...process.env, PGPASSWORD: password },
-          timeout: 10 * 60 * 1000,
-        },
+      await this.executePgRestoreWithFallback(
+        dumpFilePath,
+        host,
+        port,
+        username,
+        dbName,
+        password,
       );
       dbCommitted = true;
       this.logger.log(`pg_restore completed successfully.`);
@@ -1765,26 +1752,13 @@ export class DatabaseBackupService
         // ignore
       }
 
-      await execFileAsync(
-        'pg_restore',
-        [
-          '--clean',
-          '--if-exists',
-          '--single-transaction',
-          '--exit-on-error',
-          '--no-owner',
-          '--no-acl',
-          '--host=' + host,
-          '--port=' + port,
-          '--username=' + username,
-          '--dbname=' + dbName,
-          stagingDumpPath,
-        ],
-        {
-          shell: false,
-          env: { ...process.env, PGPASSWORD: password },
-          timeout: 10 * 60 * 1000,
-        },
+      await this.executePgRestoreWithFallback(
+        stagingDumpPath,
+        host,
+        port,
+        username,
+        dbName,
+        password,
       );
 
       this.logger.log(
@@ -2031,6 +2005,93 @@ export class DatabaseBackupService
       }
     } catch (e: any) {
       this.logger.warn(`Backup retention cleanup warning: ${e.message}`);
+    }
+  }
+
+  private async executePgRestoreWithFallback(
+    dumpPath: string,
+    host: string,
+    port: string,
+    username: string,
+    dbName: string,
+    password: string,
+  ): Promise<void> {
+    const pgRestoreArgs = [
+      '--clean',
+      '--if-exists',
+      '--single-transaction',
+      '--exit-on-error',
+      '--no-owner',
+      '--no-acl',
+      '--host=' + host,
+      '--port=' + port,
+      '--username=' + username,
+      '--dbname=' + dbName,
+      dumpPath,
+    ];
+
+    try {
+      await execFileAsync('pg_restore', pgRestoreArgs, {
+        shell: false,
+        env: { ...process.env, PGPASSWORD: password },
+        timeout: 10 * 60 * 1000,
+      });
+    } catch (restoreErr: any) {
+      const errMsg = `${restoreErr?.message || ''} ${restoreErr?.stderr || ''}`;
+      const isTxTimeout = errMsg.includes(
+        'unrecognized configuration parameter "transaction_timeout"',
+      );
+      if (isTxTimeout) {
+        this.logger.warn(
+          'Target PostgreSQL engine rejected transaction_timeout (server version < 17). Executing sanitized single-transaction SQL fallback...',
+        );
+        const { stdout: sqlDump } = await execFileAsync(
+          'pg_restore',
+          ['--clean', '--if-exists', '--no-owner', '--no-acl', dumpPath],
+          {
+            shell: false,
+            env: { ...process.env, PGPASSWORD: password },
+            maxBuffer: 100 * 1024 * 1024,
+          },
+        );
+        const sanitizedSql = sqlDump.replace(
+          /SET\s+transaction_timeout\s*=\s*0\s*;/gi,
+          '-- sanitized: SET transaction_timeout = 0;',
+        );
+        const psqlArgs = [
+          '--host=' + host,
+          '--port=' + port,
+          '--username=' + username,
+          '--dbname=' + dbName,
+          '--single-transaction',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ];
+        await new Promise<void>((resolve, reject) => {
+          const psqlProc = execFile(
+            'psql',
+            psqlArgs,
+            { env: { ...process.env, PGPASSWORD: password } },
+            (err) => {
+              if (err) reject(err);
+              else resolve();
+            },
+          );
+          if (psqlProc.stdin) {
+            psqlProc.stdin.write(sanitizedSql);
+            psqlProc.stdin.end();
+          } else {
+            reject(
+              new Error('Failed to open psql stdin for sanitized restore.'),
+            );
+          }
+        });
+        this.logger.log(
+          'Sanitized single-transaction fallback SQL restore completed successfully on PG < 17 target.',
+        );
+      } else {
+        throw restoreErr;
+      }
     }
   }
 }

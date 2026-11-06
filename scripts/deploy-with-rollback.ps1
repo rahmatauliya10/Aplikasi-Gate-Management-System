@@ -85,13 +85,16 @@ param(
         "AFTER_CONTAINER_SWITCH",
         "BEFORE_WATCHDOG"
     )]
-    [string]$FaultInjectionPhase = ""
+    [string]$FaultInjectionPhase = "",
+
+    [Parameter(Mandatory=$false)]
+    [switch]$ExportFunctionsOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if (-not $RollbackOnly -and [string]::IsNullOrWhiteSpace($TargetReleaseTag)) {
+if (-not $ExportFunctionsOnly -and -not $RollbackOnly -and [string]::IsNullOrWhiteSpace($TargetReleaseTag)) {
     throw "Parameter -TargetReleaseTag is required for normal deployment mode. For rollback mode, specify -RollbackOnly."
 }
 
@@ -204,6 +207,143 @@ if ($ResolvedTargetManifest) {
 [bool]$script:DbRestoreExecuted = $false
 [string]$MaintDir = Join-Path $WorkspaceRoot "maintenance"
 [string]$MaintActive = Join-Path $MaintDir "active"
+
+function Resolve-ReleaseGitSha {
+    param(
+        [Parameter(Mandatory=$false)]
+        [string]$TargetReleaseTag = "",
+        [Parameter(Mandatory=$false)]
+        [scriptblock]$GitExecutor = $null
+    )
+    [string]$exactSha = ""
+    try {
+        $gitOut = if ($GitExecutor) {
+            (& $GitExecutor | Out-String).Trim()
+        } else {
+            (& git rev-parse HEAD 2>$null | Out-String).Trim()
+        }
+        if ($gitOut -and $gitOut -match '^[a-fA-F0-9]{40}$') {
+            $exactSha = $gitOut
+        }
+    } catch {}
+
+    if (-not $exactSha -and $env:GITHUB_SHA -and $env:GITHUB_SHA -match '^[a-fA-F0-9]{40}$') {
+        $exactSha = $env:GITHUB_SHA
+    }
+    if (-not $exactSha -and $env:GMS_RELEASE_COMMIT_SHA -and $env:GMS_RELEASE_COMMIT_SHA -match '^[a-fA-F0-9]{40}$') {
+        $exactSha = $env:GMS_RELEASE_COMMIT_SHA
+    }
+    if (-not $exactSha -and $TargetReleaseTag -match '^[a-fA-F0-9]{40}$') {
+        $exactSha = $TargetReleaseTag
+    }
+    if (-not $exactSha) {
+        throw "CRITICAL PROVENANCE FAILURE: Cannot resolve valid 40-character Git commit SHA for target release [$TargetReleaseTag] during preflight. Deployment aborted before maintenance mode or migration."
+    }
+    return $exactSha
+}
+
+function Assert-TransactionDrain {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$DbContainer,
+        [Parameter(Mandatory=$false)]
+        [int]$TimeoutSeconds = 20,
+        [Parameter(Mandatory=$false)]
+        [scriptblock]$QueryExecutor = $null
+    )
+    [int]$elapsed = 0
+    [int]$remainingTx = 0
+    [bool]$drained = $false
+    $drainSql = "SELECT count(*) FROM pg_stat_activity WHERE datname = 'gms' AND state IN ('active', 'idle in transaction', 'idle in transaction (aborted)') AND pid <> pg_backend_pid();"
+
+    while ($elapsed -lt $TimeoutSeconds) {
+        [string]$txRaw = ""
+        try {
+            [int]$execCode = 0
+            if ($QueryExecutor) {
+                $txRaw = (& $QueryExecutor $DbContainer $drainSql | Out-String).Trim()
+            } else {
+                $txRaw = (& docker exec $DbContainer psql -t -A -U postgres -d gms -c $drainSql 2>&1 | Out-String).Trim()
+                $execCode = $LASTEXITCODE
+            }
+            if ($execCode -eq 0 -and [int]::TryParse($txRaw, [ref]$remainingTx)) {
+                if ($remainingTx -eq 0) {
+                    $drained = $true
+                    return $true
+                }
+                Write-Host "  Waiting for $remainingTx active/idle-in-transaction connections to drain ($elapsed/${TimeoutSeconds}s)..." -ForegroundColor Yellow
+            } else {
+                throw "Database drain query execution returned code ${execCode}: $txRaw"
+            }
+        } catch {
+            throw "CRITICAL TRANSACTION DRAIN FAILURE: Cannot verify transaction drain status on PostgreSQL container [$DbContainer]: $_"
+        }
+        Start-Sleep -Seconds 2
+        $elapsed += 2
+    }
+
+    if (-not $drained) {
+        throw "CRITICAL TRANSACTION DRAIN FAILURE: Database transaction drain timed out after ${TimeoutSeconds}s! Still $remainingTx active/uncommitted transactions present. Aborting deployment before migration."
+    }
+    return $true
+}
+
+function Resolve-PredeployBackupManifest {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FreshBackupId,
+        [Parameter(Mandatory=$true)]
+        [string]$BackupDir
+    )
+    if (-not $FreshBackupId -or $FreshBackupId -eq "NONE") {
+        throw "CRITICAL BACKUP INTEGRITY VIOLATION: Invalid or empty fresh backup ID specified."
+    }
+
+    [string]$cleanId = $FreshBackupId.Replace('BKP-', '')
+    [string]$expectedFile = "gms_${cleanId}_manifest.json"
+    [string]$exactPath = Join-Path $BackupDir $expectedFile
+    [string]$resolvedPath = ""
+
+    if (Test-Path -Path $exactPath -PathType Leaf) {
+        $resolvedPath = $exactPath
+    } else {
+        [string]$pointerFile = Join-Path $BackupDir "latest-predeploy.json"
+        if (Test-Path -Path $pointerFile -PathType Leaf) {
+            [object]$ptrObj = $null
+            try {
+                $ptrObj = Get-Content -Path $pointerFile -Raw | ConvertFrom-Json
+            } catch {
+                throw "CRITICAL BACKUP INTEGRITY VIOLATION: Failed parsing latest-predeploy.json pointer: $_"
+            }
+            if ($ptrObj.backupId -ne $FreshBackupId) {
+                throw "CRITICAL BACKUP INTEGRITY VIOLATION: latest-predeploy.json points to stale backup [$($ptrObj.backupId)], expected fresh backup [$FreshBackupId]. Stale pointer rejected."
+            }
+            if ($ptrObj.manifestFile) {
+                [string]$cand = Join-Path $BackupDir $ptrObj.manifestFile
+                if (Test-Path -Path $cand -PathType Leaf) {
+                    $resolvedPath = $cand
+                }
+            }
+        }
+    }
+
+    if (-not $resolvedPath -or (-not (Test-Path -Path $resolvedPath -PathType Leaf))) {
+        throw "CRITICAL PREFLIGHT FAILURE: Fresh pre-deployment backup [$FreshBackupId] manifest could not be bound or verified on host storage ($BackupDir). Aborting deployment before migration."
+    }
+
+    [object]$parsedMan = $null
+    try {
+        $parsedMan = Get-Content -Path $resolvedPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "CRITICAL BACKUP INTEGRITY VIOLATION: Failed parsing pre-deployment backup manifest at [$resolvedPath]: $_"
+    }
+
+    if ($parsedMan.backupId -ne $FreshBackupId) {
+        throw "CRITICAL BACKUP INTEGRITY VIOLATION: Pre-deployment manifest backupId mismatch! Expected fresh: $FreshBackupId, Found in manifest: $($parsedMan.backupId)"
+    }
+
+    return $resolvedPath
+}
 
 function Assert-StrictSmokeGate {
     param(
@@ -362,6 +502,10 @@ function Execute-Rollback {
             Write-Host "[GMS CRITICAL ALERT] Rollback failed, incomplete, or smoke verdict not PASSED! Maintenance flag ($MaintActive) retained to freeze write traffic and protect system integrity." -ForegroundColor Red
         }
     }
+}
+
+if ($ExportFunctionsOnly) {
+    return
 }
 
 [bool]$IsProductionMode = [bool]($RequireDigest -or ($ComposeFile -like "*prod*"))
@@ -587,9 +731,15 @@ Write-Host "====================================================================
 
 [string]$CapturedManifestPath = ""
 [string]$CapturedPreDeployBackupId = "NONE"
+[string]$ExactSourceGitSha = ""
 [bool]$MigrationStarted = $false
 
 try {
+    # Step 1.0: Resolve exact source Git SHA during preflight (P1-05 Provenance Hardening)
+    Write-Host "[GMS Preflight] Resolving and verifying release source Git SHA provenance..." -ForegroundColor Cyan
+    $ExactSourceGitSha = Resolve-ReleaseGitSha -TargetReleaseTag $TargetReleaseTag
+    Write-Host "  Source Git SHA verified: $ExactSourceGitSha [PASS]" -ForegroundColor Green
+
     # Step 1.1: Verify target image availability and immutability before altering any services
     Write-Host "[GMS Preflight] Validating image presence and digest immutability..." -ForegroundColor Cyan
     if (-not (Verify-Image-Exists -Tag $TargetReleaseTag -BackendDig $BackendDigest -FrontendDig $FrontendDigest -MigratorDig $MigratorDigest)) {
@@ -617,19 +767,14 @@ try {
         throw "CRITICAL WRITER SHUTDOWN FAILURE: Writer services ($($runningWriters -join ', ')) are still reported as running after stop command."
     }
 
-    # Active transaction drain check prior to backup and migration
-    Write-Host "[GMS Preflight] Verifying active transaction drain on PostgreSQL..." -ForegroundColor Cyan
-    try {
-        $drainSql = "SELECT count(*) FROM pg_stat_activity WHERE datname = 'gms' AND state = 'active' AND pid <> pg_backend_pid();"
-        $activeTxRaw = (& docker exec gate-system-postgres psql -t -A -U postgres -d gms -c $drainSql 2>$null | Out-String).Trim()
-        [int]$activeTxCount = 0
-        if ([int]::TryParse($activeTxRaw, [ref]$activeTxCount) -and $activeTxCount -gt 0) {
-            Write-Host "  Waiting for $activeTxCount active client transactions to drain..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 2
-        }
-    } catch {
-        Write-Host "  Notice: Transaction drain check skipped (PostgreSQL not reachable or not ready yet)." -ForegroundColor DarkGray
+    # Active transaction drain check prior to backup and migration (P1-03 Strict Fail-Closed)
+    Write-Host "[GMS Preflight] Verifying client transaction drain on PostgreSQL..." -ForegroundColor Cyan
+    [string]$dbContainer = (& docker compose -p $ProjectName -f $ComposeFile ps -q postgres 2>$null | Out-String).Trim()
+    if (-not $dbContainer) {
+        $dbContainer = "gate-system-postgres"
     }
+    [void](Assert-TransactionDrain -DbContainer $dbContainer -TimeoutSeconds 20)
+    Write-Host "  PostgreSQL client transactions drained successfully (0 active/idle in transaction) [PASS]" -ForegroundColor Green
 
     # Step 1.3: Check migration checksums against canonical baseline prior to backup & execution
     Write-Host "[GMS Preflight] Validating migration history checksums and detecting schema drift..." -ForegroundColor Cyan
@@ -643,64 +788,24 @@ try {
         throw "Pre-deployment backup script terminated with error code ${LASTEXITCODE}: $PredeployBackupLog"
     }
 
-    # Step 1.5: Strict Extraction of Captured Backup ID from Node.js standard output
+    # Step 1.5: Strict Extraction of Captured Backup ID from Node.js standard output (P0-02 Immutable Binding)
     [string]$backupLogCombined = ($PredeployBackupLog | Out-String)
+    [string]$freshBackupId = ""
     if ($backupLogCombined -match "BACKUP_CREATED_ID:\s*(BKP-[^\s\r\n]+)") {
-        $CapturedPreDeployBackupId = $Matches[1].Trim()
-        Write-Host "[GMS Preflight] Pre-deployment backup ID captured: $CapturedPreDeployBackupId" -ForegroundColor Green
+        $freshBackupId = $Matches[1].Trim()
     } elseif ($backupLogCombined -match "Backup Created:\s*(BKP-[^\s\r\n]+)") {
-        $CapturedPreDeployBackupId = $Matches[1].Trim()
-        Write-Host "[GMS Preflight] Pre-deployment backup ID captured: $CapturedPreDeployBackupId" -ForegroundColor Green
+        $freshBackupId = $Matches[1].Trim()
     } else {
         throw "CRITICAL SECURITY FAILURE: Pre-deployment backup ran but could not capture BACKUP_CREATED_ID from stdout output. Output: $backupLogCombined"
     }
 
-    # Step 1.6: Bind host manifest path strictly to the captured backupId
+    $CapturedPreDeployBackupId = $freshBackupId
+    Write-Host "[GMS Preflight] Pre-deployment backup ID strictly captured: $CapturedPreDeployBackupId (immutable)" -ForegroundColor Green
+
+    # Step 1.6: Bind host manifest path strictly to the fresh backupId (P0-02 Immutable Binding)
     [string]$HostLocalBackupDir = Join-Path $WorkspaceRoot "backups\local"
-    [string]$ExpectedManifestFile = "gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
-    [string]$ExactHostManifest = Join-Path $HostLocalBackupDir $ExpectedManifestFile
-
-    if (Test-Path -Path $ExactHostManifest -PathType Leaf) {
-        $CapturedManifestPath = $ExactHostManifest
-    } else {
-        # Fallback: check latest-predeploy.json pointer
-        [string]$latestPointer = Join-Path $HostLocalBackupDir "latest-predeploy.json"
-        if (Test-Path -Path $latestPointer -PathType Leaf) {
-            try {
-                $ptrObj = Get-Content -Path $latestPointer -Raw | ConvertFrom-Json
-                if ($ptrObj.manifestFile) {
-                    [string]$cand2 = Join-Path $HostLocalBackupDir $ptrObj.manifestFile
-                    if (Test-Path -Path $cand2 -PathType Leaf) {
-                        $CapturedManifestPath = $cand2
-                        $CapturedPreDeployBackupId = $ptrObj.backupId
-                    }
-                }
-            } catch {}
-        }
-    }
-
-    if (-not $CapturedManifestPath -and ($backupLogCombined -match "Backup Created:\s*(BKP-[^\s\r\n]+)")) {
-        $CapturedPreDeployBackupId = $Matches[1].Trim()
-        [string]$candManifest = Join-Path $HostLocalBackupDir "gms_${CapturedPreDeployBackupId.Replace('BKP-', '')}_manifest.json"
-        if (Test-Path -Path $candManifest -PathType Leaf) {
-            $CapturedManifestPath = $candManifest
-        }
-    }
-
-    if ($CapturedManifestPath -and (Test-Path -Path $CapturedManifestPath -PathType Leaf)) {
-        # Strict validation: verify manifest backupId matches captured ID
-        try {
-            $parsedMan = Get-Content -Path $CapturedManifestPath -Raw | ConvertFrom-Json
-            if ($parsedMan.backupId -ne $CapturedPreDeployBackupId) {
-                throw "Pre-deployment manifest backupId mismatch! Expected: $CapturedPreDeployBackupId, Found: $($parsedMan.backupId)"
-            }
-        } catch {
-            throw "Failed parsing pre-deployment backup manifest: $_"
-        }
-        Write-Host "[GMS Deploy] Pre-deployment backup manifest bound and confirmed on host: $CapturedManifestPath ($CapturedPreDeployBackupId)" -ForegroundColor Green
-    } else {
-        throw "CRITICAL PREFLIGHT FAILURE: Pre-deployment backup was created, but manifest file ($CapturedManifestPath) could not be bound/located on host storage ($HostLocalBackupDir). Aborting deployment before migration."
-    }
+    $CapturedManifestPath = Resolve-PredeployBackupManifest -FreshBackupId $freshBackupId -BackupDir $HostLocalBackupDir
+    Write-Host "[GMS Deploy] Pre-deployment backup manifest bound and confirmed on host: $CapturedManifestPath ($freshBackupId)" -ForegroundColor Green
 
     if ($FaultInjectionPhase -eq "AFTER_BACKUP" -or $env:GMS_FAULT_INJECTION_PHASE -eq "AFTER_BACKUP") {
         throw "INJECTED_FAULT_AFTER_BACKUP: Simulated failure immediately after backup creation."
@@ -750,39 +855,11 @@ try {
         throw "CRITICAL RELEASE GATE BLOCKED: Normal deployment smoke test did not produce a verified PASSED verdict."
     }
 
-    # Step 4: Resolve exact source Git SHA from repository or environment (No fallback/hardcoded strings allowed)
-    [string]$ExactSourceGitSha = ""
-    try {
-        $gitOut = (& git rev-parse HEAD 2>$null | Out-String).Trim()
-        if ($gitOut -and $gitOut -match '^[a-fA-F0-9]{40}$') {
-            $ExactSourceGitSha = $gitOut
-        }
-    } catch {}
-    if (-not $ExactSourceGitSha -and $env:GITHUB_SHA -and $env:GITHUB_SHA -match '^[a-fA-F0-9]{40}$') {
-        $ExactSourceGitSha = $env:GITHUB_SHA
+    # Step 4: Confirm exact source Git SHA provenance established during preflight
+    if (-not $ExactSourceGitSha -or $ExactSourceGitSha -notmatch '^[a-fA-F0-9]{40}$') {
+        throw "CRITICAL PROVENANCE FAILURE: Preflight source Git SHA is invalid or missing. Aborting release manifest creation."
     }
-    if (-not $ExactSourceGitSha -and $env:GMS_RELEASE_COMMIT_SHA -and $env:GMS_RELEASE_COMMIT_SHA -match '^[a-fA-F0-9]{40}$') {
-        $ExactSourceGitSha = $env:GMS_RELEASE_COMMIT_SHA
-    }
-    if (-not $ExactSourceGitSha -and $TargetReleaseTag -match '^[a-fA-F0-9]{40}$') {
-        $ExactSourceGitSha = $TargetReleaseTag
-    }
-    if (-not $ExactSourceGitSha) {
-        # Check existing release manifest for provenance
-        [string]$existingManifestPath = Join-Path $WorkspaceRoot "deploy\release_manifest.json"
-        if (Test-Path -Path $existingManifestPath) {
-            try {
-                $existMf = Get-Content -Path $existingManifestPath -Raw | ConvertFrom-Json
-                [string]$candSha = if ($existMf.gitSha) { [string]$existMf.gitSha } elseif ($existMf.release) { [string]$existMf.release } else { "" }
-                if ($candSha -match '^[a-fA-F0-9]{40}$') {
-                    $ExactSourceGitSha = $candSha
-                }
-            } catch {}
-        }
-    }
-    if (-not $ExactSourceGitSha) {
-        throw "CRITICAL PROVENANCE FAILURE: Cannot resolve valid 40-character Git commit SHA for release provenance. Fallback hardcoded SHAs are strictly prohibited."
-    }
+    Write-Host "[GMS Deploy] Applying immutable preflight Git SHA provenance: $ExactSourceGitSha" -ForegroundColor Green
 
     [string]$ReleasesDir = Join-Path $WorkspaceRoot "deploy\releases"
     if (-not (Test-Path -Path $ReleasesDir -PathType Container)) {

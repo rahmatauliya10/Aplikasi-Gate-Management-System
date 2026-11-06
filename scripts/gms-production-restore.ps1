@@ -239,17 +239,64 @@ if ($env:GMS_ISOLATED_DRILL_ENVIRONMENT -eq "TRUE") {
     }
 }
 
-# 5. Persistent Exactly-Once Recovery Enforcement (P1-05 / FIX-05)
-if ($RecoveryOperationId) {
-    [string]$RecLedgerFile = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
-    if (Test-Path -Path $RecLedgerFile) {
-        try {
-            $recLedger = Get-Content -Path $RecLedgerFile -Raw | ConvertFrom-Json
-            if ($recLedger.recoveryOperationId -eq $RecoveryOperationId -and $recLedger.dbRestoreExecuted -eq $true) {
-                throw "CRITICAL RECOVERY VIOLATION: Duplicate database restore rejected! Recovery operation [$RecoveryOperationId] already executed and verified DB restore at $($recLedger.dbRestoreExecutedAt)."
-            }
-        } catch {
-            if ($_.ToString() -match "CRITICAL RECOVERY VIOLATION") { throw $_ }
+# 5. Persistent Exactly-Once Recovery Enforcement (P1-04 Crash-Resilient 4-State Machine)
+if (-not $RecoveryOperationId) {
+    $RecoveryOperationId = "REC-OP-" + [guid]::NewGuid().ToString("N").Substring(0, 12).ToUpper()
+}
+
+[string]$RecLedgerFile = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
+
+function Update-RecoveryLedger {
+    param(
+        [Parameter(Mandatory=$true)]
+        [ValidateSet("PREPARED", "RESTORING", "RESTORED", "VERIFIED")]
+        [string]$State,
+        [hashtable]$Extra = @{}
+    )
+    if (-not $MaintDir) { return }
+    if (-not (Test-Path -Path $MaintDir -PathType Container)) {
+        New-Item -Path $MaintDir -ItemType Directory -Force | Out-Null
+    }
+    [string]$recTarget = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
+    [string]$recTmp = $recTarget + ".tmp"
+    $obj = @{
+        recoveryOperationId = $RecoveryOperationId
+        backupId = $BackupId
+        status = $State
+        updatedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        dbRestoreExecuted = ($State -in @("RESTORED", "VERIFIED"))
+    }
+    foreach ($k in $Extra.Keys) {
+        $obj[$k] = $Extra[$k]
+    }
+    Set-Content -Path $recTmp -Value ($obj | ConvertTo-Json -Depth 5) -Encoding utf8
+    Move-Item -Path $recTmp -Destination $recTarget -Force
+    Write-Log "  [GMS RECOVERY LEDGER] Persisted state: [$State] (op: $RecoveryOperationId, backup: $BackupId)" -Level "INFO"
+}
+
+if (Test-Path -Path $RecLedgerFile) {
+    [object]$recLedger = $null
+    try {
+        $recRaw = Get-Content -Path $RecLedgerFile -Raw
+        if ([string]::IsNullOrWhiteSpace($recRaw)) {
+            throw "Recovery ledger file is empty"
+        }
+        $recLedger = $recRaw | ConvertFrom-Json
+    } catch {
+        throw "CRITICAL RECOVERY VIOLATION: Corrupted recovery ledger at [$RecLedgerFile]! Manual inspection required: $_"
+    }
+
+    if (-not $recLedger -or -not $recLedger.recoveryOperationId) {
+        throw "CRITICAL RECOVERY VIOLATION: Corrupted recovery ledger at [$RecLedgerFile] (missing recoveryOperationId)! Manual inspection required."
+    }
+
+    if ($recLedger.status -eq "RESTORING") {
+        throw "CRITICAL RECOVERY VIOLATION: Recovery operation [$($recLedger.recoveryOperationId)] was interrupted while in state RESTORING. Automatic retry is prohibited to prevent double-restore. Manual database reconciliation is required."
+    }
+
+    if ($recLedger.recoveryOperationId -eq $RecoveryOperationId) {
+        if ($recLedger.status -in @("RESTORED", "VERIFIED") -or $recLedger.dbRestoreExecuted -eq $true) {
+            throw "CRITICAL RECOVERY VIOLATION: Duplicate database restore rejected! Recovery operation [$RecoveryOperationId] already executed (status: $($recLedger.status)) at $($recLedger.updatedAt)."
         }
     }
 }
@@ -363,6 +410,9 @@ Write-Log "  Maintenance flag created ($MaintFlagPath & $MaintActivePath) [PASS]
 [string]$TimestampSuffix = (Get-Date).ToString("yyyyMMdd_HHmmss")
 $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 
+# Step 2.1: Register PREPARED recovery state in persistent ledger
+Update-RecoveryLedger -State "PREPARED"
+
 # Step 4: Isolated Staging PostgreSQL Restoration & Invariant Checks
     Write-Log "Step 3: Spawning Isolated Staging PostgreSQL Container ($StagingContainer)..."
     & docker run -d --name $StagingContainer -p "127.0.0.1:${StagingPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$StagingDbName" -e "POSTGRES_HOST_AUTH_METHOD=trust" postgres:15-alpine 2>&1 | Out-Null
@@ -386,8 +436,12 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     $RestoreOut = & docker exec $StagingContainer pg_restore --username=$PgUser --dbname=$StagingDbName --no-owner --no-privileges $TmpDumpInContainer 2>&1
     [int]$StagingExitCode = $LASTEXITCODE
     & docker exec $StagingContainer rm -f $TmpDumpInContainer 2>&1 | Out-Null
-    if ($StagingExitCode -gt 1) {
-        throw "pg_restore failed with fatal exit code ${StagingExitCode}. Output: $RestoreOut"
+    if ($StagingExitCode -ne 0) {
+        if ($StagingExitCode -eq 1 -and $RestoreOut -match 'unrecognized configuration parameter "transaction_timeout"' -and $RestoreOut -notmatch 'ERROR:(?!.*transaction_timeout)') {
+            Write-Log "  Notice: Non-fatal transaction_timeout ignored on older PostgreSQL server version." -Level "WARN"
+        } else {
+            throw "Staging Database pg_restore failed with exit code ${StagingExitCode}: $RestoreOut"
+        }
     }
 
     # Exec-Query helper
@@ -730,18 +784,28 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     & docker cp $DumpFilePath "${LiveContainer}:${TmpDumpInLive}"
     if ($LASTEXITCODE -ne 0) { throw "Failed copying dump file to live database container." }
 
+    # Transition ledger state to RESTORING immediately before modifying live database
+    Update-RecoveryLedger -State "RESTORING"
+
     & docker exec $LiveContainer psql -U $PgUser -d $LiveDbName -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;" 2>&1 | Out-Null
     $LiveRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpDumpInLive 2>&1
     [int]$LiveExitCode = $LASTEXITCODE
     & docker exec $LiveContainer rm -f $TmpDumpInLive 2>&1 | Out-Null
 
-    if ($LiveExitCode -gt 1) {
-        throw "Live Database Promotion (pg_restore) failed with fatal exit code ${LiveExitCode}: $LiveRestoreOut"
+    if ($LiveExitCode -ne 0) {
+        if ($LiveExitCode -eq 1 -and $LiveRestoreOut -match 'unrecognized configuration parameter "transaction_timeout"' -and $LiveRestoreOut -notmatch 'ERROR:(?!.*transaction_timeout)') {
+            Write-Log "  Notice: Non-fatal transaction_timeout ignored on live DB." -Level "WARN"
+        } else {
+            throw "Live Database Promotion (pg_restore) failed with exit code ${LiveExitCode}: $LiveRestoreOut"
+        }
     }
 
     # DB pg_restore committed into live target; transition phase immediately to guarantee DB rollback on any subsequent error
     $PromotionPhase = "DB_COMMITTED_PENDING_ATTACHMENT"
     Write-Log "  Live Database pg_restore committed into [$LiveDbName] [PASS]" -Level "SUCCESS"
+
+    # Persist RESTORED state in ledger immediately upon successful DB restore
+    Update-RecoveryLedger -State "RESTORED" -Extra @{ dbRestoreExecutedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ") }
 
     if ($FaultInjectionPhase -eq "POST_DB_COMMIT" -or $env:GMS_FAULT_INJECTION_PHASE -eq "POST_DB_COMMIT") {
         throw "INJECTED_FAULT: Simulated post-DB-commit promotion failure for DR drill validation."
@@ -949,19 +1013,10 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
     Set-Content -Path $RestoreEvidencePath -Value $EvidenceJson -Encoding utf8
     Write-Log "Restore Evidence Proof written to $RestoreEvidencePath [PASS]" -Level "SUCCESS"
 
-    # Persist recovery ledger state for restart resilience (FIX-05)
-    if ($RecoveryOperationId) {
-        [string]$RecLedgerFile = Join-Path -Path $MaintDir -ChildPath "recovery-state.json"
-        $recStateObj = @{
-            recoveryOperationId = $RecoveryOperationId
-            dbRestoreExecuted = $true
-            dbRestoreExecutedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-            backupId = $BackupId
-            status = "RESTORE_DONE"
-            rtoSeconds = $RtoSeconds
-        }
-        Set-Content -Path $RecLedgerFile -Value ($recStateObj | ConvertTo-Json -Depth 4) -Encoding utf8
-        Write-Log "Persistent recovery ledger updated at $RecLedgerFile (dbRestoreExecuted = TRUE)." -Level "SUCCESS"
+    # Persist recovery ledger state for restart resilience (FIX-05 / P1-04)
+    Update-RecoveryLedger -State "VERIFIED" -Extra @{
+        dbRestoreExecutedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        rtoSeconds = $RtoSeconds
     }
 
     Write-Log "=============================================================================="
@@ -987,7 +1042,13 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
                 $RollbackRestoreOut = & docker exec $LiveContainer pg_restore --username=$PgUser --dbname=$LiveDbName --no-owner --no-privileges $TmpRollbackInLive 2>&1
                 [int]$RollbackExitCode = $LASTEXITCODE
                 & docker exec $LiveContainer rm -f $TmpRollbackInLive 2>&1 | Out-Null
-                if ($RollbackExitCode -gt 1) { throw "Rollback pg_restore failed with fatal exit code ${RollbackExitCode}: $RollbackRestoreOut" }
+                if ($RollbackExitCode -ne 0) {
+                    if ($RollbackExitCode -eq 1 -and $RollbackRestoreOut -match 'unrecognized configuration parameter "transaction_timeout"' -and $RollbackRestoreOut -notmatch 'ERROR:(?!.*transaction_timeout)') {
+                        Write-Log "  Notice: Non-fatal transaction_timeout ignored on rollback DB." -Level "WARN"
+                    } else {
+                        throw "Rollback pg_restore failed with fatal exit code ${RollbackExitCode}: $RollbackRestoreOut"
+                    }
+                }
                 Write-Log "  Live database successfully rolled back to pre-restore snapshot." -Level "SUCCESS"
             } catch {
                 Write-Log "  CRITICAL ROLLBACK ERROR: Automatic live DB rollback failed: $_" -Level "ERROR"

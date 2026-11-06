@@ -28,13 +28,13 @@
 # ==============================================================================
 
 param(
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$ArtifactsDir = "",
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$DrillPort = "",
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$CustomFixturePrefix = ""
 )
 
@@ -81,15 +81,16 @@ function Record-Drill-Phase {
         [hashtable]$EvidenceData = @{}
     )
     $script:TestResults += @{
-        phase = $PhaseName
-        status = if ($Passed) { "PASSED" } else { "FAILED" }
-        details = $Details
+        phase           = $PhaseName
+        status          = if ($Passed) { "PASSED" } else { "FAILED" }
+        details         = $Details
         durationSeconds = [math]::Round($DurationSeconds, 2)
-        evidence = $EvidenceData
+        evidence        = $EvidenceData
     }
     if ($Passed) {
         Write-Log "  [PASS] $PhaseName - $Details" -Level "SUCCESS"
-    } else {
+    }
+    else {
         Write-Log "  [FAIL] $PhaseName - $Details" -Level "ERROR"
     }
 }
@@ -116,29 +117,56 @@ if ($Prefix -eq "gate-system-postgres" -or $FixtureContainer -eq "gate-system-po
 }
 
 # ------------------------------------------------------------------------------
-# STEP 2: Docker Host, Context & Operational Target Guard (FIX-01)
+# STEP 2: Docker Host, Context & Operational Target Guard (FIX-01 / P1-06)
 # ------------------------------------------------------------------------------
 Write-Log "Step 2: Validating Docker daemon availability and Docker context security..."
+
+# Validate DOCKER_HOST environment variable before calling any docker command (P1-06 Endpoint Hardening)
+if ($env:DOCKER_HOST) {
+    [string]$dh = $env:DOCKER_HOST.Trim()
+    [bool]$isLocalPipeOrSocket = ($dh -match '^npipe:////\./pipe/' -or $dh -match '^unix://')
+    [bool]$isLoopbackTcp = ($dh -match '^tcp://(127\.0\.0\.1|localhost)(:\d+)?/?$')
+    if (-not $isLocalPipeOrSocket -and -not $isLoopbackTcp) {
+        throw "CRITICAL GOVERNANCE VIOLATION: DOCKER_HOST is set to non-local/remote endpoint [$dh]. Disaster recovery failure drill is UNCONDITIONALLY PROHIBITED against remote Docker daemons."
+    }
+}
 
 # Check Docker daemon availability
 [bool]$DockerAvailable = $false
 try {
     $rawDocker = & docker ps 2>&1
     if ($LASTEXITCODE -eq 0) { $DockerAvailable = $true }
-} catch {}
+}
+catch {}
 
 if (-not $DockerAvailable) {
     throw "FATAL: Docker daemon is not available on this host. Isolated DR drill cannot execute without Docker."
 }
 
-# Check Docker context: forbid production/remote contexts
+# Check Docker context: forbid production/remote contexts by name
 [string]$dockerContext = ""
 try {
     $dockerContext = (& docker context show 2>$null | Out-String).Trim()
-} catch {}
+}
+catch {}
 
 if ($dockerContext -and $dockerContext -notmatch '^(default|desktop-linux|colima|rancher-desktop)$' -and $dockerContext -match '(prod|production|remote|swarm|k8s)') {
     throw "CRITICAL GOVERNANCE VIOLATION: Current Docker context is '$dockerContext'. Disaster recovery failure drill is UNCONDITIONALLY PROHIBITED on non-local/production Docker contexts."
+}
+
+# Inspect actual daemon endpoint of the current context (P1-06)
+[string]$contextEndpoint = ""
+try {
+    $contextEndpoint = (& docker context inspect --format "{{.Endpoints.docker.Host}}" 2>$null | Out-String).Trim()
+}
+catch {}
+
+if ($contextEndpoint) {
+    [bool]$isLocalCtxPipeOrSocket = ($contextEndpoint -match '^npipe:////\./pipe/' -or $contextEndpoint -match '^unix://')
+    [bool]$isLocalCtxTcp = ($contextEndpoint -match '^tcp://(127\.0\.0\.1|localhost)(:\d+)?/?$')
+    if (-not $isLocalCtxPipeOrSocket -and -not $isLocalCtxTcp) {
+        throw "CRITICAL GOVERNANCE VIOLATION: Docker context '$dockerContext' endpoint [$contextEndpoint] is non-local or remote. Disaster recovery failure drill is UNCONDITIONALLY PROHIBITED against non-local daemons."
+    }
 }
 
 # Reject if container name collision already exists
@@ -156,7 +184,8 @@ function Get-FreeLoopbackPort {
         $port = ($listener.LocalEndpoint).Port
         $listener.Stop()
         return $port.ToString()
-    } catch {
+    }
+    catch {
         return $FallbackPort.ToString()
     }
 }
@@ -334,13 +363,15 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                     $hashLines = @(($rawHash.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
                     if ((@($hashLines)).Count -gt 0) { $Hash = ([string]$hashLines[-1]).Trim() }
                 }
-            } catch {
+            }
+            catch {
                 throw "FATAL: Database fingerprint query failed for table '$Table'. Error: $($_.ToString())"
             }
 
             if ([string]::IsNullOrWhiteSpace($Hash) -or $Hash.Contains("ERROR") -or $Hash.Contains("fatal") -or $Hash.Contains("could not connect")) {
                 throw "FATAL: Database fingerprint query returned error for table '$Table'. Output: $Hash"
-            } else {
+            }
+            else {
                 $Result[$Table] = $Hash.Trim()
             }
         }
@@ -398,12 +429,12 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
 
         $CorruptManifestObj = @{
             manifestType = "HISTORICAL_REHEARSAL_FIXTURE"
-            backupId = "BKP-DRILL-CORRUPT-TAMPERED-BYTE"
-            createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-            artifacts = @{
+            backupId     = "BKP-DRILL-CORRUPT-TAMPERED-BYTE"
+            createdAt    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+            artifacts    = @{
                 dump = "corrupted_test.dump"
             }
-            checksums = @{
+            checksums    = @{
                 dump = $originalHash
             }
         }
@@ -423,19 +454,22 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                 -LogDirectory $FixtureLogsDir `
                 -Force 2>&1 | Out-Null
             $p1Exit = $LASTEXITCODE
-        } catch {
+        }
+        catch {
             $p1Exit = 1
         }
 
         [bool]$p1Passed = ($p1Exit -ne 0)
         [string]$p1Details = if ($p1Passed) {
             "Mismatched/corrupt dump checksum strictly rejected before DB or uploads mutation (ExitCode=$p1Exit)."
-        } else {
+        }
+        else {
             "Security vulnerability: Corrupted dump was not rejected by restore preflight check."
         }
 
         Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $p1Passed -Details $p1Details -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds -EvidenceData @{ exitCode = $p1Exit; rejectedBeforeMutation = $p1Passed }
-    } catch {
+    }
+    catch {
         Record-Drill-Phase -PhaseName "Phase 1: Pre-promotion Checksum Corruption" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p1Start).TotalSeconds
     }
 
@@ -475,10 +509,12 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                 -LogDirectory $FixtureLogsDir `
                 -Force 2>&1 | Out-String
             $p2Exit = $LASTEXITCODE
-        } catch {
+        }
+        catch {
             $p2Output = $_.ToString()
             $p2Exit = 1
-        } finally {
+        }
+        finally {
             $env:GMS_FAULT_INJECTION_PHASE = ""
         }
 
@@ -492,7 +528,8 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
         $p2Passed = ($p2Exit -ne 0) -and $DbRestoredP2 -and $UploadsUnchangedP2 -and $MaintenanceActiveP2
         $p2Details = if ($p2Passed) {
             "DURING_DB_PROMOTION fault caught cleanly -> DB compensated -> Uploads unchanged -> Maintenance active in fixture."
-        } else {
+        }
+        else {
             "Phase 2 check failed: ExitCode=$p2Exit, DbRestored=$DbRestoredP2, UploadsUnchanged=$UploadsUnchangedP2, MaintenanceActive=$MaintenanceActiveP2."
         }
 
@@ -501,12 +538,13 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
             -Details $p2Details `
             -DurationSeconds ((Get-Date) - $p2Start).TotalSeconds `
             -EvidenceData @{
-                operatorExitCode = $p2Exit
-                databaseRestored = $DbRestoredP2
-                uploadsUnchanged = $UploadsUnchangedP2
-                maintenanceActive = $MaintenanceActiveP2
-            }
-    } catch {
+            operatorExitCode  = $p2Exit
+            databaseRestored  = $DbRestoredP2
+            uploadsUnchanged  = $UploadsUnchangedP2
+            maintenanceActive = $MaintenanceActiveP2
+        }
+    }
+    catch {
         Record-Drill-Phase -PhaseName "Phase 2: During-DB-Promotion Compensation" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p2Start).TotalSeconds
     }
 
@@ -546,10 +584,12 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                 -LogDirectory $FixtureLogsDir `
                 -Force 2>&1 | Out-String
             $p3Exit = $LASTEXITCODE
-        } catch {
+        }
+        catch {
             $p3Output = $_.ToString()
             $p3Exit = 1
-        } finally {
+        }
+        finally {
             $env:GMS_FAULT_INJECTION_PHASE = ""
         }
 
@@ -563,7 +603,8 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
         $p3Passed = ($p3Exit -ne 0) -and $DbRestored -and $UploadsRestored -and $MaintenanceActive
         $p3Details = if ($p3Passed) {
             "Operator detected failure (ExitCode=$p3Exit) -> DB 16 entities restored identical -> Physical attachments preserved -> Maintenance active."
-        } else {
+        }
+        else {
             "Phase 3 check failed: ExitCode=$p3Exit, DbRestored=$DbRestored, UploadsRestored=$UploadsRestored, MaintenanceActive=$MaintenanceActive."
         }
 
@@ -572,12 +613,13 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
             -Details $p3Details `
             -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds `
             -EvidenceData @{
-                operatorExitCode = $p3Exit
-                databaseRestored = $DbRestored
-                uploadsRestored = $UploadsRestored
-                maintenanceActive = $MaintenanceActive
-            }
-    } catch {
+            operatorExitCode  = $p3Exit
+            databaseRestored  = $DbRestored
+            uploadsRestored   = $UploadsRestored
+            maintenanceActive = $MaintenanceActive
+        }
+    }
+    catch {
         Record-Drill-Phase -PhaseName "Phase 3: Post-DB-Commit Compensation" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p3Start).TotalSeconds
     }
 
@@ -617,10 +659,12 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                 -LogDirectory $FixtureLogsDir `
                 -Force 2>&1 | Out-String
             $p4Exit = $LASTEXITCODE
-        } catch {
+        }
+        catch {
             $p4Output = $_.ToString()
             $p4Exit = 1
-        } finally {
+        }
+        finally {
             $env:GMS_FAULT_INJECTION_PHASE = ""
         }
 
@@ -633,7 +677,8 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
         $p4Passed = ($p4Exit -ne 0) -and $UploadsPreservedP4 -and $DbPreservedP4
         $p4Details = if ($p4Passed) {
             "Atomic rename and staging upload rollback verified: live uploads tree and DB preserved/reverted upon exception (ExitCode=$p4Exit)."
-        } else {
+        }
+        else {
             "Failure: Attachment promotion fault was not handled fail-closed (ExitCode=$p4Exit, UploadsPreserved=$UploadsPreservedP4, DbPreserved=$DbPreservedP4)."
         }
 
@@ -642,11 +687,12 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
             -Details $p4Details `
             -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds `
             -EvidenceData @{
-                exitCode = $p4Exit
-                uploadsPreserved = $UploadsPreservedP4
-                databasePreserved = $DbPreservedP4
-            }
-    } catch {
+            exitCode          = $p4Exit
+            uploadsPreserved  = $UploadsPreservedP4
+            databasePreserved = $DbPreservedP4
+        }
+    }
+    catch {
         Record-Drill-Phase -PhaseName "Phase 4: Attachment Swap Rollback" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p4Start).TotalSeconds
     }
 
@@ -684,10 +730,12 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                 -LogDirectory $FixtureLogsDir `
                 -Force 2>&1 | Out-String
             $p5Exit = $LASTEXITCODE
-        } catch {
+        }
+        catch {
             $p5Output = $_.ToString()
             $p5Exit = 1
-        } finally {
+        }
+        finally {
             $env:GMS_FAULT_INJECTION_PHASE = ""
         }
 
@@ -695,7 +743,8 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
         $p5Passed = ($p5Exit -ne 0) -and $MaintenanceFlagActive
         $p5Details = if ($p5Passed) {
             "Maintenance flag verified present in fixture upon discrepancy to freeze write traffic in inconsistent state (ExitCode=$p5Exit)."
-        } else {
+        }
+        else {
             "Failure: Live verification discrepancy did not trigger fail-closed maintenance freeze."
         }
 
@@ -704,10 +753,11 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
             -Details $p5Details `
             -DurationSeconds ((Get-Date) - $p5Start).TotalSeconds `
             -EvidenceData @{
-                exitCode = $p5Exit
-                maintenanceFreezeActive = $MaintenanceFlagActive
-            }
-    } catch {
+            exitCode                = $p5Exit
+            maintenanceFreezeActive = $MaintenanceFlagActive
+        }
+    }
+    catch {
         Record-Drill-Phase -PhaseName "Phase 5: Maintenance Freeze on Discrepancy" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p5Start).TotalSeconds
     }
 
@@ -753,7 +803,8 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                         break
                     }
                 }
-            } catch {}
+            }
+            catch {}
         }
 
         if (-not $mockReady) {
@@ -779,10 +830,12 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                     try {
                         $bodyObj = $response.Content | ConvertFrom-Json
                         if ($bodyObj.code) { $codeString = [string]$bodyObj.code }
-                    } catch {}
+                    }
+                    catch {}
                 }
             }
-        } catch {
+        }
+        catch {
             if ($_.Exception -and $_.Exception.Response) {
                 $httpRes = $_.Exception.Response
                 $statusCode = [int]$httpRes.StatusCode
@@ -797,7 +850,8 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
         [bool]$networkErrorProperlyRejected = $false
         try {
             $badReq = Invoke-WebRequest -Uri "http://127.0.0.1:39999/api/gate/check-in" -Method POST -TimeoutSec 2 -SkipHttpErrorCheck 2>$null
-        } catch {
+        }
+        catch {
             $networkErrorProperlyRejected = $true
         }
 
@@ -807,9 +861,11 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
 
         $p6Details = if ($p6Passed) {
             "Fail-closed write freeze verified on dynamic port ${dynHttpPort}: returned HTTP 503 MAINTENANCE_MODE; network errors verified NOT masked."
-        } elseif (-not $serverGave503) {
+        }
+        elseif (-not $serverGave503) {
             "FAIL-CLOSED violation: write API returned HTTP $statusCode (code: $codeString), expected HTTP 503 MAINTENANCE_MODE."
-        } else {
+        }
+        else {
             "FAIL-CLOSED violation: network connection exception distinction check failed."
         }
 
@@ -818,26 +874,31 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
             -Details $p6Details `
             -DurationSeconds ((Get-Date) - $p6Start).TotalSeconds `
             -EvidenceData @{
-                statusCode = $statusCode
-                code = $codeString
-                writeRejected = $writeRejected
-                networkErrorDistinguished = $networkErrorDistinguished
-                mockServerPort = $dynHttpPort
-            }
-    } catch {
+            statusCode                = $statusCode
+            code                      = $codeString
+            writeRejected             = $writeRejected
+            networkErrorDistinguished = $networkErrorDistinguished
+            mockServerPort            = $dynHttpPort
+        }
+    }
+    catch {
         Record-Drill-Phase -PhaseName "Phase 6: Maintenance HTTP Write Rejection (503)" -Passed $false -Details ($_.ToString()) -DurationSeconds ((Get-Date) - $p6Start).TotalSeconds
-    } finally {
+    }
+    finally {
         if ($mockProc -and -not $mockProc.HasExited) {
             try {
                 $mockProc.Kill()
                 $mockProc.WaitForExit(3000)
-            } catch {}
+            }
+            catch {}
         }
     }
-} catch {
+}
+catch {
     Write-Log "UNHANDLED DRILL RUNNER EXCEPTION: $_" -Level "ERROR"
     Record-Drill-Phase -PhaseName "Drill Execution Runner" -Passed $false -Details "Unhandled exception: $_" -DurationSeconds ((Get-Date) - $DrillStartTime).TotalSeconds
-} finally {
+}
+finally {
     # --------------------------------------------------------------------------
     # STEP 4: Scoped Teardown of Run ID Ephemeral Resources ONLY (FIX-01 & FIX-02)
     # --------------------------------------------------------------------------
@@ -851,7 +912,8 @@ INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt") VALUES
                 Write-Log "  Removing ephemeral container $FixtureContainer..."
                 & docker rm -f $FixtureContainer 2>&1 | Out-Null
             }
-        } catch {}
+        }
+        catch {}
     }
 
     # Remove temporary fixture directories
@@ -884,26 +946,27 @@ if (Test-Path -Path $FixtureManifest) {
             $createdDate = [datetime]::Parse($manObj.createdAt)
             $CalculatedRpoMinutes = [math]::Round([math]::Max(0.0, ((Get-Date).ToUniversalTime() - $createdDate.ToUniversalTime()).TotalMinutes), 4)
         }
-    } catch {}
+    }
+    catch {}
 }
 
 $DrillEvidenceObj = @{
-    reportTitle = "Production Operator DR Failure-Injection & Resilience Evidence (P0-02 - 6 Phases Hardened)"
-    engine = "PowerShell Isolated Ephemeral Fixture Harness"
-    runId = $RunId
+    reportTitle      = "Production Operator DR Failure-Injection & Resilience Evidence (P0-02 - 6 Phases Hardened)"
+    engine           = "PowerShell Isolated Ephemeral Fixture Harness"
+    runId            = $RunId
     fixtureContainer = $FixtureContainer
-    fixtureDatabase = $FixtureDb
-    timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-    status = if ($AllDrillsPassed) { "PASSED" } else { "FAILED" }
-    rpoMinutes = $CalculatedRpoMinutes
-    rpoDefinition = "Elapsed duration since fixture manifest creation to drill completion (rehearsal delta)"
-    rtoSeconds = [math]::Round($TotalDuration, 2)
-    drillsSummary = @{
-        totalPhases = @($script:TestResults).Count
+    fixtureDatabase  = $FixtureDb
+    timestamp        = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+    status           = if ($AllDrillsPassed) { "PASSED" } else { "FAILED" }
+    rpoMinutes       = $CalculatedRpoMinutes
+    rpoDefinition    = "Elapsed duration since fixture manifest creation to drill completion (rehearsal delta)"
+    rtoSeconds       = [math]::Round($TotalDuration, 2)
+    drillsSummary    = @{
+        totalPhases  = @($script:TestResults).Count
         passedPhases = @($script:TestResults | Where-Object { $_.status -eq "PASSED" }).Count
         failedPhases = @($script:TestResults | Where-Object { $_.status -ne "PASSED" }).Count
     }
-    phaseResults = $script:TestResults
+    phaseResults     = $script:TestResults
 }
 
 [string]$EvidenceJsonPath = Join-Path -Path $ArtifactsDir -ChildPath "restore-failure-drill-evidence-powershell.json"
@@ -924,7 +987,8 @@ Write-Host "====================================================================
 if ($AllDrillsPassed) {
     Write-Log "SUCCESS: All 6 DR failure-injection phases PASSED with verified fail-closed guarantees." -Level "SUCCESS"
     exit 0
-} else {
+}
+else {
     Write-Log "ERROR: One or more DR failure-injection phases FAILED!" -Level "ERROR"
     exit 1
 }
