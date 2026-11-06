@@ -1,4 +1,4 @@
-﻿{
+{
     "cases":  [
                   {
                       "description":  "Reject drill restore targeting operational container \u0027gate-system-postgres\u0027",
@@ -11,7 +11,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.72,
+                      "durationSeconds":  1.12,
                       "status":  "PASSED"
                   },
                   {
@@ -25,7 +25,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  0.79,
+                      "durationSeconds":  1.11,
                       "status":  "PASSED"
                   },
                   {
@@ -39,7 +39,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  0.85,
+                      "durationSeconds":  1.07,
                       "status":  "PASSED"
                   },
                   {
@@ -53,7 +53,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.42,
+                      "durationSeconds":  1.09,
                       "status":  "PASSED"
                   },
                   {
@@ -67,7 +67,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  0.97,
+                      "durationSeconds":  1.04,
                       "status":  "PASSED"
                   },
                   {
@@ -81,7 +81,7 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  1.08,
+                      "durationSeconds":  1.09,
                       "status":  "PASSED"
                   },
                   {
@@ -89,13 +89,13 @@
                       "exitCode":  1,
                       "expectedKeywords":  [
                                                "CRITICAL GOVERNANCE VIOLATION",
-                                               "Ephemeral fixture identity must NOT match operational targets"
+                                               "Ephemeral fixture identity"
                                            ],
                       "scenarioId":  "GUARD-07",
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  2.98,
+                      "durationSeconds":  1.16,
                       "status":  "PASSED"
                   },
                   {
@@ -109,11 +109,11 @@
                       "missingKeywords":  [
 
                                           ],
-                      "durationSeconds":  0.87,
+                      "durationSeconds":  1.09,
                       "status":  "PASSED"
                   }
               ],
-    "timestamp":  "2026-10-30T07:49:13.007Z",
+    "timestamp":  "2026-11-06T03:46:44.988Z",
     "summary":  {
                     "failed":  0,
                     "total":  8,

@@ -469,7 +469,8 @@ jobs:
           set -Eeuo pipefail
           node -e "
             const fs = require('fs');
-            const drEv = JSON.parse(fs.readFileSync('artifacts/release-proof/dr-isolation-guard-evidence.json', 'utf8'));
+            const raw = fs.readFileSync('artifacts/release-proof/dr-isolation-guard-evidence.json', 'utf8').replace(/^\uFEFF/, '');
+            const drEv = JSON.parse(raw);
             if (drEv.status !== 'PASSED' || drEv.summary.failed !== 0) {
               throw new Error('DR isolation guard evidence not PASSED: ' + JSON.stringify(drEv.summary));
             }

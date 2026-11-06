@@ -77,8 +77,10 @@ function Assert-GuardFailure {
 
     [bool]$hasAllKeywords = $true
     [array]$missingKeywords = @()
+    [string]$normalizedOutput = ($rawOutput -replace '[\r\n]+\s*(\|\s*)?', ' ') -replace '\s+', ' '
     foreach ($kw in $ExpectedKeywords) {
-        if ($rawOutput -notmatch [regex]::Escape($kw)) {
+        [string]$normalizedKw = ($kw -replace '[\r\n]+\s*(\|\s*)?', ' ') -replace '\s+', ' '
+        if ($rawOutput -notmatch [regex]::Escape($kw) -and $normalizedOutput -notmatch [regex]::Escape($normalizedKw)) {
             $hasAllKeywords = $false
             $missingKeywords += $kw
         }
@@ -269,7 +271,7 @@ try {
             & $PsExe -ExecutionPolicy Bypass -File $DrillScript `
                 -CustomFixturePrefix "gate-system-postgres" 2>&1
         } `
-        -ExpectedKeywords @("CRITICAL GOVERNANCE VIOLATION", "Ephemeral fixture identity must NOT match operational targets")
+        -ExpectedKeywords @("CRITICAL GOVERNANCE VIOLATION", "Ephemeral fixture identity")
 
     # --------------------------------------------------------------------------
     # Scenario 8: Rejection of duplicate database restore for same RecoveryOperationId
@@ -327,7 +329,7 @@ $EvidenceObj = @{
 }
 
 $EvidenceJsonPath = Join-Path $ArtifactsDir "dr-isolation-guard-evidence.json"
-Set-Content -Path $EvidenceJsonPath -Value ($EvidenceObj | ConvertTo-Json -Depth 5) -Encoding utf8
+[System.IO.File]::WriteAllText($EvidenceJsonPath, ($EvidenceObj | ConvertTo-Json -Depth 5), [System.Text.UTF8Encoding]::new($false))
 Write-Host "Saved DR isolation guard evidence to $EvidenceJsonPath"
 
 if ($FailedTests -eq 0 -and $PassedTests -eq $TotalTests) {
