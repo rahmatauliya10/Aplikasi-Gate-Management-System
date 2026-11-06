@@ -19,7 +19,7 @@ jobs:
         db_state: [fresh, upgraded]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_test_db
           POSTGRES_USER: postgres
@@ -176,7 +176,7 @@ jobs:
     needs: [backend-verification]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_rehearsal_db
           POSTGRES_USER: postgres
@@ -365,7 +365,7 @@ jobs:
     needs: [historical-migration-rehearsal-gate]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_rehearsal_db
           POSTGRES_USER: postgres
@@ -492,7 +492,7 @@ jobs:
     needs: [historical-migration-rehearsal-gate]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_rehearsal_db
           POSTGRES_USER: postgres

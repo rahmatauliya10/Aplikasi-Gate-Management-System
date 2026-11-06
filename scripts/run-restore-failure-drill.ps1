@@ -200,7 +200,7 @@ try {
         -e "POSTGRES_DB=$FixtureDb" `
         -e "POSTGRES_USER=$FixtureUser" `
         -e "POSTGRES_PASSWORD=$FixturePass" `
-        postgres:15-alpine 2>&1
+        postgres:17-alpine 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Failed launching isolated fixture container [$FixtureContainer]: $launchOut"
     }
