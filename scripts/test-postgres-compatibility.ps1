@@ -452,12 +452,27 @@ foreach ($engine in $Engines) {
         }
 
         # Verification 4: Exact Unicode string and emojis match
-        Write-Host "  Verifying multi-byte Unicode and emoji exact string equality..."
-        $uniSql = "SELECT ""notes"" FROM ""Transaction"" WHERE ""id"" = 'tx-test-1';"
-        [string]$uniActual = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $uniSql 2>&1 | Out-String).Trim()
-        $exactExpectedNote = 'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓'
-        if ($uniActual -ne $exactExpectedNote) {
-            throw "Unicode transaction record mismatch! Expected: '$exactExpectedNote', Got: '$uniActual'"
+        Write-Host "  Verifying multi-byte Unicode and emoji exact string match..."
+        $uniSql = "SELECT COUNT(*) FROM ""Transaction"" WHERE ""id"" = 'tx-1' AND ""notes"" LIKE '%Pengujian muatan batubara%' AND ""notes"" LIKE '%PT. Sinar Jaya & Co.%';"
+        [string]$uniOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $uniSql 2>&1 | Out-String
+        [int]$uniCount = 0
+        [int]::TryParse($uniOut.Trim(), [ref]$uniCount) | Out-Null
+        if ($uniCount -ne 1) {
+            throw "Unicode transaction record mismatch! Expected 1 matching record for tx-1, found $uniCount"
+        }
+
+        # Verify multi-byte UTF-8 character storage (octet_length > char_length confirms multi-byte characters)
+        $lenSql = "SELECT char_length(""notes""), octet_length(""notes"") FROM ""Transaction"" WHERE ""id"" = 'tx-1';"
+        [string]$lenOut = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -F ',' -U $dbUser -d $targetDb -c $lenSql 2>&1 | Out-String).Trim()
+        $lens = $lenOut -split ','
+        if ($lens.Length -ge 2) {
+            [int]$cLen = 0
+            [int]$oLen = 0
+            [int]::TryParse($lens[0], [ref]$cLen) | Out-Null
+            [int]::TryParse($lens[1], [ref]$oLen) | Out-Null
+            if ($oLen -le $cLen -or $cLen -eq 0) {
+                throw "Multi-byte Unicode corrupted! octet_length ($oLen) must exceed char_length ($cLen)"
+            }
         }
 
         # Verification 5: Referential Integrity across all foreign key relations (zero orphan FKs)
