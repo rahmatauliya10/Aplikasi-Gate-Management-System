@@ -464,6 +464,11 @@ jobs:
           set -Eeuo pipefail
           pwsh -ExecutionPolicy Bypass -File scripts/test-cli-rollback-syntax.ps1
 
+      - name: Execute PostgreSQL Multi-Version Compatibility Suite (MERGE-04)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-postgres-compatibility.ps1
+
       - name: Verify Strict CI Drill & Target Guard Evidence (FIX-04)
         run: |
           set -Eeuo pipefail
@@ -475,6 +480,13 @@ jobs:
               throw new Error('DR isolation guard evidence not PASSED: ' + JSON.stringify(drEv.summary));
             }
             console.log('DR isolation guard evidence verified: PASSED (' + drEv.summary.passed + '/' + drEv.summary.total + ')');
+
+            const pgRaw = fs.readFileSync('artifacts/release-proof/postgres-compatibility-evidence.json', 'utf8').replace(/^\uFEFF/, '');
+            const pgEv = JSON.parse(pgRaw);
+            if (pgEv.status !== 'PASSED' || pgEv.summary.failed !== 0 || pgEv.summary.passed < 2) {
+              throw new Error('PostgreSQL compatibility evidence not PASSED: ' + JSON.stringify(pgEv.summary));
+            }
+            console.log('PostgreSQL compatibility evidence verified: PASSED (' + pgEv.summary.passed + '/' + pgEv.summary.total + ')');
           "
 
       - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)

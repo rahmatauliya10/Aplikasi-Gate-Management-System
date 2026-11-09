@@ -384,52 +384,118 @@ if ($rel21Error -match "CRITICAL PROVENANCE FAILURE" -and $rel21Success -eq $val
 
 # 14. REL-22: Release provenance assertion binding (Git SHA -> Manifest/Image)
 $script:TotalTests++
-Write-Host "`n[$script:TotalTests] Testing: [REL-22] Release provenance assertion must reject mismatched manifest or image labels..." -ForegroundColor Yellow
-[string]$rel22ManifestMismatch = ""
-[string]$rel22ImageMismatch = ""
+Write-Host "`n[$script:TotalTests] Testing: [REL-22] Release provenance assertion must fail-closed on corrupt/mismatched manifest or image labels..." -ForegroundColor Yellow
 [string]$rel22TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gms_rel22_test_" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -Path $rel22TempDir -ItemType Directory -Force | Out-Null
 try {
+    [string]$validSha = "2222222222222222222222222222222222222222"
+    [string]$validDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     [string]$dummyManifest = Join-Path $rel22TempDir "mismatched-manifest.json"
-    $manObj = @{
+    [string]$corruptManifest = Join-Path $rel22TempDir "corrupt-manifest.json"
+    [string]$noShaManifest = Join-Path $rel22TempDir "no-sha-manifest.json"
+    [string]$missingDigestManifest = Join-Path $rel22TempDir "missing-digest-manifest.json"
+    [string]$validManifest = Join-Path $rel22TempDir "valid-manifest.json"
+
+    # Write manifests
+    Set-Content -Path $dummyManifest -Value (@{ release = "v1.2.3"; gitSha = "1111111111111111111111111111111111111111" } | ConvertTo-Json) -Encoding utf8
+    Set-Content -Path $corruptManifest -Value "{ not valid json }" -Encoding utf8
+    Set-Content -Path $noShaManifest -Value (@{ release = "v1.2.3" } | ConvertTo-Json) -Encoding utf8
+    Set-Content -Path $missingDigestManifest -Value (@{ release = "v1.2.3"; gitSha = $validSha } | ConvertTo-Json) -Encoding utf8
+    Set-Content -Path $validManifest -Value (@{
         release = "v1.2.3"
-        gitSha = "1111111111111111111111111111111111111111"
-    }
-    Set-Content -Path $dummyManifest -Value ($manObj | ConvertTo-Json) -Encoding utf8
+        gitSha = $validSha
+        backend = @{ digest = $validDigest }
+        frontend = @{ digest = $validDigest }
+        migrator = @{ digest = $validDigest }
+    } | ConvertTo-Json) -Encoding utf8
 
-    # Test Manifest mismatch
-    try {
-        Assert-ReleaseProvenance -ExpectedGitSha "2222222222222222222222222222222222222222" -TargetManifestPath $dummyManifest | Out-Null
-    } catch {
-        $rel22ManifestMismatch = $_.ToString()
-    }
+    [string]$s1Err = ""; [string]$s2Err = ""; [string]$s3Err = ""; [string]$s4Err = ""
+    [string]$s5Err = ""; [string]$s6Err = ""; [string]$s7Err = ""; [string]$s8Err = ""
+    [bool]$s9Success = $false
 
-    # Test Image label mismatch via mock ImageInspector scriptblock
+    # S1: Missing manifest file when RequireManifest is set
     try {
-        Assert-ReleaseProvenance -ExpectedGitSha "2222222222222222222222222222222222222222" -BackendImageTag "gms-backend:v1.2.3" -ImageInspector {
-            param($tag)
-            return '{"org.opencontainers.image.revision": "3333333333333333333333333333333333333333"}'
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath (Join-Path $rel22TempDir "nonexistent.json") -RequireManifest | Out-Null
+    } catch { $s1Err = $_.ToString() }
+
+    # S2: Corrupt manifest
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $corruptManifest | Out-Null
+    } catch { $s2Err = $_.ToString() }
+
+    # S3: Missing gitSha in manifest
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $noShaManifest | Out-Null
+    } catch { $s3Err = $_.ToString() }
+
+    # S4: Mismatched gitSha
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $dummyManifest | Out-Null
+    } catch { $s4Err = $_.ToString() }
+
+    # S5: Missing digests when RequireManifest is set
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $missingDigestManifest -RequireManifest | Out-Null
+    } catch { $s5Err = $_.ToString() }
+
+    # S6: Mismatched image digest against manifest
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $validManifest -ExpectedBackendDigest "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | Out-Null
+    } catch { $s6Err = $_.ToString() }
+
+    # S7: Mismatched Image label
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -BackendImageTag "gms-backend:v1.2.3" -ImageInspector {
+            param($tag) return '{"org.opencontainers.image.revision": "3333333333333333333333333333333333333333"}'
         } | Out-Null
-    } catch {
-        $rel22ImageMismatch = $_.ToString()
-    }
+    } catch { $s7Err = $_.ToString() }
 
-    # Test Matching Provenance succeeds
-    [bool]$rel22Success = Assert-ReleaseProvenance -ExpectedGitSha "2222222222222222222222222222222222222222" -BackendImageTag "gms-backend:v1.2.3" -ImageInspector {
-        param($tag)
-        return '{"org.opencontainers.image.revision": "2222222222222222222222222222222222222222"}'
-    }
+    # S8: Missing image labels when RequireImageLabels is set
+    try {
+        Assert-ReleaseProvenance -ExpectedGitSha $validSha -BackendImageTag "gms-backend:v1.2.3" -RequireImageLabels -ImageInspector {
+            param($tag) return '{}'
+        } | Out-Null
+    } catch { $s8Err = $_.ToString() }
 
-    if ($rel22ManifestMismatch -match "CRITICAL PROVENANCE MISMATCH" -and $rel22ManifestMismatch -match "Target manifest gitSha" -and
-        $rel22ImageMismatch -match "CRITICAL PROVENANCE MISMATCH" -and $rel22ImageMismatch -match "Image label Git SHA" -and
-        $rel22Success -eq $true) {
+    # S9: Fully valid manifest and image labels
+    $s9Success = Assert-ReleaseProvenance `
+        -ExpectedGitSha $validSha `
+        -TargetManifestPath $validManifest `
+        -BackendImageTag "gms-backend:v1.2.3" `
+        -ExpectedBackendDigest $validDigest `
+        -ExpectedFrontendDigest $validDigest `
+        -ExpectedMigratorDigest $validDigest `
+        -RequireManifest `
+        -RequireImageLabels `
+        -ImageInspector {
+            param($tag) return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+        }
+
+    $allPassed = ($s1Err -match "does not exist") -and `
+                 ($s2Err -match "corrupted or invalid JSON") -and `
+                 ($s3Err -match "missing valid 40-character gitSha") -and `
+                 ($s4Err -match "CRITICAL PROVENANCE MISMATCH") -and `
+                 ($s5Err -match "missing valid 64-hex SHA-256 backend digest") -and `
+                 ($s6Err -match "CRITICAL PROVENANCE MISMATCH") -and `
+                 ($s7Err -match "CRITICAL PROVENANCE MISMATCH") -and `
+                 ($s8Err -match "Missing required revision provenance label") -and `
+                 ($s9Success -eq $true)
+
+    if ($allPassed) {
         $script:PassedTests++
-        Write-Host "  [PASS] Correctly enforced provenance assertion binding between Git SHA, manifest, and image labels." -ForegroundColor Green
+        Write-Host "  [PASS] Correctly enforced all 9 fail-closed provenance assertion gates (missing/corrupted/mismatched manifest, digests, and image labels)." -ForegroundColor Green
     } else {
         $script:FailedTests++
-        Write-Host "  [FAIL] Release provenance assertion did not enforce expected checks!" -ForegroundColor Red
-        Write-Host "  Manifest Mismatch Error: $rel22ManifestMismatch" -ForegroundColor DarkGray
-        Write-Host "  Image Mismatch Error: $rel22ImageMismatch" -ForegroundColor DarkGray
+        Write-Host "  [FAIL] Release provenance assertion did not enforce all expected checks!" -ForegroundColor Red
+        Write-Host "  S1 (Missing Manifest): $s1Err" -ForegroundColor DarkGray
+        Write-Host "  S2 (Corrupt Manifest): $s2Err" -ForegroundColor DarkGray
+        Write-Host "  S3 (Missing GitSha):   $s3Err" -ForegroundColor DarkGray
+        Write-Host "  S4 (Mismatched GitSha): $s4Err" -ForegroundColor DarkGray
+        Write-Host "  S5 (Missing Digest):   $s5Err" -ForegroundColor DarkGray
+        Write-Host "  S6 (Mismatched Digest): $s6Err" -ForegroundColor DarkGray
+        Write-Host "  S7 (Mismatched Label): $s7Err" -ForegroundColor DarkGray
+        Write-Host "  S8 (Missing Label):    $s8Err" -ForegroundColor DarkGray
+        Write-Host "  S9 (Valid Provenance): $s9Success" -ForegroundColor DarkGray
     }
 } finally {
     if (Test-Path $rel22TempDir) {

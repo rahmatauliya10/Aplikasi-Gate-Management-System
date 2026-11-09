@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { DatabaseBackupService } from './database-backup.service';
+import {
+  DatabaseBackupService,
+  createSanitizingTransformStream,
+} from './database-backup.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import {
@@ -582,6 +585,76 @@ describe('DatabaseBackupService', () => {
       } else {
         delete process.env.BACKUP_DATABASE_URL;
       }
+    });
+  });
+
+  describe('createSanitizingTransformStream (M02 COPY-aware restore filter)', () => {
+    async function runTransform(chunks: (string | Buffer)[]): Promise<string> {
+      const stream = createSanitizingTransformStream();
+      let result = '';
+      return new Promise((resolve, reject) => {
+        stream.on('data', (d: Buffer) => {
+          result += d.toString('utf8');
+        });
+        stream.on('end', () => resolve(result));
+        stream.on('error', reject);
+        for (const chunk of chunks) {
+          const buf =
+            typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk;
+          stream.write(buf);
+        }
+        stream.end();
+      });
+    }
+
+    it('should sanitize SET transaction_timeout outside COPY blocks', async () => {
+      const input = [
+        'SET statement_timeout = 0;\n',
+        'SET transaction_timeout = 0;\n',
+        'SET client_encoding = "UTF8";\n',
+      ];
+      const output = await runTransform(input);
+      expect(output).toContain('-- sanitized: SET transaction_timeout = 0;');
+      expect(output).toContain('SET statement_timeout = 0;');
+      expect(output).toContain('SET client_encoding = "UTF8";');
+    });
+
+    it('should NEVER sanitize or drop literal transaction_timeout inside COPY blocks', async () => {
+      const input = [
+        'COPY "ActivityLog" ("id", "action", "details") FROM stdin;\n',
+        '1\tLOG_INFO\tConfig transaction_timeout modified\n',
+        '2\tLOG_WARN\tExecuted SET transaction_timeout = 0; manually\n',
+        '\\.\n',
+        'SET transaction_timeout = 0;\n',
+      ];
+      const output = await runTransform(input);
+      // Data lines inside COPY block must remain completely unmodified
+      expect(output).toContain(
+        '1\tLOG_INFO\tConfig transaction_timeout modified',
+      );
+      expect(output).toContain(
+        '2\tLOG_WARN\tExecuted SET transaction_timeout = 0; manually',
+      );
+      // But the statement outside COPY block must be sanitized
+      expect(output).toContain('-- sanitized: SET transaction_timeout = 0;');
+    });
+
+    it('should handle multi-byte UTF-8 split across chunk boundaries without corruption', async () => {
+      // 📦 is 4 bytes: 0xF0 0x9F 0x93 0xA6
+      // Let's create a full line with non-ASCII text and an emoji
+      const text =
+        'Batubara — Kontrak PT. Sinar Jaya 📦\nSET transaction_timeout = 0;\n';
+      const fullBuf = Buffer.from(text, 'utf8');
+
+      // Find the index of the emoji byte
+      const emojiIndex = fullBuf.indexOf(Buffer.from('📦'));
+      // Split right inside the 4-byte emoji sequence
+      const chunk1 = fullBuf.subarray(0, emojiIndex + 2);
+      const chunk2 = fullBuf.subarray(emojiIndex + 2);
+
+      const output = await runTransform([chunk1, chunk2]);
+      expect(output).toContain('Batubara — Kontrak PT. Sinar Jaya 📦');
+      expect(output).toContain('-- sanitized: SET transaction_timeout = 0;');
     });
   });
 });

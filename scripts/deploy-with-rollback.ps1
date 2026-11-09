@@ -251,51 +251,140 @@ function Assert-ReleaseProvenance {
         [Parameter(Mandatory=$false)]
         [string]$BackendImageTag = "",
         [Parameter(Mandatory=$false)]
+        [string]$FrontendImageTag = "",
+        [Parameter(Mandatory=$false)]
+        [string]$MigratorImageTag = "",
+        [Parameter(Mandatory=$false)]
+        [string]$ExpectedBackendDigest = "",
+        [Parameter(Mandatory=$false)]
+        [string]$ExpectedFrontendDigest = "",
+        [Parameter(Mandatory=$false)]
+        [string]$ExpectedMigratorDigest = "",
+        [Parameter(Mandatory=$false)]
+        [switch]$RequireManifest,
+        [Parameter(Mandatory=$false)]
+        [switch]$RequireImageLabels,
+        [Parameter(Mandatory=$false)]
         [scriptblock]$ImageInspector = $null
     )
     if (-not $ExpectedGitSha -or $ExpectedGitSha -notmatch '^[a-fA-F0-9]{40}$') {
-        throw "CRITICAL PROVENANCE FAILURE: Expected Git SHA is invalid or missing ($ExpectedGitSha)."
+        throw "CRITICAL PROVENANCE FAILURE: Expected Git SHA is invalid or missing ('$ExpectedGitSha'). Must be exact 40 hex characters."
     }
 
-    # If TargetManifestPath exists, verify the manifest's gitSha matches ExpectedGitSha
-    if ($TargetManifestPath -and (Test-Path -Path $TargetManifestPath -PathType Leaf)) {
+    # If TargetManifestPath or RequireManifest is specified, validate the manifest strictly fail-closed
+    if ($RequireManifest -or $TargetManifestPath) {
+        if (-not $TargetManifestPath) {
+            throw "CRITICAL PROVENANCE FAILURE: Target release manifest path is mandatory but was not specified. Aborting deployment before maintenance."
+        }
+        if (-not (Test-Path -Path $TargetManifestPath -PathType Leaf)) {
+            throw "CRITICAL PROVENANCE FAILURE: Target release manifest does not exist at [$TargetManifestPath]. Aborting deployment before maintenance."
+        }
+        [object]$manData = $null
         try {
-            $manData = Get-Content -Path $TargetManifestPath -Raw | ConvertFrom-Json
-            if ($manData.gitSha -and $manData.gitSha.ToLower() -ne $ExpectedGitSha.ToLower()) {
-                throw "CRITICAL PROVENANCE MISMATCH: Target manifest gitSha [$($manData.gitSha)] does not match preflight Git SHA [$ExpectedGitSha]."
+            $rawContent = Get-Content -Path $TargetManifestPath -Raw
+            if ([string]::IsNullOrWhiteSpace($rawContent)) {
+                throw "Release manifest file is empty"
             }
+            $manData = $rawContent | ConvertFrom-Json
         } catch {
-            if ($_.ToString() -match "CRITICAL PROVENANCE") { throw }
-            throw "CRITICAL PROVENANCE FAILURE: Failed validating release manifest provenance: $_"
+            throw "CRITICAL PROVENANCE FAILURE: Release manifest at [$TargetManifestPath] is corrupted or invalid JSON: $_"
+        }
+
+        # Validate manifest's gitSha safely under StrictMode
+        [string]$manGitSha = ""
+        if ($manData.PSObject.Properties['gitSha'] -and $manData.gitSha) {
+            $manGitSha = [string]$manData.gitSha
+        } elseif ($manData.PSObject.Properties['releaseSha'] -and $manData.releaseSha) {
+            $manGitSha = [string]$manData.releaseSha
+        } elseif ($manData.PSObject.Properties['release'] -and $manData.release -match '^[a-fA-F0-9]{40}$') {
+            $manGitSha = [string]$manData.release
+        }
+
+        if (-not $manGitSha -or $manGitSha -notmatch '^[a-fA-F0-9]{40}$') {
+            throw "CRITICAL PROVENANCE FAILURE: Release manifest [$TargetManifestPath] missing valid 40-character gitSha field."
+        }
+        if ($manGitSha.ToLower() -ne $ExpectedGitSha.ToLower()) {
+            throw "CRITICAL PROVENANCE MISMATCH: Target manifest gitSha [$manGitSha] does not match target release Git SHA [$ExpectedGitSha]."
+        }
+
+        # Validate image digests in manifest safely under StrictMode
+        [string]$manBackendDig = ""
+        if ($manData.PSObject.Properties['backend'] -and $manData.backend -and $manData.backend.PSObject.Properties['digest'] -and $manData.backend.digest) {
+            $manBackendDig = [string]$manData.backend.digest
+        }
+        [string]$manFrontendDig = ""
+        if ($manData.PSObject.Properties['frontend'] -and $manData.frontend -and $manData.frontend.PSObject.Properties['digest'] -and $manData.frontend.digest) {
+            $manFrontendDig = [string]$manData.frontend.digest
+        }
+        [string]$manMigratorDig = ""
+        if ($manData.PSObject.Properties['migrator'] -and $manData.migrator -and $manData.migrator.PSObject.Properties['digest'] -and $manData.migrator.digest) {
+            $manMigratorDig = [string]$manData.migrator.digest
+        }
+
+        if ($RequireManifest) {
+            if (-not $manBackendDig -or $manBackendDig -notmatch '^sha256:[a-fA-F0-9]{64}$') {
+                throw "CRITICAL PROVENANCE FAILURE: Release manifest [$TargetManifestPath] missing valid 64-hex SHA-256 backend digest (found: '$manBackendDig')."
+            }
+            if (-not $manFrontendDig -or $manFrontendDig -notmatch '^sha256:[a-fA-F0-9]{64}$') {
+                throw "CRITICAL PROVENANCE FAILURE: Release manifest [$TargetManifestPath] missing valid 64-hex SHA-256 frontend digest (found: '$manFrontendDig')."
+            }
+            if (-not $manMigratorDig -or $manMigratorDig -notmatch '^sha256:[a-fA-F0-9]{64}$') {
+                throw "CRITICAL PROVENANCE FAILURE: Release manifest [$TargetManifestPath] missing valid 64-hex SHA-256 migrator digest (found: '$manMigratorDig')."
+            }
+        }
+
+        # If explicit digests were passed to deploy script, they MUST match manifest
+        if ($ExpectedBackendDigest -and $manBackendDig -and $ExpectedBackendDigest -ne $manBackendDig) {
+            throw "CRITICAL PROVENANCE MISMATCH: Specified backend digest [$ExpectedBackendDigest] does not match manifest backend digest [$manBackendDig]."
+        }
+        if ($ExpectedFrontendDigest -and $manFrontendDig -and $ExpectedFrontendDigest -ne $manFrontendDig) {
+            throw "CRITICAL PROVENANCE MISMATCH: Specified frontend digest [$ExpectedFrontendDigest] does not match manifest frontend digest [$manFrontendDig]."
+        }
+        if ($ExpectedMigratorDigest -and $manMigratorDig -and $ExpectedMigratorDigest -ne $manMigratorDig) {
+            throw "CRITICAL PROVENANCE MISMATCH: Specified migrator digest [$ExpectedMigratorDigest] does not match manifest migrator digest [$manMigratorDig]."
         }
     }
 
     # If BackendImageTag is provided, inspect Docker labels (org.opencontainers.image.revision, vcs-ref, com.gms.git-sha)
     if ($BackendImageTag) {
+        [string]$imageLabelsJson = ""
         try {
-            [string]$imageLabelsJson = if ($ImageInspector) {
-                (& $ImageInspector $BackendImageTag | Out-String).Trim()
+            if ($ImageInspector) {
+                $imageLabelsJson = (& $ImageInspector $BackendImageTag | Out-String).Trim()
             } else {
-                (& docker inspect --format '{{json .Config.Labels}}' $BackendImageTag 2>$null | Out-String).Trim()
-            }
-            if ($imageLabelsJson -and $imageLabelsJson -ne "null" -and $imageLabelsJson -ne "{}") {
-                $labels = $imageLabelsJson | ConvertFrom-Json
-                [string]$labelSha = ""
-                if ($labels.psobject.Properties['org.opencontainers.image.revision']) {
-                    $labelSha = [string]$labels.'org.opencontainers.image.revision'
-                } elseif ($labels.psobject.Properties['com.gms.git-sha']) {
-                    $labelSha = [string]$labels.'com.gms.git-sha'
-                } elseif ($labels.psobject.Properties['vcs-ref']) {
-                    $labelSha = [string]$labels.'vcs-ref'
-                }
-                if ($labelSha -and $labelSha -match '^[a-fA-F0-9]{7,40}$') {
-                    if (-not $ExpectedGitSha.ToLower().StartsWith($labelSha.ToLower()) -and -not $labelSha.ToLower().StartsWith($ExpectedGitSha.ToLower())) {
-                        throw "CRITICAL PROVENANCE MISMATCH: Image label Git SHA [$labelSha] does not match preflight Git SHA [$ExpectedGitSha]."
-                    }
-                }
+                $imageLabelsJson = (& docker inspect --format '{{json .Config.Labels}}' $BackendImageTag 2>$null | Out-String).Trim()
             }
         } catch {
-            if ($_.ToString() -match "CRITICAL PROVENANCE") { throw }
+            if ($RequireImageLabels) {
+                throw "CRITICAL PROVENANCE FAILURE: Docker inspect failed on image [$BackendImageTag]: $_"
+            }
+        }
+        if ($RequireImageLabels -and (-not $imageLabelsJson -or $imageLabelsJson -eq "null" -or $imageLabelsJson -eq "{}")) {
+            throw "CRITICAL PROVENANCE FAILURE: Image [$BackendImageTag] has no labels or metadata. Missing required revision provenance label."
+        }
+        if ($imageLabelsJson -and $imageLabelsJson -ne "null" -and $imageLabelsJson -ne "{}") {
+            $labels = $null
+            try {
+                $labels = $imageLabelsJson | ConvertFrom-Json
+            } catch {
+                throw "CRITICAL PROVENANCE FAILURE: Corrupted image labels on [$BackendImageTag]: $_"
+            }
+            [string]$labelSha = ""
+            if ($labels.psobject.Properties['org.opencontainers.image.revision']) {
+                $labelSha = [string]$labels.'org.opencontainers.image.revision'
+            } elseif ($labels.psobject.Properties['com.gms.git-sha']) {
+                $labelSha = [string]$labels.'com.gms.git-sha'
+            } elseif ($labels.psobject.Properties['vcs-ref']) {
+                $labelSha = [string]$labels.'vcs-ref'
+            }
+            if ($RequireImageLabels -and (-not $labelSha -or $labelSha -notmatch '^[a-fA-F0-9]{7,40}$')) {
+                throw "CRITICAL PROVENANCE FAILURE: Image [$BackendImageTag] missing valid Git commit revision label (checked org.opencontainers.image.revision, com.gms.git-sha, vcs-ref)."
+            }
+            if ($labelSha -and $labelSha -match '^[a-fA-F0-9]{7,40}$') {
+                if (-not $ExpectedGitSha.ToLower().StartsWith($labelSha.ToLower()) -and -not $labelSha.ToLower().StartsWith($ExpectedGitSha.ToLower())) {
+                    throw "CRITICAL PROVENANCE MISMATCH: Image label Git SHA [$labelSha] does not match target release Git SHA [$ExpectedGitSha]."
+                }
+            }
         }
     }
     return $true
@@ -801,7 +890,17 @@ try {
 
     # Step 1.0b: Assert release provenance binding between preflight Git SHA and target manifest/images
     Write-Host "[GMS Preflight] Asserting release provenance binding (Git SHA -> Manifest/Images)..." -ForegroundColor Cyan
-    [void](Assert-ReleaseProvenance -ExpectedGitSha $ExactSourceGitSha -TargetManifestPath $ResolvedTargetManifest -BackendImageTag "${BackendRepository}:${TargetReleaseTag}")
+    $requireMan = if ($RequireDigest) { $true } else { $false }
+    [void](Assert-ReleaseProvenance `
+        -ExpectedGitSha $ExactSourceGitSha `
+        -TargetManifestPath $ResolvedTargetManifest `
+        -BackendImageTag "${BackendRepository}:${TargetReleaseTag}" `
+        -FrontendImageTag "${FrontendRepository}:${TargetReleaseTag}" `
+        -MigratorImageTag "${MigratorRepository}:${TargetReleaseTag}" `
+        -ExpectedBackendDigest $BackendDigest `
+        -ExpectedFrontendDigest $FrontendDigest `
+        -ExpectedMigratorDigest $MigratorDigest `
+        -RequireManifest:$requireMan)
     Write-Host "  Release provenance binding strictly confirmed [PASS]" -ForegroundColor Green
 
     # Step 1.1: Verify target image availability and immutability before altering any services

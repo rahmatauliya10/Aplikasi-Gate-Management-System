@@ -13,6 +13,7 @@ import * as argon2 from 'argon2';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { execFile, spawn } from 'child_process';
 import { pipeline, Transform } from 'stream';
+import { StringDecoder } from 'string_decoder';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -94,6 +95,52 @@ export interface DatabaseBackupPayload {
     checksum: string;
   };
   data: Record<string, any[]>;
+}
+
+export function createSanitizingTransformStream(): Transform {
+  const decoder = new StringDecoder('utf8');
+  let leftover = '';
+  let inCopy = false;
+
+  return new Transform({
+    transform(chunk: Buffer, _encoding: BufferEncoding, callback) {
+      const text = leftover + decoder.write(chunk);
+      const lines = text.split('\n');
+      leftover = lines.pop() ?? '';
+
+      const outputLines: string[] = [];
+      for (const line of lines) {
+        if (/^COPY\s+/i.test(line)) {
+          inCopy = true;
+          outputLines.push(line);
+        } else if (line === '\\.' || line.trimEnd() === '\\.') {
+          inCopy = false;
+          outputLines.push(line);
+        } else if (!inCopy && /^\s*SET\s+transaction_timeout\s*=/i.test(line)) {
+          // Only sanitize session config statement outside COPY data blocks
+          outputLines.push('-- sanitized: SET transaction_timeout = 0;');
+        } else {
+          outputLines.push(line);
+        }
+      }
+      callback(
+        null,
+        outputLines.join('\n') + (outputLines.length > 0 ? '\n' : ''),
+      );
+    },
+    flush(callback) {
+      const text = leftover + decoder.end();
+      if (text) {
+        if (!inCopy && /^\s*SET\s+transaction_timeout\s*=/i.test(text)) {
+          callback(null, '-- sanitized: SET transaction_timeout = 0;\n');
+        } else {
+          callback(null, text);
+        }
+      } else {
+        callback();
+      }
+    },
+  });
 }
 
 @Injectable()
@@ -2039,12 +2086,18 @@ export class DatabaseBackupService
       });
     } catch (restoreErr: any) {
       const errMsg = `${restoreErr?.message || ''} ${restoreErr?.stderr || ''}`;
-      const isTxTimeout = errMsg.includes(
-        'unrecognized configuration parameter "transaction_timeout"',
-      );
+      const isAuthOrConnError =
+        /password authentication failed|could not connect to server|Connection refused|does not exist/i.test(
+          errMsg,
+        );
+      const isTxTimeout =
+        !isAuthOrConnError &&
+        errMsg.includes(
+          'unrecognized configuration parameter "transaction_timeout"',
+        );
       if (isTxTimeout) {
         this.logger.warn(
-          'Target PostgreSQL engine rejected transaction_timeout (server version < 17). Executing sanitized single-transaction SQL fallback via streaming pipeline...',
+          'Target PostgreSQL engine rejected transaction_timeout (server version < 17). Executing COPY-aware single-transaction SQL fallback via streaming pipeline...',
         );
         await new Promise<void>((resolve, reject) => {
           const restoreProc = spawn(
@@ -2069,61 +2122,46 @@ export class DatabaseBackupService
             ],
             {
               env: { ...process.env, PGPASSWORD: password },
-              stdio: ['pipe', 'pipe', 'pipe'],
+              stdio: ['pipe', 'ignore', 'pipe'],
             },
           );
 
           let restoreStderr = '';
           let psqlStderr = '';
+          const MAX_STDERR_BYTES = 64 * 1024;
           restoreProc.stderr?.on('data', (d: Buffer) => {
-            restoreStderr += d.toString('utf8');
+            if (restoreStderr.length < MAX_STDERR_BYTES) {
+              restoreStderr += d
+                .toString('utf8')
+                .slice(0, MAX_STDERR_BYTES - restoreStderr.length);
+            }
           });
           psqlProc.stderr?.on('data', (d: Buffer) => {
-            psqlStderr += d.toString('utf8');
+            if (psqlStderr.length < MAX_STDERR_BYTES) {
+              psqlStderr += d
+                .toString('utf8')
+                .slice(0, MAX_STDERR_BYTES - psqlStderr.length);
+            }
           });
 
-          let leftover = '';
-          const filterTransform = new Transform({
-            transform(chunk: Buffer, _encoding: BufferEncoding, callback) {
-              const text = leftover + chunk.toString('utf8');
-              const lines = text.split('\n');
-              leftover = lines.pop() ?? '';
-              const sanitizedLines = lines.map((line) =>
-                line.replace(
-                  /SET\s+transaction_timeout\s*=\s*0\s*;/gi,
-                  '-- sanitized: SET transaction_timeout = 0;',
-                ),
-              );
-              callback(
-                null,
-                sanitizedLines.join('\n') +
-                  (sanitizedLines.length > 0 ? '\n' : ''),
-              );
-            },
-            flush(callback) {
-              if (leftover) {
-                const sanitized = leftover.replace(
-                  /SET\s+transaction_timeout\s*=\s*0\s*;/gi,
-                  '-- sanitized: SET transaction_timeout = 0;',
-                );
-                callback(null, sanitized);
-              } else {
-                callback();
-              }
-            },
-          });
+          const filterTransform = createSanitizingTransformStream();
 
           let hasSettled = false;
+          let timeoutTimer: NodeJS.Timeout | null = null;
+
           const settleError = (err: unknown) => {
             if (hasSettled) return;
             hasSettled = true;
+            if (timeoutTimer) {
+              clearTimeout(timeoutTimer);
+            }
             try {
-              restoreProc.kill();
+              restoreProc.kill('SIGTERM');
             } catch {
               // ignore process kill error if already terminated
             }
             try {
-              psqlProc.kill();
+              psqlProc.kill('SIGTERM');
             } catch {
               // ignore process kill error if already terminated
             }
@@ -2137,6 +2175,17 @@ export class DatabaseBackupService
             reject(normalizedError);
           };
 
+          timeoutTimer = setTimeout(
+            () => {
+              settleError(
+                new Error(
+                  'Streaming restore execution timed out after 10 minutes',
+                ),
+              );
+            },
+            10 * 60 * 1000,
+          );
+
           restoreProc.on('error', (err) => settleError(err));
           psqlProc.on('error', (err) => settleError(err));
           filterTransform.on('error', (err) => settleError(err));
@@ -2148,6 +2197,8 @@ export class DatabaseBackupService
             return;
           }
 
+          let streamPipelineFinished = false;
+
           pipeline(
             restoreProc.stdout,
             filterTransform,
@@ -2155,27 +2206,40 @@ export class DatabaseBackupService
             (err) => {
               if (err) {
                 settleError(err);
+              } else {
+                streamPipelineFinished = true;
+                checkDone();
               }
             },
           );
 
-          let restoreExit: number | null = null;
-          let psqlExit: number | null = null;
+          let restoreExited = false;
+          let psqlExited = false;
+          let restoreExitCode: number | null = null;
+          let psqlExitCode: number | null = null;
 
           const checkDone = () => {
-            if (restoreExit !== null && psqlExit !== null && !hasSettled) {
+            if (
+              restoreExited &&
+              psqlExited &&
+              streamPipelineFinished &&
+              !hasSettled
+            ) {
               hasSettled = true;
-              if (restoreExit !== 0) {
+              if (timeoutTimer) {
+                clearTimeout(timeoutTimer);
+              }
+              if (restoreExitCode !== 0) {
                 return reject(
                   new Error(
-                    `pg_restore streaming process exited with code ${restoreExit}: ${restoreStderr}`,
+                    `pg_restore streaming process exited with code ${restoreExitCode}: ${restoreStderr}`,
                   ),
                 );
               }
-              if (psqlExit !== 0) {
+              if (psqlExitCode !== 0) {
                 return reject(
                   new Error(
-                    `psql streaming execution exited with code ${psqlExit}: ${psqlStderr}`,
+                    `psql streaming execution exited with code ${psqlExitCode}: ${psqlStderr}`,
                   ),
                 );
               }
@@ -2183,13 +2247,15 @@ export class DatabaseBackupService
             }
           };
 
-          restoreProc.on('close', (code) => {
-            restoreExit = code ?? 0;
+          restoreProc.on('close', (code, signal) => {
+            restoreExited = true;
+            restoreExitCode = signal ? -1 : (code ?? -1);
             checkDone();
           });
 
-          psqlProc.on('close', (code) => {
-            psqlExit = code ?? 0;
+          psqlProc.on('close', (code, signal) => {
+            psqlExited = true;
+            psqlExitCode = signal ? -1 : (code ?? -1);
             checkDone();
           });
         });

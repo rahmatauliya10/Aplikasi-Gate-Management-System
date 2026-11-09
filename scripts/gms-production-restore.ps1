@@ -445,36 +445,63 @@ function Invoke-AtomicPostgresRestore {
 
     Write-Log "  Executing atomic single-transaction restore for [$Context] on [$DbName]..."
 
-    # Detect PostgreSQL server version
+    # Detect PostgreSQL server version fail-closed without string-interpolating credentials
     [string]$versionNumStr = ""
+    [int]$vExitCode = 1
     try {
-        $vCmd = if ($Pass) {
-            "PGPASSWORD='$Pass' psql -t -A -U '$User' -d '$DbName' -c 'SHOW server_version_num;'"
-        } else {
-            "psql -t -A -U '$User' -d '$DbName' -c 'SHOW server_version_num;'"
-        }
-        $vOut = & docker exec $Container sh -c $vCmd 2>&1
+        $vArgs = @("exec")
+        if ($Pass) { $vArgs += @("-e", "PGPASSWORD=$Pass") }
+        $vArgs += @($Container, "psql", "-t", "-A", "-U", $User, "-d", $DbName, "-c", "SHOW server_version_num;")
+        $vOut = & docker @vArgs 2>&1
+        $vExitCode = $LASTEXITCODE
         $versionNumStr = ([string]($vOut | Out-String)).Trim()
-    } catch {}
+    } catch {
+        $versionNumStr = $_.ToString()
+    }
 
     [int]$serverVersionNum = 0
-    [int]::TryParse($versionNumStr, [ref]$serverVersionNum) | Out-Null
+    [bool]$parsedVersion = [int]::TryParse($versionNumStr, [ref]$serverVersionNum)
+    if ($vExitCode -ne 0 -or -not $parsedVersion -or $serverVersionNum -le 0) {
+        throw "CRITICAL RESTORE FAILURE: Unable to detect PostgreSQL server version on [$Container] (query exit code: $vExitCode, output: '$versionNumStr'). Fail-closed: restore aborted before any database mutation."
+    }
     Write-Log "  Detected PostgreSQL server version: $serverVersionNum on [$Container]" -Level "INFO"
 
     [string]$restoreOutput = ""
     [int]$exitCode = 0
 
     if ($serverVersionNum -ge 170000) {
+        # Native PostgreSQL 17+: transaction_timeout is supported natively
         Write-Log "  PostgreSQL 17+ detected: Running native atomic pg_restore with --single-transaction --exit-on-error..." -Level "INFO"
-        $envPrefix = if ($Pass) { "PGPASSWORD='$Pass' " } else { "" }
-        $restoreCmd = "${envPrefix}pg_restore --username='$User' --dbname='$DbName' --clean --if-exists --single-transaction --exit-on-error --no-owner --no-privileges '$DumpPathInContainer' 2>&1"
-        $restoreOutput = & docker exec $Container sh -c $restoreCmd
+        $execArgs = @("exec")
+        if ($Pass) { $execArgs += @("-e", "PGPASSWORD=$Pass") }
+        $execArgs += @(
+            $Container,
+            "pg_restore",
+            "--username=$User",
+            "--dbname=$DbName",
+            "--clean",
+            "--if-exists",
+            "--single-transaction",
+            "--exit-on-error",
+            "--no-owner",
+            "--no-privileges",
+            $DumpPathInContainer
+        )
+        $restoreOutput = & docker @execArgs 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
     } else {
-        Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Running sanitized atomic restore pipeline via psql --single-transaction ON_ERROR_STOP=1..." -Level "INFO"
-        $envPrefix = if ($Pass) { "PGPASSWORD='$Pass' " } else { "" }
-        $pipeCmd = "set -e -o pipefail; ${envPrefix}pg_restore --clean --if-exists --no-owner --no-privileges '$DumpPathInContainer' | sed '/transaction_timeout/d' | ${envPrefix}psql -U '$User' -d '$DbName' -v ON_ERROR_STOP=1 --single-transaction 2>&1"
-        $restoreOutput = & docker exec $Container sh -c $pipeCmd
+        # PostgreSQL < 17 (e.g. PG15): Execute COPY-aware streaming pipeline without dropping COPY data rows.
+        # Awk state machine tracks COPY blocks: only filters top-level SET transaction_timeout outside COPY data.
+        Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Running COPY-aware atomic restore pipeline via psql --single-transaction ON_ERROR_STOP=1..." -Level "INFO"
+        
+        $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[[:space:]]+transaction_timeout/ { next } { print }'
+        $pipeScript = "set -e -o pipefail; pg_restore --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' | psql -U `"$User`" -d `"$DbName`" -v ON_ERROR_STOP=1 --single-transaction"
+        
+        $execArgs = @("exec")
+        if ($Pass) { $execArgs += @("-e", "PGPASSWORD=$Pass") }
+        $execArgs += @($Container, "sh", "-c", $pipeScript)
+        
+        $restoreOutput = & docker @execArgs 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
     }
 
