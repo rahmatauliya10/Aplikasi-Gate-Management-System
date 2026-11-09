@@ -402,7 +402,7 @@ foreach ($engine in $Engines) {
         } else {
             Write-Host "  Executing COPY-aware awk streaming pipeline restore (PG 15 fallback)..."
             $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
-            $pipeScript = "set -e -o pipefail; pg_restore --clean --if-exists --no-owner --no-privileges `"$dumpFileInContainer`" | awk '$awkScript' | psql -U `"$dbUser`" -d `"$targetDb`" -v ON_ERROR_STOP=1 --single-transaction"
+            $pipeScript = "set -e -o pipefail; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$dumpFileInContainer`" | awk '$awkScript' | psql -U `"$dbUser`" -d `"$targetDb`" -v ON_ERROR_STOP=1 --single-transaction"
             $restoreOutput = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $pipeScript 2>&1 | Out-String
             $restoreExit = $LASTEXITCODE
         }
