@@ -781,6 +781,26 @@ describe('DatabaseBackupService', () => {
       expect((psqlProc.stdin as any)?.writableEnded).toBe(false);
     });
 
+    it('should fail-closed when psql.stdin emits EPIPE error (destination closed while writing)', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        5000,
+      );
+
+      restoreProc.stdout?.write('CREATE TABLE "Test" (id text);\n');
+
+      // Simulate psql abruptly closing stdin / emitting EPIPE write error
+      const epipeErr = new Error('write EPIPE');
+      (epipeErr as any).code = 'EPIPE';
+      psqlProc.stdin?.emit('error', epipeErr);
+
+      await expect(promise).rejects.toThrow(/write EPIPE/);
+      expect(restoreProc.killed).toBe(true);
+      expect(psqlProc.killed).toBe(true);
+    });
+
     it('should fail-closed when child process is terminated by signal (SIGKILL / SIGTERM)', async () => {
       const promise = executeStreamingRestorePipeline(
         restoreProc,

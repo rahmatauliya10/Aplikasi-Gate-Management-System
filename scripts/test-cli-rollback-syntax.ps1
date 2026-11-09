@@ -534,6 +534,29 @@ try {
             param($tag) return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
         }
 
+    # S13: Exact immutable digest target inspection (inspects repository@digest, fails if digest labels mismatch)
+    [string]$s13Err = ""
+    $script:s13InspectTargetObserved = ""
+    try {
+        Assert-ReleaseProvenance `
+            -ExpectedGitSha $validSha `
+            -BackendImageTag "gms-backend:v1.2.3" `
+            -FrontendImageTag "gms-frontend:v1.2.3" `
+            -MigratorImageTag "gms-migrator:v1.2.3" `
+            -ExpectedBackendDigest $validDigest `
+            -RequireImageLabels `
+            -ImageInspector {
+                param($target)
+                if ($target -like "*backend*") {
+                    $script:s13InspectTargetObserved = $target
+                }
+                if ($target -eq "gms-backend@$validDigest") {
+                    return "{`"org.opencontainers.image.revision`": `"9999999999999999999999999999999999999999`"}"
+                }
+                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+            } | Out-Null
+    } catch { $s13Err = $_.ToString() }
+
     $allPassed = ($s1Err -match "does not exist") -and `
                  ($s2Err -match "corrupted or invalid JSON") -and `
                  ($s3Err -match "missing valid 40-character gitSha") -and `
@@ -545,11 +568,14 @@ try {
                  ($s9Err -match "CRITICAL PROVENANCE MISMATCH: frontend image") -and `
                  ($s10Err -match "migrator image .* has no labels or metadata") -and `
                  ($s11Err -match "Docker inspect failed on backend image") -and `
-                 ($s12Success -eq $true)
+                 ($s12Success -eq $true) -and `
+                 ($script:s13InspectTargetObserved -eq "gms-backend@$validDigest") -and `
+                 ($s13Err -match "CRITICAL PROVENANCE MISMATCH: backend image") -and `
+                 ($s13Err -match "gms-backend@sha256")
 
     if ($allPassed) {
         $script:PassedTests++
-        Write-Host "  [PASS] Correctly enforced all 12 fail-closed provenance assertion gates across 3 images (backend, frontend, migrator)." -ForegroundColor Green
+        Write-Host "  [PASS] Correctly enforced all 13 fail-closed provenance assertion gates across 3 images (backend, frontend, migrator)." -ForegroundColor Green
     } else {
         $script:FailedTests++
         Write-Host "  [FAIL] Release provenance assertion did not enforce all expected checks!" -ForegroundColor Red
@@ -565,6 +591,7 @@ try {
         Write-Host "  S10 (Migrator No Labels): $s10Err" -ForegroundColor DarkGray
         Write-Host "  S11 (Inspect Failure):    $s11Err" -ForegroundColor DarkGray
         Write-Host "  S12 (Valid Provenance):   $s12Success" -ForegroundColor DarkGray
+        Write-Host "  S13 (Exact Digest Fail):  $s13Err" -ForegroundColor DarkGray
     }
 } finally {
     if (Test-Path $rel22TempDir) {

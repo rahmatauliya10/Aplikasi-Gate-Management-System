@@ -105,6 +105,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         cargoType: 'RAW_MATERIAL',
         cargoProcessType: 'INBOUND',
         status: 'INCOMING_CHECK_IN_PROGRESS',
+        notes: 'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
         gateInAt: new Date(),
         weighbridgeRecords: {
           create: {
@@ -258,6 +259,9 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
     expect(restoredTx).not.toBeNull();
     expect(restoredTx?.plateNumber).toBe('B9999DRTest');
+    expect(restoredTx?.notes).toBe(
+      'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
+    );
     expect(restoredTx?.weighbridgeRecords).toHaveLength(1);
     expect(restoredTx?.qcVehicleChecks).toHaveLength(1);
     expect(restoredTx?.incomingMaterialChecks).toHaveLength(1);
@@ -318,6 +322,9 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
     expect(bundleRestoredTx).not.toBeNull();
     expect(bundleRestoredTx?.plateNumber).toBe('B9999DRTest');
+    expect(bundleRestoredTx?.notes).toBe(
+      'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
+    );
     expect(bundleRestoredTx?.weighbridgeRecords[0].weight).toBe(15400);
 
     // Clean up temporary test records
@@ -347,5 +354,57 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     } catch (e) {
       // ignore
     }
+  });
+
+  it('should fail-closed and reject corrupted portable bundle payload without mutating database', async () => {
+    const adminPassword = 'DrCorruptPassword123!';
+    const passwordHash = await argon2.hash(adminPassword);
+
+    const corruptUser = await prisma.user.create({
+      data: {
+        email: 'dr_corrupt_test@gms.local',
+        username: 'dr_corrupt_test',
+        passwordHash,
+        name: 'DR Corrupt Test User',
+        role: 'ADMIN',
+        isActive: true,
+      },
+    });
+
+    const jwtUser = {
+      id: corruptUser.id,
+      email: corruptUser.email,
+      role: corruptUser.role,
+      tokenVersion: corruptUser.tokenVersion,
+    };
+
+    const initialTxCount = await prisma.transaction.count();
+
+    const tamperedBundle = {
+      metadata: {
+        system: 'GMS_GATE_MANAGEMENT_SYSTEM',
+        version: '1.0.0',
+        checksums: { dump: 'invalid-checksum' },
+      },
+      dumpBase64: Buffer.from('INVALID_CORRUPTED_DUMP_STREAM').toString(
+        'base64',
+      ),
+      signature:
+        'deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb',
+    };
+
+    await expect(
+      backupService.restoreFromPortableBundle(
+        jwtUser,
+        tamperedBundle,
+        adminPassword,
+        '127.0.0.1',
+      ),
+    ).rejects.toThrow();
+
+    const postTxCount = await prisma.transaction.count();
+    expect(postTxCount).toBe(initialTxCount);
+
+    await prisma.user.delete({ where: { id: corruptUser.id } });
   });
 });

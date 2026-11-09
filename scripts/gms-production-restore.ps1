@@ -433,6 +433,26 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 # Step 2.1: Register PREPARED recovery state in persistent ledger
 Update-RecoveryLedger -State "PREPARED"
 
+function Clear-StaleGmsRestoreArtifacts {
+    param(
+        [Parameter(Mandatory=$true)][string]$Container
+    )
+    try {
+        # Securely sweep stale GMS restore staging directories from previous crashed runs
+        $findScript = 'find /tmp -maxdepth 1 -name "gms_restore_*" -type d 2>/dev/null'
+        $staleDirs = (& docker exec $Container sh -c $findScript 2>&1 | Out-String).Trim()
+        if ($staleDirs) {
+            $dirList = $staleDirs -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -like "/tmp/gms_restore_*" }
+            foreach ($d in $dirList) {
+                Write-Log "  [CLEANUP] Removing stale crash artifact staging directory: $d from container [$Container]..." -Level "WARN"
+                & docker exec $Container rm -rf $d 2>&1 | Out-Null
+            }
+        }
+    } catch {
+        Write-Log "  [WARN] Note during stale restore artifact sweep: $_" -Level "WARN"
+    }
+}
+
 function Invoke-AtomicPostgresRestore {
     param(
         [Parameter(Mandatory=$true)][string]$Container,
@@ -491,47 +511,72 @@ function Invoke-AtomicPostgresRestore {
         $exitCode = $LASTEXITCODE
     } else {
         # PostgreSQL < 17 (e.g. PG15): Two-Phase Validated Generation & Atomic Execution
-        # Phase 1: Generate sanitized SQL and validate producer exit code BEFORE touching database.
-        # This guarantees psql is NEVER invoked if pg_restore or awk fails or exits early, preventing
-        # psql --single-transaction from committing partial transactions on premature EOF.
-        Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Phase 1 - Generating and validating sanitized SQL dump..." -Level "INFO"
-        
-        $tempSqlInContainer = "/tmp/gms_restore_stage_${TimestampSuffix}.sql"
-        $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
-        $genScript = "set -e -o pipefail; rm -f `"$tempSqlInContainer`"; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' > `"$tempSqlInContainer`""
-        
-        $execGenArgs = @("exec")
-        if ($Pass) { $execGenArgs += @("-e", "PGPASSWORD=$Pass") }
-        $execGenArgs += @($Container, "sh", "-c", $genScript)
-        
-        $genOutput = & docker @execGenArgs 2>&1 | Out-String
-        $genExitCode = $LASTEXITCODE
-        
-        if ($genExitCode -ne 0) {
-            & docker exec $Container rm -f $tempSqlInContainer 2>&1 | Out-Null
-            throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation failed for [$Context] with exit code $genExitCode. Zero queries sent to target database. Output: $genOutput"
+        # Pre-cleanup: Sweep any stale artifacts left from previous crashed recovery operations
+        Clear-StaleGmsRestoreArtifacts -Container $Container
+
+        [string]$stageUniqueId = [guid]::NewGuid().ToString("N").Substring(0, 8)
+        [string]$tempStageDir = "/tmp/gms_restore_${TimestampSuffix}_${stageUniqueId}"
+        [string]$tempSqlFile = "${tempStageDir}/stage.sql"
+
+        try {
+            # Storage Capacity Pre-flight Check:
+            # Plain SQL dump expansion can reach 3x. Verify /tmp has >= 3x dump size + 100MB buffer.
+            Write-Log "  PostgreSQL < 17: Checking container storage capacity in /tmp before SQL generation..." -Level "INFO"
+            [string]$sizeStr = (& docker exec $Container stat -c %s "$DumpPathInContainer" 2>$null | Out-String).Trim()
+            [int64]$dumpBytes = 0
+            [bool]$hasDumpSize = [int64]::TryParse($sizeStr, [ref]$dumpBytes)
+            
+            [string]$availKbStr = (& docker exec $Container sh -c "df -k /tmp | awk 'NR==2 {print \$4}'" 2>$null | Out-String).Trim()
+            [int64]$availKb = 0
+            [bool]$hasAvail = [int64]::TryParse($availKbStr, [ref]$availKb)
+
+            if ($hasDumpSize -and $hasAvail -and $dumpBytes -gt 0) {
+                [int64]$availBytes = $availKb * 1024
+                [int64]$requiredBytes = [Math]::Max($dumpBytes * 3, 104857600) # Max(3x dump, 100MB)
+                if ($availBytes -lt $requiredBytes) {
+                    throw "CRITICAL RESTORE PREFLIGHT: Insufficient storage capacity in container /tmp for uncompressed SQL staging. Available: $([Math]::Round($availBytes / 1MB, 2))MB, Required: $([Math]::Round($requiredBytes / 1MB, 2))MB. Restore aborted fail-closed."
+                }
+                Write-Log "  Storage preflight verified: $([Math]::Round($availBytes / 1MB, 2))MB available in /tmp (Required: $([Math]::Round($requiredBytes / 1MB, 2))MB) [PASS]" -Level "INFO"
+            }
+
+            # Phase 1: Generate sanitized SQL in isolated directory with restricted permissions (0700 dir, 0600 file)
+            Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Phase 1 - Generating and validating sanitized SQL dump..." -Level "INFO"
+            $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
+            $genScript = "set -e -o pipefail; umask 077; mkdir -m 700 -p `"$tempStageDir`"; trap 'rm -rf `"$tempStageDir`"' INT TERM; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' > `"$tempSqlFile`""
+            
+            $execGenArgs = @("exec")
+            if ($Pass) { $execGenArgs += @("-e", "PGPASSWORD=$Pass") }
+            $execGenArgs += @($Container, "sh", "-c", $genScript)
+            
+            $genOutput = & docker @execGenArgs 2>&1 | Out-String
+            $genExitCode = $LASTEXITCODE
+            
+            if ($genExitCode -ne 0) {
+                throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation failed for [$Context] with exit code $($genExitCode). Zero queries sent to target database. Output: $genOutput"
+            }
+
+            # Verify generated SQL file exists and is non-empty
+            $sizeCheck = (& docker exec $Container sh -c "test -s `"$tempSqlFile`" && echo OK || echo EMPTY" 2>&1 | Out-String).Trim()
+            if ($sizeCheck -ne "OK") {
+                throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation produced an empty or missing SQL file ($tempSqlFile). Restore aborted before database mutation."
+            }
+
+            # Phase 2: Execute verified SQL in an atomic single transaction
+            Write-Log "  PostgreSQL < 17 detected: Phase 2 - Executing validated SQL in atomic single transaction via psql..." -Level "INFO"
+            $applyScript = "set -e -o pipefail; psql -U `"$User`" -d `"$DbName`" -v ON_ERROR_STOP=1 --single-transaction -f `"$tempSqlFile`""
+            
+            $execApplyArgs = @("exec")
+            if ($Pass) { $execApplyArgs += @("-e", "PGPASSWORD=$Pass") }
+            $execApplyArgs += @($Container, "sh", "-c", $applyScript)
+            
+            $restoreOutput = & docker @execApplyArgs 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+        } finally {
+            # Guaranteed cleanup in PowerShell finally: always clean up temporary staging directory and SQL file
+            if ($tempStageDir) {
+                & docker exec $Container rm -rf $tempStageDir 2>&1 | Out-Null
+            }
         }
-
-        # Verify generated SQL file exists and is non-empty
-        $sizeCheck = (& docker exec $Container sh -c "test -s `"$tempSqlInContainer`" && echo OK || echo EMPTY" 2>&1 | Out-String).Trim()
-        if ($sizeCheck -ne "OK") {
-            & docker exec $Container rm -f $tempSqlInContainer 2>&1 | Out-Null
-            throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation produced an empty or missing SQL file ($tempSqlInContainer). Restore aborted before database mutation."
-        }
-
-        # Phase 2: Execute verified SQL in an atomic single transaction
-        Write-Log "  PostgreSQL < 17 detected: Phase 2 - Executing validated SQL in atomic single transaction via psql..." -Level "INFO"
-        $applyScript = "set -e -o pipefail; psql -U `"$User`" -d `"$DbName`" -v ON_ERROR_STOP=1 --single-transaction -f `"$tempSqlInContainer`""
-        
-        $execApplyArgs = @("exec")
-        if ($Pass) { $execApplyArgs += @("-e", "PGPASSWORD=$Pass") }
-        $execApplyArgs += @($Container, "sh", "-c", $applyScript)
-        
-        $restoreOutput = & docker @execApplyArgs 2>&1 | Out-String
-        $exitCode = $LASTEXITCODE
-
-        # Always clean up temporary SQL file
-        & docker exec $Container rm -f $tempSqlInContainer 2>&1 | Out-Null
     }
 
     if ($exitCode -ne 0) {

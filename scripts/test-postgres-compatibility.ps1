@@ -612,6 +612,50 @@ foreach ($engine in $Engines) {
         }
         Write-Host "    [LIVE PG ROLLBACK PROVEN] Upstream producer failure aborted before commit. Zero partial rows committed ($canaryCount canary rows found, row count remained $postTxCount)." -ForegroundColor Green
 
+        # Verification 7B: Live In-Flight PostgreSQL Transaction Rollback Drill (Phase 2 constraint violation)
+        Write-Host "  Verifying real in-flight transaction rollback under psql --single-transaction -v ON_ERROR_STOP=1..."
+        $canaryFlight1 = "tx-flight-1-$RunId-$vNum"
+        $canaryFlight2 = "tx-flight-2-$RunId-$vNum"
+        $drillFlightSql = "/tmp/gms_drill_flight_${RunId}_${vNum}.sql"
+
+        # Statements 1 & 2 are valid inserts; Statement 3 violates foreign key constraint (createdById -> non-existent user)
+        $flightSqlContent = @"
+INSERT INTO "Transaction" ("id", "plateNumber", "status", "notes", "createdById") VALUES ('$canaryFlight1', 'B 1111 FLT', 'IN_PROGRESS', 'Flight canary 1', 'usr-1');
+INSERT INTO "Transaction" ("id", "plateNumber", "status", "notes", "createdById") VALUES ('$canaryFlight2', 'B 2222 FLT', 'IN_PROGRESS', 'Flight canary 2', 'usr-2');
+INSERT INTO "Transaction" ("id", "plateNumber", "status", "notes", "createdById") VALUES ('tx-flight-bad', 'B 3333 BAD', 'FAILED', 'Must fail FK', 'usr-invalid-999');
+"@
+        $encodedFlightSql = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($flightSqlContent))
+        & docker exec $cName sh -c "echo '$encodedFlightSql' | base64 -d > '$drillFlightSql'" 2>&1 | Out-Null
+
+        # Execute under single transaction with ON_ERROR_STOP=1
+        $flightExecCmd = "psql -U `"$dbUser`" -d `"$targetDb`" -v ON_ERROR_STOP=1 --single-transaction -f `"$drillFlightSql`""
+        $flightExecOut = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $flightExecCmd 2>&1 | Out-String
+        $flightExecExit = $LASTEXITCODE
+
+        # Always remove drill sql
+        & docker exec $cName rm -f $drillFlightSql 2>&1 | Out-Null
+
+        if ($flightExecExit -eq 0) {
+            throw "In-flight rollback drill error: psql unexpectedly succeeded on FK violation!"
+        }
+
+        # Assert zero canary rows committed (transaction rolled back completely)
+        $checkFlightSql = "SELECT COUNT(*) FROM ""Transaction"" WHERE ""id"" IN ('$canaryFlight1', '$canaryFlight2');"
+        [string]$flightCanaryOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $checkFlightSql 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "Failed querying flight canary count: $flightCanaryOut" }
+        [int]$flightCanaryCount = -1
+        if (-not [int]::TryParse($flightCanaryOut.Trim(), [ref]$flightCanaryCount) -or $flightCanaryCount -ne 0) {
+            throw "DATA SAFETY VIOLATION! In-flight canary records were committed ($flightCanaryCount found) despite transaction abort!"
+        }
+
+        $postFlightTxOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $baseTxSql 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "Failed querying post-flight Transaction count: $postFlightTxOut" }
+        [int]$postFlightCount = -1
+        if (-not [int]::TryParse($postFlightTxOut.Trim(), [ref]$postFlightCount) -or $postFlightCount -ne $baseTxCount) {
+            throw "DATA SAFETY VIOLATION! Transaction count altered after aborted in-flight transaction! Expected: $baseTxCount, got: $postFlightCount"
+        }
+        Write-Host "    [IN-FLIGHT ROLLBACK PROVEN] Partial multi-statement batch aborted on FK violation and rolled back atomically (0 canary rows committed, total rows strictly unchanged at $postFlightCount)." -ForegroundColor Green
+
         $enginePassed = $true
         $script:PassedTests++
         Write-Host "  [PASS] PostgreSQL $vNum restore passed with 100% data preservation across all 16 entities!" -ForegroundColor Green
@@ -631,6 +675,7 @@ foreach ($engine in $Engines) {
             unicodeHex = $tgtHex
             orphanFks = 0
             producerFailureRollbackProven = $true
+            inFlightRollbackProven = $true
         }
     } catch {
         $enginePassed = $false

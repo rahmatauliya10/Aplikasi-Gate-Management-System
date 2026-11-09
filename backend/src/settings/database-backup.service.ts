@@ -228,6 +228,10 @@ export async function executeStreamingRestorePipeline(
       return;
     }
 
+    // Explicit error listeners on stdio streams to catch EPIPE, premature close, or stream I/O failure
+    restoreProc.stdout.on('error', (err) => settleError(err));
+    psqlProc.stdin.on('error', (err) => settleError(err));
+
     let streamPipelineFinished = false;
 
     // Use pipeline between restoreProc.stdout and filterTransform to catch upstream errors

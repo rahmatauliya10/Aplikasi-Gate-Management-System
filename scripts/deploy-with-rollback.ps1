@@ -363,30 +363,40 @@ function Assert-ReleaseProvenance {
         $imgTag = [string]$img.Tag
         if (-not $imgTag) { continue }
 
+        [string]$inspectTarget = $imgTag
+        # When ExpectedDigest is present, bind inspect to exact repository@digest immutable object
+        if ($img.ExpectedDigest -and $img.ExpectedDigest -match '^sha256:[a-fA-F0-9]{64}$') {
+            [string]$repoPrefix = $imgTag
+            if ($imgTag -match '^([^:]+):') {
+                $repoPrefix = $matches[1]
+            }
+            $inspectTarget = "${repoPrefix}@$($img.ExpectedDigest)"
+        }
+
         [string]$imageLabelsJson = ""
         try {
             if ($ImageInspector) {
-                $imageLabelsJson = (& $ImageInspector $imgTag | Out-String).Trim()
+                $imageLabelsJson = (& $ImageInspector $inspectTarget | Out-String).Trim()
             } else {
-                $imageLabelsJson = (& docker inspect --format '{{json .Config.Labels}}' $imgTag 2>$null | Out-String).Trim()
+                $imageLabelsJson = (& docker inspect --format '{{json .Config.Labels}}' $inspectTarget 2>$null | Out-String).Trim()
                 if ($LASTEXITCODE -ne 0) {
                     throw "docker inspect command returned exit code $LASTEXITCODE"
                 }
             }
         } catch {
             if ($RequireImageLabels) {
-                throw "CRITICAL PROVENANCE FAILURE: Docker inspect failed on $imgRole image [$imgTag]: $_"
+                throw "CRITICAL PROVENANCE FAILURE: Docker inspect failed on $imgRole image [$inspectTarget]: $_"
             }
         }
         if ($RequireImageLabels -and (-not $imageLabelsJson -or $imageLabelsJson -eq "null" -or $imageLabelsJson -eq "{}")) {
-            throw "CRITICAL PROVENANCE FAILURE: $imgRole image [$imgTag] has no labels or metadata. Missing required revision provenance label."
+            throw "CRITICAL PROVENANCE FAILURE: $imgRole image [$inspectTarget] has no labels or metadata. Missing required revision provenance label."
         }
         if ($imageLabelsJson -and $imageLabelsJson -ne "null" -and $imageLabelsJson -ne "{}") {
             $labels = $null
             try {
                 $labels = $imageLabelsJson | ConvertFrom-Json
             } catch {
-                throw "CRITICAL PROVENANCE FAILURE: Corrupted image labels on $imgRole image [$imgTag]: $_"
+                throw "CRITICAL PROVENANCE FAILURE: Corrupted image labels on $imgRole image [$inspectTarget]: $_"
             }
             [string]$labelSha = ""
             if ($labels.psobject.Properties['org.opencontainers.image.revision']) {
@@ -397,11 +407,11 @@ function Assert-ReleaseProvenance {
                 $labelSha = [string]$labels.'vcs-ref'
             }
             if ($RequireImageLabels -and (-not $labelSha -or $labelSha -notmatch '^[a-fA-F0-9]{7,40}$')) {
-                throw "CRITICAL PROVENANCE FAILURE: $imgRole image [$imgTag] missing valid Git commit revision label (checked org.opencontainers.image.revision, com.gms.git-sha, vcs-ref)."
+                throw "CRITICAL PROVENANCE FAILURE: $imgRole image [$inspectTarget] missing valid Git commit revision label (checked org.opencontainers.image.revision, com.gms.git-sha, vcs-ref)."
             }
             if ($labelSha -and $labelSha -match '^[a-fA-F0-9]{7,40}$') {
                 if (-not $ExpectedGitSha.ToLower().StartsWith($labelSha.ToLower()) -and -not $labelSha.ToLower().StartsWith($ExpectedGitSha.ToLower())) {
-                    throw "CRITICAL PROVENANCE MISMATCH: $imgRole image [$imgTag] label Git SHA [$labelSha] does not match target release Git SHA [$ExpectedGitSha]."
+                    throw "CRITICAL PROVENANCE MISMATCH: $imgRole image [$inspectTarget] label Git SHA [$labelSha] does not match target release Git SHA [$ExpectedGitSha]."
                 }
             }
         }
