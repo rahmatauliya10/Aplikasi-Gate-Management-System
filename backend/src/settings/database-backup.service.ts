@@ -143,6 +143,176 @@ export function createSanitizingTransformStream(): Transform {
   });
 }
 
+export interface StreamingChildProcessLike {
+  stdout?: NodeJS.ReadableStream | null;
+  stderr?: NodeJS.ReadableStream | null;
+  stdin?: NodeJS.WritableStream | null;
+  on(event: 'error', listener: (err: unknown) => void): this;
+  on(
+    event: 'close',
+    listener: (code: number | null, signal: string | null) => void,
+  ): this;
+  kill(signal?: NodeJS.Signals | number): boolean;
+}
+
+export async function executeStreamingRestorePipeline(
+  restoreProc: StreamingChildProcessLike,
+  psqlProc: StreamingChildProcessLike,
+  filterTransform: Transform = createSanitizingTransformStream(),
+  timeoutMs: number = 10 * 60 * 1000,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let restoreStderr = '';
+    let psqlStderr = '';
+    const MAX_STDERR_BYTES = 64 * 1024;
+    restoreProc.stderr?.on('data', (d: Buffer) => {
+      if (restoreStderr.length < MAX_STDERR_BYTES) {
+        restoreStderr += d
+          .toString('utf8')
+          .slice(0, MAX_STDERR_BYTES - restoreStderr.length);
+      }
+    });
+    psqlProc.stderr?.on('data', (d: Buffer) => {
+      if (psqlStderr.length < MAX_STDERR_BYTES) {
+        psqlStderr += d
+          .toString('utf8')
+          .slice(0, MAX_STDERR_BYTES - psqlStderr.length);
+      }
+    });
+
+    let hasSettled = false;
+    let timeoutTimer: NodeJS.Timeout | null = null;
+
+    const settleError = (err: unknown) => {
+      if (hasSettled) return;
+      hasSettled = true;
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
+      try {
+        restoreProc.kill('SIGTERM');
+      } catch {
+        // ignore process kill error if already terminated
+      }
+      try {
+        psqlProc.kill('SIGTERM');
+      } catch {
+        // ignore process kill error if already terminated
+      }
+      const normalizedError =
+        err instanceof Error
+          ? err
+          : new Error(
+              (err as { message?: string })?.message ||
+                'Stream pipeline execution failed',
+            );
+      reject(normalizedError);
+    };
+
+    timeoutTimer = setTimeout(() => {
+      settleError(
+        new Error(
+          `Streaming restore execution timed out after ${Math.round(timeoutMs / 1000)} seconds`,
+        ),
+      );
+    }, timeoutMs);
+
+    restoreProc.on('error', (err) => settleError(err));
+    psqlProc.on('error', (err) => settleError(err));
+    filterTransform.on('error', (err) => settleError(err));
+
+    if (!restoreProc.stdout || !psqlProc.stdin) {
+      settleError(
+        new Error('Failed to open process stdio streams for pipeline'),
+      );
+      return;
+    }
+
+    let streamPipelineFinished = false;
+
+    pipeline(restoreProc.stdout, filterTransform, psqlProc.stdin, (err) => {
+      if (err) {
+        settleError(err);
+      } else {
+        streamPipelineFinished = true;
+        checkDone();
+      }
+    });
+
+    let restoreExited = false;
+    let psqlExited = false;
+    let restoreExitCode: number | null = null;
+    let psqlExitCode: number | null = null;
+
+    const checkDone = () => {
+      if (
+        restoreExited &&
+        psqlExited &&
+        streamPipelineFinished &&
+        !hasSettled
+      ) {
+        hasSettled = true;
+        if (timeoutTimer) {
+          clearTimeout(timeoutTimer);
+        }
+        if (restoreExitCode !== 0) {
+          try {
+            psqlProc.kill('SIGTERM');
+          } catch {
+            // ignore process kill error if already terminated
+          }
+          return reject(
+            new Error(
+              `pg_restore streaming process exited with code ${restoreExitCode}: ${restoreStderr}`,
+            ),
+          );
+        }
+        if (psqlExitCode !== 0) {
+          try {
+            restoreProc.kill('SIGTERM');
+          } catch {
+            // ignore process kill error if already terminated
+          }
+          return reject(
+            new Error(
+              `psql streaming execution exited with code ${psqlExitCode}: ${psqlStderr}`,
+            ),
+          );
+        }
+        resolve();
+      }
+    };
+
+    restoreProc.on('close', (code, signal) => {
+      restoreExited = true;
+      restoreExitCode = signal ? -1 : (code ?? -1);
+      if (restoreExitCode !== 0 && !hasSettled) {
+        settleError(
+          new Error(
+            `pg_restore streaming process exited with code ${restoreExitCode}: ${restoreStderr}`,
+          ),
+        );
+        return;
+      }
+      checkDone();
+    });
+
+    psqlProc.on('close', (code, signal) => {
+      psqlExited = true;
+      psqlExitCode = signal ? -1 : (code ?? -1);
+      if (psqlExitCode !== 0 && !hasSettled) {
+        settleError(
+          new Error(
+            `psql streaming execution exited with code ${psqlExitCode}: ${psqlStderr}`,
+          ),
+        );
+        return;
+      }
+      checkDone();
+    });
+  });
+}
+
 @Injectable()
 export class DatabaseBackupService
   implements OnApplicationBootstrap, OnModuleDestroy
@@ -2099,166 +2269,46 @@ export class DatabaseBackupService
         this.logger.warn(
           'Target PostgreSQL engine rejected transaction_timeout (server version < 17). Executing COPY-aware single-transaction SQL fallback via streaming pipeline...',
         );
-        await new Promise<void>((resolve, reject) => {
-          const restoreProc = spawn(
-            'pg_restore',
-            ['--clean', '--if-exists', '--no-owner', '--no-acl', dumpPath],
-            {
-              env: { ...process.env, PGPASSWORD: password },
-              stdio: ['ignore', 'pipe', 'pipe'],
-            },
-          );
+        const restoreProc = spawn(
+          'pg_restore',
+          [
+            '-f',
+            '-',
+            '--clean',
+            '--if-exists',
+            '--no-owner',
+            '--no-acl',
+            dumpPath,
+          ],
+          {
+            env: { ...process.env, PGPASSWORD: password },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        );
 
-          const psqlProc = spawn(
-            'psql',
-            [
-              '--host=' + host,
-              '--port=' + port,
-              '--username=' + username,
-              '--dbname=' + dbName,
-              '--single-transaction',
-              '-v',
-              'ON_ERROR_STOP=1',
-            ],
-            {
-              env: { ...process.env, PGPASSWORD: password },
-              stdio: ['pipe', 'ignore', 'pipe'],
-            },
-          );
+        const psqlProc = spawn(
+          'psql',
+          [
+            '--host=' + host,
+            '--port=' + port,
+            '--username=' + username,
+            '--dbname=' + dbName,
+            '--single-transaction',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          {
+            env: { ...process.env, PGPASSWORD: password },
+            stdio: ['pipe', 'ignore', 'pipe'],
+          },
+        );
 
-          let restoreStderr = '';
-          let psqlStderr = '';
-          const MAX_STDERR_BYTES = 64 * 1024;
-          restoreProc.stderr?.on('data', (d: Buffer) => {
-            if (restoreStderr.length < MAX_STDERR_BYTES) {
-              restoreStderr += d
-                .toString('utf8')
-                .slice(0, MAX_STDERR_BYTES - restoreStderr.length);
-            }
-          });
-          psqlProc.stderr?.on('data', (d: Buffer) => {
-            if (psqlStderr.length < MAX_STDERR_BYTES) {
-              psqlStderr += d
-                .toString('utf8')
-                .slice(0, MAX_STDERR_BYTES - psqlStderr.length);
-            }
-          });
-
-          const filterTransform = createSanitizingTransformStream();
-
-          let hasSettled = false;
-          let timeoutTimer: NodeJS.Timeout | null = null;
-
-          const settleError = (err: unknown) => {
-            if (hasSettled) return;
-            hasSettled = true;
-            if (timeoutTimer) {
-              clearTimeout(timeoutTimer);
-            }
-            try {
-              restoreProc.kill('SIGTERM');
-            } catch {
-              // ignore process kill error if already terminated
-            }
-            try {
-              psqlProc.kill('SIGTERM');
-            } catch {
-              // ignore process kill error if already terminated
-            }
-            const normalizedError =
-              err instanceof Error
-                ? err
-                : new Error(
-                    (err as { message?: string })?.message ||
-                      'Stream pipeline execution failed',
-                  );
-            reject(normalizedError);
-          };
-
-          timeoutTimer = setTimeout(
-            () => {
-              settleError(
-                new Error(
-                  'Streaming restore execution timed out after 10 minutes',
-                ),
-              );
-            },
-            10 * 60 * 1000,
-          );
-
-          restoreProc.on('error', (err) => settleError(err));
-          psqlProc.on('error', (err) => settleError(err));
-          filterTransform.on('error', (err) => settleError(err));
-
-          if (!restoreProc.stdout || !psqlProc.stdin) {
-            settleError(
-              new Error('Failed to open process stdio streams for pipeline'),
-            );
-            return;
-          }
-
-          let streamPipelineFinished = false;
-
-          pipeline(
-            restoreProc.stdout,
-            filterTransform,
-            psqlProc.stdin,
-            (err) => {
-              if (err) {
-                settleError(err);
-              } else {
-                streamPipelineFinished = true;
-                checkDone();
-              }
-            },
-          );
-
-          let restoreExited = false;
-          let psqlExited = false;
-          let restoreExitCode: number | null = null;
-          let psqlExitCode: number | null = null;
-
-          const checkDone = () => {
-            if (
-              restoreExited &&
-              psqlExited &&
-              streamPipelineFinished &&
-              !hasSettled
-            ) {
-              hasSettled = true;
-              if (timeoutTimer) {
-                clearTimeout(timeoutTimer);
-              }
-              if (restoreExitCode !== 0) {
-                return reject(
-                  new Error(
-                    `pg_restore streaming process exited with code ${restoreExitCode}: ${restoreStderr}`,
-                  ),
-                );
-              }
-              if (psqlExitCode !== 0) {
-                return reject(
-                  new Error(
-                    `psql streaming execution exited with code ${psqlExitCode}: ${psqlStderr}`,
-                  ),
-                );
-              }
-              resolve();
-            }
-          };
-
-          restoreProc.on('close', (code, signal) => {
-            restoreExited = true;
-            restoreExitCode = signal ? -1 : (code ?? -1);
-            checkDone();
-          });
-
-          psqlProc.on('close', (code, signal) => {
-            psqlExited = true;
-            psqlExitCode = signal ? -1 : (code ?? -1);
-            checkDone();
-          });
-        });
+        await executeStreamingRestorePipeline(
+          restoreProc,
+          psqlProc,
+          createSanitizingTransformStream(),
+          10 * 60 * 1000,
+        );
 
         this.logger.log(
           'Sanitized single-transaction fallback SQL restore completed successfully on PG < 17 target via streaming pipeline.',

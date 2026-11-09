@@ -451,30 +451,49 @@ foreach ($engine in $Engines) {
             throw "AppSetting record with value 'SET transaction_timeout = 0;' was corrupted or dropped! Found: $setCount"
         }
 
-        # Verification 4: Unicode string and emojis intact
-        Write-Host "  Verifying multi-byte Unicode and emoji data integrity..."
-        $uniSql = "SELECT COUNT(*) FROM ""Transaction"" WHERE ""notes"" ILIKE '%PT. Sinar Jaya%' AND ""notes"" ILIKE '%batubara%';"
-        [string]$uniOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $uniSql 2>&1 | Out-String
-        [int]$uniCount = 0
-        [int]::TryParse($uniOut.Trim(), [ref]$uniCount) | Out-Null
-        if ($uniCount -ne 1) {
-            throw "Unicode transaction record was corrupted or dropped! Found: $uniCount"
+        # Verification 4: Exact Unicode string and emojis match
+        Write-Host "  Verifying multi-byte Unicode and emoji exact string equality..."
+        $uniSql = "SELECT ""notes"" FROM ""Transaction"" WHERE ""id"" = 'tx-test-1';"
+        [string]$uniActual = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $uniSql 2>&1 | Out-String).Trim()
+        $exactExpectedNote = 'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓'
+        if ($uniActual -ne $exactExpectedNote) {
+            throw "Unicode transaction record mismatch! Expected: '$exactExpectedNote', Got: '$uniActual'"
         }
 
-        # Verification 5: Referential Integrity (zero orphan foreign keys)
-        Write-Host "  Verifying referential integrity (zero orphan FKs)..."
-        $orphanSql = "SELECT COUNT(*) FROM ""TransactionStatusHistory"" WHERE ""transactionId"" NOT IN (SELECT ""id"" FROM ""Transaction"");"
-        [string]$orphanOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $orphanSql 2>&1 | Out-String
-        [int]$orphanCount = 0
-        [int]::TryParse($orphanOut.Trim(), [ref]$orphanCount) | Out-Null
-        if ($orphanCount -ne 0) {
-            throw "Foreign key violation: Found $orphanCount orphan records in TransactionStatusHistory!"
+        # Verification 5: Referential Integrity across all foreign key relations (zero orphan FKs)
+        Write-Host "  Verifying referential integrity across all foreign key relations..."
+        $fkRelations = @(
+            @{ Table = "TransactionStatusHistory"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "WeighbridgeRecord"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "WarehouseProcess"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "QcVehicleCheck"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "IncomingMaterialCheck"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "Attachment"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "FraudCheck"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "UserWarehouseAccess"; Fk = "userId"; Parent = "User"; Pk = "id" },
+            @{ Table = "Transaction"; Fk = "createdById"; Parent = "User"; Pk = "id" },
+            @{ Table = "TransactionCorrection"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+            @{ Table = "TransactionCorrectionItem"; Fk = "correctionId"; Parent = "TransactionCorrection"; Pk = "id" }
+        )
+        foreach ($rel in $fkRelations) {
+            $orphanSql = "SELECT COUNT(*) FROM `"$($rel.Table)`" WHERE `"$($rel.Fk)`" NOT IN (SELECT `"$($rel.Pk)`" FROM `"$($rel.Parent)`");"
+            [string]$orphanOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $orphanSql 2>&1 | Out-String
+            [int]$orphanCount = 0
+            [int]::TryParse($orphanOut.Trim(), [ref]$orphanCount) | Out-Null
+            if ($orphanCount -ne 0) {
+                throw "Foreign key violation: Found $orphanCount orphan records in $($rel.Table) referencing $($rel.Parent)!"
+            }
         }
-        if ($orphanCount -ne 0) {
-            throw "Foreign key violation: Found $orphanCount orphan records in TransactionStatusHistory!"
-        }
-        if ($orphanCount -ne 0) {
-            throw "Foreign key violation: Found $orphanCount orphan records in TransactionStatusHistory!"
+
+        # Verification 6: Deterministic source-to-target entity reconciliation
+        Write-Host "  Verifying deterministic source vs restored data parity..."
+        foreach ($tableName in $ExpectedCounts.Keys) {
+            $paritySql = "SELECT COUNT(*) FROM `"$tableName`";"
+            [string]$sOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $sourceDb -c $paritySql 2>&1 | Out-String
+            [string]$tOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $paritySql 2>&1 | Out-String
+            if ($sOut.Trim() -ne $tOut.Trim()) {
+                throw "Data parity mismatch on table $tableName! Source: $($sOut.Trim()), Restored: $($tOut.Trim())"
+            }
         }
 
         $enginePassed = $true

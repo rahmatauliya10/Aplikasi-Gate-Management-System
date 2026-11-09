@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import {
   DatabaseBackupService,
   createSanitizingTransformStream,
+  executeStreamingRestorePipeline,
+  StreamingChildProcessLike,
 } from './database-backup.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -14,6 +16,8 @@ import * as argon2 from 'argon2';
 import { createHash, createHmac } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 
 jest.mock('child_process', () => ({
   execFile: jest.fn((cmd: string, args: string[], opts: any, callback: any) => {
@@ -655,6 +659,145 @@ describe('DatabaseBackupService', () => {
       const output = await runTransform([chunk1, chunk2]);
       expect(output).toContain('Batubara — Kontrak PT. Sinar Jaya 📦');
       expect(output).toContain('-- sanitized: SET transaction_timeout = 0;');
+    });
+  });
+
+  describe('executeStreamingRestorePipeline', () => {
+    class MockProcess
+      extends EventEmitter
+      implements StreamingChildProcessLike
+    {
+      stdout: PassThrough | null = new PassThrough();
+      stderr: PassThrough | null = new PassThrough();
+      stdin: PassThrough | null = new PassThrough();
+      killed = false;
+
+      kill(signal?: NodeJS.Signals | number): boolean {
+        this.killed = true;
+        return true;
+      }
+
+      simulateClose(code: number | null, signal: string | null = null) {
+        this.emit('close', code, signal);
+      }
+    }
+
+    let restoreProc: MockProcess;
+    let psqlProc: MockProcess;
+
+    beforeEach(() => {
+      restoreProc = new MockProcess();
+      psqlProc = new MockProcess();
+    });
+
+    it('should successfully complete streaming restore when both processes exit with 0 and pipeline finishes', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        5000,
+      );
+
+      restoreProc.stdout?.write('SET statement_timeout = 0;\n');
+      restoreProc.stdout?.end();
+
+      restoreProc.simulateClose(0);
+      psqlProc.simulateClose(0);
+
+      await expect(promise).resolves.toBeUndefined();
+    });
+
+    it('should fail-closed when psql process exits with non-zero exit code (connection severed or syntax error)', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        5000,
+      );
+
+      psqlProc.stderr?.write('FATAL: connection terminated unexpectedly\n');
+      restoreProc.stdout?.end();
+
+      restoreProc.simulateClose(0);
+      psqlProc.simulateClose(1);
+
+      await expect(promise).rejects.toThrow(
+        /psql streaming execution exited with code 1/,
+      );
+      expect(restoreProc.killed).toBe(true);
+    });
+
+    it('should fail-closed when pg_restore process exits with non-zero exit code', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        5000,
+      );
+
+      restoreProc.stderr?.write(
+        'pg_restore: error: archive header corrupted\n',
+      );
+      restoreProc.stdout?.end();
+
+      restoreProc.simulateClose(1);
+      psqlProc.simulateClose(0);
+
+      await expect(promise).rejects.toThrow(
+        /pg_restore streaming process exited with code 1/,
+      );
+      expect(psqlProc.killed).toBe(true);
+    });
+
+    it('should fail-closed when child process is terminated by signal (SIGKILL / SIGTERM)', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        5000,
+      );
+
+      restoreProc.stdout?.end();
+      restoreProc.simulateClose(null, 'SIGKILL');
+      psqlProc.simulateClose(0);
+
+      await expect(promise).rejects.toThrow(
+        /pg_restore streaming process exited with code -1/,
+      );
+    });
+
+    it('should fail-closed when stream pipeline encounters an error mid-stream', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        5000,
+      );
+
+      restoreProc.stdout?.destroy(
+        new Error('I/O error reading dump stream mid-COPY'),
+      );
+
+      await expect(promise).rejects.toThrow(
+        'I/O error reading dump stream mid-COPY',
+      );
+      expect(restoreProc.killed).toBe(true);
+      expect(psqlProc.killed).toBe(true);
+    });
+
+    it('should fail-closed on execution timeout and terminate processes', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        50, // 50ms timeout for test
+      );
+
+      await expect(promise).rejects.toThrow(
+        /Streaming restore execution timed out/,
+      );
+      expect(restoreProc.killed).toBe(true);
+      expect(psqlProc.killed).toBe(true);
     });
   });
 });

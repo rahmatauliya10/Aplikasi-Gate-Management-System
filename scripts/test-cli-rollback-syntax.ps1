@@ -451,17 +451,80 @@ try {
     } catch { $s7Err = $_.ToString() }
 
     # S8: Missing image labels when RequireImageLabels is set
+    [string]$s8Err = ""
     try {
-        Assert-ReleaseProvenance -ExpectedGitSha $validSha -BackendImageTag "gms-backend:v1.2.3" -RequireImageLabels -ImageInspector {
-            param($tag) return '{}'
-        } | Out-Null
+        Assert-ReleaseProvenance `
+            -ExpectedGitSha $validSha `
+            -BackendImageTag "gms-backend:v1.2.3" `
+            -FrontendImageTag "gms-frontend:v1.2.3" `
+            -MigratorImageTag "gms-migrator:v1.2.3" `
+            -RequireImageLabels `
+            -ImageInspector {
+                param($tag) return '{}'
+            } | Out-Null
     } catch { $s8Err = $_.ToString() }
 
-    # S9: Fully valid manifest and image labels
-    $s9Success = Assert-ReleaseProvenance `
+    # S9: Frontend image has mismatched commit SHA
+    [string]$s9Err = ""
+    try {
+        Assert-ReleaseProvenance `
+            -ExpectedGitSha $validSha `
+            -BackendImageTag "gms-backend:v1.2.3" `
+            -FrontendImageTag "gms-frontend:v1.2.3" `
+            -MigratorImageTag "gms-migrator:v1.2.3" `
+            -RequireImageLabels `
+            -ImageInspector {
+                param($tag)
+                if ($tag -like "*frontend*") {
+                    return "{`"org.opencontainers.image.revision`": `"0000000000000000000000000000000000000000`"}"
+                }
+                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+            } | Out-Null
+    } catch { $s9Err = $_.ToString() }
+
+    # S10: Migrator image has empty labels
+    [string]$s10Err = ""
+    try {
+        Assert-ReleaseProvenance `
+            -ExpectedGitSha $validSha `
+            -BackendImageTag "gms-backend:v1.2.3" `
+            -FrontendImageTag "gms-frontend:v1.2.3" `
+            -MigratorImageTag "gms-migrator:v1.2.3" `
+            -RequireImageLabels `
+            -ImageInspector {
+                param($tag)
+                if ($tag -like "*migrator*") {
+                    return "{}"
+                }
+                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+            } | Out-Null
+    } catch { $s10Err = $_.ToString() }
+
+    # S11: Docker inspect failure on one image
+    [string]$s11Err = ""
+    try {
+        Assert-ReleaseProvenance `
+            -ExpectedGitSha $validSha `
+            -BackendImageTag "gms-backend:v1.2.3" `
+            -FrontendImageTag "gms-frontend:v1.2.3" `
+            -MigratorImageTag "gms-migrator:v1.2.3" `
+            -RequireImageLabels `
+            -ImageInspector {
+                param($tag)
+                if ($tag -like "*backend*") {
+                    throw "daemon connection failed"
+                }
+                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+            } | Out-Null
+    } catch { $s11Err = $_.ToString() }
+
+    # S12: Fully valid manifest and all 3 image labels
+    $s12Success = Assert-ReleaseProvenance `
         -ExpectedGitSha $validSha `
         -TargetManifestPath $validManifest `
         -BackendImageTag "gms-backend:v1.2.3" `
+        -FrontendImageTag "gms-frontend:v1.2.3" `
+        -MigratorImageTag "gms-migrator:v1.2.3" `
         -ExpectedBackendDigest $validDigest `
         -ExpectedFrontendDigest $validDigest `
         -ExpectedMigratorDigest $validDigest `
@@ -479,23 +542,29 @@ try {
                  ($s6Err -match "CRITICAL PROVENANCE MISMATCH") -and `
                  ($s7Err -match "CRITICAL PROVENANCE MISMATCH") -and `
                  ($s8Err -match "Missing required revision provenance label") -and `
-                 ($s9Success -eq $true)
+                 ($s9Err -match "CRITICAL PROVENANCE MISMATCH: frontend image") -and `
+                 ($s10Err -match "migrator image .* has no labels or metadata") -and `
+                 ($s11Err -match "Docker inspect failed on backend image") -and `
+                 ($s12Success -eq $true)
 
     if ($allPassed) {
         $script:PassedTests++
-        Write-Host "  [PASS] Correctly enforced all 9 fail-closed provenance assertion gates (missing/corrupted/mismatched manifest, digests, and image labels)." -ForegroundColor Green
+        Write-Host "  [PASS] Correctly enforced all 12 fail-closed provenance assertion gates across 3 images (backend, frontend, migrator)." -ForegroundColor Green
     } else {
         $script:FailedTests++
         Write-Host "  [FAIL] Release provenance assertion did not enforce all expected checks!" -ForegroundColor Red
-        Write-Host "  S1 (Missing Manifest): $s1Err" -ForegroundColor DarkGray
-        Write-Host "  S2 (Corrupt Manifest): $s2Err" -ForegroundColor DarkGray
-        Write-Host "  S3 (Missing GitSha):   $s3Err" -ForegroundColor DarkGray
-        Write-Host "  S4 (Mismatched GitSha): $s4Err" -ForegroundColor DarkGray
-        Write-Host "  S5 (Missing Digest):   $s5Err" -ForegroundColor DarkGray
-        Write-Host "  S6 (Mismatched Digest): $s6Err" -ForegroundColor DarkGray
-        Write-Host "  S7 (Mismatched Label): $s7Err" -ForegroundColor DarkGray
-        Write-Host "  S8 (Missing Label):    $s8Err" -ForegroundColor DarkGray
-        Write-Host "  S9 (Valid Provenance): $s9Success" -ForegroundColor DarkGray
+        Write-Host "  S1 (Missing Manifest):    $s1Err" -ForegroundColor DarkGray
+        Write-Host "  S2 (Corrupt Manifest):    $s2Err" -ForegroundColor DarkGray
+        Write-Host "  S3 (Missing GitSha):      $s3Err" -ForegroundColor DarkGray
+        Write-Host "  S4 (Mismatched GitSha):   $s4Err" -ForegroundColor DarkGray
+        Write-Host "  S5 (Missing Digest):      $s5Err" -ForegroundColor DarkGray
+        Write-Host "  S6 (Mismatched Digest):   $s6Err" -ForegroundColor DarkGray
+        Write-Host "  S7 (Mismatched Label):    $s7Err" -ForegroundColor DarkGray
+        Write-Host "  S8 (Missing Label):       $s8Err" -ForegroundColor DarkGray
+        Write-Host "  S9 (Frontend Mismatch):   $s9Err" -ForegroundColor DarkGray
+        Write-Host "  S10 (Migrator No Labels): $s10Err" -ForegroundColor DarkGray
+        Write-Host "  S11 (Inspect Failure):    $s11Err" -ForegroundColor DarkGray
+        Write-Host "  S12 (Valid Provenance):   $s12Success" -ForegroundColor DarkGray
     }
 } finally {
     if (Test-Path $rel22TempDir) {

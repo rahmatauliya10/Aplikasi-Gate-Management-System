@@ -345,29 +345,48 @@ function Assert-ReleaseProvenance {
         }
     }
 
-    # If BackendImageTag is provided, inspect Docker labels (org.opencontainers.image.revision, vcs-ref, com.gms.git-sha)
-    if ($BackendImageTag) {
+    # Inspect Docker labels across all 3 release images (backend, frontend, migrator)
+    $imagesToCheck = @(
+        @{ Role = "backend";  Tag = $BackendImageTag;  ExpectedDigest = $ExpectedBackendDigest },
+        @{ Role = "frontend"; Tag = $FrontendImageTag; ExpectedDigest = $ExpectedFrontendDigest },
+        @{ Role = "migrator"; Tag = $MigratorImageTag; ExpectedDigest = $ExpectedMigratorDigest }
+    )
+
+    if ($RequireImageLabels) {
+        if (-not $BackendImageTag -or -not $FrontendImageTag -or -not $MigratorImageTag) {
+            throw "CRITICAL PROVENANCE FAILURE: All three image tags (backend, frontend, migrator) must be provided when RequireImageLabels is enabled."
+        }
+    }
+
+    foreach ($img in $imagesToCheck) {
+        $imgRole = [string]$img.Role
+        $imgTag = [string]$img.Tag
+        if (-not $imgTag) { continue }
+
         [string]$imageLabelsJson = ""
         try {
             if ($ImageInspector) {
-                $imageLabelsJson = (& $ImageInspector $BackendImageTag | Out-String).Trim()
+                $imageLabelsJson = (& $ImageInspector $imgTag | Out-String).Trim()
             } else {
-                $imageLabelsJson = (& docker inspect --format '{{json .Config.Labels}}' $BackendImageTag 2>$null | Out-String).Trim()
+                $imageLabelsJson = (& docker inspect --format '{{json .Config.Labels}}' $imgTag 2>$null | Out-String).Trim()
+                if ($LASTEXITCODE -ne 0) {
+                    throw "docker inspect command returned exit code $LASTEXITCODE"
+                }
             }
         } catch {
             if ($RequireImageLabels) {
-                throw "CRITICAL PROVENANCE FAILURE: Docker inspect failed on image [$BackendImageTag]: $_"
+                throw "CRITICAL PROVENANCE FAILURE: Docker inspect failed on $imgRole image [$imgTag]: $_"
             }
         }
         if ($RequireImageLabels -and (-not $imageLabelsJson -or $imageLabelsJson -eq "null" -or $imageLabelsJson -eq "{}")) {
-            throw "CRITICAL PROVENANCE FAILURE: Image [$BackendImageTag] has no labels or metadata. Missing required revision provenance label."
+            throw "CRITICAL PROVENANCE FAILURE: $imgRole image [$imgTag] has no labels or metadata. Missing required revision provenance label."
         }
         if ($imageLabelsJson -and $imageLabelsJson -ne "null" -and $imageLabelsJson -ne "{}") {
             $labels = $null
             try {
                 $labels = $imageLabelsJson | ConvertFrom-Json
             } catch {
-                throw "CRITICAL PROVENANCE FAILURE: Corrupted image labels on [$BackendImageTag]: $_"
+                throw "CRITICAL PROVENANCE FAILURE: Corrupted image labels on $imgRole image [$imgTag]: $_"
             }
             [string]$labelSha = ""
             if ($labels.psobject.Properties['org.opencontainers.image.revision']) {
@@ -378,11 +397,11 @@ function Assert-ReleaseProvenance {
                 $labelSha = [string]$labels.'vcs-ref'
             }
             if ($RequireImageLabels -and (-not $labelSha -or $labelSha -notmatch '^[a-fA-F0-9]{7,40}$')) {
-                throw "CRITICAL PROVENANCE FAILURE: Image [$BackendImageTag] missing valid Git commit revision label (checked org.opencontainers.image.revision, com.gms.git-sha, vcs-ref)."
+                throw "CRITICAL PROVENANCE FAILURE: $imgRole image [$imgTag] missing valid Git commit revision label (checked org.opencontainers.image.revision, com.gms.git-sha, vcs-ref)."
             }
             if ($labelSha -and $labelSha -match '^[a-fA-F0-9]{7,40}$') {
                 if (-not $ExpectedGitSha.ToLower().StartsWith($labelSha.ToLower()) -and -not $labelSha.ToLower().StartsWith($ExpectedGitSha.ToLower())) {
-                    throw "CRITICAL PROVENANCE MISMATCH: Image label Git SHA [$labelSha] does not match target release Git SHA [$ExpectedGitSha]."
+                    throw "CRITICAL PROVENANCE MISMATCH: $imgRole image [$imgTag] label Git SHA [$labelSha] does not match target release Git SHA [$ExpectedGitSha]."
                 }
             }
         }
@@ -890,7 +909,9 @@ try {
 
     # Step 1.0b: Assert release provenance binding between preflight Git SHA and target manifest/images
     Write-Host "[GMS Preflight] Asserting release provenance binding (Git SHA -> Manifest/Images)..." -ForegroundColor Cyan
-    $requireMan = if ($RequireDigest) { $true } else { $false }
+    $isProdDeployment = ($ComposeFile -like "*prod*" -or $RequireDigest)
+    $requireMan = if ($isProdDeployment -or $RequireDigest) { $true } else { $false }
+    $requireLabels = if ($isProdDeployment -or $RequireDigest) { $true } else { $false }
     [void](Assert-ReleaseProvenance `
         -ExpectedGitSha $ExactSourceGitSha `
         -TargetManifestPath $ResolvedTargetManifest `
@@ -900,7 +921,8 @@ try {
         -ExpectedBackendDigest $BackendDigest `
         -ExpectedFrontendDigest $FrontendDigest `
         -ExpectedMigratorDigest $MigratorDigest `
-        -RequireManifest:$requireMan)
+        -RequireManifest:$requireMan `
+        -RequireImageLabels:$requireLabels)
     Write-Host "  Release provenance binding strictly confirmed [PASS]" -ForegroundColor Green
 
     # Step 1.1: Verify target image availability and immutability before altering any services
