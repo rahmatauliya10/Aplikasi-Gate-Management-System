@@ -105,7 +105,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         cargoType: 'RAW_MATERIAL',
         cargoProcessType: 'INBOUND',
         status: 'INCOMING_CHECK_IN_PROGRESS',
-        notes: 'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
+        remarks: 'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
         gateInAt: new Date(),
         weighbridgeRecords: {
           create: {
@@ -156,7 +156,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       data: {
         transactionId: tx.id,
         correctedById: adminUser.id,
-        reason: 'DR E2E Test correction fixture',
+        reason: 'Pengujian koreksi data batubara — PT. Sinar Jaya & Co. 📦✓',
         oldValues: { initialMoisture: 10.0 },
         newValues: { initialMoisture: 12.4 },
         items: {
@@ -259,7 +259,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
     expect(restoredTx).not.toBeNull();
     expect(restoredTx?.plateNumber).toBe('B9999DRTest');
-    expect(restoredTx?.notes).toBe(
+    expect(restoredTx?.remarks).toBe(
       'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
     );
     expect(restoredTx?.weighbridgeRecords).toHaveLength(1);
@@ -267,6 +267,9 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     expect(restoredTx?.incomingMaterialChecks).toHaveLength(1);
     expect(restoredTx?.warehouseProcesses).toHaveLength(1);
     expect(restoredTx?.corrections).toHaveLength(1);
+    expect(restoredTx?.corrections[0].reason).toBe(
+      'Pengujian koreksi data batubara — PT. Sinar Jaya & Co. 📦✓',
+    );
 
     // 6. DESTRUCTIVE WIPE AGAIN for Portable Bundle Restore test
     await prisma.transactionCorrectionItem.deleteMany({
@@ -322,7 +325,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
     expect(bundleRestoredTx).not.toBeNull();
     expect(bundleRestoredTx?.plateNumber).toBe('B9999DRTest');
-    expect(bundleRestoredTx?.notes).toBe(
+    expect(bundleRestoredTx?.remarks).toBe(
       'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
     );
     expect(bundleRestoredTx?.weighbridgeRecords[0].weight).toBe(15400);
