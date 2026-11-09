@@ -494,7 +494,7 @@ function Invoke-AtomicPostgresRestore {
         # Awk state machine tracks COPY blocks: only filters top-level SET transaction_timeout outside COPY data.
         Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Running COPY-aware atomic restore pipeline via psql --single-transaction ON_ERROR_STOP=1..." -Level "INFO"
         
-        $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[[:space:]]+transaction_timeout/ { next } { print }'
+        $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
         $pipeScript = "set -e -o pipefail; pg_restore --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' | psql -U `"$User`" -d `"$DbName`" -v ON_ERROR_STOP=1 --single-transaction"
         
         $execArgs = @("exec")

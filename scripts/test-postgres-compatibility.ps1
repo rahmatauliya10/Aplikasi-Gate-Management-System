@@ -321,32 +321,35 @@ foreach ($engine in $Engines) {
             throw "CRITICAL GOVERNANCE VIOLATION: Ephemeral fixture identity matches operational database or container!"
         }
 
-        # Launch container
-        Write-Host "  Starting isolated ephemeral container $cName ($($engine.Image)) on port $cPort..."
-        & docker run -d `
+        # Launch container with isolated network, trust auth, and no host port exposure
+        Write-Host "  Starting isolated ephemeral container $cName ($($engine.Image))..."
+        $runOut = & docker run -d `
             --name $cName `
             --label "gms.test.fixture=true" `
             --label "gms.test.run_id=$RunId" `
             --label "gms.test.pg_version=$vNum" `
-            -p "127.0.0.1:${cPort}:5432" `
             -e "POSTGRES_DB=$sourceDb" `
             -e "POSTGRES_USER=$dbUser" `
             -e "POSTGRES_PASSWORD=$dbPass" `
-            $engine.Image 2>&1 | Out-Null
+            -e "POSTGRES_HOST_AUTH_METHOD=trust" `
+            $engine.Image 2>&1 | Out-String
 
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed starting container $cName"
+            throw "Failed starting container $($cName): $runOut"
         }
 
-        # Wait for container ready
+        # Wait for PostgreSQL container readiness with actual query test
         [bool]$ready = $false
-        for ($i = 0; $i -lt 30; $i++) {
+        for ($i = 0; $i -lt 45; $i++) {
             Start-Sleep -Seconds 1
-            & docker exec -e "PGPASSWORD=$dbPass" $cName pg_isready -U $dbUser -d $sourceDb 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+            $probe = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d $sourceDb -c "SELECT 1;" 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0 -and $probe -match "1") {
+                $ready = $true
+                break
+            }
         }
         if (-not $ready) {
-            throw "Container $cName did not become ready within 30 seconds"
+            throw "Container $($cName) did not become query-ready within 45 seconds"
         }
 
         # Initialize schema and 16 entities in source DB
@@ -354,29 +357,30 @@ foreach ($engine in $Engines) {
         $initFileInContainer = "/tmp/init_${RunId}.sql"
         $dumpFileInContainer = "/tmp/dump_${RunId}.dump"
 
-        # Copy init SQL to container
+        # Copy init SQL to container and ensure 644 read permissions
         $tmpSqlPath = [System.IO.Path]::GetTempFileName()
         [System.IO.File]::WriteAllText($tmpSqlPath, $InitSql, [System.Text.UTF8Encoding]::new($false))
         & docker cp $tmpSqlPath ($cName + ":" + $initFileInContainer) 2>&1 | Out-Null
         Remove-Item -Path $tmpSqlPath -Force -ErrorAction SilentlyContinue
+        & docker exec $cName chmod 644 $initFileInContainer 2>&1 | Out-Null
 
-        & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d $sourceDb -v ON_ERROR_STOP=1 -f $initFileInContainer 2>&1 | Out-Null
+        $initOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d $sourceDb -v ON_ERROR_STOP=1 -f $initFileInContainer 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed initializing source database $sourceDb"
+            throw "Failed initializing source database $($sourceDb): $initOut"
         }
 
         # Dump source database to custom archive format
         Write-Host "  Dumping source database via pg_dump -Fc..."
-        & docker exec -e "PGPASSWORD=$dbPass" $cName pg_dump -U $dbUser -d $sourceDb -Fc -f $dumpFileInContainer 2>&1 | Out-Null
+        $dumpOut = & docker exec -e "PGPASSWORD=$dbPass" $cName pg_dump -U $dbUser -d $sourceDb -Fc -f $dumpFileInContainer 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed dumping database $sourceDb"
+            throw "Failed dumping database $($sourceDb): $dumpOut"
         }
 
         # Create fresh target database
         Write-Host "  Creating fresh target database $targetDb..."
-        & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d postgres -c "CREATE DATABASE `"$targetDb`";" 2>&1 | Out-Null
+        $createOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d $sourceDb -c "CREATE DATABASE `"$targetDb`";" 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed creating target database $targetDb"
+            throw "Failed creating target database $($targetDb): $createOut"
         }
 
         # Execute Restore based on Engine Version
@@ -397,7 +401,7 @@ foreach ($engine in $Engines) {
             $restoreExit = $LASTEXITCODE
         } else {
             Write-Host "  Executing COPY-aware awk streaming pipeline restore (PG 15 fallback)..."
-            $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[[:space:]]+transaction_timeout/ { next } { print }'
+            $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
             $pipeScript = "set -e -o pipefail; pg_restore --clean --if-exists --no-owner --no-privileges `"$dumpFileInContainer`" | awk '$awkScript' | psql -U `"$dbUser`" -d `"$targetDb`" -v ON_ERROR_STOP=1 --single-transaction"
             $restoreOutput = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $pipeScript 2>&1 | Out-String
             $restoreExit = $LASTEXITCODE
@@ -449,7 +453,7 @@ foreach ($engine in $Engines) {
 
         # Verification 4: Unicode string and emojis intact
         Write-Host "  Verifying multi-byte Unicode and emoji data integrity..."
-        $uniSql = "SELECT COUNT(*) FROM ""Transaction"" WHERE ""notes"" LIKE '%PT. Sinar Jaya%' AND ""notes"" LIKE '%Batubara%';"
+        $uniSql = "SELECT COUNT(*) FROM ""Transaction"" WHERE ""notes"" ILIKE '%PT. Sinar Jaya%' AND ""notes"" ILIKE '%batubara%';"
         [string]$uniOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $uniSql 2>&1 | Out-String
         [int]$uniCount = 0
         [int]::TryParse($uniOut.Trim(), [ref]$uniCount) | Out-Null
