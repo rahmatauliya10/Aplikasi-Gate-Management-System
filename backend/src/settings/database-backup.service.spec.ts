@@ -749,6 +749,38 @@ describe('DatabaseBackupService', () => {
       expect(psqlProc.killed).toBe(true);
     });
 
+    it('should NOT close psql stdin and must terminate psql with SIGTERM when pg_restore fails after emitting partial valid SQL', async () => {
+      const promise = executeStreamingRestorePipeline(
+        restoreProc,
+        psqlProc,
+        createSanitizingTransformStream(),
+        5000,
+      );
+
+      // pg_restore emits partial valid SQL
+      restoreProc.stdout?.write(
+        'CREATE TABLE "Test" (id text);\nINSERT INTO "Test" VALUES (\'val-1\');\n',
+      );
+      restoreProc.stdout?.end();
+
+      // Wait a tick for stream to flush to transform
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Before clean exit, pg_restore exits with code 1 (failure mid-dump)
+      restoreProc.stderr?.write(
+        'pg_restore: error: corrupted block mid-dump\n',
+      );
+      restoreProc.simulateClose(1);
+
+      await expect(promise).rejects.toThrow(
+        /pg_restore streaming process exited with code 1/,
+      );
+
+      // Verify psql was terminated by signal and its stdin was NEVER cleanly ended (no EOF delivered)
+      expect(psqlProc.killed).toBe(true);
+      expect((psqlProc.stdin as any)?.writableEnded).toBe(false);
+    });
+
     it('should fail-closed when child process is terminated by signal (SIGKILL / SIGTERM)', async () => {
       const promise = executeStreamingRestorePipeline(
         restoreProc,

@@ -490,19 +490,48 @@ function Invoke-AtomicPostgresRestore {
         $restoreOutput = & docker @execArgs 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
     } else {
-        # PostgreSQL < 17 (e.g. PG15): Execute COPY-aware streaming pipeline without dropping COPY data rows.
-        # Awk state machine tracks COPY blocks: only filters top-level SET transaction_timeout outside COPY data.
-        Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Running COPY-aware atomic restore pipeline via psql --single-transaction ON_ERROR_STOP=1..." -Level "INFO"
+        # PostgreSQL < 17 (e.g. PG15): Two-Phase Validated Generation & Atomic Execution
+        # Phase 1: Generate sanitized SQL and validate producer exit code BEFORE touching database.
+        # This guarantees psql is NEVER invoked if pg_restore or awk fails or exits early, preventing
+        # psql --single-transaction from committing partial transactions on premature EOF.
+        Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Phase 1 - Generating and validating sanitized SQL dump..." -Level "INFO"
         
+        $tempSqlInContainer = "/tmp/gms_restore_stage_${TimestampSuffix}.sql"
         $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
-        $pipeScript = "set -e -o pipefail; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' | psql -U `"$User`" -d `"$DbName`" -v ON_ERROR_STOP=1 --single-transaction"
+        $genScript = "set -e -o pipefail; rm -f `"$tempSqlInContainer`"; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' > `"$tempSqlInContainer`""
         
-        $execArgs = @("exec")
-        if ($Pass) { $execArgs += @("-e", "PGPASSWORD=$Pass") }
-        $execArgs += @($Container, "sh", "-c", $pipeScript)
+        $execGenArgs = @("exec")
+        if ($Pass) { $execGenArgs += @("-e", "PGPASSWORD=$Pass") }
+        $execGenArgs += @($Container, "sh", "-c", $genScript)
         
-        $restoreOutput = & docker @execArgs 2>&1 | Out-String
+        $genOutput = & docker @execGenArgs 2>&1 | Out-String
+        $genExitCode = $LASTEXITCODE
+        
+        if ($genExitCode -ne 0) {
+            & docker exec $Container rm -f $tempSqlInContainer 2>&1 | Out-Null
+            throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation failed for [$Context] with exit code $genExitCode. Zero queries sent to target database. Output: $genOutput"
+        }
+
+        # Verify generated SQL file exists and is non-empty
+        $sizeCheck = (& docker exec $Container sh -c "test -s `"$tempSqlInContainer`" && echo OK || echo EMPTY" 2>&1 | Out-String).Trim()
+        if ($sizeCheck -ne "OK") {
+            & docker exec $Container rm -f $tempSqlInContainer 2>&1 | Out-Null
+            throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation produced an empty or missing SQL file ($tempSqlInContainer). Restore aborted before database mutation."
+        }
+
+        # Phase 2: Execute verified SQL in an atomic single transaction
+        Write-Log "  PostgreSQL < 17 detected: Phase 2 - Executing validated SQL in atomic single transaction via psql..." -Level "INFO"
+        $applyScript = "set -e -o pipefail; psql -U `"$User`" -d `"$DbName`" -v ON_ERROR_STOP=1 --single-transaction -f `"$tempSqlInContainer`""
+        
+        $execApplyArgs = @("exec")
+        if ($Pass) { $execApplyArgs += @("-e", "PGPASSWORD=$Pass") }
+        $execApplyArgs += @($Container, "sh", "-c", $applyScript)
+        
+        $restoreOutput = & docker @execApplyArgs 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
+
+        # Always clean up temporary SQL file
+        & docker exec $Container rm -f $tempSqlInContainer 2>&1 | Out-Null
     }
 
     if ($exitCode -ne 0) {

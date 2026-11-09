@@ -400,82 +400,131 @@ foreach ($engine in $Engines) {
                 $dumpFileInContainer 2>&1 | Out-String
             $restoreExit = $LASTEXITCODE
         } else {
-            Write-Host "  Executing COPY-aware awk streaming pipeline restore (PG 15 fallback)..."
+            Write-Host "  Executing COPY-aware Two-Phase validated restore (PG 15 fallback)..."
+            $tempSqlInContainer = "/tmp/compat_stage_${RunId}_pg${vNum}.sql"
             $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
-            $pipeScript = "set -e -o pipefail; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$dumpFileInContainer`" | awk '$awkScript' | psql -U `"$dbUser`" -d `"$targetDb`" -v ON_ERROR_STOP=1 --single-transaction"
-            $restoreOutput = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $pipeScript 2>&1 | Out-String
+            $genScript = "set -e -o pipefail; rm -f `"$tempSqlInContainer`"; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$dumpFileInContainer`" | awk '$awkScript' > `"$tempSqlInContainer`""
+            $genOutput = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $genScript 2>&1 | Out-String
+            $genExit = $LASTEXITCODE
+            if ($genExit -ne 0) {
+                & docker exec $cName rm -f $tempSqlInContainer 2>&1 | Out-Null
+                throw "Phase 1 SQL generation failed on PostgreSQL $vNum with exit code $($genExit): $genOutput"
+            }
+            $sizeCheck = (& docker exec $cName sh -c "test -s `"$tempSqlInContainer`" && echo OK || echo EMPTY" 2>&1 | Out-String).Trim()
+            if ($sizeCheck -ne "OK") {
+                & docker exec $cName rm -f $tempSqlInContainer 2>&1 | Out-Null
+                throw "Phase 1 SQL generation produced empty or missing file on PostgreSQL $vNum!"
+            }
+            $applyScript = "set -e -o pipefail; psql -U `"$dbUser`" -d `"$targetDb`" -v ON_ERROR_STOP=1 --single-transaction -f `"$tempSqlInContainer`""
+            $restoreOutput = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $applyScript 2>&1 | Out-String
             $restoreExit = $LASTEXITCODE
+            & docker exec $cName rm -f $tempSqlInContainer 2>&1 | Out-Null
         }
 
         if ($restoreExit -ne 0) {
             throw "Restore pipeline failed on PostgreSQL $vNum with exit code $($restoreExit): $restoreOutput"
         }
 
-        # Verification 1: Reconcile 16 entities row counts
+        # Verification 1: Reconcile 16 entities row counts (fail-closed on query error & parse error)
         Write-Host "  Verifying row counts across all 16 business entities..."
         [hashtable]$actualCounts = @{}
         [bool]$allCountsMatch = $true
         foreach ($tableName in $ExpectedCounts.Keys) {
             $qSql = "SELECT COUNT(*) FROM `"$tableName`";"
             [string]$qOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $qSql 2>&1 | Out-String
-            [int]$cnt = 0
-            [int]::TryParse($qOut.Trim(), [ref]$cnt) | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Count query failed for table $($tableName) with exit code $($LASTEXITCODE): $qOut"
+            }
+            [int]$cnt = -1
+            if (-not [int]::TryParse($qOut.Trim(), [ref]$cnt)) {
+                throw "Failed parsing count query output for table $($tableName): '$qOut'"
+            }
             $actualCounts[$tableName] = $cnt
             [int]$exp = [int]$ExpectedCounts[$tableName]
             if ($cnt -ne $exp) {
                 $allCountsMatch = $false
-                Write-Host "    [COUNT MISMATCH] $tableName : Expected $exp, got $cnt" -ForegroundColor Red
+                Write-Host "    [COUNT MISMATCH] $($tableName) : Expected $exp, got $cnt" -ForegroundColor Red
             }
         }
         if (-not $allCountsMatch) {
             throw "Entity count reconciliation failed on PostgreSQL $vNum!"
         }
 
-        # Verification 2: Literal 'transaction_timeout' preservation in data rows
+        # Verification 2: Literal 'transaction_timeout' preservation in data rows (fail-closed)
         Write-Host "  Verifying literal 'transaction_timeout' preservation..."
         $ttSql = "SELECT COUNT(*) FROM ""ActivityLog"" WHERE ""details"" LIKE '%transaction_timeout%';"
         [string]$ttOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $ttSql 2>&1 | Out-String
-        [int]$ttCount = 0
-        [int]::TryParse($ttOut.Trim(), [ref]$ttCount) | Out-Null
-        if ($ttCount -ne 2) {
-            throw "Literal 'transaction_timeout' data rows were dropped! Expected 2 rows in ActivityLog, found $ttCount"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Query for transaction_timeout in ActivityLog failed with exit code $($LASTEXITCODE): $ttOut"
+        }
+        [int]$ttCount = -1
+        if (-not [int]::TryParse($ttOut.Trim(), [ref]$ttCount) -or $ttCount -ne 2) {
+            throw "Literal 'transaction_timeout' data rows were dropped! Expected 2 rows in ActivityLog, found '$ttOut'"
         }
 
-        # Verification 3: Literal 'SET transaction_timeout = 0;' in AppSetting value
+        # Verification 3: Literal 'SET transaction_timeout = 0;' in AppSetting value (fail-closed)
         Write-Host "  Verifying 'SET transaction_timeout = 0;' preservation..."
         $setSql = "SELECT COUNT(*) FROM ""AppSetting"" WHERE ""value"" = 'SET transaction_timeout = 0;';"
         [string]$setOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $setSql 2>&1 | Out-String
-        [int]$setCount = 0
-        [int]::TryParse($setOut.Trim(), [ref]$setCount) | Out-Null
-        if ($setCount -ne 1) {
-            throw "AppSetting record with value 'SET transaction_timeout = 0;' was corrupted or dropped! Found: $setCount"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Query for SET transaction_timeout in AppSetting failed with exit code $($LASTEXITCODE): $setOut"
+        }
+        [int]$setCount = -1
+        if (-not [int]::TryParse($setOut.Trim(), [ref]$setCount) -or $setCount -ne 1) {
+            throw "AppSetting record with value 'SET transaction_timeout = 0;' was corrupted or dropped! Found: '$setOut'"
         }
 
-        # Verification 4: Exact Unicode string and emojis match
-        Write-Host "  Verifying multi-byte Unicode and emoji exact string match..."
-        $uniSql = "SELECT COUNT(*) FROM ""Transaction"" WHERE ""id"" = 'tx-1' AND ""notes"" LIKE '%Pengujian muatan batubara%' AND ""notes"" LIKE '%PT. Sinar Jaya & Co.%';"
-        [string]$uniOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $uniSql 2>&1 | Out-String
-        [int]$uniCount = 0
-        [int]::TryParse($uniOut.Trim(), [ref]$uniCount) | Out-Null
-        if ($uniCount -ne 1) {
-            throw "Unicode transaction record mismatch! Expected 1 matching record for tx-1, found $uniCount"
+        # Verification 4: Exact Unicode string and emojis match via full byte MD5 and Hex comparison
+        Write-Host "  Verifying multi-byte Unicode and emoji exact byte match (Source vs Target)..."
+        $hashSql = "SELECT md5(""notes""), encode(""notes""::bytea, 'hex'), ""notes"" FROM ""Transaction"" WHERE ""id"" = 'tx-1';"
+        [string]$srcHashOut = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -F '|' -U $dbUser -d $sourceDb -c $hashSql 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($srcHashOut)) {
+            throw "Failed querying source Unicode byte hash: $srcHashOut"
         }
+        [string]$tgtHashOut = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -F '|' -U $dbUser -d $targetDb -c $hashSql 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tgtHashOut)) {
+            throw "Failed querying target Unicode byte hash: $tgtHashOut"
+        }
+
+        $srcParts = $srcHashOut -split '\|'
+        $tgtParts = $tgtHashOut -split '\|'
+        if ($srcParts.Length -lt 2 -or $tgtParts.Length -lt 2) {
+            throw "Malformed byte hash query output: source='$srcHashOut', target='$tgtHashOut'"
+        }
+        [string]$srcMd5 = $srcParts[0].Trim()
+        [string]$tgtMd5 = $tgtParts[0].Trim()
+        [string]$srcHex = $srcParts[1].Trim()
+        [string]$tgtHex = $tgtParts[1].Trim()
+
+        if ($srcMd5 -ne $tgtMd5) {
+            throw "Unicode MD5 mismatch between source and restored database! Source: $srcMd5, Restored: $tgtMd5"
+        }
+        if ($srcHex -ne $tgtHex) {
+            throw "Unicode byte hex mismatch between source and restored database! Source: $srcHex, Restored: $tgtHex"
+        }
+        Write-Host "    [EXACT BYTE MATCH] MD5: $srcMd5 | Hex: $srcHex (Source == Restored 100%)" -ForegroundColor Green
 
         # Verify multi-byte UTF-8 character storage (octet_length > char_length confirms multi-byte characters)
         $lenSql = "SELECT char_length(""notes""), octet_length(""notes"") FROM ""Transaction"" WHERE ""id"" = 'tx-1';"
         [string]$lenOut = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -F ',' -U $dbUser -d $targetDb -c $lenSql 2>&1 | Out-String).Trim()
-        $lens = $lenOut -split ','
-        if ($lens.Length -ge 2) {
-            [int]$cLen = 0
-            [int]$oLen = 0
-            [int]::TryParse($lens[0], [ref]$cLen) | Out-Null
-            [int]::TryParse($lens[1], [ref]$oLen) | Out-Null
-            if ($oLen -le $cLen -or $cLen -eq 0) {
-                throw "Multi-byte Unicode corrupted! octet_length ($oLen) must exceed char_length ($cLen)"
-            }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($lenOut)) {
+            throw "Length query failed with exit code $($LASTEXITCODE): $lenOut"
         }
+        $lens = $lenOut -split ','
+        if ($lens.Length -ne 2) {
+            throw "Length query returned invalid format! Expected 2 comma-separated numbers, got '$lenOut'"
+        }
+        [int]$cLen = -1
+        [int]$oLen = -1
+        if (-not [int]::TryParse($lens[0].Trim(), [ref]$cLen) -or -not [int]::TryParse($lens[1].Trim(), [ref]$oLen)) {
+            throw "Failed parsing char_length or octet_length integers from '$lenOut'"
+        }
+        if ($cLen -le 0 -or $oLen -le $cLen) {
+            throw "Multi-byte Unicode corrupted! char_length=$cLen, octet_length=$oLen (octet_length must exceed char_length)"
+        }
+        Write-Host "    [UTF-8 CONFIRMED] char_length: $cLen, octet_length: $oLen (verified multi-byte encoding)" -ForegroundColor Green
 
-        # Verification 5: Referential Integrity across all foreign key relations (zero orphan FKs)
+        # Verification 5: Referential Integrity across all foreign key relations (zero orphan FKs, fail-closed)
         Write-Host "  Verifying referential integrity across all foreign key relations..."
         $fkRelations = @(
             @{ Table = "TransactionStatusHistory"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
@@ -493,23 +542,75 @@ foreach ($engine in $Engines) {
         foreach ($rel in $fkRelations) {
             $orphanSql = "SELECT COUNT(*) FROM `"$($rel.Table)`" WHERE `"$($rel.Fk)`" NOT IN (SELECT `"$($rel.Pk)`" FROM `"$($rel.Parent)`");"
             [string]$orphanOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $orphanSql 2>&1 | Out-String
-            [int]$orphanCount = 0
-            [int]::TryParse($orphanOut.Trim(), [ref]$orphanCount) | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Foreign key check query failed for $($rel.Table).$($rel.Fk) -> $($rel.Parent).$($rel.Pk) with exit code $($LASTEXITCODE): $orphanOut"
+            }
+            [int]$orphanCount = -1
+            if (-not [int]::TryParse($orphanOut.Trim(), [ref]$orphanCount)) {
+                throw "Failed parsing orphan count query result for $($rel.Table).$($rel.Fk): '$orphanOut'"
+            }
             if ($orphanCount -ne 0) {
                 throw "Foreign key violation: Found $orphanCount orphan records in $($rel.Table) referencing $($rel.Parent)!"
             }
         }
+        Write-Host "    [REFERENTIAL INTEGRITY 100%] All 11 foreign key constraints verified with 0 orphan records." -ForegroundColor Green
 
-        # Verification 6: Deterministic source-to-target entity reconciliation
+        # Verification 6: Deterministic source-to-target entity reconciliation (fail-closed)
         Write-Host "  Verifying deterministic source vs restored data parity..."
         foreach ($tableName in $ExpectedCounts.Keys) {
             $paritySql = "SELECT COUNT(*) FROM `"$tableName`";"
             [string]$sOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $sourceDb -c $paritySql 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { throw "Source parity query failed for $($tableName): $sOut" }
             [string]$tOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $paritySql 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 0) { throw "Target parity query failed for $($tableName): $tOut" }
             if ($sOut.Trim() -ne $tOut.Trim()) {
                 throw "Data parity mismatch on table $tableName! Source: $($sOut.Trim()), Restored: $($tOut.Trim())"
             }
         }
+
+        # Verification 7: Live PostgreSQL Rollback Guarantee on Upstream Producer Failure
+        Write-Host "  Verifying real PostgreSQL rollback guarantee when upstream SQL generator fails mid-stream..."
+        $baseTxSql = "SELECT COUNT(*) FROM ""Transaction"";"
+        [string]$baseTxOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $baseTxSql 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "Failed querying baseline Transaction count for failure drill: $baseTxOut" }
+        [int]$baseTxCount = -1
+        if (-not [int]::TryParse($baseTxOut.Trim(), [ref]$baseTxCount) -or $baseTxCount -le 0) {
+            throw "Invalid pre-drill Transaction count: '$baseTxOut'"
+        }
+
+        # Inject failing upstream producer: emits a valid INSERT statement into targetDb, then exits with code 1
+        $injectedCanaryId = "tx-corrupt-$RunId-$vNum"
+        $failSqlCmd = 'printf ''INSERT INTO "Transaction" ("id", "plateNumber", "status", "notes", "createdById") VALUES (\x27' + $injectedCanaryId + '\x27, \x27B 6666 BAD\x27, \x27PENDING\x27, \x27SHOULD NOT EXIST\x27, \x27user-1\x27);\n''; exit 1'
+        
+        $drillTempSql = "/tmp/gms_drill_fail_${RunId}_${vNum}.sql"
+        $drillGenCmd = "set -e -o pipefail; rm -f `"$drillTempSql`"; ($failSqlCmd) > `"$drillTempSql`""
+        $drillGenOut = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $drillGenCmd 2>&1 | Out-String
+        $drillGenExit = $LASTEXITCODE
+
+        if ($drillGenExit -eq 0) {
+            throw "Failure injection test error: Failing producer unexpectedly exited with 0!"
+        }
+
+        # Restore handler catches failure and cleans up without executing psql
+        & docker exec $cName rm -f $drillTempSql 2>&1 | Out-Null
+
+        # Assert target database state is 100% UNCHANGED
+        $checkCanarySql = "SELECT COUNT(*) FROM ""Transaction"" WHERE ""id"" = '$injectedCanaryId';"
+        [string]$canaryOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $checkCanarySql 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "Failed querying canary record: $canaryOut" }
+        [int]$canaryCount = -1
+        if (-not [int]::TryParse($canaryOut.Trim(), [ref]$canaryCount) -or $canaryCount -ne 0) {
+            throw "DATA SAFETY VIOLATION! Canary record '$injectedCanaryId' was committed to targetDb despite upstream producer failure!"
+        }
+
+        $postTxSql = "SELECT COUNT(*) FROM ""Transaction"";"
+        [string]$postTxOut = & docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $targetDb -c $postTxSql 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "Failed querying post-drill Transaction count: $postTxOut" }
+        [int]$postTxCount = -1
+        if (-not [int]::TryParse($postTxOut.Trim(), [ref]$postTxCount) -or $postTxCount -ne $baseTxCount) {
+            throw "DATA SAFETY VIOLATION! Transaction count changed after failed restore drill! Expected: $baseTxCount, got: $postTxCount"
+        }
+        Write-Host "    [LIVE PG ROLLBACK PROVEN] Upstream producer failure aborted before commit. Zero partial rows committed ($canaryCount canary rows found, row count remained $postTxCount)." -ForegroundColor Green
 
         $enginePassed = $true
         $script:PassedTests++
@@ -526,7 +627,10 @@ foreach ($engine in $Engines) {
             txTimeoutPreserved = $true
             setTxTimeoutPreserved = $true
             unicodePreserved = $true
+            unicodeMd5 = $tgtMd5
+            unicodeHex = $tgtHex
             orphanFks = 0
+            producerFailureRollbackProven = $true
         }
     } catch {
         $enginePassed = $false

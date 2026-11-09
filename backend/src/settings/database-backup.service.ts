@@ -230,13 +230,21 @@ export async function executeStreamingRestorePipeline(
 
     let streamPipelineFinished = false;
 
-    pipeline(restoreProc.stdout, filterTransform, psqlProc.stdin, (err) => {
+    // Use pipeline between restoreProc.stdout and filterTransform to catch upstream errors
+    pipeline(restoreProc.stdout, filterTransform, (err) => {
       if (err) {
         settleError(err);
       } else {
         streamPipelineFinished = true;
-        checkDone();
+        checkCommitAndDone();
       }
+    });
+
+    // Pipe sanitized stream to psqlProc.stdin WITHOUT auto-ending on upstream EOF ({ end: false })
+    // This is the critical safety control: psqlProc.stdin MUST NOT receive EOF until
+    // restoreProc has closed and is verified to have exited with code 0!
+    filterTransform.pipe(psqlProc.stdin, {
+      end: false,
     });
 
     let restoreExited = false;
@@ -244,13 +252,32 @@ export async function executeStreamingRestorePipeline(
     let restoreExitCode: number | null = null;
     let psqlExitCode: number | null = null;
 
-    const checkDone = () => {
-      if (
-        restoreExited &&
-        psqlExited &&
-        streamPipelineFinished &&
-        !hasSettled
-      ) {
+    const checkCommitAndDone = () => {
+      if (hasSettled) return;
+
+      // When the upstream stream has finished AND restoreProc has exited with code 0:
+      // It is now safe to close psqlProc.stdin (signaling EOF for single-transaction commit)
+      if (streamPipelineFinished && restoreExited && restoreExitCode === 0) {
+        const stdinStream = psqlProc.stdin as unknown as {
+          destroyed?: boolean;
+          writableEnded?: boolean;
+          end?: () => void;
+        };
+        if (
+          !stdinStream?.destroyed &&
+          !stdinStream?.writableEnded &&
+          typeof stdinStream?.end === 'function'
+        ) {
+          try {
+            stdinStream.end();
+          } catch {
+            // ignore if already closed
+          }
+        }
+      }
+
+      // Check if both processes have exited and stream finished
+      if (restoreExited && psqlExited && streamPipelineFinished) {
         hasSettled = true;
         if (timeoutTimer) {
           clearTimeout(timeoutTimer);
@@ -287,6 +314,8 @@ export async function executeStreamingRestorePipeline(
       restoreExited = true;
       restoreExitCode = signal ? -1 : (code ?? -1);
       if (restoreExitCode !== 0 && !hasSettled) {
+        // Upstream producer failed! Immediately terminate psql without ever closing stdin cleanly.
+        // In PostgreSQL, terminating the client process automatically rolls back any active transaction.
         settleError(
           new Error(
             `pg_restore streaming process exited with code ${restoreExitCode}: ${restoreStderr}`,
@@ -294,7 +323,7 @@ export async function executeStreamingRestorePipeline(
         );
         return;
       }
-      checkDone();
+      checkCommitAndDone();
     });
 
     psqlProc.on('close', (code, signal) => {
@@ -308,7 +337,7 @@ export async function executeStreamingRestorePipeline(
         );
         return;
       }
-      checkDone();
+      checkCommitAndDone();
     });
   });
 }
