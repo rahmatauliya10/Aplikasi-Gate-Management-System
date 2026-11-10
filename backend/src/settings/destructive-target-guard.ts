@@ -45,11 +45,7 @@ export function assertDestructiveTestTargetSafe(
     );
   }
 
-  const effectiveNodeEnv = (
-    nodeEnv ||
-    process.env.NODE_ENV ||
-    ''
-  )
+  const effectiveNodeEnv = (nodeEnv || process.env.NODE_ENV || '')
     .trim()
     .toLowerCase();
   if (effectiveNodeEnv === 'production' || effectiveNodeEnv === 'prod') {
@@ -261,7 +257,7 @@ export async function verifyTargetDatabaseFixtureIdentity(
     if (tableCheck && tableCheck.length > 0) {
       const prodSettings = await probe
         .$queryRawUnsafe<any[]>(
-          'SELECT key, value FROM "AppSetting" WHERE key IN (\'ENVIRONMENT_ID\', \'SYSTEM_STAGE\', \'INSTALLATION_UUID\');',
+          "SELECT key, value FROM \"AppSetting\" WHERE key IN ('ENVIRONMENT_ID', 'SYSTEM_STAGE', 'INSTALLATION_UUID');",
         )
         .catch(() => []);
 
