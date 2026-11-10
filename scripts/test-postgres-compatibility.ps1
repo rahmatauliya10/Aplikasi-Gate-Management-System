@@ -656,6 +656,179 @@ INSERT INTO "Transaction" ("id", "plateNumber", "status", "notes", "createdById"
         }
         Write-Host "    [IN-FLIGHT ROLLBACK PROVEN] Partial multi-statement batch aborted on FK violation and rolled back atomically (0 canary rows committed, total rows strictly unchanged at $postFlightCount)." -ForegroundColor Green
 
+        # Verification 8: Actual GMS Schema Migrations (30 Prisma Migrations) & Multi-Module Workflow Rehearsal (MERGE-04B)
+        if ($vNum -eq 15) {
+            Write-Host "  Verifying actual GMS schema migrations (30 Prisma migrations) and multi-module workflow rehearsal on PG15..."
+            [string]$actualSrcDb = "gms_actual_schema_${RunId}"
+            [string]$actualTgtDb = "gms_actual_target_${RunId}"
+            [string]$actualDumpInCont = "/tmp/gms_actual_${RunId}.dump"
+            [string]$actualStageDir = "/tmp/gms_restore_actual_${RunId}"
+            [string]$actualStageSql = "${actualStageDir}/stage.sql"
+
+            try {
+                # Create actual schema source database
+                & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d "postgres" -c "CREATE DATABASE `"$actualSrcDb`";" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Failed creating source database $actualSrcDb for actual schema rehearsal!" }
+
+                # Collect all 30 Prisma migration directories in sequence
+                $migrationDirs = Get-ChildItem -Path (Join-Path $ProjectRootDir "backend/prisma/migrations") -Directory | Sort-Object Name
+                if ($migrationDirs.Count -lt 30) {
+                    throw "Expected at least 30 Prisma migration directories, found $($migrationDirs.Count)"
+                }
+
+                # Initialize _prisma_migrations table
+                $createPrismaMigrationsSql = @"
+CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+    "id" VARCHAR(36) PRIMARY KEY,
+    "checksum" VARCHAR(64) NOT NULL,
+    "finished_at" TIMESTAMPTZ,
+    "migration_name" VARCHAR(255) NOT NULL,
+    "logs" TEXT,
+    "rolled_back_at" TIMESTAMPTZ,
+    "started_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "applied_steps_count" INTEGER NOT NULL DEFAULT 1
+);
+"@
+                $encodedPrismaSql = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($createPrismaMigrationsSql))
+                & docker exec -i -e "PGPASSWORD=$dbPass" $cName sh -c "echo '$encodedPrismaSql' | base64 -d | psql -U `"$dbUser`" -d `"$actualSrcDb`" -v ON_ERROR_STOP=1" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Failed creating _prisma_migrations table in $actualSrcDb!" }
+
+                # Apply each migration sequentially via psql
+                foreach ($mDir in $migrationDirs) {
+                    $mSqlFile = Join-Path $mDir.FullName "migration.sql"
+                    if (-not (Test-Path $mSqlFile)) { continue }
+                    $sqlContent = [System.IO.File]::ReadAllText($mSqlFile, [System.Text.Encoding]::UTF8)
+                    $encodedSql = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($sqlContent))
+                    & docker exec -i -e "PGPASSWORD=$dbPass" $cName sh -c "echo '$encodedSql' | base64 -d | psql -U `"$dbUser`" -d `"$actualSrcDb`" -v ON_ERROR_STOP=1" 2>&1 | Out-Null
+                    if ($LASTEXITCODE -ne 0) {
+                        throw "Failed applying Prisma migration [$($mDir.Name)] on PostgreSQL 15!"
+                    }
+
+                    # Register in _prisma_migrations
+                    $mId = [guid]::NewGuid().ToString()
+                    $mChecksum = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
+                    $regSql = "INSERT INTO `"_prisma_migrations`" (`"id`", `"checksum`", `"finished_at`", `"migration_name`") VALUES ('$mId', '$mChecksum', now(), '$($mDir.Name)');"
+                    & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d $actualSrcDb -c $regSql 2>&1 | Out-Null
+                }
+
+                # Seed representative production entities across GBB, GSP, GBJ workflows
+                $seedActualSql = @"
+-- Admin & Operator users
+INSERT INTO "User" ("id", "email", "username", "password", "name", "role", "isActive", "mustChangePassword", "createdAt", "updatedAt")
+VALUES ('usr-admin', 'admin@gms.test', 'admin_audit', 'argon2_admin_audit_placeholder', 'Auditor Admin', 'ADMIN'::"Role", true, false, now(), now()),
+       ('usr-op', 'operator@gms.test', 'operator_audit', 'argon2_op_audit_placeholder', 'Auditor Operator', 'WAREHOUSE'::"Role", true, false, now(), now());
+
+-- User warehouse access
+INSERT INTO "UserWarehouseAccess" ("id", "userId", "processType", "createdAt", "updatedAt")
+VALUES ('uwa-1', 'usr-op', 'GBB'::"ProcessType", now(), now());
+
+-- Product catalog (canonical GSP/GBB)
+INSERT INTO "ProductCatalog" ("id", "code", "name", "category", "processType", "receiptUnit", "isPaRequired", "policyVersion", "isActive", "createdAt", "updatedAt")
+VALUES ('prod-1', 'COAL-001', 'Thermal Coal', 'RAW_MATERIAL', 'GBB'::"ProcessType", 'KG'::"WarehouseUnit", false, 'SOP-2026.1', true, now(), now()),
+       ('prod-2', 'SOLAR-001', 'High Speed Diesel', 'FUEL', 'GSP'::"ProcessType", 'LITER'::"WarehouseUnit", false, 'SOP-2026.1', true, now(), now());
+
+-- Transaction 1 (GBB inbound with complete multi-stage workflow)
+INSERT INTO "Transaction" ("id", "transactionNumber", "plateNumber", "driverName", "driverPhone", "vendorName", "vehicleType", "processType", "cargoType", "cargoProcessType", "status", "createdById", "createdAt", "updatedAt")
+VALUES ('tx-gbb-1', 'TRX-GBB-202611-001', 'B 1234 GBB', 'Driver GBB', '08123456789', 'PT Supplier Batubara', 'TRUCK', 'GBB'::"ProcessType", 'Batubara', 'INBOUND'::"CargoProcessType", 'COMPLETED'::"TransactionStatus", 'usr-admin', now(), now());
+
+INSERT INTO "TransactionStatusHistory" ("id", "transactionId", "oldStatus", "newStatus", "changedById", "notes", "changedAt")
+VALUES ('tsh-1', 'tx-gbb-1', NULL, 'REGISTERED'::"TransactionStatus", 'usr-admin', 'Security check-in', now()),
+       ('tsh-2', 'tx-gbb-1', 'REGISTERED'::"TransactionStatus", 'COMPLETED'::"TransactionStatus", 'usr-admin', 'Workflow completed', now());
+
+INSERT INTO "WeighbridgeRecord" ("id", "transactionId", "type", "weight", "ticketNumber", "operatorId", "isCurrent", "createdAt", "updatedAt")
+VALUES ('wb-1', 'tx-gbb-1', 'IN'::"WeighbridgeType", 35000.00, 'WB-001', 'usr-op', true, now(), now());
+
+INSERT INTO "WarehouseProcess" ("id", "transactionId", "processType", "actualQuantity", "unit", "receivedQuantity", "receivedUnit", "createdAt", "updatedAt")
+VALUES ('wp-1', 'tx-gbb-1', 'GBB'::"ProcessType", 23000, 'KG'::"WarehouseUnit", 23000.000, 'KG'::"WarehouseUnit", now(), now());
+
+INSERT INTO "QcVehicleCheck" ("id", "transactionId", "result", "decisionMode", "hasDeviation", "createdAt", "updatedAt")
+VALUES ('qc-1', 'tx-gbb-1', 'PASSED'::"QcResult", 'ALL_CHECKS_PASSED'::"QcVehicleDecisionMode", false, now(), now());
+
+INSERT INTO "IncomingMaterialCheck" ("id", "transactionId", "result", "notes", "createdAt", "updatedAt")
+VALUES ('imc-1', 'tx-gbb-1', 'PASSED'::"QcResult", 'Sample passed specification', now(), now());
+
+INSERT INTO "Attachment" ("id", "attachmentLineageId", "transactionId", "module", "attachmentType", "originalName", "fileName", "filePath", "mimeType", "size", "uploadedById", "createdAt", "isCurrent")
+VALUES ('att-1', 'att-lin-1', 'tx-gbb-1', 'WEIGHBRIDGE', 'WEIGH_IN'::"AttachmentType", 'do.pdf', 'do_hash.pdf', 'attachments/tx-gbb-1/do_hash.pdf', 'application/pdf', 104857, 'usr-admin', now(), true);
+
+INSERT INTO "TransactionCorrection" ("id", "transactionId", "correctedById", "correctionNumber", "action", "reasonCode", "reason", "remark", "oldValues", "newValues", "expectedRevision", "createdAt")
+VALUES ('tc-1', 'tx-gbb-1', 'usr-admin', 'CORR-001', 'CORRECT_DATA'::"CorrectionAction", 'TARE_ERROR', 'Weight tare adjustment', 'Corrected tare weight', '{"weight": 12100}'::jsonb, '{"weight": 12000}'::jsonb, 1, now());
+
+INSERT INTO "TransactionCorrectionItem" ("id", "correctionId", "targetModule", "fieldName", "oldValue", "newValue", "createdAt")
+VALUES ('tci-1', 'tc-1', 'WEIGHBRIDGE'::"CorrectionTargetModule", 'tareWeight', '{"weight": 12100}'::jsonb, '{"weight": 12000}'::jsonb, now());
+
+INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt")
+VALUES ('app-1', 'DEFAULT_LANGUAGE', 'id-ID', now(), now());
+
+INSERT INTO "ActivityLog" ("id", "userId", "action", "module", "status", "description", "createdAt")
+VALUES ('act-1', 'usr-admin', 'CREATE', 'TRANSACTION', 'SUCCESS', 'Audit transaction seeded', now());
+"@
+                $encodedSeedSql = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($seedActualSql))
+                & docker exec -i -e "PGPASSWORD=$dbPass" $cName sh -c "echo '$encodedSeedSql' | base64 -d | psql -U `"$dbUser`" -d `"$actualSrcDb`" -v ON_ERROR_STOP=1" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Failed seeding representative GMS schema entities into $actualSrcDb!" }
+
+                # Dump actual schema database via pg_dump
+                & docker exec -e "PGPASSWORD=$dbPass" $cName pg_dump -Fc -U $dbUser -d $actualSrcDb -f $actualDumpInCont 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Failed dumping actual schema source database $actualSrcDb!" }
+
+                # Create actual target database
+                & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d "postgres" -c "CREATE DATABASE `"$actualTgtDb`";" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "Failed creating target database $actualTgtDb!" }
+
+                # Execute two-phase PG15 atomic restore pipeline
+                $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
+                $pipeCmd = "set -e -o pipefail; mkdir -m 700 -p `"$actualStageDir`"; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$actualDumpInCont`" | awk '$awkScript' > `"$actualStageSql`"; psql -U `"$dbUser`" -d `"$actualTgtDb`" -v ON_ERROR_STOP=1 --single-transaction -f `"$actualStageSql`""
+                $pipeOut = & docker exec -e "PGPASSWORD=$dbPass" $cName sh -c $pipeCmd 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Actual schema restore pipeline failed on PG15 with exit code $($LASTEXITCODE): $pipeOut"
+                }
+
+                # Verify _prisma_migrations count in target
+                [string]$migCountOut = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $actualTgtDb -c "SELECT COUNT(*) FROM ""_prisma_migrations"" WHERE finished_at IS NOT NULL;" 2>&1 | Out-String).Trim()
+                [int]$restoredMigCount = 0
+                [bool]$parsedMig = [int]::TryParse($migCountOut, [ref]$restoredMigCount)
+                if (-not $parsedMig -or $restoredMigCount -ne $migrationDirs.Count) {
+                    throw "Actual schema migration count mismatch! Expected $($migrationDirs.Count), got '$migCountOut'"
+                }
+
+                # Verify core entity counts match
+                $entitiesToCheck = @("User", "UserWarehouseAccess", "ProductCatalog", "Transaction", "TransactionStatusHistory", "WeighbridgeRecord", "WarehouseProcess", "QcVehicleCheck", "IncomingMaterialCheck", "Attachment", "TransactionCorrection", "TransactionCorrectionItem", "AppSetting", "ActivityLog")
+                foreach ($ent in $entitiesToCheck) {
+                    [string]$sCnt = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $actualSrcDb -c "SELECT COUNT(*) FROM `"$ent`";" 2>&1 | Out-String).Trim()
+                    [string]$tCnt = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $actualTgtDb -c "SELECT COUNT(*) FROM `"$ent`";" 2>&1 | Out-String).Trim()
+                    if ($sCnt -ne $tCnt -or [int]$sCnt -le 0) {
+                        throw "Entity parity mismatch on actual schema table $ent! Source: $sCnt, Restored: $tCnt"
+                    }
+                }
+
+                # Verify zero orphan FKs in actual target
+                $actualFkChecks = @(
+                    @{ Table = "TransactionStatusHistory"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+                    @{ Table = "WeighbridgeRecord"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+                    @{ Table = "WarehouseProcess"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+                    @{ Table = "QcVehicleCheck"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+                    @{ Table = "IncomingMaterialCheck"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+                    @{ Table = "Attachment"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+                    @{ Table = "UserWarehouseAccess"; Fk = "userId"; Parent = "User"; Pk = "id" },
+                    @{ Table = "Transaction"; Fk = "createdById"; Parent = "User"; Pk = "id" },
+                    @{ Table = "TransactionCorrection"; Fk = "transactionId"; Parent = "Transaction"; Pk = "id" },
+                    @{ Table = "TransactionCorrectionItem"; Fk = "correctionId"; Parent = "TransactionCorrection"; Pk = "id" }
+                )
+                foreach ($chk in $actualFkChecks) {
+                    $chkSql = "SELECT COUNT(*) FROM `"$($chk.Table)`" WHERE `"$($chk.Fk)`" NOT IN (SELECT `"$($chk.Pk)`" FROM `"$($chk.Parent)`");"
+                    [string]$chkOut = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $actualTgtDb -c $chkSql 2>&1 | Out-String).Trim()
+                    if ([int]$chkOut -ne 0) {
+                        throw "Foreign key orphan violation in actual schema rehearsal! Table $($chk.Table) has $chkOut orphan records!"
+                    }
+                }
+
+                Write-Host "    [ACTUAL SCHEMA REHEARSAL 100%] All $($migrationDirs.Count) Prisma migrations and 14 representative business entities restored with 0 orphan FKs and 100% parity." -ForegroundColor Green
+            } finally {
+                # Cleanup actual rehearsal artifacts
+                & docker exec $cName rm -rf $actualDumpInCont $actualStageDir 2>&1 | Out-Null
+                & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d "postgres" -c "DROP DATABASE IF EXISTS `"$actualSrcDb`"; DROP DATABASE IF EXISTS `"$actualTgtDb`";" 2>&1 | Out-Null
+            }
+        }
+
         $enginePassed = $true
         $script:PassedTests++
         Write-Host "  [PASS] PostgreSQL $vNum restore passed with 100% data preservation across all 16 entities!" -ForegroundColor Green
@@ -676,6 +849,7 @@ INSERT INTO "Transaction" ("id", "plateNumber", "status", "notes", "createdById"
             orphanFks = 0
             producerFailureRollbackProven = $true
             inFlightRollbackProven = $true
+            actualGmsSchemaRehearsalProven = if ($vNum -eq 15) { $true } else { $false }
         }
     } catch {
         $enginePassed = $false

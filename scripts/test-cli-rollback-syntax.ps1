@@ -599,6 +599,123 @@ try {
     }
 }
 
+# 15. REL-23: Production restore storage capacity preflight and scoped artifact governance
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-23] Production restore storage capacity preflight and scoped artifact governance..." -ForegroundColor Yellow
+try {
+    # Dot-source functions in fail-safe exported mode
+    . (Join-Path $PSScriptRoot "gms-production-restore.ps1") -ExportFunctionsOnly
+
+    [string]$c1Err = ""; [string]$c2Err = ""; [string]$c3Err = ""
+    [bool]$c4Pass = $false
+
+    # C1: Stat failure -> fail-closed
+    try {
+        Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
+            -StatExecutor { param($c, $p) return "" } `
+            -DfExecutor { param($c, $p) return "10000000" } | Out-Null
+    } catch { $c1Err = $_.ToString() }
+
+    # C2: Df failure -> fail-closed
+    try {
+        Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
+            -StatExecutor { param($c, $p) return "10485760" } `
+            -DfExecutor { param($c, $p) return "" } | Out-Null
+    } catch { $c2Err = $_.ToString() }
+
+    # C3: Insufficient capacity (dump 50MB -> required 150MB, available only 50MB) -> fail-closed
+    try {
+        Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
+            -StatExecutor { param($c, $p) return (50 * 1024 * 1024).ToString() } `
+            -DfExecutor { param($c, $p) return (50 * 1024).ToString() } | Out-Null
+    } catch { $c3Err = $_.ToString() }
+
+    # C4: Valid capacity (dump 10MB -> required max(30MB, 100MB) = 100MB, available 500MB) -> pass
+    $c4Res = Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
+        -StatExecutor { param($c, $p) return (10 * 1024 * 1024).ToString() } `
+        -DfExecutor { param($c, $p) return (500 * 1024).ToString() }
+    if ($c4Res -and $c4Res.DumpBytes -eq (10*1024*1024) -and $c4Res.RequiredBytes -eq 104857600) {
+        $c4Pass = $true
+    }
+
+    # Governance testing for Clear-StaleGmsRestoreArtifacts
+    [System.Collections.Generic.List[string]]$prunedDirs = [System.Collections.Generic.List[string]]::new()
+    $mockDirs = @(
+        "/tmp/gms_restore_active",
+        "/tmp/gms_restore_completed",
+        "/tmp/gms_restore_failed_recent",
+        "/tmp/gms_restore_failed_expired",
+        "/tmp/gms_restore_legacy_old",
+        "/tmp/gms_restore_legacy_recent"
+    )
+
+    $now = (Get-Date).ToUniversalTime()
+    $mockMeta = @{
+        "/tmp/gms_restore_active" = @{ operationId = "op-active"; status = "IN_PROGRESS"; createdAt = $now.ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_completed" = @{ operationId = "op-comp"; status = "COMPLETED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_failed_recent" = @{ operationId = "op-fail-rec"; status = "FAILED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_failed_expired" = @{ operationId = "op-fail-exp"; status = "FAILED"; createdAt = $now.AddHours(-26).ToString("o") } | ConvertTo-Json -Compress
+    }
+
+    Clear-StaleGmsRestoreArtifacts -Container "dummy" -CurrentOperationId "op-active" -CommandExecutor {
+        param($cont, $cmd)
+        if ($cmd -like "find /tmp*") {
+            return ($mockDirs -join "`n")
+        }
+        if ($cmd -like "*cat *stage.meta.json*") {
+            foreach ($key in $mockMeta.Keys) {
+                if ($cmd -like "*$key/*") {
+                    return $mockMeta[$key]
+                }
+            }
+            return ""
+        }
+        if ($cmd -like "*find * -maxdepth 0 -mtime +1*") {
+            if ($cmd -like "*/tmp/gms_restore_legacy_old*") {
+                return "/tmp/gms_restore_legacy_old"
+            }
+            return ""
+        }
+        if ($cmd -like "*rm -rf *") {
+            $matched = $mockDirs | Where-Object { $cmd -like "*$_*" } | Select-Object -First 1
+            if ($matched) {
+                $prunedDirs.Add($matched)
+            }
+            return ""
+        }
+        return ""
+    }
+
+    $c5ArtifactGovernancePass = (-not $prunedDirs.Contains("/tmp/gms_restore_active")) -and `
+                                ($prunedDirs.Contains("/tmp/gms_restore_completed")) -and `
+                                (-not $prunedDirs.Contains("/tmp/gms_restore_failed_recent")) -and `
+                                ($prunedDirs.Contains("/tmp/gms_restore_failed_expired")) -and `
+                                ($prunedDirs.Contains("/tmp/gms_restore_legacy_old")) -and `
+                                (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_recent"))
+
+    $allRel23Passed = ($c1Err -match "Failed to determine dump file size") -and `
+                      ($c2Err -match "Failed to determine storage capacity") -and `
+                      ($c3Err -match "Insufficient storage capacity") -and `
+                      $c4Pass -and `
+                      $c5ArtifactGovernancePass
+
+    if ($allRel23Passed) {
+        $script:PassedTests++
+        Write-Host "  [PASS] Restore storage preflight fail-closed checks and forensic artifact governance verified." -ForegroundColor Green
+    } else {
+        $script:FailedTests++
+        Write-Host "  [FAIL] Restore storage preflight or artifact governance failed verification!" -ForegroundColor Red
+        Write-Host "  C1 (Stat Fail):           $c1Err" -ForegroundColor DarkGray
+        Write-Host "  C2 (Df Fail):             $c2Err" -ForegroundColor DarkGray
+        Write-Host "  C3 (Insufficient):        $c3Err" -ForegroundColor DarkGray
+        Write-Host "  C4 (Valid Space Pass):    $c4Pass" -ForegroundColor DarkGray
+        Write-Host "  C5 (Artifact Governance): $c5ArtifactGovernancePass (Pruned: $($prunedDirs -join ', '))" -ForegroundColor DarkGray
+    }
+} catch {
+    $script:FailedTests++
+    Write-Host "  [FAIL] REL-23 threw unexpected error: $_" -ForegroundColor Red
+}
+
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
 Write-Host "CLI Syntax & Regression Matrix Verification Summary:" -ForegroundColor Cyan
 Write-Host "  Total:  $TotalTests" -ForegroundColor Cyan

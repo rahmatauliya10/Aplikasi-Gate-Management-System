@@ -68,7 +68,10 @@ param(
     [switch]$ManagedByOrchestrator,
 
     [Parameter(Mandatory=$false)]
-    [switch]$Force
+    [switch]$Force,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$ExportFunctionsOnly
 )
 
 Set-StrictMode -Version Latest
@@ -101,6 +104,151 @@ function Write-Log {
     [string]$LogEntry = "[$Timestamp] [$Level] $Message"
     Add-Content -Path $LogFile -Value $LogEntry -ErrorAction SilentlyContinue
     Write-Host $LogEntry
+}
+
+function Clear-StaleGmsRestoreArtifacts {
+    param(
+        [Parameter(Mandatory=$true)][string]$Container,
+        [Parameter(Mandatory=$false)][string]$CurrentOperationId = "",
+        [Parameter(Mandatory=$false)][scriptblock]$CommandExecutor = $null
+    )
+    try {
+        # Securely sweep stale GMS restore staging directories based on ownership, status, and age governance.
+        # Rules:
+        # 1. Directories belonging to CurrentOperationId are reserved for active execution and finally cleanup.
+        # 2. Directories with status == "COMPLETED" are safely pruned.
+        # 3. Directories with status == "IN_PROGRESS" or "FAILED" younger than 24 hours are PRESERVED for audit/forensics.
+        # 4. Expired directories (>= 24 hours) are pruned.
+        $findScript = 'find /tmp -maxdepth 1 -name "gms_restore_*" -type d 2>/dev/null'
+        [string]$staleDirs = ""
+        if ($CommandExecutor) {
+            $staleDirs = (& $CommandExecutor $Container $findScript | Out-String).Trim()
+        } else {
+            $staleDirs = (& docker exec $Container sh -c $findScript 2>&1 | Out-String).Trim()
+        }
+        if ($staleDirs) {
+            $dirList = $staleDirs -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -like "/tmp/gms_restore_*" }
+            foreach ($d in $dirList) {
+                [string]$readMetaScript = "test -f `"$d/stage.meta.json`" && cat `"$d/stage.meta.json`" || true"
+                [string]$metaJson = ""
+                if ($CommandExecutor) {
+                    $metaJson = (& $CommandExecutor $Container $readMetaScript | Out-String).Trim()
+                } else {
+                    $metaJson = (& docker exec $Container sh -c $readMetaScript 2>$null | Out-String).Trim()
+                }
+
+                [bool]$shouldPrune = $false
+                [string]$pruneReason = ""
+
+                if ($metaJson -and $metaJson.StartsWith("{")) {
+                    try {
+                        $metaObj = $metaJson | ConvertFrom-Json
+                        [string]$opId = [string]$metaObj.operationId
+                        [string]$status = [string]$metaObj.status
+                        [string]$createdIso = [string]$metaObj.createdAt
+
+                        # Do not touch the current active operation's directory
+                        if ($CurrentOperationId -and $opId -eq $CurrentOperationId) {
+                            continue
+                        }
+
+                        [double]$ageHours = 0
+                        [datetimeoffset]$dto = [datetimeoffset]::MinValue
+                        if ([datetimeoffset]::TryParse($createdIso, [ref]$dto)) {
+                            $ageHours = [Math]::Round(((Get-Date).ToUniversalTime() - $dto.UtcDateTime).TotalHours, 2)
+                        }
+
+                        if ($status -eq "COMPLETED") {
+                            $shouldPrune = $true
+                            $pruneReason = "reconciled completed operation [$opId]"
+                        } elseif ($ageHours -ge 24) {
+                            $shouldPrune = $true
+                            $pruneReason = "expired operation [$opId] with status [$status] (Age: ${ageHours}h >= 24h)"
+                        } else {
+                            Write-Log "  [PRESERVE] Preserving recent recovery artifact: $d (Op: $opId, Status: $status, Age: ${ageHours}h) for audit/forensics." -Level "INFO"
+                        }
+                    } catch {}
+                }
+
+                if (-not $shouldPrune -and -not $metaJson) {
+                    # Untagged legacy directory: check directory mtime
+                    [string]$ageCheckScript = "test -d `"$d`" && find `"$d`" -maxdepth 0 -mtime +1 2>/dev/null || true"
+                    [string]$isOlderThanOneDay = ""
+                    if ($CommandExecutor) {
+                        $isOlderThanOneDay = (& $CommandExecutor $Container $ageCheckScript | Out-String).Trim()
+                    } else {
+                        $isOlderThanOneDay = (& docker exec $Container sh -c $ageCheckScript 2>$null | Out-String).Trim()
+                    }
+                    if ($isOlderThanOneDay -eq $d) {
+                        $shouldPrune = $true
+                        $pruneReason = "un-tagged legacy directory older than 24 hours"
+                    } else {
+                        Write-Log "  [PRESERVE] Preserving un-tagged recent recovery directory: $d (< 24h) for audit/investigation." -Level "INFO"
+                    }
+                }
+
+                if ($shouldPrune) {
+                    Write-Log "  [CLEANUP] Pruning safe restore staging directory: $d ($pruneReason)..." -Level "INFO"
+                    if ($CommandExecutor) {
+                        & $CommandExecutor $Container "rm -rf `"$d`"" | Out-Null
+                    } else {
+                        & docker exec $Container rm -rf $d 2>&1 | Out-Null
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Log "  [WARN] Note during scoped restore artifact sweep: $_" -Level "WARN"
+    }
+}
+
+function Assert-RestoreStorageCapacity {
+    param(
+        [Parameter(Mandatory=$true)][string]$Container,
+        [Parameter(Mandatory=$true)][string]$DumpPathInContainer,
+        [Parameter(Mandatory=$false)][scriptblock]$StatExecutor = $null,
+        [Parameter(Mandatory=$false)][scriptblock]$DfExecutor = $null
+    )
+    Write-Log "  PostgreSQL < 17: Checking container storage capacity in /tmp before SQL generation..." -Level "INFO"
+    [string]$sizeStr = ""
+    if ($StatExecutor) {
+        $sizeStr = (& $StatExecutor $Container $DumpPathInContainer | Out-String).Trim()
+    } else {
+        $sizeStr = (& docker exec $Container stat -c %s "$DumpPathInContainer" 2>$null | Out-String).Trim()
+    }
+    [int64]$dumpBytes = 0
+    [bool]$hasDumpSize = [int64]::TryParse($sizeStr, [ref]$dumpBytes)
+    if (-not $hasDumpSize -or $dumpBytes -le 0) {
+        throw "CRITICAL RESTORE PREFLIGHT: Failed to determine dump file size on [$Container] ($DumpPathInContainer). Stat returned: '$sizeStr'. Restore aborted fail-closed."
+    }
+
+    [string]$availKbStr = ""
+    if ($DfExecutor) {
+        $availKbStr = (& $DfExecutor $Container "/tmp" | Out-String).Trim()
+    } else {
+        $availKbStr = (& docker exec $Container sh -c "df -k /tmp | awk 'NR==2 {print \$4}'" 2>$null | Out-String).Trim()
+    }
+    [int64]$availKb = 0
+    [bool]$hasAvail = [int64]::TryParse($availKbStr, [ref]$availKb)
+    if (-not $hasAvail -or $availKb -le 0) {
+        throw "CRITICAL RESTORE PREFLIGHT: Failed to determine storage capacity in container [$Container] on /tmp. Df returned: '$availKbStr'. Restore aborted fail-closed."
+    }
+
+    [int64]$availBytes = $availKb * 1024
+    [int64]$requiredBytes = [Math]::Max($dumpBytes * 3, 104857600) # Max(3x dump, 100MB buffer)
+    if ($availBytes -lt $requiredBytes) {
+        throw "CRITICAL RESTORE PREFLIGHT: Insufficient storage capacity in container /tmp for uncompressed SQL staging. Available: $([Math]::Round($availBytes / 1MB, 2))MB, Required: $([Math]::Round($requiredBytes / 1MB, 2))MB. Restore aborted fail-closed."
+    }
+    Write-Log "  Storage preflight verified: $([Math]::Round($availBytes / 1MB, 2))MB available in /tmp (Required: $([Math]::Round($requiredBytes / 1MB, 2))MB) [PASS]" -Level "INFO"
+    return @{
+        DumpBytes = $dumpBytes
+        AvailBytes = $availBytes
+        RequiredBytes = $requiredBytes
+    }
+}
+
+if ($ExportFunctionsOnly) {
+    return
 }
 
 Write-Log "=============================================================================="
@@ -433,26 +581,6 @@ $StagingContainer = "gms-restore-staging-" + $TimestampSuffix
 # Step 2.1: Register PREPARED recovery state in persistent ledger
 Update-RecoveryLedger -State "PREPARED"
 
-function Clear-StaleGmsRestoreArtifacts {
-    param(
-        [Parameter(Mandatory=$true)][string]$Container
-    )
-    try {
-        # Securely sweep stale GMS restore staging directories from previous crashed runs
-        $findScript = 'find /tmp -maxdepth 1 -name "gms_restore_*" -type d 2>/dev/null'
-        $staleDirs = (& docker exec $Container sh -c $findScript 2>&1 | Out-String).Trim()
-        if ($staleDirs) {
-            $dirList = $staleDirs -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -like "/tmp/gms_restore_*" }
-            foreach ($d in $dirList) {
-                Write-Log "  [CLEANUP] Removing stale crash artifact staging directory: $d from container [$Container]..." -Level "WARN"
-                & docker exec $Container rm -rf $d 2>&1 | Out-Null
-            }
-        }
-    } catch {
-        Write-Log "  [WARN] Note during stale restore artifact sweep: $_" -Level "WARN"
-    }
-}
-
 function Invoke-AtomicPostgresRestore {
     param(
         [Parameter(Mandatory=$true)][string]$Container,
@@ -511,38 +639,35 @@ function Invoke-AtomicPostgresRestore {
         $exitCode = $LASTEXITCODE
     } else {
         # PostgreSQL < 17 (e.g. PG15): Two-Phase Validated Generation & Atomic Execution
-        # Pre-cleanup: Sweep any stale artifacts left from previous crashed recovery operations
-        Clear-StaleGmsRestoreArtifacts -Container $Container
+        # Pre-cleanup: Sweep stale completed or expired artifacts while preserving recent failed runs for forensics
+        Clear-StaleGmsRestoreArtifacts -Container $Container -CurrentOperationId $RecoveryOperationId
 
         [string]$stageUniqueId = [guid]::NewGuid().ToString("N").Substring(0, 8)
         [string]$tempStageDir = "/tmp/gms_restore_${TimestampSuffix}_${stageUniqueId}"
         [string]$tempSqlFile = "${tempStageDir}/stage.sql"
+        [string]$tempMetaFile = "${tempStageDir}/stage.meta.json"
 
         try {
-            # Storage Capacity Pre-flight Check:
-            # Plain SQL dump expansion can reach 3x. Verify /tmp has >= 3x dump size + 100MB buffer.
-            Write-Log "  PostgreSQL < 17: Checking container storage capacity in /tmp before SQL generation..." -Level "INFO"
-            [string]$sizeStr = (& docker exec $Container stat -c %s "$DumpPathInContainer" 2>$null | Out-String).Trim()
-            [int64]$dumpBytes = 0
-            [bool]$hasDumpSize = [int64]::TryParse($sizeStr, [ref]$dumpBytes)
-            
-            [string]$availKbStr = (& docker exec $Container sh -c "df -k /tmp | awk 'NR==2 {print \$4}'" 2>$null | Out-String).Trim()
-            [int64]$availKb = 0
-            [bool]$hasAvail = [int64]::TryParse($availKbStr, [ref]$availKb)
-
-            if ($hasDumpSize -and $hasAvail -and $dumpBytes -gt 0) {
-                [int64]$availBytes = $availKb * 1024
-                [int64]$requiredBytes = [Math]::Max($dumpBytes * 3, 104857600) # Max(3x dump, 100MB)
-                if ($availBytes -lt $requiredBytes) {
-                    throw "CRITICAL RESTORE PREFLIGHT: Insufficient storage capacity in container /tmp for uncompressed SQL staging. Available: $([Math]::Round($availBytes / 1MB, 2))MB, Required: $([Math]::Round($requiredBytes / 1MB, 2))MB. Restore aborted fail-closed."
-                }
-                Write-Log "  Storage preflight verified: $([Math]::Round($availBytes / 1MB, 2))MB available in /tmp (Required: $([Math]::Round($requiredBytes / 1MB, 2))MB) [PASS]" -Level "INFO"
-            }
+            # Storage Capacity Pre-flight Check: strictly fail-closed
+            $storageResult = Assert-RestoreStorageCapacity -Container $Container -DumpPathInContainer $DumpPathInContainer
+            [int64]$dumpBytes = [int64]$storageResult.DumpBytes
 
             # Phase 1: Generate sanitized SQL in isolated directory with restricted permissions (0700 dir, 0600 file)
             Write-Log "  PostgreSQL < 17 detected (version $serverVersionNum): Phase 1 - Generating and validating sanitized SQL dump..." -Level "INFO"
+
+            # Prepare metadata JSON string
+            $metaData = @{
+                operationId = $RecoveryOperationId
+                container = $Container
+                stageUniqueId = $stageUniqueId
+                createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                status = "IN_PROGRESS"
+                pid = $PID
+            } | ConvertTo-Json -Compress
+            $encodedMeta = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($metaData))
+
             $awkScript = 'BEGIN { in_copy = 0 } /^COPY / { in_copy = 1; print; next } $0 == "\\." { in_copy = 0; print; next } !in_copy && /^SET[ \t]+transaction_timeout/ { next } { print }'
-            $genScript = "set -e -o pipefail; umask 077; mkdir -m 700 -p `"$tempStageDir`"; trap 'rm -rf `"$tempStageDir`"' INT TERM; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' > `"$tempSqlFile`""
+            $genScript = "set -e -o pipefail; umask 077; mkdir -m 700 -p `"$tempStageDir`"; echo '$encodedMeta' | base64 -d > `"$tempMetaFile`"; trap 'rm -rf `"$tempStageDir`"' INT TERM; pg_restore -f - --clean --if-exists --no-owner --no-privileges `"$DumpPathInContainer`" | awk '$awkScript' > `"$tempSqlFile`""
             
             $execGenArgs = @("exec")
             if ($Pass) { $execGenArgs += @("-e", "PGPASSWORD=$Pass") }
@@ -552,14 +677,22 @@ function Invoke-AtomicPostgresRestore {
             $genExitCode = $LASTEXITCODE
             
             if ($genExitCode -ne 0) {
+                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"IN_PROGRESS\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
                 throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation failed for [$Context] with exit code $($genExitCode). Zero queries sent to target database. Output: $genOutput"
             }
 
-            # Verify generated SQL file exists and is non-empty
-            $sizeCheck = (& docker exec $Container sh -c "test -s `"$tempSqlFile`" && echo OK || echo EMPTY" 2>&1 | Out-String).Trim()
-            if ($sizeCheck -ne "OK") {
+            # Verify generated SQL file exists, is non-empty, and respects safe expansion bounds
+            [string]$sqlBytesStr = (& docker exec $Container stat -c %s "$tempSqlFile" 2>$null | Out-String).Trim()
+            [int64]$sqlBytes = 0
+            if (-not [int64]::TryParse($sqlBytesStr, [ref]$sqlBytes) -or $sqlBytes -le 0) {
                 throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation produced an empty or missing SQL file ($tempSqlFile). Restore aborted before database mutation."
             }
+
+            # Safe expansion cap: SQL dump should not exceed 10x dump size or remaining capacity
+            if ($sqlBytes -gt ($dumpBytes * 10) -and $sqlBytes -gt 524288000) { # > 10x dump and > 500MB
+                throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation exceeded safe expansion bound ($sqlBytes bytes vs dump size $dumpBytes bytes). Disk exhaustion prevented; restore aborted fail-closed."
+            }
+            Write-Log "  Validated generated SQL dump: $sqlBytes bytes (expansion: $([Math]::Round($sqlBytes / [Math]::Max($dumpBytes, 1), 2))x) [PASS]" -Level "INFO"
 
             # Phase 2: Execute verified SQL in an atomic single transaction
             Write-Log "  PostgreSQL < 17 detected: Phase 2 - Executing validated SQL in atomic single transaction via psql..." -Level "INFO"
@@ -571,6 +704,12 @@ function Invoke-AtomicPostgresRestore {
             
             $restoreOutput = & docker @execApplyArgs 2>&1 | Out-String
             $exitCode = $LASTEXITCODE
+
+            if ($exitCode -eq 0) {
+                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"IN_PROGRESS\"/\"status\":\"COMPLETED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
+            } else {
+                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"IN_PROGRESS\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
+            }
         } finally {
             # Guaranteed cleanup in PowerShell finally: always clean up temporary staging directory and SQL file
             if ($tempStageDir) {
