@@ -724,12 +724,15 @@ function Invoke-AtomicPostgresRestore {
                 & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"[A-Z_]*\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
             }
         } finally {
-            # Strict forensic retention: only prune temporary staging directory if restore completed successfully ($stageExitCode -eq 0).
-            # If restore failed, was interrupted, or did not complete cleanly, strictly preserve staging directory and SQL file for operator investigation.
+            # Explicit post-SQL retention policy (P1/P2 Remediation):
+            # - If restore failed or was interrupted, preserve staging directory, stage.meta.json (status: FAILED),
+            #   and SQL file intact in container for operator post-incident analysis.
+            # - If restore succeeded ($stageExitCode -eq 0), scrub uncompressed plaintext SQL to protect data privacy
+            #   and container storage capacity, while preserving stage.meta.json as forensic proof until the overall recovery is VERIFIED.
             if ($tempStageDir) {
                 if ($stageExitCode -eq 0) {
-                    Write-Log "  Cleaning up temporary staging directory after successful restore: $tempStageDir..." -Level "INFO"
-                    & docker exec $Container rm -rf $tempStageDir 2>&1 | Out-Null
+                    Write-Log "  Scrubbing temporary uncompressed SQL after verified application: $tempSqlFile (preserving forensic metadata until ledger verification)..." -Level "INFO"
+                    & docker exec $Container rm -f $tempSqlFile 2>&1 | Out-Null
                 } else {
                     Write-Log "  [FORENSIC PRESERVE] Restore not verified successful (exit code: $stageExitCode). Retaining staging directory [$tempStageDir] in container [$Container] for operator investigation." -Level "WARN"
                     & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"[A-Z_]*\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
