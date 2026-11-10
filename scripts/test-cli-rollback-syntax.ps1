@@ -748,7 +748,7 @@ try {
     # 4. Execute the real operations that historically threatened maintenance files:
     #    (a) Run deploy-with-rollback.ps1 parameter validation with explicit MaintenanceDir scoped to test workspace
     [string]$deployScript = Join-Path $PSScriptRoot "deploy-with-rollback.ps1"
-    & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$deployScript' -ExportFunctionsOnly 2>&1" | Out-Null
+    & $PsExe -NoProfile -ExecutionPolicy Bypass -Command "& '$deployScript' -ExportFunctionsOnly 2>&1" | Out-Null
 
     #    (b) Run scoped maintenance cleanup logic on the test workspace
     if (Test-Path $testFlag) { Remove-Item -Path $testFlag -Force }
