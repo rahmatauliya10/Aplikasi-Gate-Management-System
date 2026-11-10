@@ -99,6 +99,8 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
           BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test
+          GMS_FIXTURE_ISOLATION_UUID: FIXTURE-CI-E2E-TEST-DB-UUID-01
+          GMS_ENVIRONMENT_ID: GMS-TEST-E2E-FIXTURE
         run: npm run test:cov
 
       - name: Execute Real Backend E2E Test Suite in CI (P1-10)
@@ -110,6 +112,8 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
           BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test
+          GMS_FIXTURE_ISOLATION_UUID: FIXTURE-CI-E2E-TEST-DB-UUID-01
+          GMS_ENVIRONMENT_ID: GMS-TEST-E2E-FIXTURE
         run: npm run test:e2e
 
   frontend-verification:

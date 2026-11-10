@@ -700,13 +700,15 @@ function Clear-DeploymentMaintenanceStateSafe {
     [string]$resolvedTarget = [System.IO.Path]::GetFullPath($TargetWorkspaceRoot)
 
     # Fail-closed boundary check: If AllowedBoundaryDirectory is specified,
-    # target MUST be strictly contained inside AllowedBoundaryDirectory
+    # target MUST be strictly contained inside AllowedBoundaryDirectory (preventing sibling prefix collisions and root matching)
     if (-not [string]::IsNullOrWhiteSpace($AllowedBoundaryDirectory)) {
-        [string]$resolvedBoundary = [System.IO.Path]::GetFullPath($AllowedBoundaryDirectory).TrimEnd('\', '/')
-        [string]$trimmedTarget = $resolvedTarget.TrimEnd('\', '/')
-        if (-not $trimmedTarget.StartsWith($resolvedBoundary, [System.StringComparison]::OrdinalIgnoreCase) -or 
-            ($trimmedTarget.Length -le $resolvedBoundary.Length)) {
-            throw "MAINTENANCE CLEANUP BOUNDARY VIOLATION: Target workspace '$resolvedTarget' is outside allowed boundary '$resolvedBoundary' or matches boundary root! Cleanup blocked fail-closed."
+        [char]$sep = [System.IO.Path]::DirectorySeparatorChar
+        [string]$boundaryWithSep = [System.IO.Path]::GetFullPath($AllowedBoundaryDirectory).TrimEnd('\', '/') + $sep
+        [string]$targetWithSep = $resolvedTarget.TrimEnd('\', '/') + $sep
+
+        if (-not $targetWithSep.StartsWith($boundaryWithSep, [System.StringComparison]::OrdinalIgnoreCase) -or 
+            ($targetWithSep.Length -le $boundaryWithSep.Length)) {
+            throw "MAINTENANCE CLEANUP BOUNDARY VIOLATION: Target workspace '$resolvedTarget' is outside allowed boundary '$AllowedBoundaryDirectory' or matches boundary root! Cleanup blocked fail-closed."
         }
     }
 

@@ -784,6 +784,27 @@ try {
         }
     }
 
+    [bool]$negativeSiblingPrefixBlocked = $false
+    [string]$siblingCollisionDir = $isolatedWorkDir + "_sibling_collision"
+    try {
+        # Sibling directory starting with same prefix must be blocked by separator boundary check
+        Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $siblingCollisionDir -AllowedBoundaryDirectory $isolatedWorkDir
+    } catch {
+        if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
+            $negativeSiblingPrefixBlocked = $true
+        }
+    }
+
+    [bool]$negativeExactBoundaryRootBlocked = $false
+    try {
+        # Exact boundary root itself must be rejected (must be strictly contained inside boundary)
+        Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $script:TestFixtureDir -AllowedBoundaryDirectory $script:TestFixtureDir
+    } catch {
+        if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
+            $negativeExactBoundaryRootBlocked = $true
+        }
+    }
+
     [bool]$negativeEmptyTargetBlocked = $false
     try {
         Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot ""
@@ -794,18 +815,23 @@ try {
     }
 
     [bool]$passed = $scopedCleanupSucceeded -and $flagStillExists -and $activeStillExists -and $ledgerStillExists -and `
-                    $hashesIdentical -and $negativeBoundaryOutsideBlocked -and $negativeOperationalRootBlocked -and $negativeEmptyTargetBlocked
+                    $hashesIdentical -and $negativeBoundaryOutsideBlocked -and $negativeOperationalRootBlocked -and `
+                    $negativeSiblingPrefixBlocked -and $negativeExactBoundaryRootBlocked -and $negativeEmptyTargetBlocked
 
     if ($passed) {
         $script:PassedTests++
-        Write-Host "  [PASS] Operational maintenance state non-interference invariant verified: SHA-256 hashes 100% identical and out-of-boundary cleanup blocked." -ForegroundColor Green
+        Write-Host "  [PASS] Operational maintenance state non-interference invariant verified: SHA-256 hashes 100% identical and boundary containment guards passed." -ForegroundColor Green
     } else {
         $script:FailedTests++
         Write-Host "  [FAIL] Invariant violation: external maintenance flag or ledger was modified, hash diverged, or negative guard failed!" -ForegroundColor Red
-        Write-Host "    Flag Hash Match:    $($hashFlagPre -eq $hashFlagPost)" -ForegroundColor DarkGray
-        Write-Host "    Active Hash Match:  $($hashActivePre -eq $hashActivePost)" -ForegroundColor DarkGray
-        Write-Host "    Ledger Hash Match:  $($hashLedgerPre -eq $hashLedgerPost)" -ForegroundColor DarkGray
-        Write-Host "    Negative Guard Pass: $negativeGuardPassed" -ForegroundColor DarkGray
+        Write-Host "    Flag Hash Match:         $($hashFlagPre -eq $hashFlagPost)" -ForegroundColor DarkGray
+        Write-Host "    Active Hash Match:       $($hashActivePre -eq $hashActivePost)" -ForegroundColor DarkGray
+        Write-Host "    Ledger Hash Match:       $($hashLedgerPre -eq $hashLedgerPost)" -ForegroundColor DarkGray
+        Write-Host "    Boundary Outside Pass:   $negativeBoundaryOutsideBlocked" -ForegroundColor DarkGray
+        Write-Host "    Operational Root Pass:   $negativeOperationalRootBlocked" -ForegroundColor DarkGray
+        Write-Host "    Sibling Collision Pass:  $negativeSiblingPrefixBlocked" -ForegroundColor DarkGray
+        Write-Host "    Exact Root Boundary Pass:$negativeExactBoundaryRootBlocked" -ForegroundColor DarkGray
+        Write-Host "    Empty Target Pass:       $negativeEmptyTargetBlocked" -ForegroundColor DarkGray
     }
 } catch {
     $script:FailedTests++

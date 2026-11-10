@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 
 export interface DestructiveTargetValidationOptions {
@@ -172,26 +173,37 @@ export function assertDestructiveTestTargetSafe(
   return { safe: true, dbName, host: rawHostname };
 }
 
+export interface FixtureIdentityVerificationOptions {
+  expectedFixtureUuid?: string;
+  expectedEnvId?: string;
+  expectedDbName?: string;
+  initialNodeEnv?: string;
+}
+
+export interface FixtureIdentityVerificationResult {
+  verified: boolean;
+  dbName: string;
+  currentUser: string;
+  isIsolatedFixture: boolean;
+  fixtureUuid: string;
+  envId?: string;
+}
+
 /**
  * Independent live read-only verification of target database identity.
  * Connects directly to the target database and inspects runtime catalog information:
  * - current_database()
  * - current_user
- * - verifies absence of operational production settings in AppSetting table
+ * - verifies existence of AppSetting table (fail-closed if missing)
+ * - queries operational settings without fallback (fail-closed on query error)
+ * - asserts absence of production settings (rejects ENVIRONMENT_ID, SYSTEM_STAGE, INSTALLATION_UUID containing PROD)
+ * - asserts positive proof of isolated fixture (FIXTURE_ISOLATION_UUID starting with FIXTURE- or TEST-)
+ * - verifies expectedFixtureUuid and expectedEnvId matches live DB values if provided
  */
 export async function verifyTargetDatabaseFixtureIdentity(
   databaseUrl: string,
-  options?: {
-    expectedFixtureUuid?: string;
-    expectedDbName?: string;
-    initialNodeEnv?: string;
-  },
-): Promise<{
-  verified: boolean;
-  dbName: string;
-  currentUser: string;
-  isIsolatedFixture: boolean;
-}> {
+  options?: FixtureIdentityVerificationOptions,
+): Promise<FixtureIdentityVerificationResult> {
   // 1. Static preflight checks
   const staticResult = assertDestructiveTestTargetSafe({
     databaseUrl,
@@ -249,30 +261,70 @@ export async function verifyTargetDatabaseFixtureIdentity(
       );
     }
 
-    // 3. Inspect target schema for operational production settings if AppSetting table exists
+    // 3. Inspect target schema for AppSetting table (fail-closed if missing)
     const tableCheck = await probe.$queryRawUnsafe<any[]>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('AppSetting', 'app_settings');",
     );
 
-    if (tableCheck && tableCheck.length > 0) {
-      const prodSettings = await probe
-        .$queryRawUnsafe<any[]>(
-          "SELECT key, value FROM \"AppSetting\" WHERE key IN ('ENVIRONMENT_ID', 'SYSTEM_STAGE', 'INSTALLATION_UUID');",
-        )
-        .catch(() => []);
+    if (!tableCheck || tableCheck.length === 0) {
+      throw new Error(
+        `DESTRUCTIVE TARGET GUARD REJECTION: AppSetting table does not exist in target database '${liveDbName}'. Target lacks positive fixture identity proof. Destructive execution blocked fail-closed.`,
+      );
+    }
 
-      for (const setting of prodSettings) {
-        const val = String(setting.value || '').toUpperCase();
-        if (
-          val.includes('PROD') ||
-          val === 'GMS-PROD-SJA-01' ||
-          val === 'GMS-PROD-UUID-01'
-        ) {
-          throw new Error(
-            `DESTRUCTIVE TARGET GUARD REJECTION: Connected database contains operational production setting '${setting.key}=${setting.value}'! Refusing destructive operations on live operational data.`,
-          );
-        }
+    // 4. Query settings directly without fallback (fail-closed on any query error)
+    const settingsRows = await probe.$queryRawUnsafe<any[]>(
+      "SELECT key, value FROM \"AppSetting\" WHERE key IN ('ENVIRONMENT_ID', 'SYSTEM_STAGE', 'INSTALLATION_UUID', 'FIXTURE_ISOLATION_UUID');",
+    );
+
+    const settingsMap = new Map<string, string>();
+    for (const row of settingsRows || []) {
+      if (row.key) {
+        settingsMap.set(String(row.key), String(row.value || ''));
       }
+    }
+
+    // Assert absence of operational production settings
+    for (const [key, value] of settingsMap.entries()) {
+      if (key === 'FIXTURE_ISOLATION_UUID') continue;
+      const val = value.toUpperCase();
+      if (
+        val.includes('PROD') ||
+        val === 'GMS-PROD-SJA-01' ||
+        val === 'GMS-PROD-UUID-01'
+      ) {
+        throw new Error(
+          `DESTRUCTIVE TARGET GUARD REJECTION: Connected database contains operational production setting '${key}=${value}'! Refusing destructive operations on live operational data.`,
+        );
+      }
+    }
+
+    // 5. Positive proof of fixture isolation
+    const liveFixtureUuid = settingsMap.get('FIXTURE_ISOLATION_UUID');
+    if (
+      !liveFixtureUuid ||
+      (!liveFixtureUuid.startsWith('FIXTURE-') &&
+        !liveFixtureUuid.startsWith('TEST-'))
+    ) {
+      throw new Error(
+        `DESTRUCTIVE TARGET GUARD REJECTION: Target database does not contain a valid FIXTURE_ISOLATION_UUID (must start with 'FIXTURE-' or 'TEST-'). Found: '${liveFixtureUuid || '<none>'}'. Positive proof of isolated test fixture is required before destructive execution.`,
+      );
+    }
+
+    if (
+      options?.expectedFixtureUuid &&
+      liveFixtureUuid !== options.expectedFixtureUuid
+    ) {
+      throw new Error(
+        `DESTRUCTIVE TARGET GUARD REJECTION: Fixture UUID mismatch! Expected '${options.expectedFixtureUuid}', but connected database contains '${liveFixtureUuid}'. Aborting fail-closed.`,
+      );
+    }
+
+    const liveEnvId = settingsMap.get('ENVIRONMENT_ID');
+    if (options?.expectedEnvId && liveEnvId !== options.expectedEnvId) {
+      throw new Error(
+        `DESTRUCTIVE TARGET GUARD REJECTION: Environment ID mismatch! Expected '${options.expectedEnvId}', but connected database contains '${liveEnvId}'. Aborting fail-closed.`,
+      );
     }
 
     return {
@@ -280,7 +332,115 @@ export async function verifyTargetDatabaseFixtureIdentity(
       dbName: liveDbName,
       currentUser: liveUser,
       isIsolatedFixture: true,
+      fixtureUuid: liveFixtureUuid,
+      envId: liveEnvId,
     };
+  } finally {
+    await probe.$disconnect().catch(() => {});
+  }
+}
+
+/**
+ * Stamped registration of positive fixture identity markers into the target database.
+ * Statically asserts that target database is safe before connection, ensures AppSetting table exists,
+ * verifies database is not operational production, and upserts FIXTURE_ISOLATION_UUID and ENVIRONMENT_ID.
+ */
+export async function registerDatabaseFixtureIdentity(
+  databaseUrl: string,
+  fixtureUuid: string,
+  environmentId: string = 'GMS-TEST-E2E-FIXTURE',
+): Promise<void> {
+  // 1. Static preflight check on target database URL
+  assertDestructiveTestTargetSafe({
+    databaseUrl,
+    nodeEnv: 'test',
+  });
+
+  if (
+    !fixtureUuid ||
+    (!fixtureUuid.startsWith('FIXTURE-') && !fixtureUuid.startsWith('TEST-'))
+  ) {
+    throw new Error(
+      `INVALID FIXTURE IDENTITY: fixtureUuid '${fixtureUuid}' must start with 'FIXTURE-' or 'TEST-'.`,
+    );
+  }
+
+  const probe = new PrismaClient({
+    datasources: { db: { url: databaseUrl } },
+  });
+
+  try {
+    await probe.$connect();
+
+    // Verify live DB identity and ensure it is not an operational production DB
+    const identityRows = await probe.$queryRawUnsafe<any[]>(
+      'SELECT current_database() as db_name;',
+    );
+    const liveDbName = String(identityRows?.[0]?.db_name || '').toLowerCase();
+    const prohibitedDbNames = [
+      'gms',
+      'gate_management_system',
+      'postgres',
+      'production',
+      'gms_prod',
+      'gms_production',
+    ];
+    if (
+      prohibitedDbNames.includes(liveDbName) ||
+      liveDbName.endsWith('_prod') ||
+      liveDbName.startsWith('prod_')
+    ) {
+      throw new Error(
+        `DESTRUCTIVE TARGET GUARD REJECTION: Connected database '${liveDbName}' is an operational production database! Fixture registration refused fail-closed.`,
+      );
+    }
+
+    // Ensure AppSetting table exists
+    await probe.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "AppSetting" (
+        "id" TEXT PRIMARY KEY,
+        "key" TEXT NOT NULL UNIQUE,
+        "value" TEXT NOT NULL,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Check if existing records have operational production values
+    const existingRows = await probe.$queryRawUnsafe<any[]>(
+      "SELECT key, value FROM \"AppSetting\" WHERE key IN ('ENVIRONMENT_ID', 'SYSTEM_STAGE', 'INSTALLATION_UUID');",
+    );
+    for (const row of existingRows || []) {
+      const val = String(row.value || '').toUpperCase();
+      if (
+        val.includes('PROD') ||
+        val === 'GMS-PROD-SJA-01' ||
+        val === 'GMS-PROD-UUID-01'
+      ) {
+        throw new Error(
+          `DESTRUCTIVE TARGET GUARD REJECTION: Connected database contains operational production setting '${row.key}=${row.value}'! Refusing fixture registration on live operational data.`,
+        );
+      }
+    }
+
+    const upsertSql = `
+      INSERT INTO "AppSetting" ("id", "key", "value", "createdAt", "updatedAt")
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updatedAt" = NOW();
+    `;
+
+    await probe.$executeRawUnsafe(
+      upsertSql,
+      randomUUID(),
+      'FIXTURE_ISOLATION_UUID',
+      fixtureUuid,
+    );
+    await probe.$executeRawUnsafe(
+      upsertSql,
+      randomUUID(),
+      'ENVIRONMENT_ID',
+      environmentId,
+    );
   } finally {
     await probe.$disconnect().catch(() => {});
   }

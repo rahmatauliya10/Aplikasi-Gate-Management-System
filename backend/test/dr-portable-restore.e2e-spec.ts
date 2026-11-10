@@ -10,13 +10,19 @@ import { configureApp } from './../src/app.config';
 import {
   assertDestructiveTestTargetSafe,
   verifyTargetDatabaseFixtureIdentity,
+  registerDatabaseFixtureIdentity,
   DestructiveTargetValidationOptions,
+  FixtureIdentityVerificationOptions,
+  FixtureIdentityVerificationResult,
 } from './../src/settings/destructive-target-guard';
 
 export {
   assertDestructiveTestTargetSafe,
   verifyTargetDatabaseFixtureIdentity,
+  registerDatabaseFixtureIdentity,
   DestructiveTargetValidationOptions,
+  FixtureIdentityVerificationOptions,
+  FixtureIdentityVerificationResult,
 };
 
 describe('Disaster Recovery & Portable Restore (e2e)', () => {
@@ -75,9 +81,24 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       offsiteBackupDir: isolatedOffsiteBackupDir,
     });
 
-    // 3. Independent live read-only verification of target database identity
+    const fixtureUuid =
+      process.env.GMS_FIXTURE_ISOLATION_UUID ||
+      'FIXTURE-E2E-PORTABLE-RESTORE-01';
+    const fixtureEnvId =
+      process.env.GMS_ENVIRONMENT_ID || 'GMS-TEST-E2E-FIXTURE';
+
+    // Register positive fixture identity proof in target database
+    await registerDatabaseFixtureIdentity(
+      process.env.DATABASE_URL_TEST,
+      fixtureUuid,
+      fixtureEnvId,
+    );
+
+    // 3. Independent live read-only verification of target database identity with positive fixture proof
     await verifyTargetDatabaseFixtureIdentity(process.env.DATABASE_URL_TEST, {
       expectedDbName: targetSafety.dbName,
+      expectedFixtureUuid: fixtureUuid,
+      expectedEnvId: fixtureEnvId,
       initialNodeEnv: initialNodeEnv,
     });
 
@@ -619,6 +640,60 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       await prisma.appSetting.delete({
         where: { key: 'SENTINEL_GUARD_MARKER_001' },
       });
+    });
+
+    it('should positively verify target database fixture identity when fixture proof matches', async () => {
+      const fixtureUuid = 'FIXTURE-E2E-SENTINEL-MATCH-01';
+      const fixtureEnv = 'GMS-TEST-E2E-FIXTURE';
+      await registerDatabaseFixtureIdentity(
+        process.env.DATABASE_URL_TEST as string,
+        fixtureUuid,
+        fixtureEnv,
+      );
+
+      const verification = await verifyTargetDatabaseFixtureIdentity(
+        process.env.DATABASE_URL_TEST as string,
+        {
+          expectedFixtureUuid: fixtureUuid,
+          expectedEnvId: fixtureEnv,
+        },
+      );
+
+      expect(verification.verified).toBe(true);
+      expect(verification.isIsolatedFixture).toBe(true);
+      expect(verification.fixtureUuid).toBe(fixtureUuid);
+      expect(verification.envId).toBe(fixtureEnv);
+    });
+
+    it('should reject verification when expectedFixtureUuid does not match fail-closed', async () => {
+      await expect(
+        verifyTargetDatabaseFixtureIdentity(
+          process.env.DATABASE_URL_TEST as string,
+          {
+            expectedFixtureUuid: 'FIXTURE-E2E-NON-EXISTENT-UUID',
+          },
+        ),
+      ).rejects.toThrow(/Fixture UUID mismatch/);
+    });
+
+    it('should reject verification when expectedEnvId does not match fail-closed', async () => {
+      await expect(
+        verifyTargetDatabaseFixtureIdentity(
+          process.env.DATABASE_URL_TEST as string,
+          {
+            expectedEnvId: 'GMS-PROD-UNAUTHORIZED-ENV',
+          },
+        ),
+      ).rejects.toThrow(/Environment ID mismatch/);
+    });
+
+    it('should reject registerDatabaseFixtureIdentity when fixtureUuid lacks valid prefix fail-closed', async () => {
+      await expect(
+        registerDatabaseFixtureIdentity(
+          process.env.DATABASE_URL_TEST as string,
+          'OPERATIONAL-PROD-UUID-INVALID',
+        ),
+      ).rejects.toThrow(/INVALID FIXTURE IDENTITY/);
     });
   });
 });
