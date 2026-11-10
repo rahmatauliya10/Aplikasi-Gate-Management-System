@@ -642,7 +642,8 @@ try {
     [System.Collections.Generic.List[string]]$prunedDirs = [System.Collections.Generic.List[string]]::new()
     $mockDirs = @(
         "/tmp/gms_restore_active",
-        "/tmp/gms_restore_completed",
+        "/tmp/gms_restore_completed_verified",
+        "/tmp/gms_restore_completed_unverified",
         "/tmp/gms_restore_failed_recent",
         "/tmp/gms_restore_failed_expired",
         "/tmp/gms_restore_legacy_old",
@@ -652,46 +653,45 @@ try {
     $now = (Get-Date).ToUniversalTime()
     $mockMeta = @{
         "/tmp/gms_restore_active" = @{ operationId = "op-active"; status = "IN_PROGRESS"; createdAt = $now.ToString("o") } | ConvertTo-Json -Compress
-        "/tmp/gms_restore_completed" = @{ operationId = "op-comp"; status = "COMPLETED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_completed_verified" = @{ operationId = "op-comp-verified"; status = "COMPLETED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_completed_unverified" = @{ operationId = "op-comp-unverified"; status = "COMPLETED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
         "/tmp/gms_restore_failed_recent" = @{ operationId = "op-fail-rec"; status = "FAILED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
         "/tmp/gms_restore_failed_expired" = @{ operationId = "op-fail-exp"; status = "FAILED"; createdAt = $now.AddHours(-26).ToString("o") } | ConvertTo-Json -Compress
     }
 
-    Clear-StaleGmsRestoreArtifacts -Container "dummy" -CurrentOperationId "op-active" -CommandExecutor {
-        param($cont, $cmd)
-        if ($cmd -like "find /tmp*") {
-            return ($mockDirs -join "`n")
-        }
-        if ($cmd -like "*cat *stage.meta.json*") {
-            foreach ($key in $mockMeta.Keys) {
-                if ($cmd -like "*$key/*") {
-                    return $mockMeta[$key]
+    Clear-StaleGmsRestoreArtifacts -Container "dummy" -CurrentOperationId "op-active" `
+        -LedgerInspector { param($op) return ($op -eq "op-comp-verified") } `
+        -CommandExecutor {
+            param($cont, $cmd)
+            if ($cmd -like "find /tmp*") {
+                return ($mockDirs -join "`n")
+            }
+            if ($cmd -like "*cat *stage.meta.json*") {
+                foreach ($key in $mockMeta.Keys) {
+                    if ($cmd -like "*$key/*") {
+                        return $mockMeta[$key]
+                    }
                 }
+                return ""
+            }
+            if ($cmd -like "*rm -rf *") {
+                $matched = $mockDirs | Where-Object { $cmd -like "*$_*" } | Select-Object -First 1
+                if ($matched) {
+                    $prunedDirs.Add($matched)
+                }
+                return ""
             }
             return ""
         }
-        if ($cmd -like "*find * -maxdepth 0 -mtime +1*") {
-            if ($cmd -like "*/tmp/gms_restore_legacy_old*") {
-                return "/tmp/gms_restore_legacy_old"
-            }
-            return ""
-        }
-        if ($cmd -like "*rm -rf *") {
-            $matched = $mockDirs | Where-Object { $cmd -like "*$_*" } | Select-Object -First 1
-            if ($matched) {
-                $prunedDirs.Add($matched)
-            }
-            return ""
-        }
-        return ""
-    }
 
     $c5ArtifactGovernancePass = (-not $prunedDirs.Contains("/tmp/gms_restore_active")) -and `
-                                ($prunedDirs.Contains("/tmp/gms_restore_completed")) -and `
+                                ($prunedDirs.Contains("/tmp/gms_restore_completed_verified")) -and `
+                                (-not $prunedDirs.Contains("/tmp/gms_restore_completed_unverified")) -and `
                                 (-not $prunedDirs.Contains("/tmp/gms_restore_failed_recent")) -and `
-                                ($prunedDirs.Contains("/tmp/gms_restore_failed_expired")) -and `
-                                ($prunedDirs.Contains("/tmp/gms_restore_legacy_old")) -and `
-                                (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_recent"))
+                                (-not $prunedDirs.Contains("/tmp/gms_restore_failed_expired")) -and `
+                                (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_old")) -and `
+                                (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_recent")) -and `
+                                ($prunedDirs.Count -eq 1)
 
     $allRel23Passed = ($c1Err -match "Failed to determine dump file size") -and `
                       ($c2Err -match "Failed to determine storage capacity") -and `

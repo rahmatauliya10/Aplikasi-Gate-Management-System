@@ -110,15 +110,18 @@ function Clear-StaleGmsRestoreArtifacts {
     param(
         [Parameter(Mandatory=$true)][string]$Container,
         [Parameter(Mandatory=$false)][string]$CurrentOperationId = "",
+        [Parameter(Mandatory=$false)][string]$LedgerPath = "",
+        [Parameter(Mandatory=$false)][scriptblock]$LedgerInspector = $null,
         [Parameter(Mandatory=$false)][scriptblock]$CommandExecutor = $null
     )
     try {
-        # Securely sweep stale GMS restore staging directories based on ownership, status, and age governance.
+        # Securely sweep GMS restore staging directories based on strict forensic retention governance.
         # Rules:
-        # 1. Directories belonging to CurrentOperationId are reserved for active execution and finally cleanup.
-        # 2. Directories with status == "COMPLETED" are safely pruned.
-        # 3. Directories with status == "IN_PROGRESS" or "FAILED" younger than 24 hours are PRESERVED for audit/forensics.
-        # 4. Expired directories (>= 24 hours) are pruned.
+        # 1. Directories belonging to CurrentOperationId are reserved for active execution and finally block.
+        # 2. Directories with status in ("FAILED", "IN_PROGRESS", "RESTORING") are NEVER deleted automatically by age;
+        #    they are strictly PRESERVED for post-incident audit and operator investigation.
+        # 3. Untagged directories (missing stage.meta.json) are NEVER deleted automatically; they are strictly PRESERVED.
+        # 4. Directories with status == "COMPLETED" may ONLY be pruned if the recovery operation is confirmed VERIFIED in the recovery ledger.
         $findScript = 'find /tmp -maxdepth 1 -name "gms_restore_*" -type d 2>/dev/null'
         [string]$staleDirs = ""
         if ($CommandExecutor) {
@@ -158,37 +161,45 @@ function Clear-StaleGmsRestoreArtifacts {
                             $ageHours = [Math]::Round(((Get-Date).ToUniversalTime() - $dto.UtcDateTime).TotalHours, 2)
                         }
 
-                        if ($status -eq "COMPLETED") {
-                            $shouldPrune = $true
-                            $pruneReason = "reconciled completed operation [$opId]"
-                        } elseif ($ageHours -ge 24) {
-                            $shouldPrune = $true
-                            $pruneReason = "expired operation [$opId] with status [$status] (Age: ${ageHours}h >= 24h)"
-                        } else {
-                            Write-Log "  [PRESERVE] Preserving recent recovery artifact: $d (Op: $opId, Status: $status, Age: ${ageHours}h) for audit/forensics." -Level "INFO"
-                        }
-                    } catch {}
-                }
+                        if ($status -in @("FAILED", "IN_PROGRESS", "RESTORING")) {
+                            # Strict forensic retention: Never delete failed or incomplete operations by age
+                            Write-Log "  [FORENSIC PRESERVE] Preserving unreconciled recovery artifact: $d (Op: $opId, Status: $status, Age: ${ageHours}h). Incomplete/failed artifacts are strictly preserved for operator review." -Level "INFO"
+                        } elseif ($status -eq "COMPLETED") {
+                            # Completed operations may only be pruned if confirmed VERIFIED in the recovery ledger
+                            [bool]$isVerified = $false
+                            if ($LedgerInspector) {
+                                $isVerified = [bool](& $LedgerInspector $opId)
+                            } elseif ($LedgerPath -and (Test-Path -Path $LedgerPath -PathType Leaf)) {
+                                try {
+                                    $ledgerContent = Get-Content -Path $LedgerPath -Raw -ErrorAction SilentlyContinue
+                                    if ($ledgerContent) {
+                                        $ledgerObj = $ledgerContent | ConvertFrom-Json
+                                        if ($ledgerObj.recoveryOperationId -eq $opId -and $ledgerObj.status -eq "VERIFIED") {
+                                            $isVerified = $true
+                                        }
+                                    }
+                                } catch {}
+                            }
 
-                if (-not $shouldPrune -and -not $metaJson) {
-                    # Untagged legacy directory: check directory mtime
-                    [string]$ageCheckScript = "test -d `"$d`" && find `"$d`" -maxdepth 0 -mtime +1 2>/dev/null || true"
-                    [string]$isOlderThanOneDay = ""
-                    if ($CommandExecutor) {
-                        $isOlderThanOneDay = (& $CommandExecutor $Container $ageCheckScript | Out-String).Trim()
-                    } else {
-                        $isOlderThanOneDay = (& docker exec $Container sh -c $ageCheckScript 2>$null | Out-String).Trim()
+                            if ($isVerified) {
+                                $shouldPrune = $true
+                                $pruneReason = "reconciled and verified operation [$opId]"
+                            } else {
+                                Write-Log "  [FORENSIC PRESERVE] Preserving completed recovery artifact: $d (Op: $opId, Age: ${ageHours}h) pending terminal VERIFIED status in ledger." -Level "INFO"
+                            }
+                        } else {
+                            Write-Log "  [FORENSIC PRESERVE] Preserving recovery artifact with unknown status: $d (Op: $opId, Status: $status)." -Level "WARN"
+                        }
+                    } catch {
+                        Write-Log "  [FORENSIC PRESERVE] Preserving recovery directory due to metadata parse note: $d" -Level "WARN"
                     }
-                    if ($isOlderThanOneDay -eq $d) {
-                        $shouldPrune = $true
-                        $pruneReason = "un-tagged legacy directory older than 24 hours"
-                    } else {
-                        Write-Log "  [PRESERVE] Preserving un-tagged recent recovery directory: $d (< 24h) for audit/investigation." -Level "INFO"
-                    }
+                } else {
+                    # Untagged legacy directory: strictly preserve for operator inspection
+                    Write-Log "  [FORENSIC PRESERVE] Preserving untagged legacy recovery directory: $d for operator investigation." -Level "WARN"
                 }
 
                 if ($shouldPrune) {
-                    Write-Log "  [CLEANUP] Pruning safe restore staging directory: $d ($pruneReason)..." -Level "INFO"
+                    Write-Log "  [CLEANUP] Pruning reconciled recovery staging directory: $d ($pruneReason)..." -Level "INFO"
                     if ($CommandExecutor) {
                         & $CommandExecutor $Container "rm -rf `"$d`"" | Out-Null
                     } else {
@@ -639,13 +650,14 @@ function Invoke-AtomicPostgresRestore {
         $exitCode = $LASTEXITCODE
     } else {
         # PostgreSQL < 17 (e.g. PG15): Two-Phase Validated Generation & Atomic Execution
-        # Pre-cleanup: Sweep stale completed or expired artifacts while preserving recent failed runs for forensics
-        Clear-StaleGmsRestoreArtifacts -Container $Container -CurrentOperationId $RecoveryOperationId
+        # Pre-cleanup: Sweep verified completed artifacts while strictly preserving unreconciled runs for forensics
+        Clear-StaleGmsRestoreArtifacts -Container $Container -CurrentOperationId $RecoveryOperationId -LedgerPath $RecLedgerFile
 
         [string]$stageUniqueId = [guid]::NewGuid().ToString("N").Substring(0, 8)
         [string]$tempStageDir = "/tmp/gms_restore_${TimestampSuffix}_${stageUniqueId}"
         [string]$tempSqlFile = "${tempStageDir}/stage.sql"
         [string]$tempMetaFile = "${tempStageDir}/stage.meta.json"
+        [int]$stageExitCode = 1
 
         try {
             # Storage Capacity Pre-flight Check: strictly fail-closed
@@ -677,7 +689,7 @@ function Invoke-AtomicPostgresRestore {
             $genExitCode = $LASTEXITCODE
             
             if ($genExitCode -ne 0) {
-                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"IN_PROGRESS\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
+                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"[A-Z_]*\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
                 throw "CRITICAL ATOMIC RESTORE FAILURE: Phase 1 SQL generation failed for [$Context] with exit code $($genExitCode). Zero queries sent to target database. Output: $genOutput"
             }
 
@@ -703,17 +715,25 @@ function Invoke-AtomicPostgresRestore {
             $execApplyArgs += @($Container, "sh", "-c", $applyScript)
             
             $restoreOutput = & docker @execApplyArgs 2>&1 | Out-String
-            $exitCode = $LASTEXITCODE
+            $stageExitCode = $LASTEXITCODE
+            $exitCode = $stageExitCode
 
-            if ($exitCode -eq 0) {
-                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"IN_PROGRESS\"/\"status\":\"COMPLETED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
+            if ($stageExitCode -eq 0) {
+                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"[A-Z_]*\"/\"status\":\"COMPLETED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
             } else {
-                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"IN_PROGRESS\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
+                & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"[A-Z_]*\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
             }
         } finally {
-            # Guaranteed cleanup in PowerShell finally: always clean up temporary staging directory and SQL file
+            # Strict forensic retention: only prune temporary staging directory if restore completed successfully ($stageExitCode -eq 0).
+            # If restore failed, was interrupted, or did not complete cleanly, strictly preserve staging directory and SQL file for operator investigation.
             if ($tempStageDir) {
-                & docker exec $Container rm -rf $tempStageDir 2>&1 | Out-Null
+                if ($stageExitCode -eq 0) {
+                    Write-Log "  Cleaning up temporary staging directory after successful restore: $tempStageDir..." -Level "INFO"
+                    & docker exec $Container rm -rf $tempStageDir 2>&1 | Out-Null
+                } else {
+                    Write-Log "  [FORENSIC PRESERVE] Restore not verified successful (exit code: $stageExitCode). Retaining staging directory [$tempStageDir] in container [$Container] for operator investigation." -Level "WARN"
+                    & docker exec $Container sh -c "test -f `"$tempMetaFile`" && sed -i 's/\"status\":\"[A-Z_]*\"/\"status\":\"FAILED\"/g' `"$tempMetaFile`" || true" 2>$null | Out-Null
+                }
             }
         }
     }

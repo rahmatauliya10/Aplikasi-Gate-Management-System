@@ -704,9 +704,9 @@ CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
                         throw "Failed applying Prisma migration [$($mDir.Name)] on PostgreSQL 15!"
                     }
 
-                    # Register in _prisma_migrations
+                    # Register in _prisma_migrations with authentic SHA-256 checksum matching migration.sql file content
                     $mId = [guid]::NewGuid().ToString()
-                    $mChecksum = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
+                    $mChecksum = (Get-FileHash -Path $mSqlFile -Algorithm SHA256).Hash.ToLowerInvariant()
                     $regSql = "INSERT INTO `"_prisma_migrations`" (`"id`", `"checksum`", `"finished_at`", `"migration_name`") VALUES ('$mId', '$mChecksum', now(), '$($mDir.Name)');"
                     & docker exec -e "PGPASSWORD=$dbPass" $cName psql -U $dbUser -d $actualSrcDb -c $regSql 2>&1 | Out-Null
                 }
@@ -790,6 +790,24 @@ VALUES ('act-1', 'usr-admin', 'CREATE', 'TRANSACTION', 'SUCCESS', 'Audit transac
                     throw "Actual schema migration count mismatch! Expected $($migrationDirs.Count), got '$migCountOut'"
                 }
 
+                # Verify authentic Prisma migration checksums in restored database match exact disk SHA-256 digests
+                Write-Host "    Verifying authentic Prisma migration checksums in restored database ($actualTgtDb)..."
+                $checksumMismatchCount = 0
+                foreach ($mDir in $migrationDirs) {
+                    $mSqlFile = Join-Path $mDir.FullName "migration.sql"
+                    if (-not (Test-Path $mSqlFile)) { continue }
+                    $expectedHash = (Get-FileHash -Path $mSqlFile -Algorithm SHA256).Hash.ToLowerInvariant()
+                    $actualDbChecksum = (& docker exec -e "PGPASSWORD=$dbPass" $cName psql -t -A -U $dbUser -d $actualTgtDb -c "SELECT checksum FROM ""_prisma_migrations"" WHERE migration_name = '$($mDir.Name)';" 2>&1 | Out-String).Trim()
+                    if ($actualDbChecksum -ne $expectedHash) {
+                        $checksumMismatchCount++
+                        Write-Host "    [CHECKSUM MISMATCH] $($mDir.Name): expected $expectedHash, got '$actualDbChecksum'" -ForegroundColor Red
+                    }
+                }
+                if ($checksumMismatchCount -ne 0) {
+                    throw "Prisma migration checksum reconciliation failed on restored database! $checksumMismatchCount migrations had checksum mismatches."
+                }
+                Write-Host "    [AUTHENTIC CHECKSUMS 100%] All $($migrationDirs.Count) Prisma migration checksums in restored database match exact disk SHA-256 hashes." -ForegroundColor Green
+
                 # Verify core entity counts match
                 $entitiesToCheck = @("User", "UserWarehouseAccess", "ProductCatalog", "Transaction", "TransactionStatusHistory", "WeighbridgeRecord", "WarehouseProcess", "QcVehicleCheck", "IncomingMaterialCheck", "Attachment", "TransactionCorrection", "TransactionCorrectionItem", "AppSetting", "ActivityLog")
                 foreach ($ent in $entitiesToCheck) {
@@ -850,6 +868,8 @@ VALUES ('act-1', 'usr-admin', 'CREATE', 'TRANSACTION', 'SUCCESS', 'Audit transac
             producerFailureRollbackProven = $true
             inFlightRollbackProven = $true
             actualGmsSchemaRehearsalProven = if ($vNum -eq 15) { $true } else { $false }
+            actualGmsSchemaChecksumsVerified = if ($vNum -eq 15) { $true } else { $false }
+            authenticPrismaMigrationsReconciled = if ($vNum -eq 15) { $migrationDirs.Count } else { 0 }
         }
     } catch {
         $enginePassed = $false
