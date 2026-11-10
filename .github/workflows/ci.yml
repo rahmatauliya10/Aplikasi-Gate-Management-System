@@ -237,10 +237,9 @@ jobs:
           echo "Git commit range scan completed with 0 leaks."
 
           echo "=============================================================================="
-          echo "Executing Gitleaks Scan across Full Working Tree (dir . --no-git)..."
+          echo "Executing Gitleaks Scan across Full Working Tree (dir .)..."
           echo "=============================================================================="
           gitleaks dir . \
-            --no-git \
             --config=.gitleaks.toml \
             --verbose \
             --redact \
