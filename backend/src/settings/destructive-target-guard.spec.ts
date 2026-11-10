@@ -380,4 +380,22 @@ describe('Live Target Database Fixture Identity Verification (P1 Positive Proof)
       ),
     ).rejects.toThrow(/operational production database/);
   });
+
+  it('should guarantee that verifyTargetDatabaseFixtureIdentity is strictly read-only and never executes mutations', async () => {
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([
+        { db_name: 'gms_test', current_user: 'postgres' },
+      ])
+      .mockResolvedValueOnce([{ table_name: 'AppSetting' }])
+      .mockResolvedValueOnce([
+        { key: 'FIXTURE_ISOLATION_UUID', value: 'FIXTURE-1234' },
+      ]);
+
+    await verifyTargetDatabaseFixtureIdentity(
+      'postgresql://postgres:postgres@localhost:5432/gms_test',
+    );
+
+    // ZERO execute calls allowed
+    expect(mockExecuteRawUnsafe).not.toHaveBeenCalled();
+  });
 });

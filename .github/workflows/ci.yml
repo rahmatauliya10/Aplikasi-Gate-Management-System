@@ -58,6 +58,9 @@ jobs:
         working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          DATABASE_URL_TEST: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          GMS_FIXTURE_ISOLATION_UUID: FIXTURE-CI-E2E-TEST-DB-UUID-01
+          GMS_ENVIRONMENT_ID: GMS-TEST-E2E-FIXTURE
         run: |
           npx prisma generate
           npm run prisma:preflight -- --report-only --fail-on-duplicates
@@ -69,6 +72,7 @@ jobs:
           npx prisma migrate deploy
           node scripts/verify-migration-invariants.js
           node scripts/enforce-audit-immutability.js
+          npm run fixture:provision
 
       - name: Verify Migration Checksums (P0-01 Evidence)
         working-directory: ./backend

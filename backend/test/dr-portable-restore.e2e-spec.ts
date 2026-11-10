@@ -81,24 +81,18 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       offsiteBackupDir: isolatedOffsiteBackupDir,
     });
 
-    const fixtureUuid =
+    // 3. Independent read-only verification of pre-provisioned target database identity
+    // (Fail-closed: beforeAll does NOT create or mutate fixture identity; it only verifies pre-existing proof)
+    const expectedFixtureUuid =
       process.env.GMS_FIXTURE_ISOLATION_UUID ||
-      'FIXTURE-E2E-PORTABLE-RESTORE-01';
-    const fixtureEnvId =
+      'FIXTURE-CI-E2E-TEST-DB-UUID-01';
+    const expectedEnvId =
       process.env.GMS_ENVIRONMENT_ID || 'GMS-TEST-E2E-FIXTURE';
 
-    // Register positive fixture identity proof in target database
-    await registerDatabaseFixtureIdentity(
-      process.env.DATABASE_URL_TEST,
-      fixtureUuid,
-      fixtureEnvId,
-    );
-
-    // 3. Independent live read-only verification of target database identity with positive fixture proof
     await verifyTargetDatabaseFixtureIdentity(process.env.DATABASE_URL_TEST, {
       expectedDbName: targetSafety.dbName,
-      expectedFixtureUuid: fixtureUuid,
-      expectedEnvId: fixtureEnvId,
+      expectedFixtureUuid: expectedFixtureUuid,
+      expectedEnvId: expectedEnvId,
       initialNodeEnv: initialNodeEnv,
     });
 
@@ -694,6 +688,105 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
           'OPERATIONAL-PROD-UUID-INVALID',
         ),
       ).rejects.toThrow(/INVALID FIXTURE IDENTITY/);
+    });
+
+    it('INTEGRATION NEGATIVE TEST: should reject database lacking fixture marker fail-closed without mutating schema or data', async () => {
+      // 1. Snapshot current fixture marker
+      const originalMarker = await prisma.appSetting.findUnique({
+        where: { key: 'FIXTURE_ISOLATION_UUID' },
+      });
+
+      // 2. Insert critical operational data record to simulate real business records
+      await prisma.appSetting.upsert({
+        where: { key: 'CRITICAL_OPERATIONAL_DATA' },
+        create: {
+          key: 'CRITICAL_OPERATIONAL_DATA',
+          value: 'DO_NOT_TOUCH_OR_OVERWRITE_001',
+        },
+        update: {
+          value: 'DO_NOT_TOUCH_OR_OVERWRITE_001',
+        },
+      });
+
+      try {
+        // 3. Temporarily remove fixture identity marker (simulating an un-provisioned foreign database)
+        await prisma.appSetting.delete({
+          where: { key: 'FIXTURE_ISOLATION_UUID' },
+        });
+
+        // 4. Read-only verification MUST throw fail-closed
+        await expect(
+          verifyTargetDatabaseFixtureIdentity(
+            process.env.DATABASE_URL_TEST as string,
+            {
+              expectedFixtureUuid: 'FIXTURE-CI-E2E-TEST-DB-UUID-01',
+            },
+          ),
+        ).rejects.toThrow(/does not contain a valid FIXTURE_ISOLATION_UUID/);
+
+        // 5. Assert that critical operational data remains 100% UNTOUCHED
+        const checkRecord = await prisma.appSetting.findUnique({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA' },
+        });
+        expect(checkRecord).not.toBeNull();
+        expect(checkRecord?.value).toBe('DO_NOT_TOUCH_OR_OVERWRITE_001');
+
+        // 6. Assert that verification did NOT secretly create or inject any fixture marker
+        const checkMarker = await prisma.appSetting.findUnique({
+          where: { key: 'FIXTURE_ISOLATION_UUID' },
+        });
+        expect(checkMarker).toBeNull();
+      } finally {
+        // Cleanup critical record and restore original fixture marker
+        await prisma.appSetting.deleteMany({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA' },
+        });
+        if (originalMarker) {
+          await prisma.appSetting.upsert({
+            where: { key: 'FIXTURE_ISOLATION_UUID' },
+            create: {
+              key: 'FIXTURE_ISOLATION_UUID',
+              value: originalMarker.value,
+            },
+            update: {
+              value: originalMarker.value,
+            },
+          });
+        }
+      }
+    });
+
+    it('INTEGRATION NEGATIVE TEST: should reject database with mismatched fixture UUID fail-closed without mutating schema or data', async () => {
+      await prisma.appSetting.upsert({
+        where: { key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH' },
+        create: {
+          key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH',
+          value: 'PRESERVE_UNCHANGED_002',
+        },
+        update: {
+          value: 'PRESERVE_UNCHANGED_002',
+        },
+      });
+
+      try {
+        await expect(
+          verifyTargetDatabaseFixtureIdentity(
+            process.env.DATABASE_URL_TEST as string,
+            {
+              expectedFixtureUuid: 'FIXTURE-UNAUTHORIZED-MISMATCHED-UUID',
+            },
+          ),
+        ).rejects.toThrow(/Fixture UUID mismatch/);
+
+        const checkRecord = await prisma.appSetting.findUnique({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH' },
+        });
+        expect(checkRecord?.value).toBe('PRESERVE_UNCHANGED_002');
+      } finally {
+        await prisma.appSetting.deleteMany({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH' },
+        });
+      }
     });
   });
 });
