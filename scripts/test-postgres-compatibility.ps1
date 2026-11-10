@@ -742,13 +742,13 @@ INSERT INTO "WarehouseProcess" ("id", "transactionId", "processType", "actualQua
 VALUES ('wp-1', 'tx-gbb-1', 'GBB'::"ProcessType", 23000, 'KG'::"WarehouseUnit", 23000.000, 'KG'::"WarehouseUnit", now(), now());
 
 INSERT INTO "QcVehicleCheck" ("id", "transactionId", "result", "decisionMode", "hasDeviation", "createdAt", "updatedAt")
-VALUES ('qc-1', 'tx-gbb-1', 'PASSED'::"QcResult", 'ALL_CHECKS_PASSED'::"QcVehicleDecisionMode", false, now(), now());
+VALUES ('qc-1', 'tx-gbb-1', 'PASS'::"QcResult", 'NORMAL_PASS'::"QcVehicleDecisionMode", false, now(), now());
 
 INSERT INTO "IncomingMaterialCheck" ("id", "transactionId", "result", "notes", "createdAt", "updatedAt")
-VALUES ('imc-1', 'tx-gbb-1', 'PASSED'::"QcResult", 'Sample passed specification', now(), now());
+VALUES ('imc-1', 'tx-gbb-1', 'PASS'::"QcResult", 'Sample passed specification', now(), now());
 
 INSERT INTO "Attachment" ("id", "attachmentLineageId", "transactionId", "module", "attachmentType", "originalName", "fileName", "filePath", "mimeType", "size", "uploadedById", "createdAt", "isCurrent")
-VALUES ('att-1', 'att-lin-1', 'tx-gbb-1', 'WEIGHBRIDGE', 'WEIGH_IN'::"AttachmentType", 'do.pdf', 'do_hash.pdf', 'attachments/tx-gbb-1/do_hash.pdf', 'application/pdf', 104857, 'usr-admin', now(), true);
+VALUES ('att-1', 'att-lin-1', 'tx-gbb-1', 'WEIGHBRIDGE', 'DOCUMENT'::"AttachmentType", 'do.pdf', 'do_hash.pdf', 'attachments/tx-gbb-1/do_hash.pdf', 'application/pdf', 104857, 'usr-admin', now(), true);
 
 INSERT INTO "TransactionCorrection" ("id", "transactionId", "correctedById", "correctionNumber", "action", "reasonCode", "reason", "remark", "oldValues", "newValues", "expectedRevision", "createdAt")
 VALUES ('tc-1', 'tx-gbb-1', 'usr-admin', 'CORR-001', 'CORRECT_DATA'::"CorrectionAction", 'TARE_ERROR', 'Weight tare adjustment', 'Corrected tare weight', '{"weight": 12100}'::jsonb, '{"weight": 12000}'::jsonb, 1, now());
@@ -763,8 +763,8 @@ INSERT INTO "ActivityLog" ("id", "userId", "action", "module", "status", "descri
 VALUES ('act-1', 'usr-admin', 'CREATE', 'TRANSACTION', 'SUCCESS', 'Audit transaction seeded', now());
 "@
                 $encodedSeedSql = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($seedActualSql))
-                & docker exec -i -e "PGPASSWORD=$dbPass" $cName sh -c "echo '$encodedSeedSql' | base64 -d | psql -U `"$dbUser`" -d `"$actualSrcDb`" -v ON_ERROR_STOP=1" 2>&1 | Out-Null
-                if ($LASTEXITCODE -ne 0) { throw "Failed seeding representative GMS schema entities into $actualSrcDb!" }
+                $seedOut = & docker exec -i -e "PGPASSWORD=$dbPass" $cName sh -c "echo '$encodedSeedSql' | base64 -d | psql -U `"$dbUser`" -d `"$actualSrcDb`" -v ON_ERROR_STOP=1" 2>&1 | Out-String
+                if ($LASTEXITCODE -ne 0) { throw "Failed seeding representative GMS schema entities into $actualSrcDb! Error: $seedOut" }
 
                 # Dump actual schema database via pg_dump
                 & docker exec -e "PGPASSWORD=$dbPass" $cName pg_dump -Fc -U $dbUser -d $actualSrcDb -f $actualDumpInCont 2>&1 | Out-Null
