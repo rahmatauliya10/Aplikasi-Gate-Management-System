@@ -44,6 +44,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
     // Isolate environment variables to test paths
     process.env.NODE_ENV = 'test';
+    process.env.GMS_DISABLE_BACKUP_SCHEDULER = 'true';
     process.env.UPLOAD_DIR = isolatedUploadDir;
     process.env.LOCAL_BACKUP_DIR = isolatedLocalBackupDir;
     process.env.OFFSITE_BACKUP_DIR = isolatedOffsiteBackupDir;
@@ -544,12 +545,11 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     });
 
     it('should verify that target database data remains untouched when guard rejects target', async () => {
-      // Create a marker transaction in current test DB
-      const markerTx = await prisma.transaction.create({
+      // Create a marker setting in current test DB
+      const markerSetting = await prisma.appSetting.create({
         data: {
-          transactionNumber: 'TRX-GUARD-MARKER-001',
-          plateNumber: 'B1234MARKER',
-          driverName: 'Driver Marker Verification',
+          key: 'SENTINEL_GUARD_MARKER_001',
+          value: 'UNTOUCHED_SENTINEL_VALUE',
         },
       });
 
@@ -561,15 +561,17 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         });
       }).toThrow();
 
-      // Verify that marker transaction is 100% intact and no mutations occurred
-      const retrieved = await prisma.transaction.findUnique({
-        where: { id: markerTx.id },
+      // Verify that marker setting is 100% intact and no mutations occurred
+      const retrieved = await prisma.appSetting.findUnique({
+        where: { key: 'SENTINEL_GUARD_MARKER_001' },
       });
       expect(retrieved).not.toBeNull();
-      expect(retrieved?.transactionNumber).toBe('TRX-GUARD-MARKER-001');
+      expect(retrieved?.value).toBe('UNTOUCHED_SENTINEL_VALUE');
 
-      // Cleanup marker transaction
-      await prisma.transaction.delete({ where: { id: markerTx.id } });
+      // Cleanup marker setting
+      await prisma.appSetting.delete({
+        where: { key: 'SENTINEL_GUARD_MARKER_001' },
+      });
     });
   });
 });
