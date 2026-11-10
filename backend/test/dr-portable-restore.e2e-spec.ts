@@ -9,10 +9,15 @@ import { DatabaseBackupService } from './../src/settings/database-backup.service
 import { configureApp } from './../src/app.config';
 import {
   assertDestructiveTestTargetSafe,
+  verifyTargetDatabaseFixtureIdentity,
   DestructiveTargetValidationOptions,
 } from './../src/settings/destructive-target-guard';
 
-export { assertDestructiveTestTargetSafe, DestructiveTargetValidationOptions };
+export {
+  assertDestructiveTestTargetSafe,
+  verifyTargetDatabaseFixtureIdentity,
+  DestructiveTargetValidationOptions,
+};
 
 describe('Disaster Recovery & Portable Restore (e2e)', () => {
   let app: INestApplication;
@@ -37,29 +42,51 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
   );
 
   beforeAll(async () => {
+    // 1. Capture incoming environment BEFORE mutating process.env
+    const initialNodeEnv = process.env.NODE_ENV;
+    const initialGmsEnv = process.env.GMS_ENVIRONMENT_ID;
+    const initialInstallUuid = process.env.GMS_INSTALLATION_UUID;
+
+    // Fail immediately if the test process was launched in production mode
+    if (
+      initialNodeEnv &&
+      (initialNodeEnv.toLowerCase() === 'production' ||
+        initialNodeEnv.toLowerCase() === 'prod')
+    ) {
+      throw new Error(
+        `FATAL DESTRUCTIVE TARGET GUARD: E2E test started with incoming NODE_ENV='${initialNodeEnv}'! Aborting immediately before environment configuration.`,
+      );
+    }
+
     if (!process.env.DATABASE_URL_TEST) {
       process.env.DATABASE_URL_TEST =
         'postgresql://postgres:postgres@127.0.0.1:5432/gms_test';
     }
 
-    // Isolate environment variables to test paths
+    // 2. Strict target validation before any application initialization or database mutation
+    const targetSafety = assertDestructiveTestTargetSafe({
+      databaseUrl: process.env.DATABASE_URL_TEST,
+      initialNodeEnv: initialNodeEnv,
+      nodeEnv: 'test',
+      gmsEnvId: initialGmsEnv,
+      installationUuid: initialInstallUuid,
+      uploadDir: isolatedUploadDir,
+      localBackupDir: isolatedLocalBackupDir,
+      offsiteBackupDir: isolatedOffsiteBackupDir,
+    });
+
+    // 3. Independent live read-only verification of target database identity
+    await verifyTargetDatabaseFixtureIdentity(process.env.DATABASE_URL_TEST, {
+      expectedDbName: targetSafety.dbName,
+      initialNodeEnv: initialNodeEnv,
+    });
+
+    // 4. Safely isolate environment variables to test paths
     process.env.NODE_ENV = 'test';
     process.env.GMS_DISABLE_BACKUP_SCHEDULER = 'true';
     process.env.UPLOAD_DIR = isolatedUploadDir;
     process.env.LOCAL_BACKUP_DIR = isolatedLocalBackupDir;
     process.env.OFFSITE_BACKUP_DIR = isolatedOffsiteBackupDir;
-
-    // Strict target validation before any application initialization or database mutation
-    assertDestructiveTestTargetSafe({
-      databaseUrl: process.env.DATABASE_URL_TEST,
-      nodeEnv: process.env.NODE_ENV,
-      gmsEnvId: process.env.GMS_ENVIRONMENT_ID,
-      installationUuid: process.env.GMS_INSTALLATION_UUID,
-      uploadDir: process.env.UPLOAD_DIR,
-      localBackupDir: process.env.LOCAL_BACKUP_DIR,
-      offsiteBackupDir: process.env.OFFSITE_BACKUP_DIR,
-    });
-
     process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
 
     // Create isolated directory structure
@@ -493,6 +520,26 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
           nodeEnv: 'test',
         }),
       ).toThrow(/prohibited or matches operational database/);
+    });
+
+    it('should reject incoming production NODE_ENV fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          initialNodeEnv: 'production',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/Incoming execution environment is set to production/);
+    });
+
+    it('should reject remote or unauthorized database hosts fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl:
+            'postgresql://postgres:postgres@remote-operational.cloud:5432/gms_test',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/not in the allowed local\/fixture host allowlist/);
     });
 
     it('should reject production NODE_ENV fail-closed', () => {

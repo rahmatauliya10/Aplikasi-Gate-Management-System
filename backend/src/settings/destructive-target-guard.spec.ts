@@ -10,21 +10,24 @@ describe('Destructive Target Isolation Guard (P1-02 Unit Tests)', () => {
     });
     expect(res.safe).toBe(true);
     expect(res.dbName).toBe('gms_test');
+    expect(res.host).toBe('localhost');
   });
 
-  it('should allow rehearsal and fixture database targets', () => {
+  it('should allow rehearsal and fixture database targets on local or container hosts', () => {
     const res1 = assertDestructiveTestTargetSafe({
       databaseUrl:
-        'postgresql://postgres:postgres@localhost:5432/gms_rehearsal_db',
+        'postgresql://postgres:postgres@127.0.0.1:5432/gms_rehearsal_db',
       nodeEnv: 'test',
     });
     expect(res1.safe).toBe(true);
+    expect(res1.host).toBe('127.0.0.1');
 
     const res2 = assertDestructiveTestTargetSafe({
-      databaseUrl: 'postgres://postgres:postgres@localhost:5432/my_fixture_tmp',
+      databaseUrl: 'postgres://postgres:postgres@postgres:5432/my_fixture_tmp',
       nodeEnv: 'test',
     });
     expect(res2.safe).toBe(true);
+    expect(res2.host).toBe('postgres');
   });
 
   it('should reject empty or missing database URL fail-closed', () => {
@@ -34,6 +37,42 @@ describe('Destructive Target Isolation Guard (P1-02 Unit Tests)', () => {
         nodeEnv: 'test',
       }),
     ).toThrow(/DATABASE_URL_TEST is undefined or empty/);
+  });
+
+  it('should reject incoming production NODE_ENV before environment mutation fail-closed', () => {
+    expect(() =>
+      assertDestructiveTestTargetSafe({
+        databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+        initialNodeEnv: 'production',
+        nodeEnv: 'test',
+      }),
+    ).toThrow(/Incoming execution environment is set to production/);
+
+    expect(() =>
+      assertDestructiveTestTargetSafe({
+        databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+        initialNodeEnv: 'prod',
+        nodeEnv: 'test',
+      }),
+    ).toThrow(/Incoming execution environment is set to production/);
+  });
+
+  it('should reject remote or unauthorized database hosts fail-closed', () => {
+    expect(() =>
+      assertDestructiveTestTargetSafe({
+        databaseUrl:
+          'postgresql://postgres:postgres@production-db.internal:5432/gms_test',
+        nodeEnv: 'test',
+      }),
+    ).toThrow(/not in the allowed local\/fixture host allowlist/);
+
+    expect(() =>
+      assertDestructiveTestTargetSafe({
+        databaseUrl:
+          'postgresql://postgres:postgres@192.168.1.150:5432/gms_test',
+        nodeEnv: 'test',
+      }),
+    ).toThrow(/not in the allowed local\/fixture host allowlist/);
   });
 
   it('should reject operational database name "gms" fail-closed', () => {

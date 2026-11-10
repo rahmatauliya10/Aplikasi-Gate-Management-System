@@ -213,12 +213,17 @@ jobs:
           fi
           echo "Assertion passed: Local HEAD matches target HEAD (${CURRENT_HEAD})."
 
-          # Compute commit count to scan
-          COMMIT_COUNT=$(git rev-list --count "${TARGET_BASE}..${TARGET_HEAD}" || echo "0")
+          # Compute commit count to scan with strict fail-closed enforcement for pull requests
+          COMMIT_COUNT=$(git rev-list --count "${TARGET_BASE}..${TARGET_HEAD}" 2>/dev/null || echo "-1")
           echo "Commits in scan range [${TARGET_BASE}..${TARGET_HEAD}]: ${COMMIT_COUNT}"
           if [ "$COMMIT_COUNT" -le 0 ]; then
-            echo "::warning::Commit count in range is 0. Ensuring at least HEAD commit is verified."
-            SCAN_LOG_OPTS="-n 1 ${TARGET_HEAD}"
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "::error::CRITICAL PROVENANCE FAILURE: Pull request commit range [${TARGET_BASE}..${TARGET_HEAD}] yielded ${COMMIT_COUNT} commits! PR must contain at least 1 verifiable commit. Fallback scan rejected to prevent silent coverage reduction. Aborting fail-closed."
+              exit 1
+            else
+              echo "::warning::Commit count in push range is 0. Ensuring at least HEAD commit is verified."
+              SCAN_LOG_OPTS="-n 1 ${TARGET_HEAD}"
+            fi
           else
             SCAN_LOG_OPTS="${TARGET_BASE}..${TARGET_HEAD}"
           fi

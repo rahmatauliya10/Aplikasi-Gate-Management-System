@@ -745,14 +745,10 @@ try {
     Set-Content -Path $testFlag -Value "TEMPORARY_TEST_FLAG" -Encoding utf8
     Set-Content -Path (Join-Path $testDir "active") -Value "TEST_SESSION" -Encoding utf8
 
-    # 4. Execute the real operations that historically threatened maintenance files:
-    #    (a) Run deploy-with-rollback.ps1 parameter validation with explicit MaintenanceDir scoped to test workspace
-    [string]$deployScript = Join-Path $PSScriptRoot "deploy-with-rollback.ps1"
-    & $PsExe -NoProfile -ExecutionPolicy Bypass -Command "& '$deployScript' -ExportFunctionsOnly 2>&1" | Out-Null
-
-    #    (b) Run scoped maintenance cleanup logic on the test workspace
-    if (Test-Path $testFlag) { Remove-Item -Path $testFlag -Force }
-    if (Test-Path $testDir) { Remove-Item -Path $testDir -Recurse -Force }
+    # 4. Execute the real operations using the production cleanup engine:
+    #    (a) Run production Clear-DeploymentMaintenanceStateSafe scoped strictly to the test workspace
+    [int]$clearedFiles = Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $isolatedWorkDir -AllowedBoundaryDirectory $script:TestFixtureDir
+    [bool]$scopedCleanupSucceeded = ($clearedFiles -eq 2) -and (-not (Test-Path $testFlag)) -and (-not (Test-Path (Join-Path $testDir "active")))
 
     # 5. Verify byte-for-byte SHA-256 hash preservation of operational sentinels
     [bool]$flagStillExists = Test-Path -Path $sentinelFlag
@@ -767,29 +763,38 @@ try {
                              ($hashActivePre -eq $hashActivePost) -and `
                              ($hashLedgerPre -eq $hashLedgerPost)
 
-    # 6. Negative test: Out-of-bounds maintenance cleanup guard
-    # Ensure any attempt to prune files outside fixture directory boundaries is strictly blocked
-    [bool]$negativeGuardPassed = $false
+    # 6. Negative tests: Production Clear-DeploymentMaintenanceStateSafe boundary enforcement
+    [bool]$negativeBoundaryOutsideBlocked = $false
     try {
-        $safePrune = {
-            param([string]$targetPath, [string]$allowedBoundary)
-            [string]$normTarget = [System.IO.Path]::GetFullPath($targetPath)
-            [string]$normBoundary = [System.IO.Path]::GetFullPath($allowedBoundary)
-            if (-not $normTarget.StartsWith($normBoundary, [System.StringComparison]::OrdinalIgnoreCase)) {
-                throw "GUARD VIOLATION: Refusing to delete path outside test fixture boundary: $targetPath"
-            }
-            Remove-Item -Path $normTarget -Recurse -Force
-        }
-
-        & $safePrune $mockRoot $isolatedWorkDir
+        # Attempt to prune mockRoot while restricting boundary to isolatedWorkDir
+        Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $mockRoot -AllowedBoundaryDirectory $isolatedWorkDir
     } catch {
-        if ($_ -match "GUARD VIOLATION") {
-            $negativeGuardPassed = $true
+        if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
+            $negativeBoundaryOutsideBlocked = $true
         }
     }
 
-    [bool]$passed = $flagStillExists -and $activeStillExists -and $ledgerStillExists -and `
-                    $hashesIdentical -and $negativeGuardPassed
+    [bool]$negativeOperationalRootBlocked = $false
+    try {
+        # Attempt to prune actual project root while restricting boundary to test fixture directory
+        Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $ProjectRootDir -AllowedBoundaryDirectory $script:TestFixtureDir
+    } catch {
+        if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
+            $negativeOperationalRootBlocked = $true
+        }
+    }
+
+    [bool]$negativeEmptyTargetBlocked = $false
+    try {
+        Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot ""
+    } catch {
+        if ($_ -match "MAINTENANCE CLEANUP GUARD") {
+            $negativeEmptyTargetBlocked = $true
+        }
+    }
+
+    [bool]$passed = $scopedCleanupSucceeded -and $flagStillExists -and $activeStillExists -and $ledgerStillExists -and `
+                    $hashesIdentical -and $negativeBoundaryOutsideBlocked -and $negativeOperationalRootBlocked -and $negativeEmptyTargetBlocked
 
     if ($passed) {
         $script:PassedTests++

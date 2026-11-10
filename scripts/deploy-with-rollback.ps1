@@ -669,16 +669,61 @@ function Execute-Rollback {
     } finally {
         if ($RollbackSucceeded -and $SmokePassedVerdictProven) {
             Write-Host "  Deactivating maintenance freeze; opening traffic..." -ForegroundColor Green
-            if (Test-Path -Path $MaintActive) {
-                Remove-Item -Path $MaintActive -Force -ErrorAction SilentlyContinue
-            }
-            if (Test-Path -Path (Join-Path $WorkspaceRoot "maintenance.flag")) {
-                Remove-Item -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Force -ErrorAction SilentlyContinue
-            }
+            [void](Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $WorkspaceRoot)
         } else {
             Write-Host "[GMS CRITICAL ALERT] Rollback failed, incomplete, or smoke verdict not PASSED! Maintenance flag ($MaintActive) retained to freeze write traffic and protect system integrity." -ForegroundColor Red
         }
     }
+}
+
+function Clear-DeploymentMaintenanceStateSafe {
+    <#
+    .SYNOPSIS
+        Safely clears maintenance sentinels (active file and root flag) with fail-closed boundary guard.
+    .PARAMETER TargetWorkspaceRoot
+        Root directory of the workspace where maintenance files are located. Defaults to $WorkspaceRoot.
+    .PARAMETER AllowedBoundaryDirectory
+        Optional boundary containment directory. When provided (e.g. in test suites), TargetWorkspaceRoot
+        must resolve strictly inside this directory to prevent accidental deletion of operational files.
+    #>
+    param(
+        [Parameter(Mandatory=$false)]
+        [string]$TargetWorkspaceRoot = $WorkspaceRoot,
+        [Parameter(Mandatory=$false)]
+        [string]$AllowedBoundaryDirectory = ""
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TargetWorkspaceRoot)) {
+        throw "MAINTENANCE CLEANUP GUARD: TargetWorkspaceRoot is empty or null. Aborting cleanup."
+    }
+
+    [string]$resolvedTarget = [System.IO.Path]::GetFullPath($TargetWorkspaceRoot)
+
+    # Fail-closed boundary check: If AllowedBoundaryDirectory is specified,
+    # target MUST be strictly contained inside AllowedBoundaryDirectory
+    if (-not [string]::IsNullOrWhiteSpace($AllowedBoundaryDirectory)) {
+        [string]$resolvedBoundary = [System.IO.Path]::GetFullPath($AllowedBoundaryDirectory).TrimEnd('\', '/')
+        [string]$trimmedTarget = $resolvedTarget.TrimEnd('\', '/')
+        if (-not $trimmedTarget.StartsWith($resolvedBoundary, [System.StringComparison]::OrdinalIgnoreCase) -or 
+            ($trimmedTarget.Length -le $resolvedBoundary.Length)) {
+            throw "MAINTENANCE CLEANUP BOUNDARY VIOLATION: Target workspace '$resolvedTarget' is outside allowed boundary '$resolvedBoundary' or matches boundary root! Cleanup blocked fail-closed."
+        }
+    }
+
+    [string]$targetMaintDir = Join-Path $resolvedTarget "maintenance"
+    [string]$targetMaintActive = Join-Path $targetMaintDir "active"
+    [string]$targetMaintFlag = Join-Path $resolvedTarget "maintenance.flag"
+
+    [int]$removedCount = 0
+    if (Test-Path -Path $targetMaintActive) {
+        Remove-Item -Path $targetMaintActive -Force -ErrorAction Stop
+        $removedCount++
+    }
+    if (Test-Path -Path $targetMaintFlag) {
+        Remove-Item -Path $targetMaintFlag -Force -ErrorAction Stop
+        $removedCount++
+    }
+    return $removedCount
 }
 
 if ($ExportFunctionsOnly) {
@@ -1166,12 +1211,7 @@ try {
 
     # Step 7: Deactivate maintenance write-freeze; open production traffic
     Write-Host "[GMS Deploy] Deactivating maintenance write-freeze; opening production traffic..." -ForegroundColor Green
-    if (Test-Path -Path $MaintActive) {
-        Remove-Item -Path $MaintActive -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -Path (Join-Path $WorkspaceRoot "maintenance.flag")) {
-        Remove-Item -Path (Join-Path $WorkspaceRoot "maintenance.flag") -Force -ErrorAction SilentlyContinue
-    }
+    [void](Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $WorkspaceRoot)
 
     Write-Host "[GMS Deploy] SUCCESS! Release [$TargetReleaseTag] (SHA: $ExactSourceGitSha) deployed, verified healthy, and traffic opened." -ForegroundColor Green
     exit 0
