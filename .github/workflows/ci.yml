@@ -151,16 +151,129 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js Environment
         uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
           node-version: '22'
 
-      - name: Execute Gitleaks Secret Detection Scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      - name: Install and Execute Gitleaks Secret Detection Scan (Full PR Range & Working Tree)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof
+
+          echo "=============================================================================="
+          echo "Installing Gitleaks Standalone Binary (v8.21.2)..."
+          echo "=============================================================================="
+          GITLEAKS_VERSION="8.21.2"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | sudo tar -xz -C /usr/local/bin gitleaks
+          chmod +x /usr/local/bin/gitleaks
+          gitleaks version
+
+          echo "=============================================================================="
+          echo "Resolving Target Git Range & Commit Boundary Assertions..."
+          echo "=============================================================================="
+          CURRENT_HEAD=$(git rev-parse HEAD)
+          echo "Current local Git HEAD: ${CURRENT_HEAD}"
+
+          TARGET_HEAD=""
+          TARGET_BASE=""
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            TARGET_BASE="$PR_BASE_SHA"
+            TARGET_HEAD="$PR_HEAD_SHA"
+            echo "Pull Request Event: Base SHA = ${TARGET_BASE}, Head SHA = ${TARGET_HEAD}"
+            
+            # Fetch base ref from remote to ensure the merge base exists locally
+            git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1000 || true
+          else
+            TARGET_HEAD="$EVENT_SHA"
+            if [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+              TARGET_BASE="$PUSH_BEFORE_SHA"
+            else
+              TARGET_BASE="${TARGET_HEAD}~1"
+            fi
+            echo "Push Event: Base SHA = ${TARGET_BASE}, Head SHA = ${TARGET_HEAD}"
+          fi
+
+          # Assert that local HEAD matches target HEAD commit exactly
+          if [ -n "$TARGET_HEAD" ] && [ "$CURRENT_HEAD" != "$TARGET_HEAD" ]; then
+            echo "::error::Target HEAD mismatch! Expected ${TARGET_HEAD}, but local repository is at ${CURRENT_HEAD}."
+            exit 1
+          fi
+          echo "Assertion passed: Local HEAD matches target HEAD (${CURRENT_HEAD})."
+
+          # Compute commit count to scan
+          COMMIT_COUNT=$(git rev-list --count "${TARGET_BASE}..${TARGET_HEAD}" || echo "0")
+          echo "Commits in scan range [${TARGET_BASE}..${TARGET_HEAD}]: ${COMMIT_COUNT}"
+          if [ "$COMMIT_COUNT" -le 0 ]; then
+            echo "::warning::Commit count in range is 0. Ensuring at least HEAD commit is verified."
+            SCAN_LOG_OPTS="-n 1 ${TARGET_HEAD}"
+          else
+            SCAN_LOG_OPTS="${TARGET_BASE}..${TARGET_HEAD}"
+          fi
+
+          echo "=============================================================================="
+          echo "Executing Gitleaks Scan across Git Log Range (${SCAN_LOG_OPTS})..."
+          echo "=============================================================================="
+          gitleaks git \
+            --log-opts="${SCAN_LOG_OPTS}" \
+            --config=.gitleaks.toml \
+            --verbose \
+            --redact \
+            --report-format=json \
+            --report-path=artifacts/release-proof/gitleaks-commits-report.json
+
+          echo "Git commit range scan completed with 0 leaks."
+
+          echo "=============================================================================="
+          echo "Executing Gitleaks Scan across Full Working Tree (dir . --no-git)..."
+          echo "=============================================================================="
+          gitleaks dir . \
+            --no-git \
+            --config=.gitleaks.toml \
+            --verbose \
+            --redact \
+            --report-format=json \
+            --report-path=artifacts/release-proof/gitleaks-dir-report.json
+
+          echo "Working tree scan completed with 0 leaks."
+
+          # Generate evidence summary file
+          cat <<EOF > artifacts/release-proof/gitleaks-scan-evidence.json
+          {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "eventName": "${EVENT_NAME}",
+            "baseSha": "${TARGET_BASE}",
+            "headSha": "${TARGET_HEAD}",
+            "currentHead": "${CURRENT_HEAD}",
+            "commitsScanned": ${COMMIT_COUNT},
+            "scanRange": "${SCAN_LOG_OPTS}",
+            "headMatched": true,
+            "commitScanStatus": "PASSED",
+            "dirScanStatus": "PASSED",
+            "gitleaksVersion": "$GITLEAKS_VERSION"
+          }
+          EOF
+          cat artifacts/release-proof/gitleaks-scan-evidence.json
+
+      - name: Archive Gitleaks Scan Evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        if: always()
+        with:
+          name: gitleaks-scan-evidence
+          path: |
+            artifacts/release-proof/gitleaks-commits-report.json
+            artifacts/release-proof/gitleaks-dir-report.json
+            artifacts/release-proof/gitleaks-scan-evidence.json
+          retention-days: 14
 
       - name: Execute Production Security Audit (Backend)
         working-directory: ./backend

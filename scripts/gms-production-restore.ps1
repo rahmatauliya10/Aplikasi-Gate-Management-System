@@ -258,6 +258,85 @@ function Assert-RestoreStorageCapacity {
     }
 }
 
+function Exec-LiveDbQueryInternal {
+    param(
+        [Parameter(Mandatory=$true)][string]$Container,
+        [Parameter(Mandatory=$true)][string]$DbName,
+        [Parameter(Mandatory=$true)][string]$User,
+        [Parameter(Mandatory=$false)][string]$Pass = "",
+        [Parameter(Mandatory=$true)][string]$Sql = "",
+        [Parameter(Mandatory=$false)][scriptblock]$CommandExecutor = $null
+    )
+    $LASTEXITCODE = 0
+    [string]$raw = ""
+    [int]$exitCode = 0
+    if ($CommandExecutor) {
+        $raw = (& $CommandExecutor $Container $Sql | Out-String)
+    } else {
+        $execArgs = @("exec")
+        if ($Pass) { $execArgs += @("-e", "PGPASSWORD=$Pass") }
+        $execArgs += @($Container, "psql", "-v", "ON_ERROR_STOP=1", "-t", "-A", "-U", $User, "-d", $DbName, "-c", $Sql)
+        $raw = (& docker @execArgs 2>&1 | Out-String)
+        $exitCode = $LASTEXITCODE
+    }
+
+    if ($exitCode -ne 0 -or $raw -match '(?i)(psql:\s*error|FATAL:|could not connect to server|terminating connection|ERROR:|\bFAILED\b)') {
+        throw "CRITICAL LIVE DB QUERY FAILURE: Exit code: $exitCode. Error executing SQL [$Sql]: $raw"
+    }
+
+    [string[]]$lines = @(($raw -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
+    if ((@($lines)).Count -gt 0) { return ([string]$lines[-1]).Trim() }
+    return ""
+}
+
+function Get-LiveTableCountSafe {
+    param(
+        [Parameter(Mandatory=$true)][string]$TableName,
+        [Parameter(Mandatory=$false)][string]$Container = "",
+        [Parameter(Mandatory=$false)][string]$DbName = "",
+        [Parameter(Mandatory=$false)][string]$User = "",
+        [Parameter(Mandatory=$false)][string]$Pass = "",
+        [Parameter(Mandatory=$false)][bool]$AllowMissingIfHistorical = $false,
+        [Parameter(Mandatory=$false)][scriptblock]$QueryExecutor = $null
+    )
+    if ([string]::IsNullOrWhiteSpace($TableName)) {
+        throw "CRITICAL RESTORE VERIFICATION: TableName cannot be null or empty. Fail-closed."
+    }
+
+    # Helper scriptblock for executing SQL
+    $execQuery = {
+        param([string]$sql)
+        if ($QueryExecutor) {
+            return (& $QueryExecutor $sql)
+        } else {
+            return (Exec-LiveDbQueryInternal -Container $Container -DbName $DbName -User $User -Pass $Pass -Sql $sql)
+        }
+    }
+
+    # 1. Existence check
+    [string]$exists = (& $execQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$TableName') = 1 THEN '1' ELSE '0' END;")
+    [string]$cleanExists = if ($exists) { $exists.Trim() } else { "" }
+    if ($cleanExists -ne "1" -and $cleanExists -ne "0") {
+        throw "CRITICAL RESTORE VERIFICATION: Unexpected existence check result [$exists] for table [$TableName]. Fail-closed."
+    }
+    if ($cleanExists -eq "0") {
+        if ($AllowMissingIfHistorical) {
+            Write-Log "  Historical schema note: optional table [$TableName] does not exist in target database. Count evaluated as 0." -Level "INFO"
+            return 0
+        }
+        throw "CRITICAL RESTORE VERIFICATION: Mandatory table [$TableName] does NOT exist in live database [$DbName]! Restoration cannot be verified. Fail-closed."
+    }
+
+    # 2. Count query
+    [string]$cntStr = (& $execQuery "SELECT COUNT(*) FROM `"$TableName`";")
+    [string]$cleanCnt = if ($cntStr) { $cntStr.Trim() } else { "" }
+    [int]$cnt = -1
+    if (-not [int]::TryParse($cleanCnt, [ref]$cnt) -or $cnt -lt 0) {
+        throw "CRITICAL RESTORE VERIFICATION: Non-numeric or invalid row count [$cntStr] returned for table [$TableName]! Fail-closed."
+    }
+    return $cnt
+}
+
 if ($ExportFunctionsOnly) {
     return
 }
@@ -971,15 +1050,7 @@ function Invoke-AtomicPostgresRestore {
 
     # Helper for live database queries
     function Exec-LiveDbQuery([string]$sql) {
-        $raw = if ($PgPass) {
-            & docker exec -e "PGPASSWORD=$PgPass" $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
-        } else {
-            & docker exec $LiveContainer psql -t -A -U $PgUser -d $LiveDbName -c "$sql" 2>&1
-        }
-        if (-not $raw) { return "" }
-        [string[]]$lines = @(($raw.ToString() -split "`r?`n") | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -notmatch '^(NOTICE|WARNING):' })
-        if ((@($lines)).Count -gt 0) { return ([string]$lines[-1]).Trim() }
-        return ""
+        return (Exec-LiveDbQueryInternal -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -Sql $sql)
     }
 
     # --------------------------------------------------------------------------
@@ -1163,31 +1234,25 @@ function Invoke-AtomicPostgresRestore {
         throw "INJECTED_FAULT: Simulated live verification discrepancy for DR drill validation."
     }
 
-    function Get-LiveTableCountSafe([string]$TableName) {
-        [string]$exists = Exec-LiveDbQuery "SELECT CASE WHEN (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$TableName') = 1 THEN '1' ELSE '0' END;"
-        if ($exists -ne "1") { return 0 }
-        [string]$cntStr = Exec-LiveDbQuery "SELECT COUNT(*) FROM `"$TableName`";"
-        [int]$cnt = 0
-        if ([int]::TryParse($cntStr, [ref]$cnt)) { return $cnt }
-        return 0
-    }
+    # Check if target database is running historical schema (less than 10 finished migrations)
+    [bool]$isHistoricalSchema = ($LiveMigCount -lt 10)
 
-    [int]$LiveUserCount = Get-LiveTableCountSafe "User"
-    [int]$LiveTxCount = Get-LiveTableCountSafe "Transaction"
-    [int]$LiveAttCount = Get-LiveTableCountSafe "Attachment"
-    [int]$LiveCorrectionCount = Get-LiveTableCountSafe "TransactionCorrection"
-    [int]$LiveCorrectionItemCount = Get-LiveTableCountSafe "TransactionCorrectionItem"
-    [int]$LiveWbCount = Get-LiveTableCountSafe "WeighbridgeRecord"
-    [int]$LiveWhCount = Get-LiveTableCountSafe "WarehouseProcess"
-    [int]$LiveQcvCount = Get-LiveTableCountSafe "QcVehicleCheck"
-    [int]$LiveImCount = Get-LiveTableCountSafe "IncomingMaterialCheck"
-    [int]$LiveFraudCount = Get-LiveTableCountSafe "FraudCheck"
-    [int]$LiveActCount = Get-LiveTableCountSafe "ActivityLog"
-    [int]$LiveSettingCount = Get-LiveTableCountSafe "AppSetting"
-    [int]$LiveAnnounceCount = Get-LiveTableCountSafe "Announcement"
-    [int]$LiveIssueCount = Get-LiveTableCountSafe "SystemIssue"
-    [int]$LiveStatusHistCount = Get-LiveTableCountSafe "TransactionStatusHistory"
-    [int]$LiveWhAccessCount = Get-LiveTableCountSafe "UserWarehouseAccess"
+    [int]$LiveUserCount = Get-LiveTableCountSafe -TableName "User" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveTxCount = Get-LiveTableCountSafe -TableName "Transaction" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveAttCount = Get-LiveTableCountSafe -TableName "Attachment" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveCorrectionCount = Get-LiveTableCountSafe -TableName "TransactionCorrection" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -AllowMissingIfHistorical $isHistoricalSchema
+    [int]$LiveCorrectionItemCount = Get-LiveTableCountSafe -TableName "TransactionCorrectionItem" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -AllowMissingIfHistorical $isHistoricalSchema
+    [int]$LiveWbCount = Get-LiveTableCountSafe -TableName "WeighbridgeRecord" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveWhCount = Get-LiveTableCountSafe -TableName "WarehouseProcess" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveQcvCount = Get-LiveTableCountSafe -TableName "QcVehicleCheck" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveImCount = Get-LiveTableCountSafe -TableName "IncomingMaterialCheck" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveFraudCount = Get-LiveTableCountSafe -TableName "FraudCheck" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -AllowMissingIfHistorical $isHistoricalSchema
+    [int]$LiveActCount = Get-LiveTableCountSafe -TableName "ActivityLog" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveSettingCount = Get-LiveTableCountSafe -TableName "AppSetting" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass
+    [int]$LiveAnnounceCount = Get-LiveTableCountSafe -TableName "Announcement" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -AllowMissingIfHistorical $isHistoricalSchema
+    [int]$LiveIssueCount = Get-LiveTableCountSafe -TableName "SystemIssue" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -AllowMissingIfHistorical $isHistoricalSchema
+    [int]$LiveStatusHistCount = Get-LiveTableCountSafe -TableName "TransactionStatusHistory" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -AllowMissingIfHistorical $isHistoricalSchema
+    [int]$LiveWhAccessCount = Get-LiveTableCountSafe -TableName "UserWarehouseAccess" -Container $LiveContainer -DbName $LiveDbName -User $PgUser -Pass $PgPass -AllowMissingIfHistorical $isHistoricalSchema
 
     # Invariant checks on live database
     [int]$LiveWbDupeCurrent = 0

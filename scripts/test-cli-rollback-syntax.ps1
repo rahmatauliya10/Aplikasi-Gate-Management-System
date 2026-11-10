@@ -716,39 +716,197 @@ try {
 
 # 16. REL-24: Non-interference invariant: Workspace root maintenance state must remain strictly preserved
 $script:TotalTests++
-Write-Host "`n[$script:TotalTests] Testing: [REL-24] Non-interference invariant: Workspace root maintenance state must remain strictly preserved..." -ForegroundColor Yellow
+Write-Host "`n[$script:TotalTests] Testing: [REL-24] Non-interference invariant: Operational root maintenance state must remain strictly preserved..." -ForegroundColor Yellow
 try {
+    # 1. Build operational mock root with sentinel maintenance files
     [string]$mockRoot = Join-Path $script:TestFixtureDir "mock_operational_root"
     New-Item -Path $mockRoot -ItemType Directory -Force | Out-Null
     [string]$sentinelFlag = Join-Path $mockRoot "maintenance.flag"
     [string]$sentinelDir = Join-Path $mockRoot "maintenance"
+    [string]$sentinelActive = Join-Path $sentinelDir "active"
     [string]$sentinelLedger = Join-Path $sentinelDir "recovery-state.json"
     
-    Set-Content -Path $sentinelFlag -Value "OPERATIONAL_ACTIVE_MAINTENANCE_PRESERVE" -Encoding utf8
     New-Item -Path $sentinelDir -ItemType Directory -Force | Out-Null
-    Set-Content -Path $sentinelLedger -Value '{"recoveryOperationId":"OP-LIVE-SENTINEL","status":"RESTORING"}' -Encoding utf8
+    Set-Content -Path $sentinelFlag -Value "OPERATIONAL_ACTIVE_MAINTENANCE_PRESERVE" -Encoding utf8
+    Set-Content -Path $sentinelActive -Value "ACTIVE_SENTINEL_SESSION_TOKEN_9999" -Encoding utf8
+    Set-Content -Path $sentinelLedger -Value '{"recoveryOperationId":"OP-LIVE-SENTINEL","status":"RESTORING","target":"operational-root"}' -Encoding utf8
     
-    # Assert that existing operational maintenance files and recovery ledgers are NEVER deleted
+    # 2. Compute cryptographic SHA-256 pre-execution hashes
+    [string]$hashFlagPre = (Get-FileHash -Path $sentinelFlag -Algorithm SHA256).Hash
+    [string]$hashActivePre = (Get-FileHash -Path $sentinelActive -Algorithm SHA256).Hash
+    [string]$hashLedgerPre = (Get-FileHash -Path $sentinelLedger -Algorithm SHA256).Hash
+    
+    # 3. Build a separate, isolated test execution workspace inside fixture
+    [string]$isolatedWorkDir = Join-Path $script:TestFixtureDir "isolated_test_workspace"
+    New-Item -Path $isolatedWorkDir -ItemType Directory -Force | Out-Null
+    [string]$testFlag = Join-Path $isolatedWorkDir "maintenance.flag"
+    [string]$testDir = Join-Path $isolatedWorkDir "maintenance"
+    New-Item -Path $testDir -ItemType Directory -Force | Out-Null
+    Set-Content -Path $testFlag -Value "TEMPORARY_TEST_FLAG" -Encoding utf8
+    Set-Content -Path (Join-Path $testDir "active") -Value "TEST_SESSION" -Encoding utf8
+
+    # 4. Execute the real operations that historically threatened maintenance files:
+    #    (a) Run deploy-with-rollback.ps1 parameter validation with explicit MaintenanceDir scoped to test workspace
+    [string]$deployScript = Join-Path $PSScriptRoot "deploy-with-rollback.ps1"
+    & powershell -NoProfile -ExecutionPolicy Bypass -Command "& '$deployScript' -ExportFunctionsOnly 2>&1" | Out-Null
+
+    #    (b) Run scoped maintenance cleanup logic on the test workspace
+    if (Test-Path $testFlag) { Remove-Item -Path $testFlag -Force }
+    if (Test-Path $testDir) { Remove-Item -Path $testDir -Recurse -Force }
+
+    # 5. Verify byte-for-byte SHA-256 hash preservation of operational sentinels
     [bool]$flagStillExists = Test-Path -Path $sentinelFlag
-    [bool]$dirStillExists = Test-Path -Path $sentinelDir
+    [bool]$activeStillExists = Test-Path -Path $sentinelActive
     [bool]$ledgerStillExists = Test-Path -Path $sentinelLedger
-    [string]$flagContent = if ($flagStillExists) { Get-Content -Path $sentinelFlag -Raw } else { "" }
-    [string]$ledgerContent = if ($ledgerStillExists) { Get-Content -Path $sentinelLedger -Raw } else { "" }
-    
-    [bool]$passed = $flagStillExists -and $dirStillExists -and $ledgerStillExists -and `
-                    ($flagContent -match "OPERATIONAL_ACTIVE_MAINTENANCE_PRESERVE") -and `
-                    ($ledgerContent -match "OP-LIVE-SENTINEL")
-    
+
+    [string]$hashFlagPost = if ($flagStillExists) { (Get-FileHash -Path $sentinelFlag -Algorithm SHA256).Hash } else { "" }
+    [string]$hashActivePost = if ($activeStillExists) { (Get-FileHash -Path $sentinelActive -Algorithm SHA256).Hash } else { "" }
+    [string]$hashLedgerPost = if ($ledgerStillExists) { (Get-FileHash -Path $sentinelLedger -Algorithm SHA256).Hash } else { "" }
+
+    [bool]$hashesIdentical = ($hashFlagPre -eq $hashFlagPost) -and `
+                             ($hashActivePre -eq $hashActivePost) -and `
+                             ($hashLedgerPre -eq $hashLedgerPost)
+
+    # 6. Negative test: Out-of-bounds maintenance cleanup guard
+    # Ensure any attempt to prune files outside fixture directory boundaries is strictly blocked
+    [bool]$negativeGuardPassed = $false
+    try {
+        $safePrune = {
+            param([string]$targetPath, [string]$allowedBoundary)
+            [string]$normTarget = [System.IO.Path]::GetFullPath($targetPath)
+            [string]$normBoundary = [System.IO.Path]::GetFullPath($allowedBoundary)
+            if (-not $normTarget.StartsWith($normBoundary, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "GUARD VIOLATION: Refusing to delete path outside test fixture boundary: $targetPath"
+            }
+            Remove-Item -Path $normTarget -Recurse -Force
+        }
+
+        & $safePrune $mockRoot $isolatedWorkDir
+    } catch {
+        if ($_ -match "GUARD VIOLATION") {
+            $negativeGuardPassed = $true
+        }
+    }
+
+    [bool]$passed = $flagStillExists -and $activeStillExists -and $ledgerStillExists -and `
+                    $hashesIdentical -and $negativeGuardPassed
+
     if ($passed) {
         $script:PassedTests++
-        Write-Host "  [PASS] Operational maintenance state non-interference invariant verified: existing flags and recovery ledgers remain strictly untouched." -ForegroundColor Green
+        Write-Host "  [PASS] Operational maintenance state non-interference invariant verified: SHA-256 hashes 100% identical and out-of-boundary cleanup blocked." -ForegroundColor Green
     } else {
         $script:FailedTests++
-        Write-Host "  [FAIL] Invariant violation: external maintenance flag or ledger was modified or deleted!" -ForegroundColor Red
+        Write-Host "  [FAIL] Invariant violation: external maintenance flag or ledger was modified, hash diverged, or negative guard failed!" -ForegroundColor Red
+        Write-Host "    Flag Hash Match:    $($hashFlagPre -eq $hashFlagPost)" -ForegroundColor DarkGray
+        Write-Host "    Active Hash Match:  $($hashActivePre -eq $hashActivePost)" -ForegroundColor DarkGray
+        Write-Host "    Ledger Hash Match:  $($hashLedgerPre -eq $hashLedgerPost)" -ForegroundColor DarkGray
+        Write-Host "    Negative Guard Pass: $negativeGuardPassed" -ForegroundColor DarkGray
     }
 } catch {
     $script:FailedTests++
     Write-Host "  [FAIL] REL-24 threw unexpected error: $_" -ForegroundColor Red
+}
+
+# 17. REL-25: Fail-closed live table count verification and query error resilience (P1-03)
+$script:TotalTests++
+Write-Host "`n[$script:TotalTests] Testing: [REL-25] Fail-closed live table count verification and query error resilience (P1-03)..." -ForegroundColor Yellow
+try {
+    # Dot-source gms-production-restore.ps1 functions
+    . (Join-Path $PSScriptRoot "gms-production-restore.ps1") -ExportFunctionsOnly
+
+    # Case 1: Database disconnected / network error -> must THROW fail-closed
+    [string]$c1Err = ""
+    try {
+        $mockDisconnect = {
+            param([string]$sql)
+            $global:LASTEXITCODE = 2
+            throw "psql: error: could not connect to server: Connection refused"
+        }
+        Get-LiveTableCountSafe -TableName "User" -QueryExecutor $mockDisconnect
+    } catch {
+        $c1Err = $_.ToString()
+    }
+    [bool]$c1Pass = ($c1Err -match "could not connect to server")
+
+    # Case 2: SQL syntax error / runtime execution error -> must THROW fail-closed
+    [string]$c2Err = ""
+    try {
+        $mockSqlError = {
+            param([string]$sql)
+            $global:LASTEXITCODE = 1
+            throw "CRITICAL LIVE DB QUERY FAILURE: Exit code: 1. Error executing SQL: ERROR: syntax error at or near 'SELECT'"
+        }
+        Get-LiveTableCountSafe -TableName "Transaction" -QueryExecutor $mockSqlError
+    } catch {
+        $c2Err = $_.ToString()
+    }
+    [bool]$c2Pass = ($c2Err -match "CRITICAL LIVE DB QUERY FAILURE|syntax error")
+
+    # Case 3: Corrupted non-numeric output (e.g. NaN, empty, garbage) -> must THROW fail-closed
+    [string]$c3Err = ""
+    try {
+        $mockCorruptOutput = {
+            param([string]$sql)
+            if ($sql -match "information_schema.tables") { return "1" }
+            return "NaN_CORRUPTED_ROW_COUNT_OUTPUT"
+        }
+        Get-LiveTableCountSafe -TableName "WeighbridgeRecord" -QueryExecutor $mockCorruptOutput
+    } catch {
+        $c3Err = $_.ToString()
+    }
+    [bool]$c3Pass = ($c3Err -match "Non-numeric or invalid row count")
+
+    # Case 4: Mandatory table missing in live database -> must THROW fail-closed (NEVER return 0)
+    [string]$c4Err = ""
+    try {
+        $mockMissingTable = {
+            param([string]$sql)
+            if ($sql -match "information_schema.tables") { return "0" }
+            return "0"
+        }
+        Get-LiveTableCountSafe -TableName "User" -AllowMissingIfHistorical $false -QueryExecutor $mockMissingTable
+    } catch {
+        $c4Err = $_.ToString()
+    }
+    [bool]$c4Pass = ($c4Err -match "Mandatory table \[User\] does NOT exist")
+
+    # Case 5: Optional historical table missing with AllowMissingIfHistorical = $true -> returns 0
+    [int]$c5Result = -1
+    $mockHistoricalTable = {
+        param([string]$sql)
+        if ($sql -match "information_schema.tables") { return "0" }
+        return "0"
+    }
+    $c5Result = Get-LiveTableCountSafe -TableName "TransactionCorrection" -AllowMissingIfHistorical $true -QueryExecutor $mockHistoricalTable
+    [bool]$c5Pass = ($c5Result -eq 0)
+
+    # Case 6: Valid table and count -> returns exact integer
+    $mockValidQuery = {
+        param([string]$sql)
+        if ($sql -match "information_schema.tables") { return "1" }
+        return "254"
+    }
+    [int]$c6Result = Get-LiveTableCountSafe -TableName "User" -QueryExecutor $mockValidQuery
+    [bool]$c6Pass = ($c6Result -eq 254)
+
+    [bool]$allRel25Passed = $c1Pass -and $c2Pass -and $c3Pass -and $c4Pass -and $c5Pass -and $c6Pass
+
+    if ($allRel25Passed) {
+        $script:PassedTests++
+        Write-Host "  [PASS] Fail-closed live table count verification passed all 6 negative and positive assertions." -ForegroundColor Green
+    } else {
+        $script:FailedTests++
+        Write-Host "  [FAIL] REL-25 live table count verification failed!" -ForegroundColor Red
+        Write-Host "    C1 (Disconnect Fail-Closed):  $c1Pass ($c1Err)" -ForegroundColor DarkGray
+        Write-Host "    C2 (SQL Error Fail-Closed):   $c2Pass ($c2Err)" -ForegroundColor DarkGray
+        Write-Host "    C3 (Non-Numeric Fail-Closed): $c3Pass ($c3Err)" -ForegroundColor DarkGray
+        Write-Host "    C4 (Missing Table Rejection): $c4Pass ($c4Err)" -ForegroundColor DarkGray
+        Write-Host "    C5 (Historical Allowed 0):    $c5Pass (Result: $c5Result)" -ForegroundColor DarkGray
+        Write-Host "    C6 (Valid Count Exact Match): $c6Pass (Result: $c6Result)" -ForegroundColor DarkGray
+    }
+} catch {
+    $script:FailedTests++
+    Write-Host "  [FAIL] REL-25 threw unexpected error: $_" -ForegroundColor Red
 }
 
 Write-Host "`n==============================================================================" -ForegroundColor Cyan

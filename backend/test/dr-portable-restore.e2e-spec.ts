@@ -7,18 +7,64 @@ import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { DatabaseBackupService } from './../src/settings/database-backup.service';
 import { configureApp } from './../src/app.config';
+import {
+  assertDestructiveTestTargetSafe,
+  DestructiveTargetValidationOptions,
+} from './../src/settings/destructive-target-guard';
+
+export { assertDestructiveTestTargetSafe, DestructiveTargetValidationOptions };
 
 describe('Disaster Recovery & Portable Restore (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let backupService: DatabaseBackupService;
 
+  const isolatedFixtureDir = path.join(
+    __dirname,
+    'fixtures',
+    'tmp-dr-portable-e2e',
+  );
+  const isolatedUploadDir = path.join(isolatedFixtureDir, 'uploads');
+  const isolatedLocalBackupDir = path.join(
+    isolatedFixtureDir,
+    'backups',
+    'local',
+  );
+  const isolatedOffsiteBackupDir = path.join(
+    isolatedFixtureDir,
+    'backups',
+    'nas',
+  );
+
   beforeAll(async () => {
     if (!process.env.DATABASE_URL_TEST) {
       process.env.DATABASE_URL_TEST =
         'postgresql://postgres:postgres@127.0.0.1:5432/gms_test';
     }
+
+    // Isolate environment variables to test paths
+    process.env.NODE_ENV = 'test';
+    process.env.UPLOAD_DIR = isolatedUploadDir;
+    process.env.LOCAL_BACKUP_DIR = isolatedLocalBackupDir;
+    process.env.OFFSITE_BACKUP_DIR = isolatedOffsiteBackupDir;
+
+    // Strict target validation before any application initialization or database mutation
+    assertDestructiveTestTargetSafe({
+      databaseUrl: process.env.DATABASE_URL_TEST,
+      nodeEnv: process.env.NODE_ENV,
+      gmsEnvId: process.env.GMS_ENVIRONMENT_ID,
+      installationUuid: process.env.GMS_INSTALLATION_UUID,
+      uploadDir: process.env.UPLOAD_DIR,
+      localBackupDir: process.env.LOCAL_BACKUP_DIR,
+      offsiteBackupDir: process.env.OFFSITE_BACKUP_DIR,
+    });
+
     process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
+
+    // Create isolated directory structure
+    fs.mkdirSync(isolatedUploadDir, { recursive: true });
+    fs.mkdirSync(isolatedLocalBackupDir, { recursive: true });
+    fs.mkdirSync(isolatedOffsiteBackupDir, { recursive: true });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -35,6 +81,14 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
   afterAll(async () => {
     if (app) {
       await app.close();
+    }
+    // Clean up isolated fixture directory
+    try {
+      if (fs.existsSync(isolatedFixtureDir)) {
+        fs.rmSync(isolatedFixtureDir, { recursive: true, force: true });
+      }
+    } catch (e) {
+      // Ignore cleanup error on teardown
     }
   });
 
@@ -409,5 +463,113 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     expect(postTxCount).toBe(initialTxCount);
 
     await prisma.user.delete({ where: { id: corruptUser.id } });
+  });
+
+  describe('Destructive Target Isolation Guard (P1-02 Negative Tests)', () => {
+    it('should reject empty or missing database URL fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: '',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/DATABASE_URL_TEST is undefined or empty/);
+    });
+
+    it('should reject operational database name "gms" fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/prohibited or matches operational database/);
+    });
+
+    it('should reject operational database name "gate_management_system" fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl:
+            'postgresql://postgres:postgres@localhost:5432/gate_management_system',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/prohibited or matches operational database/);
+    });
+
+    it('should reject production NODE_ENV fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          nodeEnv: 'production',
+        }),
+      ).toThrow(/NODE_ENV is set to 'production'/);
+    });
+
+    it('should reject production GMS_ENVIRONMENT_ID fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          gmsEnvId: 'GMS-PROD-SJA-01',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/identified as production/);
+    });
+
+    it('should reject operational installation UUID fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          installationUuid: 'GMS-PROD-UUID-01',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/belongs to an operational environment/);
+    });
+
+    it('should reject target database lacking explicit test indicator fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl:
+            'postgresql://postgres:postgres@localhost:5432/operational_analytics',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/does not contain an authorized test indicator/);
+    });
+
+    it('should reject operational uploads directory fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          uploadDir: path.resolve('./uploads'),
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/points to operational root storage directory/);
+    });
+
+    it('should verify that target database data remains untouched when guard rejects target', async () => {
+      // Create a marker transaction in current test DB
+      const markerTx = await prisma.transaction.create({
+        data: {
+          transactionNumber: 'TRX-GUARD-MARKER-001',
+          plateNumber: 'B1234MARKER',
+          driverName: 'Driver Marker Verification',
+        },
+      });
+
+      // Attempt to invoke guard with unsafe production target
+      expect(() => {
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms',
+          nodeEnv: 'production',
+        });
+      }).toThrow();
+
+      // Verify that marker transaction is 100% intact and no mutations occurred
+      const retrieved = await prisma.transaction.findUnique({
+        where: { id: markerTx.id },
+      });
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.transactionNumber).toBe('TRX-GUARD-MARKER-001');
+
+      // Cleanup marker transaction
+      await prisma.transaction.delete({ where: { id: markerTx.id } });
+    });
   });
 });
