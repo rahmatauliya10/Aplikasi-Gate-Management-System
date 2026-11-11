@@ -347,9 +347,10 @@ describe('Live Target Database Fixture Identity Verification (P1 Positive Proof)
     ).rejects.toThrow(/Environment ID mismatch/);
   });
 
-  it('should register fixture identity on valid test database', async () => {
+  it('should register fixture identity on valid test database when AppSetting exists', async () => {
     mockQueryRawUnsafe
       .mockResolvedValueOnce([{ db_name: 'gms_test' }])
+      .mockResolvedValueOnce([{ table_name: 'AppSetting' }])
       .mockResolvedValueOnce([]); // No existing prod settings
 
     await registerDatabaseFixtureIdentity(
@@ -359,6 +360,20 @@ describe('Live Target Database Fixture Identity Verification (P1 Positive Proof)
     );
 
     expect(mockExecuteRawUnsafe).toHaveBeenCalled();
+  });
+
+  it('should reject registerDatabaseFixtureIdentity if AppSetting table does not exist fail-closed', async () => {
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([{ db_name: 'gms_test' }])
+      .mockResolvedValueOnce([]); // AppSetting table missing
+
+    await expect(
+      registerDatabaseFixtureIdentity(
+        'postgresql://postgres:postgres@localhost:5432/gms_test',
+        'FIXTURE-TEST-01',
+        'GMS-TEST-E2E-FIXTURE',
+      ),
+    ).rejects.toThrow(/AppSetting table does not exist/);
   });
 
   it('should reject registerDatabaseFixtureIdentity if fixtureUuid lacks valid prefix fail-closed', async () => {

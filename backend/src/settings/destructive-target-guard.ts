@@ -395,16 +395,16 @@ export async function registerDatabaseFixtureIdentity(
       );
     }
 
-    // Ensure AppSetting table exists
-    await probe.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS "AppSetting" (
-        "id" TEXT PRIMARY KEY,
-        "key" TEXT NOT NULL UNIQUE,
-        "value" TEXT NOT NULL,
-        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    // Verify that AppSetting table already exists in public schema (fail-closed if schema is not migrated)
+    const tableCheck = await probe.$queryRawUnsafe<any[]>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('AppSetting', 'app_settings');",
+    );
+
+    if (!tableCheck || tableCheck.length === 0) {
+      throw new Error(
+        `DESTRUCTIVE TARGET GUARD REJECTION: Cannot register fixture identity on database '${liveDbName}': AppSetting table does not exist. Target schema must be pre-migrated before fixture identity registration. Aborting fail-closed.`,
       );
-    `);
+    }
 
     // Check if existing records have operational production values
     const existingRows = await probe.$queryRawUnsafe<any[]>(

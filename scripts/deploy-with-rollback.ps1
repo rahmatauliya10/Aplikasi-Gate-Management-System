@@ -716,6 +716,32 @@ function Clear-DeploymentMaintenanceStateSafe {
     [string]$targetMaintActive = Join-Path $targetMaintDir "active"
     [string]$targetMaintFlag = Join-Path $resolvedTarget "maintenance.flag"
 
+    # Fail-closed reparse point check: Ensure workspace and sentinel paths are not junctions/symlinks escaping allowed boundary
+    if (-not [string]::IsNullOrWhiteSpace($AllowedBoundaryDirectory)) {
+        $assertNoEscapingReparsePoint = {
+            param([string]$pathToCheck)
+            if (Test-Path -Path $pathToCheck) {
+                $item = Get-Item -Path $pathToCheck -Force -ErrorAction SilentlyContinue
+                if ($item -and ($item.LinkType -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))) {
+                    [string]$linkTarget = $item.Target
+                    if (-not [string]::IsNullOrWhiteSpace($linkTarget)) {
+                        [string]$resolvedLinkTarget = [System.IO.Path]::GetFullPath($linkTarget)
+                        [string]$linkTargetWithSep = $resolvedLinkTarget.TrimEnd('\', '/') + $sep
+                        if (-not $linkTargetWithSep.StartsWith($boundaryWithSep, [System.StringComparison]::OrdinalIgnoreCase) -or
+                            ($linkTargetWithSep.Length -le $boundaryWithSep.Length)) {
+                            throw "MAINTENANCE CLEANUP REPARSE POINT VIOLATION: Path '$pathToCheck' is a reparse point (symlink/junction) targeting '$resolvedLinkTarget', which escapes allowed boundary '$AllowedBoundaryDirectory'! Cleanup blocked fail-closed."
+                        }
+                    }
+                }
+            }
+        }
+
+        & $assertNoEscapingReparsePoint $resolvedTarget
+        & $assertNoEscapingReparsePoint $targetMaintDir
+        & $assertNoEscapingReparsePoint $targetMaintActive
+        & $assertNoEscapingReparsePoint $targetMaintFlag
+    }
+
     [int]$removedCount = 0
     if (Test-Path -Path $targetMaintActive) {
         Remove-Item -Path $targetMaintActive -Force -ErrorAction Stop

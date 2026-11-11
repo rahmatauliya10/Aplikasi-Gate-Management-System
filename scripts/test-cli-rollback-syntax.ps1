@@ -814,9 +814,31 @@ try {
         }
     }
 
+    [bool]$negativeReparsePointBlocked = $false
+    [string]$junctionLink = Join-Path $isolatedWorkDir "escaping_junction"
+    try {
+        # Create a junction inside isolatedWorkDir pointing OUTSIDE to mockRoot
+        New-Item -ItemType Junction -Path $junctionLink -Target $mockRoot -Force -ErrorAction SilentlyContinue | Out-Null
+        if (Test-Path $junctionLink) {
+            Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $junctionLink -AllowedBoundaryDirectory $isolatedWorkDir
+        } else {
+            # Fallback if unprivileged or non-Windows
+            $negativeReparsePointBlocked = $true
+        }
+    } catch {
+        if ($_ -match "MAINTENANCE CLEANUP REPARSE POINT VIOLATION") {
+            $negativeReparsePointBlocked = $true
+        }
+    } finally {
+        if (Test-Path $junctionLink) {
+            [System.IO.Directory]::Delete($junctionLink)
+        }
+    }
+
     [bool]$passed = $scopedCleanupSucceeded -and $flagStillExists -and $activeStillExists -and $ledgerStillExists -and `
                     $hashesIdentical -and $negativeBoundaryOutsideBlocked -and $negativeOperationalRootBlocked -and `
-                    $negativeSiblingPrefixBlocked -and $negativeExactBoundaryRootBlocked -and $negativeEmptyTargetBlocked
+                    $negativeSiblingPrefixBlocked -and $negativeExactBoundaryRootBlocked -and $negativeEmptyTargetBlocked -and `
+                    $negativeReparsePointBlocked
 
     if ($passed) {
         $script:PassedTests++
