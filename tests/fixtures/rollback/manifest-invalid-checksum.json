@@ -1,0 +1,12 @@
+{
+  "manifestType": "PRODUCTION_RELEASE",
+  "release": "fixture-invalid-checksum",
+  "gitSha": "0000000000000000000000000000000000000000",
+  "schemaVersion": "1.0.0",
+  "migrationInventory": [
+    {
+      "migration_name": "20260714030729_init",
+      "checksum": "not-a-64-hex-sha256-hash"
+    }
+  ]
+}

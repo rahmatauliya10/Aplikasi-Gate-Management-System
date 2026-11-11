@@ -7,18 +7,107 @@ import { AppModule } from './../src/app.module';
 import { PrismaService } from './../src/prisma/prisma.service';
 import { DatabaseBackupService } from './../src/settings/database-backup.service';
 import { configureApp } from './../src/app.config';
+import {
+  assertDestructiveTestTargetSafe,
+  verifyTargetDatabaseFixtureIdentity,
+  registerDatabaseFixtureIdentity,
+  DestructiveTargetValidationOptions,
+  FixtureIdentityVerificationOptions,
+  FixtureIdentityVerificationResult,
+} from './../src/settings/destructive-target-guard';
+
+export {
+  assertDestructiveTestTargetSafe,
+  verifyTargetDatabaseFixtureIdentity,
+  registerDatabaseFixtureIdentity,
+  DestructiveTargetValidationOptions,
+  FixtureIdentityVerificationOptions,
+  FixtureIdentityVerificationResult,
+};
 
 describe('Disaster Recovery & Portable Restore (e2e)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let backupService: DatabaseBackupService;
 
+  const isolatedFixtureDir = path.join(
+    __dirname,
+    'fixtures',
+    'tmp-dr-portable-e2e',
+  );
+  const isolatedUploadDir = path.join(isolatedFixtureDir, 'uploads');
+  const isolatedLocalBackupDir = path.join(
+    isolatedFixtureDir,
+    'backups',
+    'local',
+  );
+  const isolatedOffsiteBackupDir = path.join(
+    isolatedFixtureDir,
+    'backups',
+    'nas',
+  );
+
   beforeAll(async () => {
+    // 1. Capture incoming environment BEFORE mutating process.env
+    const initialNodeEnv = process.env.NODE_ENV;
+    const initialGmsEnv = process.env.GMS_ENVIRONMENT_ID;
+    const initialInstallUuid = process.env.GMS_INSTALLATION_UUID;
+
+    // Fail immediately if the test process was launched in production mode
+    if (
+      initialNodeEnv &&
+      (initialNodeEnv.toLowerCase() === 'production' ||
+        initialNodeEnv.toLowerCase() === 'prod')
+    ) {
+      throw new Error(
+        `FATAL DESTRUCTIVE TARGET GUARD: E2E test started with incoming NODE_ENV='${initialNodeEnv}'! Aborting immediately before environment configuration.`,
+      );
+    }
+
     if (!process.env.DATABASE_URL_TEST) {
       process.env.DATABASE_URL_TEST =
         'postgresql://postgres:postgres@127.0.0.1:5432/gms_test';
     }
+
+    // 2. Strict target validation before any application initialization or database mutation
+    const targetSafety = assertDestructiveTestTargetSafe({
+      databaseUrl: process.env.DATABASE_URL_TEST,
+      initialNodeEnv: initialNodeEnv,
+      nodeEnv: 'test',
+      gmsEnvId: initialGmsEnv,
+      installationUuid: initialInstallUuid,
+      uploadDir: isolatedUploadDir,
+      localBackupDir: isolatedLocalBackupDir,
+      offsiteBackupDir: isolatedOffsiteBackupDir,
+    });
+
+    // 3. Independent read-only verification of pre-provisioned target database identity
+    // (Fail-closed: beforeAll does NOT create or mutate fixture identity; it only verifies pre-existing proof)
+    const expectedFixtureUuid =
+      process.env.GMS_FIXTURE_ISOLATION_UUID ||
+      'FIXTURE-CI-E2E-TEST-DB-UUID-01';
+    const expectedEnvId =
+      process.env.GMS_ENVIRONMENT_ID || 'GMS-TEST-E2E-FIXTURE';
+
+    await verifyTargetDatabaseFixtureIdentity(process.env.DATABASE_URL_TEST, {
+      expectedDbName: targetSafety.dbName,
+      expectedFixtureUuid: expectedFixtureUuid,
+      expectedEnvId: expectedEnvId,
+      initialNodeEnv: initialNodeEnv,
+    });
+
+    // 4. Safely isolate environment variables to test paths
+    process.env.NODE_ENV = 'test';
+    process.env.GMS_DISABLE_BACKUP_SCHEDULER = 'true';
+    process.env.UPLOAD_DIR = isolatedUploadDir;
+    process.env.LOCAL_BACKUP_DIR = isolatedLocalBackupDir;
+    process.env.OFFSITE_BACKUP_DIR = isolatedOffsiteBackupDir;
     process.env.DATABASE_URL = process.env.DATABASE_URL_TEST;
+
+    // Create isolated directory structure
+    fs.mkdirSync(isolatedUploadDir, { recursive: true });
+    fs.mkdirSync(isolatedLocalBackupDir, { recursive: true });
+    fs.mkdirSync(isolatedOffsiteBackupDir, { recursive: true });
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -35,6 +124,14 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
   afterAll(async () => {
     if (app) {
       await app.close();
+    }
+    // Clean up isolated fixture directory
+    try {
+      if (fs.existsSync(isolatedFixtureDir)) {
+        fs.rmSync(isolatedFixtureDir, { recursive: true, force: true });
+      }
+    } catch (e) {
+      // Ignore cleanup error on teardown
     }
   });
 
@@ -105,6 +202,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
         cargoType: 'RAW_MATERIAL',
         cargoProcessType: 'INBOUND',
         status: 'INCOMING_CHECK_IN_PROGRESS',
+        remarks: 'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
         gateInAt: new Date(),
         weighbridgeRecords: {
           create: {
@@ -155,7 +253,7 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
       data: {
         transactionId: tx.id,
         correctedById: adminUser.id,
-        reason: 'DR E2E Test correction fixture',
+        reason: 'Pengujian koreksi data batubara — PT. Sinar Jaya & Co. 📦✓',
         oldValues: { initialMoisture: 10.0 },
         newValues: { initialMoisture: 12.4 },
         items: {
@@ -258,11 +356,17 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
     expect(restoredTx).not.toBeNull();
     expect(restoredTx?.plateNumber).toBe('B9999DRTest');
+    expect(restoredTx?.remarks).toBe(
+      'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
+    );
     expect(restoredTx?.weighbridgeRecords).toHaveLength(1);
     expect(restoredTx?.qcVehicleChecks).toHaveLength(1);
     expect(restoredTx?.incomingMaterialChecks).toHaveLength(1);
     expect(restoredTx?.warehouseProcesses).toHaveLength(1);
     expect(restoredTx?.corrections).toHaveLength(1);
+    expect(restoredTx?.corrections[0].reason).toBe(
+      'Pengujian koreksi data batubara — PT. Sinar Jaya & Co. 📦✓',
+    );
 
     // 6. DESTRUCTIVE WIPE AGAIN for Portable Bundle Restore test
     await prisma.transactionCorrectionItem.deleteMany({
@@ -318,6 +422,9 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
 
     expect(bundleRestoredTx).not.toBeNull();
     expect(bundleRestoredTx?.plateNumber).toBe('B9999DRTest');
+    expect(bundleRestoredTx?.remarks).toBe(
+      'Pengujian muatan batubara — PT. Sinar Jaya & Co. 📦✓',
+    );
     expect(bundleRestoredTx?.weighbridgeRecords[0].weight).toBe(15400);
 
     // Clean up temporary test records
@@ -347,5 +454,339 @@ describe('Disaster Recovery & Portable Restore (e2e)', () => {
     } catch (e) {
       // ignore
     }
+  });
+
+  it('should fail-closed and reject corrupted portable bundle payload without mutating database', async () => {
+    const adminPassword = 'DrCorruptPassword123!';
+    const passwordHash = await argon2.hash(adminPassword);
+
+    const corruptUser = await prisma.user.create({
+      data: {
+        email: 'dr_corrupt_test@gms.local',
+        username: 'dr_corrupt_test',
+        passwordHash,
+        name: 'DR Corrupt Test User',
+        role: 'ADMIN',
+        isActive: true,
+      },
+    });
+
+    const jwtUser = {
+      id: corruptUser.id,
+      email: corruptUser.email,
+      role: corruptUser.role,
+      tokenVersion: corruptUser.tokenVersion,
+    };
+
+    const initialTxCount = await prisma.transaction.count();
+
+    const tamperedBundle = {
+      metadata: {
+        system: 'GMS_GATE_MANAGEMENT_SYSTEM',
+        version: '1.0.0',
+        checksums: { dump: 'invalid-checksum' },
+      },
+      dumpBase64: Buffer.from('INVALID_CORRUPTED_DUMP_STREAM').toString(
+        'base64',
+      ),
+      signature:
+        'deadbeef00112233445566778899aabbccddeeff00112233445566778899aabb',
+    };
+
+    await expect(
+      backupService.restoreFromPortableBundle(
+        jwtUser,
+        tamperedBundle,
+        adminPassword,
+        '127.0.0.1',
+      ),
+    ).rejects.toThrow();
+
+    const postTxCount = await prisma.transaction.count();
+    expect(postTxCount).toBe(initialTxCount);
+
+    await prisma.user.delete({ where: { id: corruptUser.id } });
+  });
+
+  describe('Destructive Target Isolation Guard (P1-02 Negative Tests)', () => {
+    it('should reject empty or missing database URL fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: '',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/DATABASE_URL_TEST is undefined or empty/);
+    });
+
+    it('should reject operational database name "gms" fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/prohibited or matches operational database/);
+    });
+
+    it('should reject operational database name "gate_management_system" fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl:
+            'postgresql://postgres:postgres@localhost:5432/gate_management_system',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/prohibited or matches operational database/);
+    });
+
+    it('should reject incoming production NODE_ENV fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          initialNodeEnv: 'production',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/Incoming execution environment is set to production/);
+    });
+
+    it('should reject remote or unauthorized database hosts fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl:
+            'postgresql://postgres:postgres@remote-operational.cloud:5432/gms_test',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/not in the allowed local\/fixture host allowlist/);
+    });
+
+    it('should reject production NODE_ENV fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          nodeEnv: 'production',
+        }),
+      ).toThrow(/NODE_ENV is set to 'production'/);
+    });
+
+    it('should reject production GMS_ENVIRONMENT_ID fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          gmsEnvId: 'GMS-PROD-SJA-01',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/identified as production/);
+    });
+
+    it('should reject operational installation UUID fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          installationUuid: 'GMS-PROD-UUID-01',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/belongs to an operational environment/);
+    });
+
+    it('should reject target database lacking explicit test indicator fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl:
+            'postgresql://postgres:postgres@localhost:5432/operational_analytics',
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/does not contain an authorized test indicator/);
+    });
+
+    it('should reject operational uploads directory fail-closed', () => {
+      expect(() =>
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms_test',
+          uploadDir: path.resolve('./uploads'),
+          nodeEnv: 'test',
+        }),
+      ).toThrow(/points to operational root storage directory/);
+    });
+
+    it('should verify that target database data remains untouched when guard rejects target', async () => {
+      // Create a marker setting in current test DB
+      const markerSetting = await prisma.appSetting.create({
+        data: {
+          key: 'SENTINEL_GUARD_MARKER_001',
+          value: 'UNTOUCHED_SENTINEL_VALUE',
+        },
+      });
+
+      // Attempt to invoke guard with unsafe production target
+      expect(() => {
+        assertDestructiveTestTargetSafe({
+          databaseUrl: 'postgresql://postgres:postgres@localhost:5432/gms',
+          nodeEnv: 'production',
+        });
+      }).toThrow();
+
+      // Verify that marker setting is 100% intact and no mutations occurred
+      const retrieved = await prisma.appSetting.findUnique({
+        where: { key: 'SENTINEL_GUARD_MARKER_001' },
+      });
+      expect(retrieved).not.toBeNull();
+      expect(retrieved?.value).toBe('UNTOUCHED_SENTINEL_VALUE');
+
+      // Cleanup marker setting
+      await prisma.appSetting.delete({
+        where: { key: 'SENTINEL_GUARD_MARKER_001' },
+      });
+    });
+
+    it('should positively verify target database fixture identity when fixture proof matches', async () => {
+      const fixtureUuid = 'FIXTURE-E2E-SENTINEL-MATCH-01';
+      const fixtureEnv = 'GMS-TEST-E2E-FIXTURE';
+      await registerDatabaseFixtureIdentity(
+        process.env.DATABASE_URL_TEST as string,
+        fixtureUuid,
+        fixtureEnv,
+      );
+
+      const verification = await verifyTargetDatabaseFixtureIdentity(
+        process.env.DATABASE_URL_TEST as string,
+        {
+          expectedFixtureUuid: fixtureUuid,
+          expectedEnvId: fixtureEnv,
+        },
+      );
+
+      expect(verification.verified).toBe(true);
+      expect(verification.isIsolatedFixture).toBe(true);
+      expect(verification.fixtureUuid).toBe(fixtureUuid);
+      expect(verification.envId).toBe(fixtureEnv);
+    });
+
+    it('should reject verification when expectedFixtureUuid does not match fail-closed', async () => {
+      await expect(
+        verifyTargetDatabaseFixtureIdentity(
+          process.env.DATABASE_URL_TEST as string,
+          {
+            expectedFixtureUuid: 'FIXTURE-E2E-NON-EXISTENT-UUID',
+          },
+        ),
+      ).rejects.toThrow(/Fixture UUID mismatch/);
+    });
+
+    it('should reject verification when expectedEnvId does not match fail-closed', async () => {
+      await expect(
+        verifyTargetDatabaseFixtureIdentity(
+          process.env.DATABASE_URL_TEST as string,
+          {
+            expectedEnvId: 'GMS-PROD-UNAUTHORIZED-ENV',
+          },
+        ),
+      ).rejects.toThrow(/Environment ID mismatch/);
+    });
+
+    it('should reject registerDatabaseFixtureIdentity when fixtureUuid lacks valid prefix fail-closed', async () => {
+      await expect(
+        registerDatabaseFixtureIdentity(
+          process.env.DATABASE_URL_TEST as string,
+          'OPERATIONAL-PROD-UUID-INVALID',
+        ),
+      ).rejects.toThrow(/INVALID FIXTURE IDENTITY/);
+    });
+
+    it('INTEGRATION NEGATIVE TEST: should reject database lacking fixture marker fail-closed without mutating schema or data', async () => {
+      // 1. Snapshot current fixture marker
+      const originalMarker = await prisma.appSetting.findUnique({
+        where: { key: 'FIXTURE_ISOLATION_UUID' },
+      });
+
+      // 2. Insert critical operational data record to simulate real business records
+      await prisma.appSetting.upsert({
+        where: { key: 'CRITICAL_OPERATIONAL_DATA' },
+        create: {
+          key: 'CRITICAL_OPERATIONAL_DATA',
+          value: 'DO_NOT_TOUCH_OR_OVERWRITE_001',
+        },
+        update: {
+          value: 'DO_NOT_TOUCH_OR_OVERWRITE_001',
+        },
+      });
+
+      try {
+        // 3. Temporarily remove fixture identity marker (simulating an un-provisioned foreign database)
+        await prisma.appSetting.delete({
+          where: { key: 'FIXTURE_ISOLATION_UUID' },
+        });
+
+        // 4. Read-only verification MUST throw fail-closed
+        await expect(
+          verifyTargetDatabaseFixtureIdentity(
+            process.env.DATABASE_URL_TEST as string,
+            {
+              expectedFixtureUuid: 'FIXTURE-CI-E2E-TEST-DB-UUID-01',
+            },
+          ),
+        ).rejects.toThrow(/does not contain a valid FIXTURE_ISOLATION_UUID/);
+
+        // 5. Assert that critical operational data remains 100% UNTOUCHED
+        const checkRecord = await prisma.appSetting.findUnique({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA' },
+        });
+        expect(checkRecord).not.toBeNull();
+        expect(checkRecord?.value).toBe('DO_NOT_TOUCH_OR_OVERWRITE_001');
+
+        // 6. Assert that verification did NOT secretly create or inject any fixture marker
+        const checkMarker = await prisma.appSetting.findUnique({
+          where: { key: 'FIXTURE_ISOLATION_UUID' },
+        });
+        expect(checkMarker).toBeNull();
+      } finally {
+        // Cleanup critical record and restore original fixture marker
+        await prisma.appSetting.deleteMany({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA' },
+        });
+        if (originalMarker) {
+          await prisma.appSetting.upsert({
+            where: { key: 'FIXTURE_ISOLATION_UUID' },
+            create: {
+              key: 'FIXTURE_ISOLATION_UUID',
+              value: originalMarker.value,
+            },
+            update: {
+              value: originalMarker.value,
+            },
+          });
+        }
+      }
+    });
+
+    it('INTEGRATION NEGATIVE TEST: should reject database with mismatched fixture UUID fail-closed without mutating schema or data', async () => {
+      await prisma.appSetting.upsert({
+        where: { key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH' },
+        create: {
+          key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH',
+          value: 'PRESERVE_UNCHANGED_002',
+        },
+        update: {
+          value: 'PRESERVE_UNCHANGED_002',
+        },
+      });
+
+      try {
+        await expect(
+          verifyTargetDatabaseFixtureIdentity(
+            process.env.DATABASE_URL_TEST as string,
+            {
+              expectedFixtureUuid: 'FIXTURE-UNAUTHORIZED-MISMATCHED-UUID',
+            },
+          ),
+        ).rejects.toThrow(/Fixture UUID mismatch/);
+
+        const checkRecord = await prisma.appSetting.findUnique({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH' },
+        });
+        expect(checkRecord?.value).toBe('PRESERVE_UNCHANGED_002');
+      } finally {
+        await prisma.appSetting.deleteMany({
+          where: { key: 'CRITICAL_OPERATIONAL_DATA_MISMATCH' },
+        });
+      }
+    });
   });
 });

@@ -180,7 +180,7 @@ $env:DATABASE_URL = $DrillDbUrl
 try {
     # 1. Start dedicated isolated PostgreSQL container
     Write-Log "Step 1: Starting dedicated isolated PostgreSQL container ($RehearsalContainer on port $RehearsalPort)..."
-    & docker run -d --name $RehearsalContainer -p "${RehearsalPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$DrillDbName" postgres:15-alpine 2>&1 | Out-Null
+    & docker run -d --name $RehearsalContainer -p "${RehearsalPort}:5432" -e "POSTGRES_USER=$PgUser" -e "POSTGRES_PASSWORD=$PgPass" -e "POSTGRES_DB=$DrillDbName" postgres:17-alpine 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Failed to start dedicated PostgreSQL rehearsal container." }
 
     # Wait for PostgreSQL container readiness
@@ -204,7 +204,7 @@ try {
     & docker exec $RehearsalContainer rm -f $TmpDumpPath 2>&1 | Out-Null
 
     if ($RestoreExitCode -ne 0) {
-        throw "Historical pg_restore failed with exit code $RestoreExitCode: $RestoreOut"
+        throw "Historical pg_restore failed with exit code ${RestoreExitCode}: $RestoreOut"
     }
     Write-Log "pg_restore completed with exit code 0 (SUCCESS)."
 

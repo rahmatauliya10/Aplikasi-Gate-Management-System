@@ -49,7 +49,7 @@ RUN mkdir -p /app/uploads /app/backups/local /app/backups/nas /app/logs /home/no
 USER node
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["sh", "-c", "npx prisma migrate deploy && node scripts/enforce-audit-immutability.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node scripts/verify-migration-invariants.js && node scripts/enforce-audit-immutability.js"]
 
 # ------------------------------------------------------------------------------
 # Stage 3: Pristine Production Dependencies (Zero devDependencies footprint)
@@ -67,6 +67,7 @@ RUN npm ci --omit=dev --ignore-scripts
 
 # Copy generated Prisma engine & client artifacts directly from builder
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
 
 # ------------------------------------------------------------------------------
 # Stage 4: Production Runtime (Zero npm/npx Hardened Node 22 Alpine Container)

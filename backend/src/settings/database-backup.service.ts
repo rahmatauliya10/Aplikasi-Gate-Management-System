@@ -11,7 +11,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import * as argon2 from 'argon2';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
+import { pipeline, Transform } from 'stream';
+import { StringDecoder } from 'string_decoder';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -93,6 +95,255 @@ export interface DatabaseBackupPayload {
     checksum: string;
   };
   data: Record<string, any[]>;
+}
+
+export function createSanitizingTransformStream(): Transform {
+  const decoder = new StringDecoder('utf8');
+  let leftover = '';
+  let inCopy = false;
+
+  return new Transform({
+    transform(chunk: Buffer, _encoding: BufferEncoding, callback) {
+      const text = leftover + decoder.write(chunk);
+      const lines = text.split('\n');
+      leftover = lines.pop() ?? '';
+
+      const outputLines: string[] = [];
+      for (const line of lines) {
+        if (/^COPY\s+/i.test(line)) {
+          inCopy = true;
+          outputLines.push(line);
+        } else if (line === '\\.' || line.trimEnd() === '\\.') {
+          inCopy = false;
+          outputLines.push(line);
+        } else if (!inCopy && /^\s*SET\s+transaction_timeout\s*=/i.test(line)) {
+          // Only sanitize session config statement outside COPY data blocks
+          outputLines.push('-- sanitized: SET transaction_timeout = 0;');
+        } else {
+          outputLines.push(line);
+        }
+      }
+      callback(
+        null,
+        outputLines.join('\n') + (outputLines.length > 0 ? '\n' : ''),
+      );
+    },
+    flush(callback) {
+      const text = leftover + decoder.end();
+      if (text) {
+        if (!inCopy && /^\s*SET\s+transaction_timeout\s*=/i.test(text)) {
+          callback(null, '-- sanitized: SET transaction_timeout = 0;\n');
+        } else {
+          callback(null, text);
+        }
+      } else {
+        callback();
+      }
+    },
+  });
+}
+
+export interface StreamingChildProcessLike {
+  stdout?: NodeJS.ReadableStream | null;
+  stderr?: NodeJS.ReadableStream | null;
+  stdin?: NodeJS.WritableStream | null;
+  on(event: 'error', listener: (err: unknown) => void): this;
+  on(
+    event: 'close',
+    listener: (code: number | null, signal: string | null) => void,
+  ): this;
+  kill(signal?: NodeJS.Signals | number): boolean;
+}
+
+export async function executeStreamingRestorePipeline(
+  restoreProc: StreamingChildProcessLike,
+  psqlProc: StreamingChildProcessLike,
+  filterTransform: Transform = createSanitizingTransformStream(),
+  timeoutMs: number = 10 * 60 * 1000,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let restoreStderr = '';
+    let psqlStderr = '';
+    const MAX_STDERR_BYTES = 64 * 1024;
+    restoreProc.stderr?.on('data', (d: Buffer) => {
+      if (restoreStderr.length < MAX_STDERR_BYTES) {
+        restoreStderr += d
+          .toString('utf8')
+          .slice(0, MAX_STDERR_BYTES - restoreStderr.length);
+      }
+    });
+    psqlProc.stderr?.on('data', (d: Buffer) => {
+      if (psqlStderr.length < MAX_STDERR_BYTES) {
+        psqlStderr += d
+          .toString('utf8')
+          .slice(0, MAX_STDERR_BYTES - psqlStderr.length);
+      }
+    });
+
+    let hasSettled = false;
+    let timeoutTimer: NodeJS.Timeout | null = null;
+
+    const settleError = (err: unknown) => {
+      if (hasSettled) return;
+      hasSettled = true;
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
+      try {
+        restoreProc.kill('SIGTERM');
+      } catch {
+        // ignore process kill error if already terminated
+      }
+      try {
+        psqlProc.kill('SIGTERM');
+      } catch {
+        // ignore process kill error if already terminated
+      }
+      const normalizedError =
+        err instanceof Error
+          ? err
+          : new Error(
+              (err as { message?: string })?.message ||
+                'Stream pipeline execution failed',
+            );
+      reject(normalizedError);
+    };
+
+    timeoutTimer = setTimeout(() => {
+      settleError(
+        new Error(
+          `Streaming restore execution timed out after ${Math.round(timeoutMs / 1000)} seconds`,
+        ),
+      );
+    }, timeoutMs);
+
+    restoreProc.on('error', (err) => settleError(err));
+    psqlProc.on('error', (err) => settleError(err));
+    filterTransform.on('error', (err) => settleError(err));
+
+    if (!restoreProc.stdout || !psqlProc.stdin) {
+      settleError(
+        new Error('Failed to open process stdio streams for pipeline'),
+      );
+      return;
+    }
+
+    // Explicit error listeners on stdio streams to catch EPIPE, premature close, or stream I/O failure
+    restoreProc.stdout.on('error', (err) => settleError(err));
+    psqlProc.stdin.on('error', (err) => settleError(err));
+
+    let streamPipelineFinished = false;
+
+    // Use pipeline between restoreProc.stdout and filterTransform to catch upstream errors
+    pipeline(restoreProc.stdout, filterTransform, (err) => {
+      if (err) {
+        settleError(err);
+      } else {
+        streamPipelineFinished = true;
+        checkCommitAndDone();
+      }
+    });
+
+    // Pipe sanitized stream to psqlProc.stdin WITHOUT auto-ending on upstream EOF ({ end: false })
+    // This is the critical safety control: psqlProc.stdin MUST NOT receive EOF until
+    // restoreProc has closed and is verified to have exited with code 0!
+    filterTransform.pipe(psqlProc.stdin, {
+      end: false,
+    });
+
+    let restoreExited = false;
+    let psqlExited = false;
+    let restoreExitCode: number | null = null;
+    let psqlExitCode: number | null = null;
+
+    const checkCommitAndDone = () => {
+      if (hasSettled) return;
+
+      // When the upstream stream has finished AND restoreProc has exited with code 0:
+      // It is now safe to close psqlProc.stdin (signaling EOF for single-transaction commit)
+      if (streamPipelineFinished && restoreExited && restoreExitCode === 0) {
+        const stdinStream = psqlProc.stdin as unknown as {
+          destroyed?: boolean;
+          writableEnded?: boolean;
+          end?: () => void;
+        };
+        if (
+          !stdinStream?.destroyed &&
+          !stdinStream?.writableEnded &&
+          typeof stdinStream?.end === 'function'
+        ) {
+          try {
+            stdinStream.end();
+          } catch {
+            // ignore if already closed
+          }
+        }
+      }
+
+      // Check if both processes have exited and stream finished
+      if (restoreExited && psqlExited && streamPipelineFinished) {
+        hasSettled = true;
+        if (timeoutTimer) {
+          clearTimeout(timeoutTimer);
+        }
+        if (restoreExitCode !== 0) {
+          try {
+            psqlProc.kill('SIGTERM');
+          } catch {
+            // ignore process kill error if already terminated
+          }
+          return reject(
+            new Error(
+              `pg_restore streaming process exited with code ${restoreExitCode}: ${restoreStderr}`,
+            ),
+          );
+        }
+        if (psqlExitCode !== 0) {
+          try {
+            restoreProc.kill('SIGTERM');
+          } catch {
+            // ignore process kill error if already terminated
+          }
+          return reject(
+            new Error(
+              `psql streaming execution exited with code ${psqlExitCode}: ${psqlStderr}`,
+            ),
+          );
+        }
+        resolve();
+      }
+    };
+
+    restoreProc.on('close', (code, signal) => {
+      restoreExited = true;
+      restoreExitCode = signal ? -1 : (code ?? -1);
+      if (restoreExitCode !== 0 && !hasSettled) {
+        // Upstream producer failed! Immediately terminate psql without ever closing stdin cleanly.
+        // In PostgreSQL, terminating the client process automatically rolls back any active transaction.
+        settleError(
+          new Error(
+            `pg_restore streaming process exited with code ${restoreExitCode}: ${restoreStderr}`,
+          ),
+        );
+        return;
+      }
+      checkCommitAndDone();
+    });
+
+    psqlProc.on('close', (code, signal) => {
+      psqlExited = true;
+      psqlExitCode = signal ? -1 : (code ?? -1);
+      if (psqlExitCode !== 0 && !hasSettled) {
+        settleError(
+          new Error(
+            `psql streaming execution exited with code ${psqlExitCode}: ${psqlStderr}`,
+          ),
+        );
+        return;
+      }
+      checkCommitAndDone();
+    });
+  });
 }
 
 @Injectable()
@@ -1371,26 +1622,13 @@ export class DatabaseBackupService
         );
       }
 
-      await execFileAsync(
-        'pg_restore',
-        [
-          '--clean',
-          '--if-exists',
-          '--single-transaction',
-          '--exit-on-error',
-          '--no-owner',
-          '--no-acl',
-          '--host=' + host,
-          '--port=' + port,
-          '--username=' + username,
-          '--dbname=' + dbName,
-          dumpFilePath,
-        ],
-        {
-          shell: false,
-          env: { ...process.env, PGPASSWORD: password },
-          timeout: 10 * 60 * 1000,
-        },
+      await this.executePgRestoreWithFallback(
+        dumpFilePath,
+        host,
+        port,
+        username,
+        dbName,
+        password,
       );
       dbCommitted = true;
       this.logger.log(`pg_restore completed successfully.`);
@@ -1765,26 +2003,13 @@ export class DatabaseBackupService
         // ignore
       }
 
-      await execFileAsync(
-        'pg_restore',
-        [
-          '--clean',
-          '--if-exists',
-          '--single-transaction',
-          '--exit-on-error',
-          '--no-owner',
-          '--no-acl',
-          '--host=' + host,
-          '--port=' + port,
-          '--username=' + username,
-          '--dbname=' + dbName,
-          stagingDumpPath,
-        ],
-        {
-          shell: false,
-          env: { ...process.env, PGPASSWORD: password },
-          timeout: 10 * 60 * 1000,
-        },
+      await this.executePgRestoreWithFallback(
+        stagingDumpPath,
+        host,
+        port,
+        username,
+        dbName,
+        password,
       );
 
       this.logger.log(
@@ -2031,6 +2256,99 @@ export class DatabaseBackupService
       }
     } catch (e: any) {
       this.logger.warn(`Backup retention cleanup warning: ${e.message}`);
+    }
+  }
+
+  private async executePgRestoreWithFallback(
+    dumpPath: string,
+    host: string,
+    port: string,
+    username: string,
+    dbName: string,
+    password: string,
+  ): Promise<void> {
+    const pgRestoreArgs = [
+      '--clean',
+      '--if-exists',
+      '--single-transaction',
+      '--exit-on-error',
+      '--no-owner',
+      '--no-acl',
+      '--host=' + host,
+      '--port=' + port,
+      '--username=' + username,
+      '--dbname=' + dbName,
+      dumpPath,
+    ];
+
+    try {
+      await execFileAsync('pg_restore', pgRestoreArgs, {
+        shell: false,
+        env: { ...process.env, PGPASSWORD: password },
+        timeout: 10 * 60 * 1000,
+      });
+    } catch (restoreErr: any) {
+      const errMsg = `${restoreErr?.message || ''} ${restoreErr?.stderr || ''}`;
+      const isAuthOrConnError =
+        /password authentication failed|could not connect to server|Connection refused|does not exist/i.test(
+          errMsg,
+        );
+      const isTxTimeout =
+        !isAuthOrConnError &&
+        errMsg.includes(
+          'unrecognized configuration parameter "transaction_timeout"',
+        );
+      if (isTxTimeout) {
+        this.logger.warn(
+          'Target PostgreSQL engine rejected transaction_timeout (server version < 17). Executing COPY-aware single-transaction SQL fallback via streaming pipeline...',
+        );
+        const restoreProc = spawn(
+          'pg_restore',
+          [
+            '-f',
+            '-',
+            '--clean',
+            '--if-exists',
+            '--no-owner',
+            '--no-acl',
+            dumpPath,
+          ],
+          {
+            env: { ...process.env, PGPASSWORD: password },
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        );
+
+        const psqlProc = spawn(
+          'psql',
+          [
+            '--host=' + host,
+            '--port=' + port,
+            '--username=' + username,
+            '--dbname=' + dbName,
+            '--single-transaction',
+            '-v',
+            'ON_ERROR_STOP=1',
+          ],
+          {
+            env: { ...process.env, PGPASSWORD: password },
+            stdio: ['pipe', 'ignore', 'pipe'],
+          },
+        );
+
+        await executeStreamingRestorePipeline(
+          restoreProc,
+          psqlProc,
+          createSanitizingTransformStream(),
+          10 * 60 * 1000,
+        );
+
+        this.logger.log(
+          'Sanitized single-transaction fallback SQL restore completed successfully on PG < 17 target via streaming pipeline.',
+        );
+      } else {
+        throw restoreErr;
+      }
     }
   }
 }

@@ -15,9 +15,7 @@ import Login from '../views/Login.vue'
 import ChangePassword from '../views/ChangePassword.vue'
 import Unauthorized from '../views/Unauthorized.vue'
 
-const router = createRouter({
-    history: createWebHistory(import.meta.env.BASE_URL),
-    routes: [
+export const routes = [
         {
             path: '/login',
             name: 'login',
@@ -106,6 +104,10 @@ const router = createRouter({
             component: NotFound
         }
     ]
+
+const router = createRouter({
+    history: createWebHistory(import.meta.env.BASE_URL),
+    routes,
 })
 
 export const isPageLoading = ref(false)

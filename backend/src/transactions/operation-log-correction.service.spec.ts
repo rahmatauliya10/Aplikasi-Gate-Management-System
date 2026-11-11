@@ -9,8 +9,21 @@ import {
   NotFoundException,
   InternalServerErrorException,
 } from '@nestjs/common';
-import { CorrectionAction, CorrectionTargetModule } from '@prisma/client';
+import {
+  CorrectionAction,
+  CorrectionTargetModule,
+  TransactionStatus,
+  QcResult,
+} from '@prisma/client';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+import {
+  GBJ_CHECKLIST_ITEMS,
+  GBJ_CHECKLIST_SEVERITY,
+} from '../qc/constants/gbj-checklist-policy';
+import {
+  GSP_PREUNLOAD_CANONICAL_ITEMS,
+  GSP_PREUNLOAD_VERSION,
+} from '../warehouse/constants/gsp-preunload-checklist';
 
 describe('OperationLogCorrectionService', () => {
   let service: OperationLogCorrectionService;
@@ -105,6 +118,11 @@ describe('OperationLogCorrectionService', () => {
     },
     fraudCheck: {
       create: jest.fn().mockResolvedValue({ id: 'fc-1' }),
+    },
+    qcProductAnalysis: {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
     },
   });
 
@@ -455,6 +473,75 @@ describe('OperationLogCorrectionService', () => {
         email: 'admin@gms.local',
       }),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('should preserve warehouse received quantity and unit during copy-on-write correction', async () => {
+    const receivedQuantity = { toString: () => '100.000' };
+    const mockTx = {
+      id: 'tx-warehouse-receipt',
+      status: 'COMPLETED',
+      revision: 4,
+      warehouseProcesses: [
+        {
+          id: 'wh-receipt-1',
+          transactionId: 'tx-warehouse-receipt',
+          processType: 'GSP',
+          startAt: new Date('2026-10-01T01:00:00Z'),
+          endAt: new Date('2026-10-01T02:00:00Z'),
+          startById: 'usr-start',
+          endById: 'usr-end',
+          actualWeight: 100,
+          actualQuantity: 100,
+          receivedQuantity,
+          receivedUnit: 'KG',
+          unit: 'KG',
+          palletCount: null,
+          bagCount: null,
+          rollCount: null,
+          condition: 'GOOD',
+          remarks: 'original remarks',
+          checklistItems: [],
+          revision: 2,
+          isCurrent: true,
+        },
+      ],
+    };
+    const mockTxClient = createMockTxClient(mockTx);
+    jest
+      .spyOn(mockPrismaService, '$transaction')
+      .mockImplementation(async (cb: any) => cb(mockTxClient));
+
+    await service.correctOperationLog(
+      'tx-warehouse-receipt',
+      {
+        action: CorrectionAction.CORRECT_DATA,
+        reasonCode: 'SALAH_INPUT',
+        remark: 'Koreksi catatan tanpa mengubah data penerimaan',
+        expectedRevision: 4,
+        items: [
+          {
+            targetModule: CorrectionTargetModule.WAREHOUSE,
+            targetRecordId: 'wh-receipt-1',
+            fieldName: 'remarks',
+            newValue: 'corrected remarks',
+          },
+        ],
+      },
+      {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      },
+    );
+
+    expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        receivedQuantity,
+        receivedUnit: 'KG',
+        remarks: 'corrected remarks',
+        revision: 3,
+      }),
+    });
   });
 
   it('should execute REOPEN_WORKFLOW and supersede downstream current records', async () => {
@@ -1729,7 +1816,7 @@ describe('OperationLogCorrectionService', () => {
         service.correctOperationLog(
           'tx-1',
           {
-            action: CorrectionAction.UPDATE_VALUES,
+            action: CorrectionAction.CORRECT_DATA,
             reopenTargetStatus: 'GATE_IN',
             items: [{ targetModule: 'TRANSACTION', fieldName: 'plateNumber' }],
             reasonCode: 'OTHER',
@@ -1746,7 +1833,7 @@ describe('OperationLogCorrectionService', () => {
         service.correctOperationLog(
           'tx-1',
           {
-            action: CorrectionAction.UPDATE_VALUES,
+            action: CorrectionAction.CORRECT_DATA,
             items: [],
             reasonCode: 'OTHER',
             remark: 'Empty items',
@@ -1786,6 +1873,1493 @@ describe('OperationLogCorrectionService', () => {
       ).rejects.toThrow(
         'Transaksi yang telah di-void secara administratif tidak dapat di-reopen',
       );
+    });
+
+    it('invalidates active GSP PA records when REOPEN_WORKFLOW targets REGISTERED', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-comp',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'REGISTERED' as any,
+        reasonCode: 'REOPEN_WORKFLOW',
+        remark: 'Reopen Batubara to REGISTERED for re-entry cycle',
+        expectedRevision: 3,
+        items: [],
+      };
+
+      const res = await service.correctOperationLog('tx-gsp-coal-comp', dto, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.qcProductAnalysis.updateMany).toHaveBeenCalledWith({
+        where: {
+          transactionId: 'tx-gsp-coal-comp',
+          isVoided: false,
+          isCurrent: true,
+        },
+        data: expect.objectContaining({
+          isVoided: true,
+          status: 'VOIDED',
+          voidReason: expect.stringContaining('REGISTERED'),
+        }),
+      });
+    });
+
+    it('invalidates active GSP PA records when REOPEN_WORKFLOW targets QC_VEHICLE_PENDING', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-qc',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const dto = {
+        action: CorrectionAction.REOPEN_WORKFLOW,
+        reopenTargetStatus: 'QC_VEHICLE_PENDING' as any,
+        reasonCode: 'REOPEN_WORKFLOW',
+        remark: 'Reopen Batubara to QC_VEHICLE_PENDING for re-analysis',
+        expectedRevision: 3,
+        items: [],
+      };
+
+      const res = await service.correctOperationLog('tx-gsp-coal-qc', dto, {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      });
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.qcProductAnalysis.updateMany).toHaveBeenCalledWith({
+        where: {
+          transactionId: 'tx-gsp-coal-qc',
+          isVoided: false,
+          isCurrent: true,
+        },
+        data: expect.objectContaining({
+          isVoided: true,
+          status: 'VOIDED',
+          voidReason: expect.stringContaining('QC_VEHICLE_PENDING'),
+        }),
+      });
+    });
+
+    it('rejects non-exempt PA_NOT_REQUIRED before transaction or child writes', async () => {
+      const tx = createMockTxClient({
+        id: 'tx-required-pa',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        revision: 3,
+        productCatalogId: 'cat-coal-1',
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      });
+      mockPrismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+      await expect(
+        service.correctOperationLog(
+          'tx-required-pa',
+          {
+            action: CorrectionAction.REOPEN_WORKFLOW,
+            reopenTargetStatus: TransactionStatus.PA_NOT_REQUIRED,
+            reasonCode: 'REOPEN_WORKFLOW',
+            remark: 'Reopen requires legitimate product exemption',
+            expectedRevision: 3,
+            items: [],
+          },
+          { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+        ),
+      ).rejects.toThrow('PA_NOT_REQUIRED');
+      expect(tx.transaction.updateMany).not.toHaveBeenCalled();
+      expect(tx.qcProductAnalysis.updateMany).not.toHaveBeenCalled();
+      expect(tx.transactionCorrection.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['RELEASE', 'ACCEPT_WITH_NOTE'])(
+      'preserves active GSP PA with valid %s evidence on reopen',
+      async (paStatus) => {
+        const mockTx: any = {
+          id: 'tx-gsp-coal-pass',
+          status: 'COMPLETED',
+          processType: 'GSP',
+          cargoType: 'Coal',
+          cargoSubType: 'Batubara',
+          productCatalogId: 'cat-coal-1',
+          revision: 3,
+          productCatalog: {
+            id: 'cat-coal-1',
+            name: 'Batubara',
+            isPaRequired: true,
+          },
+        };
+
+        const mockTxClient = createMockTxClient(mockTx);
+        mockTx.qcProductAnalyses = [
+          {
+            id: 'pa-1',
+            isCurrent: true,
+            revision: 1,
+            transactionId: 'tx-gsp-coal-pass',
+            testRound: 1,
+            productCatalogId: 'cat-coal-1',
+            status: paStatus,
+            result: paStatus === 'RELEASE' ? QcResult.PASS : QcResult.REJECT,
+            dispositionAction: 'ACCEPT_WITH_NOTE',
+            dispositionReason: 'Approved documented concession',
+            dispositionById: 'qc-supervisor',
+            dispositionAt: new Date('2026-10-19T00:00:00Z'),
+            isVoided: false,
+          },
+        ];
+
+        mockPrismaService.$transaction.mockImplementation((cb: any) =>
+          cb(mockTxClient),
+        );
+
+        const dto = {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara to Warehouse stage with valid PA',
+          expectedRevision: 3,
+          items: [],
+        };
+
+        const res = await service.correctOperationLog('tx-gsp-coal-pass', dto, {
+          id: 'adm-1',
+          role: 'ADMIN',
+          email: 'admin@gms.local',
+        });
+
+        expect(res.success).toBe(true);
+        expect(
+          mockTxClient.qcProductAnalysis.updateMany,
+        ).not.toHaveBeenCalled();
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: TransactionStatus.QC_VEHICLE_PASSED,
+            }),
+          }),
+        );
+      },
+    );
+
+    it('downgrades to QC_VEHICLE_PENDING when REOPEN target QC_VEHICLE_PASSED has PA result = null', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-null-res',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalogId: 'cat-coal-1',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
+        id: 'pa-null',
+        testRound: 1,
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: null,
+        isVoided: false,
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.correctOperationLog(
+        mockTx.id,
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara with null PA result',
+          expectedRevision: 3,
+          items: [],
+        },
+        { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PENDING,
+          }),
+        }),
+      );
+    });
+
+    it('downgrades to QC_VEHICLE_PENDING when REOPEN target QC_VEHICLE_PASSED has PA result = "PASSED"', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-passed-res',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalogId: 'cat-coal-1',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
+        id: 'pa-passed',
+        testRound: 1,
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: 'PASSED',
+        isVoided: false,
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.correctOperationLog(
+        mockTx.id,
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara with non-enum PASSED result',
+          expectedRevision: 3,
+          items: [],
+        },
+        { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PENDING,
+          }),
+        }),
+      );
+    });
+
+    it('downgrades to QC_VEHICLE_PENDING when REOPEN target QC_VEHICLE_PASSED has PA result = REJECT', async () => {
+      const mockTx = {
+        id: 'tx-gsp-coal-reject-res',
+        status: 'COMPLETED',
+        processType: 'GSP',
+        cargoType: 'Coal',
+        cargoSubType: 'Batubara',
+        productCatalogId: 'cat-coal-1',
+        revision: 3,
+        productCatalog: {
+          id: 'cat-coal-1',
+          name: 'Batubara',
+          isPaRequired: true,
+        },
+      };
+
+      const mockTxClient = createMockTxClient(mockTx);
+      mockTxClient.qcProductAnalysis.findFirst.mockResolvedValue({
+        id: 'pa-reject',
+        testRound: 1,
+        productCatalogId: 'cat-coal-1',
+        status: 'RELEASE',
+        result: QcResult.REJECT,
+        isVoided: false,
+      });
+
+      mockPrismaService.$transaction.mockImplementation((cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.correctOperationLog(
+        mockTx.id,
+        {
+          action: CorrectionAction.REOPEN_WORKFLOW,
+          reopenTargetStatus: TransactionStatus.QC_VEHICLE_PASSED,
+          reasonCode: 'REOPEN_WORKFLOW',
+          remark: 'Reopen Batubara with REJECT result',
+          expectedRevision: 3,
+          items: [],
+        },
+        { id: 'adm-1', role: 'ADMIN', email: 'admin@gms.local' },
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: TransactionStatus.QC_VEHICLE_PENDING,
+          }),
+        }),
+      );
+    });
+
+    describe('Defensive Field Validators & Normalizers', () => {
+      const mockAdminUser = {
+        id: 'adm-1',
+        role: 'ADMIN',
+        email: 'admin@gms.local',
+      } as any;
+
+      let mockDefaultTx: any;
+      let mockTxClient: any;
+
+      beforeEach(() => {
+        mockDefaultTx = {
+          id: 'tx-1',
+          plateNumber: 'B 1234 XYZ',
+          status: 'COMPLETED',
+          isVoided: false,
+          processType: 'GBB',
+          cargoType: 'Raw Material',
+          cargoSubType: 'Cocoa',
+          revision: 1,
+          productCatalogId: 'cat-1',
+          productCatalog: {
+            id: 'cat-1',
+            name: 'Cocoa Beans',
+            isPaRequired: false,
+          },
+          weighbridgeRecords: [
+            { id: 'wb-1', isCurrent: true, grossWeight: 1000 },
+          ],
+          qcVehicleChecks: [
+            { id: 'qcv-1', isCurrent: true, checklistItems: {} },
+          ],
+          incomingMaterialChecks: [
+            { id: 'inc-1', isCurrent: true, moisture: 10 },
+          ],
+          warehouseProcesses: [
+            {
+              id: 'wh-1',
+              isCurrent: true,
+              palletCount: 10,
+              receivedUnit: 'BAG',
+            },
+          ],
+          attachments: [],
+        };
+        mockTxClient = createMockTxClient(mockDefaultTx);
+        mockPrismaService.transaction.findFirst.mockResolvedValue(
+          mockDefaultTx,
+        );
+        mockPrismaService.$transaction.mockImplementation((cb: any) =>
+          cb(mockTxClient),
+        );
+      });
+
+      const correction = (
+        targetModule: CorrectionTargetModule,
+        targetRecordId: string,
+        fields: Record<string, unknown>,
+      ) =>
+        ({
+          action: CorrectionAction.CORRECT_DATA,
+          reasonCode: 'DATA_ENTRY_ERROR',
+          remark: 'Koreksi admin berdasarkan pemeriksaan bukti operasional',
+          expectedRevision: 1,
+          items: Object.entries(fields).map(([fieldName, newValue]) => ({
+            targetModule,
+            targetRecordId,
+            fieldName,
+            newValue,
+          })),
+        }) as any;
+      const photo = `data:image/png;base64,${Buffer.from('verified photo fixture').toString('base64')}`;
+      const prepareGbj = () => {
+        mockDefaultTx.processType = 'GBJ';
+        mockDefaultTx.qcVehicleChecks[0] = {
+          id: 'qcv-1',
+          transactionId: 'tx-1',
+          isCurrent: true,
+          revision: 3,
+          result: 'PASS',
+          decisionMode: 'NORMAL_PASS',
+          hasDeviation: false,
+          deviationReason: null,
+          checkedById: 'qc-original',
+          completedAt: new Date('2026-10-19T10:00:00Z'),
+          checklistItems: {
+            source: 'original',
+            items: GBJ_CHECKLIST_ITEMS.map((label, index) => ({
+              label,
+              ok: true,
+              severity: GBJ_CHECKLIST_SEVERITY[index],
+              photo,
+              metadata: { retained: true },
+            })),
+          },
+        };
+        return mockDefaultTx.qcVehicleChecks[0];
+      };
+      const prepareGsp = () => {
+        mockDefaultTx.processType = 'GSP';
+        mockDefaultTx.productCatalog = {
+          id: 'cat-1',
+          code: 'SOLAR-001',
+          receiptUnit: 'LITER',
+        };
+        const checklist = {
+          version: GSP_PREUNLOAD_VERSION,
+          overallResult: 'CONCESSION',
+          metadata: { retained: true },
+          disposition: {
+            action: 'ACCEPT_WITH_NOTE',
+            reason: 'Pengawasan bongkar tambahan',
+            decidedById: 'supervisor-original',
+            decidedAt: '2026-10-19T10:00:00Z',
+          },
+          items: GSP_PREUNLOAD_CANONICAL_ITEMS.map((item) => ({
+            ...item,
+            result: ['CLEAN_VEHICLE', 'ITEMS_NEATLY_ARRANGED'].includes(
+              item.code,
+            )
+              ? 'NOT_OK'
+              : 'OK',
+            notes: 'Catatan bukti asli',
+            photoAttachmentId: 'photo-1',
+            photoUrl: null,
+          })),
+        };
+        mockDefaultTx.warehouseProcesses[0] = {
+          id: 'wh-1',
+          transactionId: 'tx-1',
+          processType: 'GSP',
+          isCurrent: true,
+          revision: 2,
+          receivedQuantity: '100.000',
+          receivedUnit: 'LITER',
+          checklistItems: checklist,
+          startById: 'warehouse-original',
+        };
+        mockTxClient.attachment.findFirst.mockResolvedValue({
+          id: 'photo-1',
+          transactionId: 'tx-1',
+          isCurrent: true,
+          mimeType: 'image/png',
+          fileType: 'image/png',
+          sha256: 'a'.repeat(64),
+        });
+        return checklist;
+      };
+      const expectNoWrites = () => {
+        expect(
+          mockTxClient.transactionCorrection.create,
+        ).not.toHaveBeenCalled();
+        expect(mockTxClient.qcVehicleCheck.updateMany).not.toHaveBeenCalled();
+        expect(mockTxClient.qcVehicleCheck.create).not.toHaveBeenCalled();
+        expect(mockTxClient.warehouseProcess.updateMany).not.toHaveBeenCalled();
+        expect(mockTxClient.warehouseProcess.create).not.toHaveBeenCalled();
+        expect(mockTxClient.transaction.updateMany).not.toHaveBeenCalled();
+        expect(
+          mockTxClient.transactionCorrectionItem.createMany,
+        ).not.toHaveBeenCalled();
+        for (const model of [
+          mockTxClient.attachment,
+          mockTxClient.incomingMaterialCheck,
+          mockTxClient.weighbridgeRecord,
+        ]) {
+          expect(model.updateMany).not.toHaveBeenCalled();
+          expect(model.create).not.toHaveBeenCalled();
+        }
+      };
+
+      it('rejects omitted GBJ deviation flag when the effective successor would contradict checklist', async () => {
+        const existing = prepareGbj();
+        const checklist = JSON.parse(JSON.stringify(existing.checklistItems));
+        checklist.items[2].ok = false;
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+              checklistItems: checklist,
+              decisionMode: 'APPROVED_WITH_DEVIATION',
+              deviationReason: 'Alas tambahan dan pengawasan',
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it('rejects explicit null GBJ decision before writing a null successor', async () => {
+        prepareGbj();
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+              decisionMode: null,
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it('preserves GBJ metadata and links a valid decision successor to audit items', async () => {
+        const existing = prepareGbj();
+        const checklist = JSON.parse(JSON.stringify(existing.checklistItems));
+        checklist.items[2].ok = false;
+        await service.correctOperationLog(
+          'tx-1',
+          correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+            checklistItems: checklist,
+            decisionMode: 'APPROVED_WITH_DEVIATION',
+            hasDeviation: true,
+            deviationReason: 'Alas tambahan dan pengawasan',
+          }),
+          mockAdminUser,
+        );
+        expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              result: 'PASS',
+              hasDeviation: true,
+              decisionMode: 'APPROVED_WITH_DEVIATION',
+              checkedById: 'qc-original',
+              completedAt: existing.completedAt,
+              revision: 4,
+              checklistItems: checklist,
+            }),
+          }),
+        );
+        expect(
+          mockTxClient.transactionCorrectionItem.createMany,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.arrayContaining([
+              expect.objectContaining({
+                targetRecordId: 'qcv-1',
+                replacementRecordId: 'qcv-new-1',
+              }),
+            ]),
+          }),
+        );
+      });
+
+      it('accepts GBJ evidence above the generic text limit but below the photo limit', async () => {
+        const checklist = JSON.parse(
+          JSON.stringify(prepareGbj().checklistItems),
+        );
+        checklist.items[2].ok = false;
+        checklist.items[2].photo = `data:image/png;base64,${Buffer.alloc(16 * 1024).toString('base64')}`;
+        await service.correctOperationLog(
+          'tx-1',
+          correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+            checklistItems: checklist,
+            hasDeviation: true,
+            decisionMode: 'APPROVED_WITH_DEVIATION',
+            deviationReason: 'Pengawasan khusus tambahan',
+          }),
+          mockAdminUser,
+        );
+        expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalled();
+      });
+
+      it('keeps the generic text limit for non-photo GBJ metadata', async () => {
+        const checklist = JSON.parse(
+          JSON.stringify(prepareGbj().checklistItems),
+        );
+        checklist.source = 'x'.repeat(10001);
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+              checklistItems: checklist,
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it('accepts consistent explicit GBB moisture corrections preserving metadata', async () => {
+        mockDefaultTx.qcVehicleChecks[0].checklistItems = {
+          initialMoisture: 12,
+          items: [{ label: 'Estimasi Moisture', value: 12, retained: true }],
+        };
+        const next = {
+          initialMoisture: 13,
+          items: [{ label: 'Estimasi Moisture', value: 13, retained: true }],
+        };
+        await service.correctOperationLog(
+          'tx-1',
+          correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+            checklistItems: next,
+          }),
+          mockAdminUser,
+        );
+        expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ checklistItems: next }),
+          }),
+        );
+      });
+
+      it('rejects conflicting GBB moisture copies before any writes', async () => {
+        const original = {
+          initialMoisture: 12,
+          items: [{ label: 'Estimasi Moisture', value: 12 }],
+        };
+        mockDefaultTx.qcVehicleChecks[0].checklistItems = original;
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+              checklistItems: { ...original, initialMoisture: 13 },
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it('rejects superseding the correction header evidence in the same batch', async () => {
+        prepareGsp();
+        mockDefaultTx.attachments = [
+          {
+            id: 'photo-1',
+            transactionId: 'tx-1',
+            isCurrent: true,
+            revision: 1,
+            sha256: 'a'.repeat(64),
+            originalName: 'before.png',
+          },
+        ];
+        const dto = correction(CorrectionTargetModule.ATTACHMENT, 'photo-1', {
+          originalName: 'after.png',
+        });
+        dto.evidenceAttachmentId = 'photo-1';
+        await expect(
+          service.correctOperationLog('tx-1', dto, mockAdminUser),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it('rejects superseding GSP checklist evidence in the same correction batch', async () => {
+        const next = JSON.parse(JSON.stringify(prepareGsp()));
+        next.items[0].result = 'OK';
+        mockDefaultTx.attachments = [
+          {
+            id: 'photo-1',
+            transactionId: 'tx-1',
+            isCurrent: true,
+            revision: 1,
+            sha256: 'a'.repeat(64),
+            originalName: 'before.png',
+          },
+        ];
+        const dto = correction(CorrectionTargetModule.WAREHOUSE, 'wh-1', {
+          checklistItems: next,
+        });
+        dto.items.push({
+          targetModule: CorrectionTargetModule.ATTACHMENT,
+          targetRecordId: 'photo-1',
+          fieldName: 'originalName',
+          newValue: 'after.png',
+        });
+        await expect(
+          service.correctOperationLog('tx-1', dto, mockAdminUser),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it.each(['overallResult', 'disposition', 'metadata'])(
+        'rejects GSP forged %s metadata even with nine canonical items',
+        async (field) => {
+          const original = prepareGsp();
+          const next = JSON.parse(JSON.stringify(original));
+          if (field === 'overallResult') next.overallResult = 'OK';
+          if (field === 'disposition')
+            next.disposition.decidedById = 'forged-actor';
+          if (field === 'metadata') next.metadata.retained = false;
+          next.items[0].result = 'OK';
+          await expect(
+            service.correctOperationLog(
+              'tx-1',
+              correction(CorrectionTargetModule.WAREHOUSE, 'wh-1', {
+                checklistItems: next,
+              }),
+              mockAdminUser,
+            ),
+          ).rejects.toThrow(BadRequestException);
+          expectNoWrites();
+        },
+      );
+
+      it('accepts compatible GSP result correction while preserving disposition and receiving metadata', async () => {
+        const original = prepareGsp();
+        const next = JSON.parse(JSON.stringify(original));
+        next.items[0].result = 'OK';
+        await service.correctOperationLog(
+          'tx-1',
+          correction(CorrectionTargetModule.WAREHOUSE, 'wh-1', {
+            checklistItems: next,
+          }),
+          mockAdminUser,
+        );
+        expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              checklistItems: next,
+              receivedUnit: 'LITER',
+              startById: 'warehouse-original',
+              revision: 3,
+            }),
+          }),
+        );
+        expect(mockTxClient.fraudCheck.create).not.toHaveBeenCalled();
+        expect(
+          mockTxClient.transactionCorrectionItem.createMany,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.arrayContaining([
+              expect.objectContaining({ replacementRecordId: 'wh-new-1' }),
+            ]),
+          }),
+        );
+      });
+
+      it('rejects GSP concession containing a critical failure before successor writes', async () => {
+        const next = JSON.parse(JSON.stringify(prepareGsp()));
+        next.items.find((item: any) => item.code === 'DOOR_SEAL_GOOD').result =
+          'NOT_OK';
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.WAREHOUSE, 'wh-1', {
+              checklistItems: next,
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it.each([
+        [
+          'NORMAL_PASS with findings',
+          { decisionMode: 'NORMAL_PASS', hasDeviation: true },
+          2,
+        ],
+        [
+          'critical concession',
+          {
+            decisionMode: 'APPROVED_WITH_DEVIATION',
+            hasDeviation: true,
+            deviationReason: 'Pengawasan khusus tambahan',
+          },
+          0,
+        ],
+        [
+          'short concession reason',
+          {
+            decisionMode: 'APPROVED_WITH_DEVIATION',
+            hasDeviation: true,
+            deviationReason: 'short',
+          },
+          2,
+        ],
+        [
+          'REJECTED without findings',
+          { decisionMode: 'REJECTED', result: 'REJECT' },
+          -1,
+        ],
+        ['result contradicting mode', { result: 'REJECT' }, -1],
+        ['null deviation flag', { hasDeviation: null }, -1],
+      ])(
+        'rejects GBJ %s before correction writes',
+        async (_name, fields, failedIndex) => {
+          const existing = prepareGbj();
+          const checklist = JSON.parse(JSON.stringify(existing.checklistItems));
+          if (Number(failedIndex) >= 0)
+            checklist.items[Number(failedIndex)].ok = false;
+          await expect(
+            service.correctOperationLog(
+              'tx-1',
+              correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+                checklistItems: checklist,
+                ...(fields as object),
+              }),
+              mockAdminUser,
+            ),
+          ).rejects.toThrow(BadRequestException);
+          expectNoWrites();
+        },
+      );
+
+      it.each([
+        'missing',
+        'mime',
+        'empty',
+        'oversize',
+        'boolean',
+        'label',
+        'severity',
+      ])('rejects GBJ malformed %s evidence/checklist', async (kind) => {
+        const checklist = JSON.parse(
+          JSON.stringify(prepareGbj().checklistItems),
+        );
+        checklist.items[2].ok = false;
+        if (kind === 'missing') checklist.items[2].photo = null;
+        if (kind === 'mime')
+          checklist.items[2].photo = 'data:image/svg+xml;base64,aW1hZ2U=';
+        if (kind === 'empty')
+          checklist.items[2].photo = 'data:image/png;base64,';
+        if (kind === 'oversize')
+          checklist.items[2].photo = `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 1).toString('base64')}`;
+        if (kind === 'boolean') checklist.items[2].ok = 'false';
+        if (kind === 'label')
+          checklist.items[2].label = 'generic vehicle cleanliness';
+        if (kind === 'severity') checklist.items[2].severity = 'CRITICAL';
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+              checklistItems: checklist,
+              hasDeviation: true,
+              decisionMode: 'APPROVED_WITH_DEVIATION',
+              deviationReason: 'Pengawasan khusus tambahan',
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it.each([
+        'code',
+        'duplicate',
+        'version',
+        'label',
+        'result',
+        'notes',
+        'evidence',
+        'foreign',
+        'stale',
+        'checksum',
+        'pending',
+      ])('rejects invalid GSP %s before any write', async (kind) => {
+        const original = prepareGsp();
+        const next = JSON.parse(JSON.stringify(original));
+        next.items[0].result = 'OK';
+        if (kind === 'code') next.items[1].code = 'UNKNOWN';
+        if (kind === 'duplicate') next.items[1].code = next.items[0].code;
+        if (kind === 'version') next.version = 'UNKNOWN';
+        if (kind === 'label') next.items[1].label = 'Generic label';
+        if (kind === 'result') next.items[1].result = 'PASS';
+        if (kind === 'notes') {
+          original.items[3].notes = '';
+          next.items[3].notes = '';
+        }
+        if (kind === 'evidence') {
+          original.items[3].photoAttachmentId = '';
+          next.items[3].photoAttachmentId = '';
+        }
+        if (kind === 'foreign')
+          mockTxClient.attachment.findFirst.mockResolvedValue({
+            id: 'photo-1',
+            transactionId: 'other',
+            isCurrent: true,
+            mimeType: 'image/png',
+            sha256: 'a'.repeat(64),
+          });
+        if (kind === 'stale')
+          mockTxClient.attachment.findFirst.mockResolvedValue({
+            id: 'photo-1',
+            transactionId: 'tx-1',
+            isCurrent: false,
+            mimeType: 'image/png',
+            sha256: 'a'.repeat(64),
+          });
+        if (kind === 'checksum')
+          mockTxClient.attachment.findFirst.mockResolvedValue({
+            id: 'photo-1',
+            transactionId: 'tx-1',
+            isCurrent: true,
+            mimeType: 'image/png',
+            sha256: null,
+          });
+        if (kind === 'pending') {
+          original.overallResult = 'PENDING_DISPOSITION';
+          next.overallResult = 'PENDING_DISPOSITION';
+        }
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.WAREHOUSE, 'wh-1', {
+              checklistItems: next,
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it('rejects an invalid effective receiving pair before creating its correction header', async () => {
+        prepareGsp();
+        mockDefaultTx.warehouseProcesses[0].receivedUnit = 'KG';
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.WAREHOUSE, 'wh-1', {
+              receivedQuantity: '101.000',
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it('preserves GBB unknown sampling entries and metadata on a valid sampling edit', async () => {
+        const original = {
+          metadata: 'keep',
+          items: [
+            { label: 'Sampling Visual', ok: true, photo: 'existing' },
+            { label: 'Legacy measurement', value: 18 },
+          ],
+        };
+        mockDefaultTx.qcVehicleChecks[0] = {
+          ...mockDefaultTx.qcVehicleChecks[0],
+          revision: 1,
+          transactionId: 'tx-1',
+          checklistItems: original,
+        };
+        const next = JSON.parse(JSON.stringify(original));
+        next.items[0].ok = false;
+        await service.correctOperationLog(
+          'tx-1',
+          correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+            checklistItems: next,
+          }),
+          mockAdminUser,
+        );
+        expect(mockTxClient.qcVehicleCheck.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ checklistItems: next }),
+          }),
+        );
+      });
+
+      it('rejects generic replacement of persisted GBB sampling', async () => {
+        mockDefaultTx.qcVehicleChecks[0].checklistItems = {
+          items: [{ label: 'Sampling Visual', ok: true }],
+        };
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            correction(CorrectionTargetModule.QC_VEHICLE, 'qcv-1', {
+              checklistItems: {
+                items: [{ label: 'Vehicle Cleanliness', ok: false }],
+              },
+            }),
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+        expectNoWrites();
+      });
+
+      it.each(['parameters', 'dispositionAction', 'dispositionReason'])(
+        'rejects unsupported PA field %s without writes',
+        async (field) => {
+          prepareGsp();
+          await expect(
+            service.correctOperationLog(
+              'tx-1',
+              correction(CorrectionTargetModule.WAREHOUSE, 'wh-1', {
+                [field]: 'forged PA change',
+              }),
+              mockAdminUser,
+            ),
+          ).rejects.toThrow(BadRequestException);
+          expectNoWrites();
+        },
+      );
+
+      it('should reject empty or whitespace plateNumber', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid plate',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'plateNumber',
+                  newValue: '   ',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid plate format', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid plate format',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'plateNumber',
+                  newValue: '###---',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject non-positive or non-finite weight numbers', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid weight',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'grossWeight',
+                  newValue: -500,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject non-scalar value on scalar field', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Non-scalar remarks',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'remarks',
+                  newValue: { nested: 'object' },
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid percentage on moisture field', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid moisture percentage',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_MATERIAL,
+                  fieldName: 'moisture',
+                  newValue: 150,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject negative integers on warehouse counts', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Negative pallet count',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'palletCount',
+                  newValue: -5,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject circular JSON in checklistItems', async () => {
+        const circular: any = { name: 'test' };
+        circular.self = circular;
+
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Circular checklist',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_VEHICLE,
+                  fieldName: 'checklistItems',
+                  newValue: circular,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject prohibited prototype keys in checklistItems JSON', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Prohibited key',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_VEHICLE,
+                  fieldName: 'checklistItems',
+                  newValue: { __proto__: { evil: true } },
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject GSP legacy QC Vehicle correction', async () => {
+        mockDefaultTx.processType = 'GSP';
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Koreksi QC legacy GSP ditolak',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_VEHICLE,
+                  targetRecordId: 'qcv-1',
+                  fieldName: 'notes',
+                  newValue: 'Tidak boleh dikoreksi sebagai QC GSP',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject incoming coffee lab correction outside GBB', async () => {
+        mockDefaultTx.processType = 'GBJ';
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Koreksi incoming bukan GBB ditolak',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.INCOMING_MATERIAL,
+                  targetRecordId: 'inc-1',
+                  fieldName: 'notes',
+                  newValue: 'Tidak boleh dikoreksi sebagai QC GBJ',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject generic actual weight correction for GSP warehouse receiving', async () => {
+        mockDefaultTx.processType = 'GSP';
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Koreksi field berat GSP ditolak',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  targetRecordId: 'wh-1',
+                  fieldName: 'actualWeight',
+                  newValue: 123,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid receivedUnit enum values in WAREHOUSE', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid receivedUnit',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'receivedUnit',
+                  newValue: 'NON_EXISTENT_UNIT',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should allow GSP LITER receiving correction through receivedQuantity only', async () => {
+        mockDefaultTx.processType = 'GSP';
+        mockDefaultTx.productCatalog = {
+          ...mockDefaultTx.productCatalog,
+          code: 'SOLAR-001',
+          receiptUnit: 'LITER',
+        };
+        mockDefaultTx.warehouseProcesses[0] = {
+          ...mockDefaultTx.warehouseProcesses[0],
+          processType: 'GSP',
+          receivedQuantity: '100.000',
+          receivedUnit: 'LITER',
+        };
+
+        await service.correctOperationLog(
+          'tx-1',
+          {
+            action: CorrectionAction.CORRECT_DATA,
+            reasonCode: 'DATA_ENTRY_ERROR',
+            remark: 'Koreksi jumlah liter penerimaan GSP',
+            expectedRevision: 1,
+            items: [
+              {
+                targetModule: CorrectionTargetModule.WAREHOUSE,
+                targetRecordId: 'wh-1',
+                fieldName: 'receivedQuantity',
+                newValue: '1234.567',
+              },
+            ],
+          },
+          mockAdminUser,
+        );
+
+        expect(mockTxClient.warehouseProcess.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              receivedUnit: 'LITER',
+              receivedQuantity: expect.objectContaining({
+                toString: expect.any(Function),
+              }),
+            }),
+          }),
+        );
+        const warehouseCreate =
+          mockTxClient.warehouseProcess.create.mock.calls[0][0];
+        expect(warehouseCreate.data.receivedQuantity.toString()).toBe(
+          '1234.567',
+        );
+      });
+
+      it('should reject non-canonical GSP checklist/disposition correction', async () => {
+        mockDefaultTx.processType = 'GSP';
+        mockDefaultTx.warehouseProcesses[0] = {
+          ...mockDefaultTx.warehouseProcesses[0],
+          processType: 'GSP',
+        };
+
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Checklist pra-bongkar GSP tidak boleh diedit generik',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  targetRecordId: 'wh-1',
+                  fieldName: 'checklistItems',
+                  newValue: { items: [] },
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject direct status field alteration in items', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Direct status change',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.TRANSACTION,
+                  fieldName: 'status',
+                  newValue: 'COMPLETED',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject non-string receivedQuantity', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid receivedQuantity type',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'receivedQuantity',
+                  newValue: 1234,
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid ISO date in startAt', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid startAt date',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.WAREHOUSE,
+                  fieldName: 'startAt',
+                  newValue: 'not-a-valid-date',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('should reject invalid QC result enum', async () => {
+        await expect(
+          service.correctOperationLog(
+            'tx-1',
+            {
+              action: CorrectionAction.CORRECT_DATA,
+              reasonCode: 'DATA_ENTRY_ERROR',
+              remark: 'Invalid result enum',
+              expectedRevision: 1,
+              items: [
+                {
+                  targetModule: CorrectionTargetModule.QC_VEHICLE,
+                  fieldName: 'result',
+                  newValue: 'INVALID_RESULT_ENUM',
+                },
+              ],
+            } as any,
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+      });
     });
   });
 });

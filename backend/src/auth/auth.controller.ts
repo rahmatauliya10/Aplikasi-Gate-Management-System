@@ -4,6 +4,7 @@ import {
   Put,
   Get,
   Body,
+  Param,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -27,6 +28,8 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
 function parseCookieSecure(): boolean {
@@ -190,5 +193,38 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(user.id, dto);
+  }
+
+  @Post('users/:id/unlock')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Unlock user account (Admin only)',
+    description:
+      'Audit-compliant unlock of a locked user account without deleting historical activity logs.',
+  })
+  @ApiResponse({ status: 200, description: 'Account successfully unlocked' })
+  @ApiResponse({ status: 403, description: 'Forbidden - requires ADMIN role' })
+  async unlockUser(
+    @Param('id') targetUserId: string,
+    @CurrentUser() adminUser: JwtPayloadUser,
+    @Body() body: { reason?: string },
+  ) {
+    await this.authService.unlockUser(
+      targetUserId,
+      adminUser.id,
+      body?.reason || 'Administrative account unlock by Admin',
+    );
+    return {
+      success: true,
+      message:
+        'Akun berhasil dibuka kuncinya secara sah dan tercatat pada audit trail.',
+      data: {
+        userId: targetUserId,
+        unlockedBy: adminUser.id,
+        unlockedAt: new Date().toISOString(),
+      },
+    };
   }
 }

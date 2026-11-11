@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col h-screen font-sans overflow-hidden" style="background: #EFFAFD;">
     <!-- Top Header Bar — Cyber Command Center -->
-    <header class="h-16 md:h-20 flex items-center pr-4 md:pr-8 shrink-0 relative z-50 backdrop-blur-xl border-b border-white/40" 
+    <header class="h-16 md:h-20 flex min-w-0 items-center pr-4 md:pr-8 shrink-0 relative z-50 backdrop-blur-xl border-b border-white/40"
             style="background: rgba(255, 255, 255, 0.7); box-shadow: 0 10px 40px rgba(15, 23, 42, 0.05);">
       
       <!-- Animated top accent line -->
@@ -10,7 +10,7 @@
       </div>
 
       <!-- Left: Sidebar Toggle + Brand -->
-      <div class="flex items-center shrink-0" :class="sidebarOpen ? 'w-[250px] md:w-[300px]' : 'w-[74px] justify-center'" style="transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);">
+      <div class="flex min-w-0 items-center shrink-0" :class="sidebarOpen ? 'w-[250px] md:w-[332px] md:justify-start' : 'w-[74px] justify-center'" style="transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);">
         <button @click="sidebarOpen = !sidebarOpen"
           class="sidebar-toggle-btn w-10 h-10 flex shrink-0 items-center justify-center text-slate-500 hover:text-[#4A8BDF] rounded-2xl bg-slate-50 hover:bg-[#E6F0FA] border border-slate-100 transition-all duration-300 active:scale-90"
         >
@@ -31,7 +31,7 @@
       </div>
 
       <!-- ═══ Search Area ═══ -->
-      <div class="hidden md:flex flex-1 max-w-md mx-10 relative group">
+      <div class="hidden 2xl:flex min-w-0 flex-1 max-w-md mx-4 2xl:mx-10 relative group">
         <div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
           <span class="material-icons text-slate-400 text-lg group-focus-within:text-[#4A8BDF] transition-colors">search</span>
         </div>
@@ -41,17 +41,17 @@
       </div>
 
       <!-- ═══ Right: Command Center Modules ═══ -->
-      <div class="flex items-center space-x-2 md:space-x-6 ml-auto">
+      <div class="flex min-w-0 shrink items-center space-x-1 sm:space-x-2 lg:space-x-6 ml-auto">
         <!-- Module: Clock (Modernized) -->
-        <div class="hidden sm:flex items-center space-x-4 px-5 py-2.5 rounded-[1.5rem] bg-slate-50 border border-slate-100 group cursor-default hover:bg-white hover:shadow-md transition-all duration-500">
-          <div class="flex flex-col text-right hidden lg:block">
+        <div class="hidden sm:flex min-w-0 shrink items-center space-x-2 lg:space-x-4 px-2 lg:px-5 py-2.5 rounded-[1.5rem] bg-slate-50 border border-slate-100 group cursor-default hover:bg-white hover:shadow-md transition-all duration-500">
+          <div class="hidden xl:flex flex-col text-right">
             <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{{ currentDate.split(',')[0] }}</span>
             <span class="text-[11px] font-black text-slate-700 mt-1 leading-none">{{ currentDate.split(',')[1] }}</span>
           </div>
           <div class="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm border border-slate-100 group-hover:text-[#4A8BDF] transition-colors">
             <span class="material-icons text-[#4A8BDF] text-xl">schedule</span>
           </div>
-          <div class="flex items-baseline space-x-0.5 relative">
+          <div class="flex min-w-0 items-baseline space-x-0.5 relative">
             <span class="text-2xl font-black text-slate-900 tracking-tighter font-mono leading-none">{{ clockHour }}</span>
             <span class="text-2xl font-black leading-none text-[#4A8BDF] animate-pulse">:</span>
             <span class="text-2xl font-black text-slate-900 tracking-tighter font-mono leading-none">{{ clockMinute }}</span>
@@ -60,14 +60,17 @@
           </div>
         </div>
 
+        <!-- Pending Transaction Reminder Bell -->
+        <div class="hidden sm:block">
+          <PendingReminderBell />
+        </div>
+
         <!-- Notifications -->
-        <div class="relative">
-          <button @click="showActivityLog = true; notificationStore.markAsRead()" class="relative w-12 h-12 flex items-center justify-center rounded-2xl bg-white border border-slate-100 text-slate-500 hover:text-[#A0006D] hover:shadow-lg transition-all duration-300 active:scale-90 group">
-            <span class="material-icons text-2xl group-hover:animate-bounce">notifications_none</span>
+        <div class="relative hidden sm:block">
+          <button @click="showActivityLog = true; notificationStore.markAsRead()" class="relative w-12 h-12 flex items-center justify-center rounded-2xl bg-white border border-slate-100 text-slate-500 hover:text-[#A0006D] hover:shadow-lg transition-all duration-300 active:scale-90 group" title="Log Aktivitas Sistem">
+            <span class="material-icons text-2xl group-hover:animate-bounce">history</span>
             <span v-if="notificationStore.unreadCount > 0" class="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded-full bg-[#A0006D] text-[9px] font-bold text-white border-2 border-white shadow-sm">{{ notificationStore.unreadCount > 9 ? '9+' : notificationStore.unreadCount }}</span>
           </button>
-          
-          <!-- Activity Log Drawer component will replace the dropdown -->
         </div>
 
         <!-- Profile (Glass Style) -->
@@ -211,20 +214,21 @@
       </main>
     </div>
     <ActivityLogDrawer :is-open="showActivityLog" @update:isOpen="showActivityLog = $event" @close="showActivityLog = false" />
+    <LoginPendingReminderModal />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../stores/notificationStore'
 import { useAuthStore } from '../stores/authStore'
 import ProfileDropdown from '../components/ProfileDropdown.vue'
 import ActivityLogDrawer from '../components/ActivityLogDrawer.vue'
 import RunningTextBanner from '../components/RunningTextBanner.vue'
+import PendingReminderBell from '../components/PendingReminderBell.vue'
+import LoginPendingReminderModal from '../components/LoginPendingReminderModal.vue'
 import { plantClockParts, PLANT_TIME_ZONE } from '../utils/displayTime'
 
-const router = useRouter()
 const notificationStore = useNotificationStore()
 const authStore = useAuthStore()
 const showActivityLog = ref(false)
@@ -287,7 +291,7 @@ onUnmounted(() => {
 
 /* ═══ Nav Link Base ═══ */
 .nav-link {
-  @apply flex items-center space-x-4 px-4 py-3 rounded-xl text-[13px] font-bold whitespace-nowrap;
+  @apply flex min-w-0 items-center space-x-4 px-4 py-3 rounded-xl text-[13px] font-bold whitespace-nowrap;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -306,7 +310,7 @@ onUnmounted(() => {
 }
 
 .nav-text {
-  @apply truncate flex-1;
+  @apply min-w-0 truncate flex-1;
 }
 
 .nav-icon {

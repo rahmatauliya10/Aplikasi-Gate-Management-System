@@ -91,8 +91,7 @@ export class DatabaseBackupController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const ipAddress =
-      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+    const ipAddress = req.ip || req.socket?.remoteAddress;
     const backupData = await this.backupService.generateBackup(user, ipAddress);
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -121,8 +120,7 @@ export class DatabaseBackupController {
       });
     }
 
-    const ipAddress =
-      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+    const ipAddress = req.ip || req.socket?.remoteAddress;
 
     let payload = backupData;
     if (typeof backupData === 'string') {
@@ -195,8 +193,7 @@ export class DatabaseBackupController {
       });
     }
 
-    const ipAddress =
-      (req.headers['x-forwarded-for'] as string) || req.socket?.remoteAddress;
+    const ipAddress = req.ip || req.socket?.remoteAddress;
 
     let payload = bundleData;
     if (typeof bundleData === 'string') {
