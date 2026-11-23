@@ -2335,7 +2335,7 @@ export class WarehouseService {
           if (stat.size <= 0) {
             throw new Error('ZERO_BYTE_FILE');
           }
-          fileBuffer = fs.readFileSync(fullPath) as Buffer;
+          fileBuffer = fs.readFileSync(fullPath);
           if (!fileBuffer || fileBuffer.length === 0) {
             throw new Error('EMPTY_BUFFER');
           }

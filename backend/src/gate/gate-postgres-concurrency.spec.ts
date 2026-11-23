@@ -49,9 +49,9 @@ if (rawTestDbUrl) {
 
 const isPgTestAvailable = Boolean(
   rawTestDbUrl &&
-    process.env.DATABASE_URL === rawTestDbUrl &&
-    process.env.GMS_FIXTURE_ISOLATION_UUID &&
-    process.env.GMS_FIXTURE_ISOLATION_UUID.startsWith('FIXTURE-'),
+  process.env.DATABASE_URL === rawTestDbUrl &&
+  process.env.GMS_FIXTURE_ISOLATION_UUID &&
+  process.env.GMS_FIXTURE_ISOLATION_UUID.startsWith('FIXTURE-'),
 );
 
 const describePgTest = isPgTestAvailable ? describe : describe.skip;
