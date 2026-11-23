@@ -69,6 +69,7 @@
     "@types/node": "^22.10.7",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^6.0.2",
+    "effect": "3.22.5",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.2",
@@ -86,7 +87,21 @@
     "typescript-eslint": "^8.20.0"
   },
   "overrides": {
-    "handlebars": "^4.7.10"
+    "body-parser": "^2.4.0",
+    "multer": "^2.5.0",
+    "js-yaml": "^5.5.0",
+    "deepmerge-ts": "^8.0.0",
+    "proxy-addr": "^2.0.8",
+    "handlebars": "^4.7.10",
+    "effect": "3.22.5",
+    "@prisma/config": {
+      "effect": "3.22.5"
+    },
+    "prisma": {
+      "@prisma/config": {
+        "effect": "3.22.5"
+      }
+    }
   },
   "jest": {
     "moduleFileExtensions": [
@@ -167,12 +182,5 @@
   },
   "prisma": {
     "seed": "node dist/prisma/seed.js"
-  },
-  "overrides": {
-    "body-parser": "^2.4.0",
-    "multer": "^2.5.0",
-    "js-yaml": "^5.5.0",
-    "deepmerge-ts": "^8.0.0",
-    "proxy-addr": "^2.0.8"
   }
 }
