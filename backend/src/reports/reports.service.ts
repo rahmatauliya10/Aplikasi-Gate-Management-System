@@ -640,8 +640,8 @@ export class ReportsService {
           END AS net,
           CASE
             WHEN fraud."warehouseActualWeight" > 0 THEN fraud."warehouseActualWeight"
-            WHEN (COALESCE(t."receivedUnit"::text, wp."receivedUnit"::text, t."warehouseUnit"::text, wp."unit"::text) = 'KG'
-                  OR COALESCE(t."receivedUnit"::text, wp."receivedUnit"::text, t."warehouseUnit"::text, wp."unit"::text) IS NULL)
+            WHEN (COALESCE(t."receiptUnit"::text, wp."receivedUnit"::text, t."warehouseUnit"::text, wp."unit"::text) = 'KG'
+                  OR COALESCE(t."receiptUnit"::text, wp."receivedUnit"::text, t."warehouseUnit"::text, wp."unit"::text) IS NULL)
                  AND COALESCE(t."receivedQuantity", wp."receivedQuantity") > 0
             THEN CAST(COALESCE(t."receivedQuantity", wp."receivedQuantity") AS DOUBLE PRECISION)
             WHEN t."actualWeight" > 0 THEN t."actualWeight"
