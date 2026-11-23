@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  ConflictException,
 } from '@nestjs/common';
 import { ActiveTransactionAmendmentService } from './active-transaction-amendment.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -112,6 +113,9 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
         qcProductAnalysis: {
           updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
+        warehouseProcess: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
       };
 
       mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
@@ -132,7 +136,12 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
       expect(res.success).toBe(true);
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'tx-solar-active', revision: 2 },
+          where: {
+            id: 'tx-solar-active',
+            revision: 2,
+            status: TransactionStatus.PA_NOT_REQUIRED,
+            warehouseStartAt: null,
+          },
           data: expect.objectContaining({
             cargoType: 'Coal',
             cargoSubType: 'Batubara',
@@ -213,6 +222,347 @@ describe('ActiveTransactionAmendmentService (Task 4)', () => {
           mockAdminUser,
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    describe('COR-04: Active Process Supersession and CAS Protection', () => {
+      const waitingDispTx = {
+        id: 'tx-waiting-disp',
+        status: TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION,
+        processType: ProcessType.GSP,
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar',
+        warehouseStartAt: null,
+        revision: 3,
+        productCatalogId: 'cat-solar-1',
+        gspAnalysisProfile: GspAnalysisProfile.PA_EXEMPT,
+        receiptUnit: WarehouseUnit.LITER,
+      };
+
+      const targetCatalog = {
+        id: 'cat-coal-target',
+        code: 'COAL-002',
+        name: 'Batubara Kalori Tinggi',
+        category: 'Coal',
+        subCategory: 'Batubara',
+        processType: ProcessType.GSP,
+        isActive: true,
+        isPaRequired: true,
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        receiptUnit: WarehouseUnit.KG,
+      };
+
+      it('COR04-01: supersedes active uncompleted warehouse process with correction id on amendment from waiting disposition', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...waitingDispTx,
+        });
+        mockPrismaService.productCatalog.findFirst.mockResolvedValueOnce(
+          targetCatalog,
+        );
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          transactionCorrection: {
+            create: jest.fn().mockResolvedValue({ id: 'corr-amend-uuid-1' }),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          qcProductAnalysis: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          warehouseProcess: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        const res = await service.amendActiveProduct(
+          'tx-waiting-disp',
+          {
+            cargoType: 'Coal',
+            cargoSubType: 'Batubara',
+            reason: 'Salah jenis muatan sebelum bongkar',
+            revision: 3,
+          },
+          mockAdminUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.warehouseProcess.updateMany).toHaveBeenCalledTimes(
+          1,
+        );
+        expect(mockTxClient.warehouseProcess.updateMany).toHaveBeenCalledWith({
+          where: {
+            transactionId: 'tx-waiting-disp',
+            isCurrent: true,
+            endAt: null,
+          },
+          data: {
+            isCurrent: false,
+            supersededAt: expect.any(Date),
+            supersededByCorrectionId: 'corr-amend-uuid-1',
+          },
+        });
+      });
+
+      it('COR04-02: succeeds normally when no active uncompleted warehouse process exists (updateMany returns count 0)', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...waitingDispTx,
+        });
+        mockPrismaService.productCatalog.findFirst.mockResolvedValueOnce(
+          targetCatalog,
+        );
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          transactionCorrection: {
+            create: jest.fn().mockResolvedValue({ id: 'corr-amend-uuid-2' }),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          qcProductAnalysis: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          warehouseProcess: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        const res = await service.amendActiveProduct(
+          'tx-waiting-disp',
+          {
+            cargoType: 'Coal',
+            cargoSubType: 'Batubara',
+            reason: 'Salah input sebelum proses bongkar dibuat',
+            revision: 3,
+          },
+          mockAdminUser,
+        );
+
+        expect(res.success).toBe(true);
+        expect(mockTxClient.warehouseProcess.updateMany).toHaveBeenCalledTimes(
+          1,
+        );
+      });
+
+      it('COR04-03: throws ConflictException and halts before correction or supersession on CAS write conflict', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...waitingDispTx,
+        });
+        mockPrismaService.productCatalog.findFirst.mockResolvedValueOnce(
+          targetCatalog,
+        );
+
+        const mockTxClient = {
+          transaction: {
+            // Count 0 signifies concurrent status change or concurrent warehouse start
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          transactionCorrection: {
+            create: jest.fn(),
+          },
+          transactionStatusHistory: {
+            create: jest.fn(),
+          },
+          qcProductAnalysis: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          warehouseProcess: {
+            updateMany: jest.fn(),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        await expect(
+          service.amendActiveProduct(
+            'tx-waiting-disp',
+            {
+              cargoType: 'Coal',
+              cargoSubType: 'Batubara',
+              reason: 'Konflik konkuren',
+              revision: 3,
+            },
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(ConflictException);
+
+        expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: {
+              id: 'tx-waiting-disp',
+              revision: 3,
+              status: TransactionStatus.WAITING_GSP_CHECKLIST_DISPOSITION,
+              warehouseStartAt: null,
+            },
+          }),
+        );
+        expect(
+          mockTxClient.transactionCorrection.create,
+        ).not.toHaveBeenCalled();
+        expect(mockTxClient.warehouseProcess.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('COR04-04: rejects fail-closed if warehouse process supersession throws', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...waitingDispTx,
+        });
+        mockPrismaService.productCatalog.findFirst.mockResolvedValueOnce(
+          targetCatalog,
+        );
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          transactionCorrection: {
+            create: jest.fn().mockResolvedValue({ id: 'corr-amend-uuid-4' }),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          qcProductAnalysis: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          warehouseProcess: {
+            updateMany: jest
+              .fn()
+              .mockRejectedValue(new Error('Supersession DB failure')),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        await expect(
+          service.amendActiveProduct(
+            'tx-waiting-disp',
+            {
+              cargoType: 'Coal',
+              cargoSubType: 'Batubara',
+              reason: 'Uji supersesi gagal',
+              revision: 3,
+            },
+            mockAdminUser,
+          ),
+        ).rejects.toThrow('Supersession DB failure');
+      });
+
+      it('COR04-05: guards reject amendment before entering transaction when warehouse process already started', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...waitingDispTx,
+          warehouseStartAt: new Date(),
+        });
+
+        await expect(
+          service.amendActiveProduct(
+            'tx-waiting-disp',
+            {
+              cargoType: 'Coal',
+              cargoSubType: 'Batubara',
+              reason: 'Pembongkaran sudah dimulai',
+              revision: 3,
+            },
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
+
+      it('COR04-06: history preservation: supersession payload strictly omits checklist, endAt, and evidence modifications', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...waitingDispTx,
+        });
+        mockPrismaService.productCatalog.findFirst.mockResolvedValueOnce(
+          targetCatalog,
+        );
+
+        const mockTxClient = {
+          transaction: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+          transactionCorrection: {
+            create: jest
+              .fn()
+              .mockResolvedValue({ id: 'corr-amend-preserve-1' }),
+          },
+          transactionStatusHistory: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          qcProductAnalysis: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          warehouseProcess: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          },
+        };
+
+        mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
+          cb(mockTxClient),
+        );
+
+        await service.amendActiveProduct(
+          'tx-waiting-disp',
+          {
+            cargoType: 'Coal',
+            cargoSubType: 'Batubara',
+            reason: 'Verifikasi preservasi histori',
+            revision: 3,
+          },
+          mockAdminUser,
+        );
+
+        const updateCall =
+          mockTxClient.warehouseProcess.updateMany.mock.calls[0][0];
+        expect(updateCall.data).toEqual({
+          isCurrent: false,
+          supersededAt: expect.any(Date),
+          supersededByCorrectionId: 'corr-amend-preserve-1',
+        });
+        expect(updateCall.data.checklistItems).toBeUndefined();
+        expect(updateCall.data.endAt).toBeUndefined();
+        expect(updateCall.data.actualWeight).toBeUndefined();
+        expect(updateCall.data.actualQuantity).toBeUndefined();
+        expect(updateCall.data.receivedQuantity).toBeUndefined();
+      });
+
+      it('COR04-08: rejects with ConflictException before entering transaction when dto.revision mismatches snapshot tx.revision', async () => {
+        mockPrismaService.transaction.findUnique.mockResolvedValueOnce({
+          ...waitingDispTx,
+          revision: 4, // snapshot is at rev 4
+        });
+
+        await expect(
+          service.amendActiveProduct(
+            'tx-waiting-disp',
+            {
+              cargoType: 'Coal',
+              cargoSubType: 'Batubara',
+              reason: 'Percobaan revisi kedaluwarsa',
+              revision: 3, // dto is stale at rev 3
+            },
+            mockAdminUser,
+          ),
+        ).rejects.toThrow(ConflictException);
+
+        expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      });
     });
   });
 

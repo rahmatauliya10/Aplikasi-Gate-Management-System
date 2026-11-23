@@ -18,6 +18,7 @@ import {
   createPaSpecSnapshot,
   evaluatePaParameters,
   fingerprintStableJson,
+  normalizeLegacyPaParameters,
   patchPaParameters,
   resolvePaProfile,
 } from '../qc/pa-correction-evaluation';
@@ -1058,14 +1059,18 @@ export class OperationLogCorrectionService {
     }
     assertSafeJsonValue(patch, 'parameters');
     const analysisProfile = resolvePaProfile(rec, tx);
-    const parameters = patchPaParameters(
+    const normalizedOriginal = normalizeLegacyPaParameters(
+      analysisProfile,
       rec.parameters,
+    );
+    const parameters = patchPaParameters(
+      normalizedOriginal,
       patch,
       analysisProfile,
     );
     if (
       fingerprintStableJson(parameters) ===
-      fingerprintStableJson(rec.parameters)
+      fingerprintStableJson(normalizedOriginal)
     ) {
       throw new BadRequestException(
         'Tidak ada perubahan parameter PA (No-Op).',
@@ -2576,6 +2581,7 @@ export class OperationLogCorrectionService {
         // For GSP commodities:
         if (processType === 'GSP') {
           const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+            productCatalogId: tx.productCatalogId,
             processType: tx.processType,
             cargoType: tx.cargoType,
             cargoSubType: tx.cargoSubType,

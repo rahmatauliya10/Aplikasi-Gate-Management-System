@@ -465,4 +465,110 @@ describe('Admin PA operation log correction', () => {
     await expect(save(preview)).rejects.toThrow(ConflictException);
     expect(db.qcProductAnalysis.create).not.toHaveBeenCalled();
   });
+
+  describe('COR-06: Legacy String Numeric Compatibility & No-Op Verification (Mock Prisma Flow)', () => {
+    it('successfully previews and saves sensory correction on legacy record with string numeric parameters (e.g. density: "1,17")', async () => {
+      tx.qcProductAnalyses[0].parameters = {
+        ph: '4,5',
+        density: '1,17',
+        sensory: {
+          visual: 'Kuning keruh',
+          foreignMatters: 'Tidak ada kontaminasi',
+          packagingLabel: 'Kemasan & label tidak rusak',
+        },
+        retained: { lab: 'legacy' },
+      };
+
+      const req = request({
+        parameters: {
+          sensory: {
+            visual: 'Kuning',
+          },
+        },
+      });
+
+      const preview = await service.previewPaCorrection('tx-1', req, admin);
+      expect(preview.result).toBe('PASS');
+      expect(preview.status).toBe('RELEASE');
+      expect(preview.parameters.density).toBe(1.17);
+      expect(preview.parameters.ph).toBe(4.5);
+      expect(preview.parameters.sensory.visual).toBe('Kuning');
+
+      await save(preview, {
+        newValue: { sensory: { visual: 'Kuning' } },
+      });
+
+      const createdData = db.qcProductAnalysis.create.mock.calls[0][0].data;
+      expect(createdData.parameters.density).toBe(1.17);
+      expect(createdData.parameters.ph).toBe(4.5);
+      expect(createdData.parameters.sensory.visual).toBe('Kuning');
+      expect(tx.qcProductAnalyses[0].parameters.density).toBe('1,17');
+    });
+
+    it('strictly rejects dummy patch as No-Op when parameters have no factual change despite string-to-number normalization', async () => {
+      tx.qcProductAnalyses[0].parameters = {
+        ph: '4,5',
+        density: '1,17',
+        sensory: {
+          visual: 'Kuning',
+          foreignMatters: 'Tidak ada kontaminasi',
+          packagingLabel: 'Kemasan & label tidak rusak',
+        },
+      };
+
+      const dummyPatchReq = request({
+        parameters: {
+          sensory: {
+            visual: 'Kuning',
+          },
+        },
+      });
+
+      await expect(
+        service.previewPaCorrection('tx-1', dummyPatchReq, admin),
+      ).rejects.toThrow(/No-Op/);
+      noWrites();
+    });
+
+    it('COR-06: successfully previews and saves sensory correction on legacy record containing aluminaContent: "" without blocking', async () => {
+      tx.qcProductAnalyses[0].parameters = {
+        ph: '4,5',
+        density: '1,17',
+        aluminaContent: '',
+        sensory: {
+          visual: 'Kuning keruh',
+          foreignMatters: 'Tidak ada kontaminasi',
+          packagingLabel: 'Kemasan & label tidak rusak',
+        },
+      };
+
+      const req = request({
+        parameters: {
+          sensory: {
+            visual: 'Kuning',
+          },
+        },
+      });
+
+      const preview = await service.previewPaCorrection('tx-1', req, admin);
+      expect(preview.result).toBe('PASS');
+      expect(preview.status).toBe('RELEASE');
+      expect(preview.parameters.density).toBe(1.17);
+      expect(preview.parameters.ph).toBe(4.5);
+      expect(preview.parameters.sensory.visual).toBe('Kuning');
+      expect(preview.parameters).not.toHaveProperty('aluminaContent');
+
+      await save(preview, {
+        newValue: { sensory: { visual: 'Kuning' } },
+      });
+
+      const createdData = db.qcProductAnalysis.create.mock.calls[0][0].data;
+      expect(createdData.parameters.density).toBe(1.17);
+      expect(createdData.parameters.ph).toBe(4.5);
+      expect(createdData.parameters.sensory.visual).toBe('Kuning');
+      expect(createdData.parameters).not.toHaveProperty('aluminaContent');
+      // Original database record retained its original parameter representation
+      expect(tx.qcProductAnalyses[0].parameters.aluminaContent).toBe('');
+    });
+  });
 });

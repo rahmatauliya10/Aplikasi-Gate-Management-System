@@ -305,7 +305,11 @@ export function getOperationHistoryFraud(
   const fraudNet = rawFraudNet !== null && rawFraudNet > 0 ? rawFraudNet : null;
   const fraudRoll = asNumber(latestFraud?.warehouseActualWeight);
   const net = fraudNet ?? getNetWeight(tx, quality);
-  const rawRoll = fraudRoll ?? asNumber(tx.actualWeight);
+  const rawWarehouseReceived =
+    asNumber(tx.receivedQuantity) ??
+    asNumber(latestCurrent(tx.warehouseProcesses)?.receivedQuantity);
+  const rawRoll =
+    fraudRoll ?? rawWarehouseReceived ?? asNumber(tx.actualWeight);
   const roll = rawRoll !== null && rawRoll > 0 ? rawRoll : null;
   if (rawRoll !== null && rawRoll <= 0) quality.push('INVALID_WEIGHT');
   if (rawRoll === null) quality.push('MISSING_WEIGHT');

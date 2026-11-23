@@ -1118,7 +1118,7 @@ const triggerStartQc = async (truck) => {
 const showGspPaModal = ref(false);
 const gspTestRound = ref(1);
 
-const openGspPaModal = async (truck, round = 1) => {
+const openGspPaModal = async (truck, round) => {
   if (!truck) return;
 
   // Profile check for PA_EXEMPT (Section 22)
@@ -1133,7 +1133,10 @@ const openGspPaModal = async (truck, round = 1) => {
     return
   }
 
-  gspTestRound.value = round;
+  const determinedRound = round !== undefined && round !== null
+    ? round
+    : (truck.status === 'QC_RETEST_REQUIRED' || truck.gspTestRound === 2 ? 2 : 1);
+  gspTestRound.value = determinedRound;
 
   // Canonical PA start for GSP:
   // Triggered when status is QC_VEHICLE_PENDING (Round 1) or QC_RETEST_REQUIRED (Round 2)
@@ -1190,7 +1193,8 @@ const openQcStage1Modal = async (truck) => {
   if (!truck) return;
   const pType = getProcessType(truck);
   if (pType === 'GSP') {
-    await openGspPaModal(truck, 1);
+    const round = truck.status === 'QC_RETEST_REQUIRED' || truck.gspTestRound === 2 ? 2 : 1;
+    await openGspPaModal(truck, round);
     return;
   }
   const mode = getQcStage1Mode(truck);

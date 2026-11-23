@@ -89,19 +89,177 @@ export class GateService {
 
           // Atomic daily arrival sequence counter for plant day (WIB) - Strictly Fail-Closed
           const plantDay = getPlantDay();
-          let dailySequence: number;
+
+          // 2. Transaction-scoped daily advisory lock to serialize arrival sequence allocation per dateKey
           try {
-            if (!tx.dailyArrivalCounter) {
-              throw new Error(
-                'dailyArrivalCounter repository is unavailable in current Prisma transaction context',
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'gate_arrival_counter_' + plantDay.dateKey}))`;
+          } catch (lockErr: any) {
+            this.logger.error(
+              `Daily arrival advisory lock failed for dateKey ${plantDay.dateKey}: ${lockErr.message}. Aborting fail-closed.`,
+              lockErr.stack,
+            );
+            throw new InternalServerErrorException(
+              'Penguncian nomor urut harian gagal; pendaftaran dibatalkan secara fail-closed.',
+            );
+          }
+
+          if (
+            !tx.dailyArrivalCounter ||
+            typeof tx.dailyArrivalCounter.findUnique !== 'function' ||
+            typeof tx.dailyArrivalCounter.upsert !== 'function' ||
+            !tx.transaction ||
+            typeof tx.transaction.findMany !== 'function'
+          ) {
+            throw new InternalServerErrorException(
+              'Layanan database arrival counter tidak tersedia dalam konteks transaksi.',
+            );
+          }
+
+          let existingCounter: any;
+          try {
+            existingCounter = await tx.dailyArrivalCounter.findUnique({
+              where: { dateKey: plantDay.dateKey },
+            });
+          } catch (err: any) {
+            this.logger.error(
+              `Gagal membaca dailyArrivalCounter untuk ${plantDay.dateKey}: ${err.message}`,
+              err.stack,
+            );
+            throw new InternalServerErrorException(
+              'Gagal memverifikasi counter kedatangan harian secara fail-closed.',
+            );
+          }
+
+          const MAX_INT32 = 2147483647;
+          let counterExisting = 0;
+
+          if (existingCounter !== null && existingCounter !== undefined) {
+            if (
+              typeof existingCounter.lastSeq !== 'number' ||
+              !Number.isInteger(existingCounter.lastSeq) ||
+              existingCounter.lastSeq < 0 ||
+              existingCounter.lastSeq > MAX_INT32
+            ) {
+              throw new InternalServerErrorException(
+                `Nilai counter kedatangan harian di database tidak valid atau rusak (${existingCounter.lastSeq}).`,
               );
             }
-            const arrivalCounter = await tx.dailyArrivalCounter.upsert({
-              where: { dateKey: plantDay.dateKey },
-              create: { dateKey: plantDay.dateKey, lastSeq: 1 },
-              update: { lastSeq: { increment: 1 } },
+            counterExisting = existingCounter.lastSeq;
+          }
+
+          const prefix = `GMS-${plantDay.dateKey}-`;
+          let existingTxs: Array<{
+            transactionNumber: string;
+            dailySequence: number | null;
+          }>;
+          try {
+            existingTxs = await tx.transaction.findMany({
+              where: {
+                transactionNumber: { startsWith: prefix },
+              },
+              select: {
+                transactionNumber: true,
+                dailySequence: true,
+              },
             });
-            dailySequence = arrivalCounter.lastSeq;
+          } catch (err: any) {
+            this.logger.error(
+              `Gagal membaca transaksi existing untuk ${prefix}: ${err.message}`,
+              err.stack,
+            );
+            throw new InternalServerErrorException(
+              'Gagal memeriksa transaksi existing untuk alokasi nomor urut.',
+            );
+          }
+
+          const CANONICAL_TX_REGEX = /^GMS-\d{8}-(\d{4,})$/;
+          let highestExistingSequence = 0;
+
+          for (const rec of existingTxs) {
+            let recDailySeq: number | null = null;
+            if (rec.dailySequence !== null && rec.dailySequence !== undefined) {
+              if (
+                typeof rec.dailySequence !== 'number' ||
+                !Number.isInteger(rec.dailySequence) ||
+                rec.dailySequence < 1 ||
+                rec.dailySequence > MAX_INT32
+              ) {
+                throw new InternalServerErrorException(
+                  `Data dailySequence (${rec.dailySequence}) pada transaksi ${rec.transactionNumber} tidak valid atau melampaui batas penyimpanan.`,
+                );
+              }
+              recDailySeq = rec.dailySequence;
+            }
+
+            let recSuffixSeq: number | null = null;
+            if (typeof rec.transactionNumber === 'string') {
+              const match = rec.transactionNumber.match(CANONICAL_TX_REGEX);
+              if (match && match[1]) {
+                try {
+                  const bigSuffix = BigInt(match[1]);
+                  if (bigSuffix > BigInt(MAX_INT32)) {
+                    throw new InternalServerErrorException(
+                      `Suffix nomor transaksi ${rec.transactionNumber} melampaui batas maksimum integer 32-bit (${MAX_INT32}).`,
+                    );
+                  }
+                  if (bigSuffix < 1n) {
+                    throw new InternalServerErrorException(
+                      `Suffix nomor transaksi ${rec.transactionNumber} tidak boleh kurang dari 1.`,
+                    );
+                  }
+                  recSuffixSeq = Number(bigSuffix);
+                } catch (parseErr: any) {
+                  if (parseErr instanceof InternalServerErrorException) {
+                    throw parseErr;
+                  }
+                  throw new InternalServerErrorException(
+                    `Gagal memproses suffix numerik transaksi ${rec.transactionNumber}: ${parseErr.message}`,
+                  );
+                }
+              }
+              // Non-canonical suffix without dailySequence is ignored according to contract
+            }
+
+            // Reconciliation per transaction row
+            let effectiveSeq: number | null = null;
+            if (recDailySeq !== null && recSuffixSeq !== null) {
+              effectiveSeq =
+                recDailySeq > recSuffixSeq ? recDailySeq : recSuffixSeq;
+            } else if (recDailySeq !== null) {
+              effectiveSeq = recDailySeq;
+            } else if (recSuffixSeq !== null) {
+              effectiveSeq = recSuffixSeq;
+            }
+
+            if (
+              effectiveSeq !== null &&
+              effectiveSeq > highestExistingSequence
+            ) {
+              highestExistingSequence = effectiveSeq;
+            }
+          }
+
+          const baseline =
+            counterExisting > highestExistingSequence
+              ? counterExisting
+              : highestExistingSequence;
+
+          if (baseline >= MAX_INT32) {
+            throw new InternalServerErrorException(
+              `Nomor urut kedatangan harian telah mencapai batas maksimum integer 32-bit (${MAX_INT32}). Alokasi baru ditolak secara fail-closed.`,
+            );
+          }
+
+          const nextSequence = baseline + 1;
+          let dailySequence: number;
+
+          try {
+            await tx.dailyArrivalCounter.upsert({
+              where: { dateKey: plantDay.dateKey },
+              create: { dateKey: plantDay.dateKey, lastSeq: nextSequence },
+              update: { lastSeq: nextSequence },
+            });
+            dailySequence = nextSequence;
           } catch (counterErr: any) {
             this.logger.error(
               `Failed to allocate atomic dailyArrivalCounter for ${plantDay.dateKey}: ${counterErr.message}. Aborting transaction fail-closed.`,

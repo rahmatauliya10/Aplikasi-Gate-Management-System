@@ -1095,6 +1095,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         qcProductAnalysis: {
           updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
+        warehouseProcess: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
         transactionCorrection: {
           create: jest.fn().mockResolvedValue({ id: 'corr-amend-1' }),
         },
@@ -1510,6 +1513,9 @@ describe('GSP 4-Group Comprehensive UAT Protocol (Task 9 Scenarios)', () => {
         },
         qcProductAnalysis: {
           updateMany: jest.fn().mockResolvedValue({ count: 1 }), // Old PA analysis voided
+        },
+        warehouseProcess: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         transactionCorrection: {
           create: jest.fn().mockResolvedValue({ id: 'corr-amend-8' }),

@@ -55,6 +55,12 @@ export class ActiveTransactionAmendmentService {
       throw new NotFoundException('Transaksi tidak ditemukan');
     }
 
+    if (dto.revision !== tx.revision) {
+      throw new ConflictException(
+        'Revisi transaksi tidak sesuai (Stale Revision Conflict). Transaksi telah diperbarui oleh pengguna lain.',
+      );
+    }
+
     if (
       tx.status === TransactionStatus.COMPLETED ||
       tx.status === TransactionStatus.CANCELLED
@@ -258,7 +264,12 @@ export class ActiveTransactionAmendmentService {
       });
 
       const claimed = await prismaTx.transaction.updateMany({
-        where: { id: transactionId, revision: dto.revision },
+        where: {
+          id: transactionId,
+          revision: tx.revision,
+          status: tx.status,
+          warehouseStartAt: null,
+        },
         data: {
           cargoType: authoritativeCargoType,
           cargoSubType: authoritativeCargoSubType,
@@ -282,7 +293,7 @@ export class ActiveTransactionAmendmentService {
         );
       }
 
-      await prismaTx.transactionCorrection.create({
+      const correction = await prismaTx.transactionCorrection.create({
         data: {
           transactionId,
           correctedById: user.id,
@@ -309,6 +320,19 @@ export class ActiveTransactionAmendmentService {
             status: newStatus,
           },
           expectedRevision: dto.revision,
+        },
+      });
+
+      await prismaTx.warehouseProcess.updateMany({
+        where: {
+          transactionId,
+          isCurrent: true,
+          endAt: null,
+        },
+        data: {
+          isCurrent: false,
+          supersededAt: new Date(),
+          supersededByCorrectionId: correction.id,
         },
       });
 

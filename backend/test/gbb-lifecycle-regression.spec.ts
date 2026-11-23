@@ -20,6 +20,7 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
     $transaction: jest.fn((cb) => cb(mockPrismaService)),
     transaction: {
       count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
       create: jest.fn(),
@@ -57,6 +58,7 @@ describe('GBB & GBJ Full Lifecycle Regression Suite (Explicit Isolation)', () =>
       create: jest.fn(),
     },
     dailyArrivalCounter: {
+      findUnique: jest.fn().mockResolvedValue(null),
       upsert: jest
         .fn()
         .mockImplementation(() =>

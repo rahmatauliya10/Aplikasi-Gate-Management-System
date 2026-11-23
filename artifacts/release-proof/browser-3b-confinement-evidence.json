@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-11-18T09:20:03.494Z",
+  "methodology": "Integrasi browser nyata dengan module source aplikasi melalui Vite dan API stub lokal.",
+  "originA": "http://127.0.0.1:58808",
+  "originB": "http://127.0.0.1:58809",
+  "chromeProduct": "Chrome/157.0.8103.79",
+  "suite1_photoValid": {
+    "passed": true,
+    "blobRendered": true,
+    "bearerAttachedToA": true,
+    "originAResponseStatus": 200
+  },
+  "suite2_maliciousUrlRejection": {
+    "passed": true,
+    "payloadsTested": [
+      "/api//127.0.0.1:58809/probe",
+      "//127.0.0.1:58809/probe",
+      "http://127.0.0.1:58809/probe"
+    ],
+    "allPayloadsBlockedByClient": true,
+    "probeRequestsReceivedByB": 0
+  },
+  "suite3_redirectConfinement": {
+    "passed": true,
+    "requestDispatchedToA": true,
+    "bearerTokenAttachedToA": true,
+    "originAResponseStatus": 302,
+    "originARedirectLocation": "http://127.0.0.1:58809/untrusted-receiver",
+    "redirectRequestsReceivedByB": 1,
+    "authorizationHeaderDetectedOnB": false,
+    "syntheticTokenDetectedOnB": false,
+    "browserClientStatus": "followed_200"
+  }
+}

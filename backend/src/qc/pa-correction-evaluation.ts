@@ -357,6 +357,151 @@ function chemicalSensoryFailures(raw: JsonObject, rules: JsonObject): string[] {
   return failures;
 }
 
+export function parseLegacyNumericParameter(
+  value: unknown,
+  fieldName: string,
+): number {
+  if (value === null || value === undefined) {
+    bad(
+      `Parameter '${fieldName}' wajib diisi dan harus berupa angka numerik finite valid.`,
+    );
+  }
+  if (typeof value === 'boolean') {
+    bad(
+      `Parameter '${fieldName}' tidak boleh bertipe boolean. Nilai harus berupa angka numerik finite valid.`,
+    );
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Number.isNaN(value)) {
+      bad(`Parameter '${fieldName}' harus berupa angka numerik finite valid.`);
+    }
+    return value;
+  }
+  if (typeof value !== 'string') {
+    bad(`Parameter '${fieldName}' tidak valid (tipe data ${typeof value}).`);
+  }
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    bad(`Parameter '${fieldName}' tidak boleh kosong.`);
+  }
+  if (/^[+-]?infinity$/i.test(trimmed) || trimmed.toLowerCase() === 'nan') {
+    bad(`Parameter '${fieldName}' tidak valid (non-finite atau NaN).`);
+  }
+  let normalizedStr = trimmed;
+  if (trimmed.includes(',') && !trimmed.includes('.')) {
+    const commaCount = (trimmed.match(/,/g) || []).length;
+    if (commaCount === 1) {
+      normalizedStr = trimmed.replace(',', '.');
+    }
+  }
+  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalizedStr)) {
+    bad(
+      `Parameter '${fieldName}' tidak valid ('${value}'). Format harus berupa angka desimal standar.`,
+    );
+  }
+  const num = Number(normalizedStr);
+  if (!Number.isFinite(num) || Number.isNaN(num)) {
+    bad(`Parameter '${fieldName}' harus berupa angka numerik finite valid.`);
+  }
+  return num;
+}
+
+export function normalizeLegacyPaParameters(
+  profile: PaProfile,
+  parameters: unknown,
+): JsonObject {
+  const current = structuredClone(object(parameters, 'parameters'));
+  if (profile === 'COAL_PA') {
+    if (present(current.moisture)) {
+      current.moisture = parseLegacyNumericParameter(
+        current.moisture,
+        'moisture',
+      );
+    }
+    if (present(current.totalMoisture)) {
+      current.totalMoisture = parseLegacyNumericParameter(
+        current.totalMoisture,
+        'totalMoisture',
+      );
+    }
+    if (present(current.moisture) && present(current.totalMoisture)) {
+      if (current.moisture !== current.totalMoisture) {
+        bad(
+          'Parameter alias moisture, totalMoisture memiliki nilai yang konflik.',
+        );
+      }
+    }
+  } else if (profile === 'PAC_PA') {
+    if (present(current.ph)) {
+      current.ph = parseLegacyNumericParameter(current.ph, 'ph');
+    }
+    if (present(current.density)) {
+      current.density = parseLegacyNumericParameter(current.density, 'density');
+    }
+    if (current.aluminaContent != null) {
+      if (
+        typeof current.aluminaContent === 'string' &&
+        current.aluminaContent.trim() === ''
+      ) {
+        delete current.aluminaContent;
+      } else {
+        current.aluminaContent = parseLegacyNumericParameter(
+          current.aluminaContent,
+          'aluminaContent',
+        );
+      }
+    } else {
+      delete current.aluminaContent;
+    }
+  } else if (profile === 'RAPID_KLEN_PA') {
+    if (present(current.alkalinityNa2O)) {
+      current.alkalinityNa2O = parseLegacyNumericParameter(
+        current.alkalinityNa2O,
+        'alkalinityNa2O',
+      );
+    }
+    if (present(current.alkalinityNa2o)) {
+      current.alkalinityNa2o = parseLegacyNumericParameter(
+        current.alkalinityNa2o,
+        'alkalinityNa2o',
+      );
+    }
+    if (present(current.alkalinityNa2O) && present(current.alkalinityNa2o)) {
+      if (current.alkalinityNa2O !== current.alkalinityNa2o) {
+        bad(
+          'Parameter alias alkalinityNa2O, alkalinityNa2o memiliki nilai yang konflik.',
+        );
+      }
+    }
+    if (present(current.alkalinityNaOH)) {
+      current.alkalinityNaOH = parseLegacyNumericParameter(
+        current.alkalinityNaOH,
+        'alkalinityNaOH',
+      );
+    }
+    if (present(current.alkalinityNaoh)) {
+      current.alkalinityNaoh = parseLegacyNumericParameter(
+        current.alkalinityNaoh,
+        'alkalinityNaoh',
+      );
+    }
+    if (present(current.alkalinityNaOH) && present(current.alkalinityNaoh)) {
+      if (current.alkalinityNaOH !== current.alkalinityNaoh) {
+        bad(
+          'Parameter alias alkalinityNaOH, alkalinityNaoh memiliki nilai yang konflik.',
+        );
+      }
+    }
+    if (present(current.ph)) {
+      current.ph = parseLegacyNumericParameter(current.ph, 'ph');
+    }
+    if (present(current.density)) {
+      current.density = parseLegacyNumericParameter(current.density, 'density');
+    }
+  }
+  return current;
+}
+
 /** Uses only frozen snapshot rules; current constants are not consulted. */
 export function evaluatePaParameters(
   profile: PaProfile,
@@ -444,7 +589,7 @@ export function patchPaParameters(
   patch: unknown,
   profile: PaProfile,
 ): JsonObject {
-  const current = structuredClone(object(parameters, 'parameters'));
+  const current = normalizeLegacyPaParameters(profile, parameters);
   const changes = object(patch, 'parameter patch');
   const allowed =
     profile === 'COAL_PA'

@@ -133,6 +133,95 @@ export function parseStrictFiniteNumber(
   return num;
 }
 
+/**
+ * Strictly parses and validates Coal total moisture parameter.
+ * Preserves the exact existing strict decimal grammar (no comma allowed).
+ */
+export function parseCoalMoistureValue(
+  val: unknown,
+  fieldName = 'total moisture',
+): number {
+  if (val === undefined || val === null) {
+    throw new BadRequestException({
+      message:
+        'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  if (typeof val === 'boolean') {
+    throw new BadRequestException({
+      message:
+        'Kadar air (total moisture) batubara tidak boleh bertipe boolean. Nilai harus berupa angka finite antara 0% dan 100%.',
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  if (typeof val !== 'number' && typeof val !== 'string') {
+    throw new BadRequestException({
+      message:
+        'Kadar air (total moisture) batubara tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.',
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  let parsed: number;
+
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val) || Number.isNaN(val)) {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+    parsed = val;
+  } else {
+    const trimmed = val.trim();
+    if (trimmed === '') {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+    if (/^[+-]?infinity$/i.test(trimmed) || trimmed.toLowerCase() === 'nan') {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+
+    // Reject comma, hex ("0x..."), octal ("0o..."), binary ("0b..."), scientific notation ("1e2"), and any non-decimal representations
+    if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
+      throw new BadRequestException({
+        message: `Kadar air (total moisture) batubara ('${val}') tidak valid. Format harus berupa angka desimal standar (tidak mendukung notasi ilmiah/eksponensial atau heksadesimal).`,
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+
+    const num = Number(trimmed);
+    if (!Number.isFinite(num) || Number.isNaN(num)) {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite, NaN, atau overflow).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+    parsed = num;
+  }
+
+  if (parsed < 0 || parsed > 100) {
+    throw new BadRequestException({
+      message: `Kadar air (total moisture) batubara (${val}) tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.`,
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  return parsed;
+}
+
 @Injectable()
 export class QcProductAnalysisService {
   private readonly logger = new Logger(QcProductAnalysisService.name);
@@ -307,21 +396,32 @@ export class QcProductAnalysisService {
 
     this.authorizationScopeService.assertProcessAccess(user, tx.processType);
 
-    // Exempt products (Solar) must never undergo lab PA analysis
-    const isExempt = isProductPaExempt(tx.productCatalog, {
-      processType: tx.processType,
-      cargoType: tx.cargoType,
-      cargoSubType: tx.cargoSubType,
-    });
-    // Exempt products (Solar) must never undergo lab PA analysis (Section 23)
-    if (
+    // Authoritative check on transaction's snapshot profile:
+    // If the transaction snapshot profile is explicitly PA_EXEMPT or status is PA_NOT_REQUIRED, reject lab PA.
+    // In-flight transactions that already hold a non-exempt profile must not be blocked
+    // by subsequent administrative changes to the master product catalog.
+    const isSnapshotExempt =
       tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT ||
-      tx.status === TransactionStatus.PA_NOT_REQUIRED ||
-      isExempt
-    ) {
+      tx.status === TransactionStatus.PA_NOT_REQUIRED;
+
+    if (isSnapshotExempt) {
       throw new BadRequestException(
         `Produk ini (${tx.cargoSubType || 'Solar'}) berizin bypass PA. Analisis PA tidak diperlukan.`,
       );
+    }
+
+    if (!tx.gspAnalysisProfile) {
+      const isExempt = isProductPaExempt(tx.productCatalog, {
+        productCatalogId: tx.productCatalogId,
+        processType: tx.processType,
+        cargoType: tx.cargoType,
+        cargoSubType: tx.cargoSubType,
+      });
+      if (isExempt) {
+        throw new BadRequestException(
+          `Produk ini (${tx.cargoSubType || 'Solar'}) berizin bypass PA. Analisis PA tidak diperlukan.`,
+        );
+      }
     }
 
     // ─── 1. Authoritative Product Identity ───
@@ -525,6 +625,7 @@ export class QcProductAnalysisService {
     }
 
     const rawParams = (dto.parameters || {}) as any;
+    let sanitizedParameters: Record<string, any> = { ...rawParams };
 
     if (targetProfile === GspAnalysisProfile.COAL_PA) {
       const coalSpecMeta = this.specProvider.getCoalSpec();
@@ -546,8 +647,13 @@ export class QcProductAnalysisService {
               }
             : undefined;
 
-      const rawMoistureVal = rawParams.moisture ?? rawParams.totalMoisture;
-      if (rawMoistureVal === undefined || rawMoistureVal === null) {
+      const hasMoisture =
+        rawParams.moisture !== undefined && rawParams.moisture !== null;
+      const hasTotalMoisture =
+        rawParams.totalMoisture !== undefined &&
+        rawParams.totalMoisture !== null;
+
+      if (!hasMoisture && !hasTotalMoisture) {
         throw new BadRequestException({
           message:
             'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
@@ -555,80 +661,27 @@ export class QcProductAnalysisService {
         });
       }
 
-      if (typeof rawMoistureVal === 'boolean') {
-        throw new BadRequestException({
-          message:
-            'Kadar air (total moisture) batubara tidak boleh bertipe boolean. Nilai harus berupa angka finite antara 0% dan 100%.',
-          error: 'INVALID_MOISTURE_MEASUREMENT',
-        });
-      }
-
-      if (
-        typeof rawMoistureVal !== 'number' &&
-        typeof rawMoistureVal !== 'string'
-      ) {
-        throw new BadRequestException({
-          message:
-            'Kadar air (total moisture) batubara tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.',
-          error: 'INVALID_MOISTURE_MEASUREMENT',
-        });
-      }
-
       let parsedMoisture: number;
-
-      if (typeof rawMoistureVal === 'number') {
-        if (!Number.isFinite(rawMoistureVal) || Number.isNaN(rawMoistureVal)) {
+      if (hasMoisture && hasTotalMoisture) {
+        const m1 = parseCoalMoistureValue(rawParams.moisture, 'moisture');
+        const m2 = parseCoalMoistureValue(
+          rawParams.totalMoisture,
+          'totalMoisture',
+        );
+        if (m1 !== m2) {
           throw new BadRequestException({
-            message:
-              'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
+            message: `Konflik nilai parameter kadar air batubara: moisture (${rawParams.moisture}) dan totalMoisture (${rawParams.totalMoisture}) memiliki nilai yang berbeda.`,
             error: 'INVALID_MOISTURE_MEASUREMENT',
           });
         }
-        parsedMoisture = rawMoistureVal;
+        parsedMoisture = m1;
+      } else if (hasMoisture) {
+        parsedMoisture = parseCoalMoistureValue(rawParams.moisture, 'moisture');
       } else {
-        const trimmed = rawMoistureVal.trim();
-        if (trimmed === '') {
-          throw new BadRequestException({
-            message:
-              'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
-            error: 'INVALID_MOISTURE_MEASUREMENT',
-          });
-        }
-        if (
-          /^[+-]?infinity$/i.test(trimmed) ||
-          trimmed.toLowerCase() === 'nan'
-        ) {
-          throw new BadRequestException({
-            message:
-              'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
-            error: 'INVALID_MOISTURE_MEASUREMENT',
-          });
-        }
-
-        // Reject hex ("0x..."), octal ("0o..."), binary ("0b..."), scientific notation ("1e2"), and any non-decimal representations
-        if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
-          throw new BadRequestException({
-            message: `Kadar air (total moisture) batubara ('${rawMoistureVal}') tidak valid. Format harus berupa angka desimal standar (tidak mendukung notasi ilmiah/eksponensial atau heksadesimal).`,
-            error: 'INVALID_MOISTURE_MEASUREMENT',
-          });
-        }
-
-        const num = Number(trimmed);
-        if (!Number.isFinite(num) || Number.isNaN(num)) {
-          throw new BadRequestException({
-            message:
-              'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite, NaN, atau overflow).',
-            error: 'INVALID_MOISTURE_MEASUREMENT',
-          });
-        }
-        parsedMoisture = num;
-      }
-
-      if (parsedMoisture < 0 || parsedMoisture > 100) {
-        throw new BadRequestException({
-          message: `Kadar air (total moisture) batubara (${rawMoistureVal}) tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.`,
-          error: 'INVALID_MOISTURE_MEASUREMENT',
-        });
+        parsedMoisture = parseCoalMoistureValue(
+          rawParams.totalMoisture,
+          'totalMoisture',
+        );
       }
 
       evalResult = evaluateCoalAnalysis(
@@ -642,15 +695,26 @@ export class QcProductAnalysisService {
         },
         coalSpecMeta,
       );
+
+      sanitizedParameters = {
+        ...rawParams,
+        totalMoisture: parsedMoisture,
+        ...(rawParams.moisture !== undefined
+          ? { moisture: parsedMoisture }
+          : {}),
+      };
     } else if (targetProfile === GspAnalysisProfile.PAC_PA) {
       const pacSpecMeta = this.specProvider.getPacSpec();
 
       const ph = parseStrictFiniteNumber(rawParams.ph, 'ph');
       const density = parseStrictFiniteNumber(rawParams.density, 'density');
-      const aluminaContent =
-        rawParams.aluminaContent != null && rawParams.aluminaContent !== ''
-          ? parseStrictFiniteNumber(rawParams.aluminaContent, 'aluminaContent')
-          : undefined;
+      const hasAlumina =
+        rawParams.aluminaContent != null &&
+        (typeof rawParams.aluminaContent !== 'string' ||
+          rawParams.aluminaContent.trim() !== '');
+      const aluminaContent = hasAlumina
+        ? parseStrictFiniteNumber(rawParams.aluminaContent, 'aluminaContent')
+        : undefined;
 
       evalResult = evaluatePacAnalysis(
         {
@@ -666,17 +730,80 @@ export class QcProductAnalysisService {
         authoritativeProductName,
         pacSpecMeta,
       );
+
+      sanitizedParameters = {
+        ...rawParams,
+        ph,
+        density,
+      };
+      if (aluminaContent !== undefined) {
+        sanitizedParameters.aluminaContent = aluminaContent;
+      } else {
+        delete sanitizedParameters.aluminaContent;
+      }
     } else if (targetProfile === GspAnalysisProfile.RAPID_KLEN_PA) {
       const rkSpecMeta = this.specProvider.getRapidKlenSpec();
 
-      const alkalinityNa2O = parseStrictFiniteNumber(
-        rawParams.alkalinityNa2O ?? rawParams.alkalinityNa2o,
-        'alkalinityNa2O',
-      );
-      const alkalinityNaOH = parseStrictFiniteNumber(
-        rawParams.alkalinityNaOH ?? rawParams.alkalinityNaoh,
-        'alkalinityNaOH',
-      );
+      let alkalinityNa2O: number;
+      const hasNa2O =
+        rawParams.alkalinityNa2O !== undefined &&
+        rawParams.alkalinityNa2O !== null;
+      const hasNa2o =
+        rawParams.alkalinityNa2o !== undefined &&
+        rawParams.alkalinityNa2o !== null;
+
+      if (hasNa2O && hasNa2o) {
+        const val1 = parseStrictFiniteNumber(
+          rawParams.alkalinityNa2O,
+          'alkalinityNa2O',
+        );
+        const val2 = parseStrictFiniteNumber(
+          rawParams.alkalinityNa2o,
+          'alkalinityNa2o',
+        );
+        if (val1 !== val2) {
+          throw new BadRequestException(
+            `Konflik nilai parameter Rapid Klen: alkalinityNa2O (${rawParams.alkalinityNa2O}) dan alkalinityNa2o (${rawParams.alkalinityNa2o}) memiliki nilai yang berbeda.`,
+          );
+        }
+        alkalinityNa2O = val1;
+      } else {
+        alkalinityNa2O = parseStrictFiniteNumber(
+          rawParams.alkalinityNa2O ?? rawParams.alkalinityNa2o,
+          'alkalinityNa2O',
+        );
+      }
+
+      let alkalinityNaOH: number;
+      const hasNaOH =
+        rawParams.alkalinityNaOH !== undefined &&
+        rawParams.alkalinityNaOH !== null;
+      const hasNaoh =
+        rawParams.alkalinityNaoh !== undefined &&
+        rawParams.alkalinityNaoh !== null;
+
+      if (hasNaOH && hasNaoh) {
+        const val1 = parseStrictFiniteNumber(
+          rawParams.alkalinityNaOH,
+          'alkalinityNaOH',
+        );
+        const val2 = parseStrictFiniteNumber(
+          rawParams.alkalinityNaoh,
+          'alkalinityNaoh',
+        );
+        if (val1 !== val2) {
+          throw new BadRequestException(
+            `Konflik nilai parameter Rapid Klen: alkalinityNaOH (${rawParams.alkalinityNaOH}) dan alkalinityNaoh (${rawParams.alkalinityNaoh}) memiliki nilai yang berbeda.`,
+          );
+        }
+        alkalinityNaOH = val1;
+      } else {
+        alkalinityNaOH = parseStrictFiniteNumber(
+          rawParams.alkalinityNaOH ?? rawParams.alkalinityNaoh,
+          'alkalinityNaOH',
+        );
+      }
+
       const ph = parseStrictFiniteNumber(rawParams.ph, 'ph');
       const density = parseStrictFiniteNumber(rawParams.density, 'density');
 
@@ -695,6 +822,20 @@ export class QcProductAnalysisService {
         authoritativeProductName,
         rkSpecMeta,
       );
+
+      sanitizedParameters = {
+        ...rawParams,
+        alkalinityNa2O,
+        alkalinityNaOH,
+        ph,
+        density,
+        ...(rawParams.alkalinityNa2o !== undefined
+          ? { alkalinityNa2o: alkalinityNa2O }
+          : {}),
+        ...(rawParams.alkalinityNaoh !== undefined
+          ? { alkalinityNaoh: alkalinityNaOH }
+          : {}),
+      };
     } else {
       // Fallback: Unverified product specification
       evalResult = {
@@ -840,7 +981,7 @@ export class QcProductAnalysisService {
           testRound: authoritativeTestRound,
           productCategory: authoritativeProductCategory,
           productName: authoritativeProductName,
-          parameters: dto.parameters as any,
+          parameters: sanitizedParameters as any,
           result: serverQcResult,
           status: authoritativeDecision,
           testedById: user.id,

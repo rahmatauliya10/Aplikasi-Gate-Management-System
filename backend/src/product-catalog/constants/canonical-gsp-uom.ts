@@ -15,6 +15,15 @@ export function assertCanonicalGspUomMapping(
   code: string,
   receiptUnit: WarehouseUnit,
 ): void {
+  // GSP products must strictly use KG or LITER
+  if (receiptUnit !== WarehouseUnit.KG && receiptUnit !== WarehouseUnit.LITER) {
+    throw new BadRequestException({
+      success: false,
+      message: `Satuan penerimaan GSP '${receiptUnit}' tidak valid. Produk GSP hanya diizinkan menggunakan satuan KG atau LITER.`,
+      errors: ['INVALID_GSP_RECEIPT_UNIT'],
+    });
+  }
+
   const expected = CANONICAL_GSP_RECEIPT_UNITS[code.trim().toUpperCase()];
   if (expected && expected !== receiptUnit) {
     throw new BadRequestException({

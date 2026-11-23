@@ -9,6 +9,7 @@ import {
 import {
   QcProductAnalysisService,
   parseStrictFiniteNumber,
+  parseCoalMoistureValue,
 } from './qc-product-analysis.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
@@ -2796,6 +2797,493 @@ describe('QcProductAnalysisService (Task 5 & Spec Rev 2.1)', () => {
       expect(() => parseStrictFiniteNumber(undefined, 'val')).toThrow(
         BadRequestException,
       );
+    });
+    it('parseCoalMoistureValue strictly parses decimals and rejects invalid/comma representations', () => {
+      expect(parseCoalMoistureValue(20.5)).toBe(20.5);
+      expect(parseCoalMoistureValue('20.5')).toBe(20.5);
+      expect(parseCoalMoistureValue('0')).toBe(0);
+      expect(parseCoalMoistureValue(100)).toBe(100);
+
+      // Rejects comma, boolean, non-numeric, overflow, non-finite
+      expect(() => parseCoalMoistureValue('20,5')).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue(true)).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue(false)).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue(null)).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue(undefined)).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseCoalMoistureValue('')).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue('NaN')).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue('Infinity')).toThrow(
+        BadRequestException,
+      );
+      expect(() => parseCoalMoistureValue('0x20')).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue(105)).toThrow(BadRequestException);
+      expect(() => parseCoalMoistureValue(-1)).toThrow(BadRequestException);
+    });
+  });
+
+  describe('COR-06: Sanitized Canonical Number Persistence on qcProductAnalysis.create', () => {
+    it('persists canonical numbers in qcProductAnalysis.create parameters when string inputs are submitted for PAC', async () => {
+      const pacTx = {
+        id: 'tx-pac-cor06',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        productCatalogId: 'PAC-001',
+        productCatalog: {
+          id: 'PAC-001',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          category: 'Chemical UTL',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+          isPaRequired: true,
+        },
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-pac-cor06', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitProductAnalysis(
+        'tx-pac-cor06',
+        {
+          productCategory: 'Chemical UTL',
+          productName: 'PAC 280 AC',
+          parameters: {
+            sensory: {
+              visual: 'Kuning',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
+            },
+            ph: '4,20' as any,
+            density: '1,210' as any,
+          },
+          result: QcResult.PASS,
+          decision: AnalysisDecision.RELEASE,
+          revision: 2,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      expect(mockTxClient.qcProductAnalysis.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            parameters: expect.objectContaining({
+              ph: 4.2,
+              density: 1.21,
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('omits aluminaContent completely from persisted parameters when submitted as empty string for PAC', async () => {
+      const pacTx = {
+        id: 'tx-pac-alumina-empty',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        productCatalogId: 'PAC-001',
+        productCatalog: {
+          id: 'PAC-001',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          category: 'Chemical UTL',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+          isPaRequired: true,
+        },
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-pac-empty-al', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitProductAnalysis(
+        'tx-pac-alumina-empty',
+        {
+          productCategory: 'Chemical UTL',
+          productName: 'PAC 280 AC',
+          parameters: {
+            sensory: {
+              visual: 'Kuning',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
+            },
+            ph: '4,20' as any,
+            density: '1,210' as any,
+            aluminaContent: '' as any,
+          },
+          result: QcResult.PASS,
+          decision: AnalysisDecision.RELEASE,
+          revision: 2,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      const createdData =
+        mockTxClient.qcProductAnalysis.create.mock.calls[0][0].data;
+      expect(createdData.parameters).not.toHaveProperty('aluminaContent');
+      expect(createdData.parameters.ph).toBe(4.2);
+      expect(createdData.parameters.density).toBe(1.21);
+    });
+
+    it('persists canonical numeric aluminaContent when valid numeric string is passed for PAC', async () => {
+      const pacTx = {
+        id: 'tx-pac-alumina-val',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'PAC 280 AC',
+        productCatalogId: 'PAC-001',
+        productCatalog: {
+          id: 'PAC-001',
+          code: 'PAC-001',
+          name: 'PAC 280 AC',
+          category: 'Chemical UTL',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+          isPaRequired: true,
+        },
+        gspAnalysisProfile: GspAnalysisProfile.PAC_PA,
+        revision: 2,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(pacTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-pac-val-al', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitProductAnalysis(
+        'tx-pac-alumina-val',
+        {
+          productCategory: 'Chemical UTL',
+          productName: 'PAC 280 AC',
+          parameters: {
+            sensory: {
+              visual: 'Kuning',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
+            },
+            ph: '4.2',
+            density: '1.21',
+            aluminaContent: '29,50' as any,
+          },
+          result: QcResult.PASS,
+          decision: AnalysisDecision.RELEASE,
+          revision: 2,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      const createdData =
+        mockTxClient.qcProductAnalysis.create.mock.calls[0][0].data;
+      expect(createdData.parameters.aluminaContent).toBe(29.5);
+    });
+
+    it('rejects Coal write with conflicting moisture and totalMoisture aliases before DB mutation', async () => {
+      const coalTx = {
+        id: 'tx-coal-conflict',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'BATUBARA',
+        cargoSubType: 'BATUBARA',
+        productCatalogId: 'COAL-001',
+        productCatalog: {
+          id: 'COAL-001',
+          code: 'COAL-001',
+          name: 'BATUBARA GAR 4200',
+          category: 'BATUBARA',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+          isPaRequired: true,
+        },
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        revision: 1,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-coal-conflict',
+          {
+            productCategory: 'BATUBARA',
+            productName: 'BATUBARA GAR 4200',
+            parameters: {
+              calorieBand: 'GAR 4200',
+              moisture: 20 as any,
+              totalMoisture: '99' as any,
+              sensoryPassed: true,
+              visualPassed: true,
+            },
+            revision: 1,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('accepts Coal write when moisture and totalMoisture have identical numeric values', async () => {
+      const coalTx = {
+        id: 'tx-coal-match',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'BATUBARA',
+        cargoSubType: 'BATUBARA',
+        productCatalogId: 'COAL-001',
+        productCatalog: {
+          id: 'COAL-001',
+          code: 'COAL-001',
+          name: 'BATUBARA GAR 4200',
+          category: 'BATUBARA',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+          isPaRequired: true,
+        },
+        gspAnalysisProfile: GspAnalysisProfile.COAL_PA,
+        revision: 1,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(coalTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-coal-match', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+      jest
+        .spyOn(specProvider, 'getCoalSpec')
+        .mockReturnValue(TEST_FIXTURE_COAL_SPEC_METADATA);
+      jest.spyOn(specProvider, 'isTestFixtureActive').mockReturnValue(true);
+
+      const res = await service.submitProductAnalysis(
+        'tx-coal-match',
+        {
+          productCategory: 'BATUBARA',
+          productName: 'BATUBARA GAR 4200',
+          parameters: {
+            calorieBand: 'COAL_5600_6000',
+            visual: validCoalVisual,
+            moisture: '20.5' as any,
+            totalMoisture: 20.5,
+          },
+          result: QcResult.PASS,
+          decision: AnalysisDecision.RELEASE,
+          revision: 1,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      const createdData =
+        mockTxClient.qcProductAnalysis.create.mock.calls[0][0].data;
+      expect(createdData.parameters.totalMoisture).toBe(20.5);
+      expect(createdData.parameters.moisture).toBe(20.5);
+    });
+
+    it('rejects Rapid Klen write with conflicting alkalinity aliases before DB mutation', async () => {
+      const rkTx = {
+        id: 'tx-rk-conflict',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'RAPID KLEN',
+        productCatalogId: 'RK-001',
+        productCatalog: {
+          id: 'RK-001',
+          code: 'RK-001',
+          name: 'RAPID KLEN',
+          category: 'Chemical UTL',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+          isPaRequired: true,
+        },
+        gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+        revision: 1,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rkTx);
+
+      await expect(
+        service.submitProductAnalysis(
+          'tx-rk-conflict',
+          {
+            productCategory: 'Chemical UTL',
+            productName: 'RAPID KLEN',
+            parameters: {
+              alkalinityNa2O: '12.5' as any,
+              alkalinityNa2o: '13.0' as any,
+              alkalinityNaOH: 10,
+              ph: 13,
+              density: 1.15,
+              sensory: {
+                visual: 'Jernih',
+                foreignMatters: 'Tidak ada kontaminasi',
+                packagingLabel: 'Kemasan & label tidak rusak',
+              },
+            },
+            revision: 1,
+          },
+          mockAnalystUser,
+        ),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('accepts Rapid Klen write with matching alkalinity aliases and stores canonical numbers', async () => {
+      const rkTx = {
+        id: 'tx-rk-match',
+        status: TransactionStatus.QC_VEHICLE_PENDING,
+        processType: ProcessType.GSP,
+        cargoType: 'Chemical UTL',
+        cargoSubType: 'RAPID KLEN',
+        productCatalogId: 'RK-001',
+        productCatalog: {
+          id: 'RK-001',
+          code: 'RK-001',
+          name: 'RAPID KLEN',
+          category: 'Chemical UTL',
+          processType: ProcessType.GSP,
+          gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+          isPaRequired: true,
+        },
+        gspAnalysisProfile: GspAnalysisProfile.RAPID_KLEN_PA,
+        revision: 1,
+      };
+
+      mockPrismaService.transaction.findUnique.mockResolvedValueOnce(rkTx);
+
+      const mockTxClient = {
+        transaction: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        qcProductAnalysis: {
+          create: jest
+            .fn()
+            .mockResolvedValue({ id: 'analysis-rk-match', testRound: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+        transactionStatusHistory: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+      };
+
+      mockPrismaService.$transaction.mockImplementationOnce(async (cb: any) =>
+        cb(mockTxClient),
+      );
+
+      const res = await service.submitProductAnalysis(
+        'tx-rk-match',
+        {
+          productCategory: 'Chemical UTL',
+          productName: 'RAPID KLEN',
+          parameters: {
+            alkalinityNa2O: '36,50' as any,
+            alkalinityNa2o: 36.5,
+            alkalinityNaOH: '46,20' as any,
+            alkalinityNaoh: 46.2,
+            ph: '13,2' as any,
+            density: '1,45' as any,
+            sensory: {
+              visual: 'Jernih',
+              foreignMatters: 'Tidak ada kontaminasi',
+              packagingLabel: 'Kemasan & label tidak rusak',
+            },
+          },
+          result: QcResult.PASS,
+          decision: AnalysisDecision.RELEASE,
+          revision: 1,
+        },
+        mockAnalystUser,
+      );
+
+      expect(res.success).toBe(true);
+      const createdData =
+        mockTxClient.qcProductAnalysis.create.mock.calls[0][0].data;
+      expect(createdData.parameters.alkalinityNa2O).toBe(36.5);
+      expect(createdData.parameters.alkalinityNa2o).toBe(36.5);
+      expect(createdData.parameters.alkalinityNaOH).toBe(46.2);
+      expect(createdData.parameters.alkalinityNaoh).toBe(46.2);
+      expect(createdData.parameters.ph).toBe(13.2);
+      expect(createdData.parameters.density).toBe(1.45);
     });
   });
 });

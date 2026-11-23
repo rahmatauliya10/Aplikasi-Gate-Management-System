@@ -174,6 +174,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
         },
+        warehouseProcess: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
       };
 
       mockPrismaService.$transaction.mockImplementation(async (cb: any) =>
@@ -199,7 +202,12 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
       // Verify transaction updated with new status and cleared exemption metadata
       expect(mockTxClient.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'tx-solar-to-coal', revision: 2 },
+          where: {
+            id: 'tx-solar-to-coal',
+            revision: 2,
+            status: TransactionStatus.PA_NOT_REQUIRED,
+            warehouseStartAt: null,
+          },
           data: expect.objectContaining({
             cargoType: 'Coal',
             cargoSubType: 'Batubara GAR 4200',
@@ -273,6 +281,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
+        },
+        warehouseProcess: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
       };
 
@@ -408,6 +419,9 @@ describe('ActiveTransactionAmendmentService (Product Amendment & Anti-Tamper)', 
         },
         transactionStatusHistory: {
           create: jest.fn().mockResolvedValue({}),
+        },
+        warehouseProcess: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
       };
 

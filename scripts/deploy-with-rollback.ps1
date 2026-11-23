@@ -716,22 +716,86 @@ function Clear-DeploymentMaintenanceStateSafe {
     [string]$targetMaintActive = Join-Path $targetMaintDir "active"
     [string]$targetMaintFlag = Join-Path $resolvedTarget "maintenance.flag"
 
-    # Fail-closed reparse point check: Ensure workspace and sentinel paths are not junctions/symlinks escaping allowed boundary
+    # Fail-closed reparse point check: Ensure workspace, ancestors, chained targets, and sentinel paths are not junctions/symlinks escaping allowed boundary
     if (-not [string]::IsNullOrWhiteSpace($AllowedBoundaryDirectory)) {
+        [string]$resolvedBoundary = [System.IO.Path]::GetFullPath($AllowedBoundaryDirectory)
+        [System.Collections.Generic.HashSet[string]]$activeTraversalPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        [System.Collections.Generic.HashSet[string]]$verifiedPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+        $traversalState = [PSCustomObject]@{ HopCount = 0 }
+        [int]$maxGlobalHops = 32
+
         $assertNoEscapingReparsePoint = {
             param([string]$pathToCheck)
-            if (Test-Path -Path $pathToCheck) {
-                $item = Get-Item -Path $pathToCheck -Force -ErrorAction SilentlyContinue
-                if ($item -and ($item.LinkType -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))) {
-                    [string]$linkTarget = $item.Target
-                    if (-not [string]::IsNullOrWhiteSpace($linkTarget)) {
-                        [string]$resolvedLinkTarget = [System.IO.Path]::GetFullPath($linkTarget)
-                        [string]$linkTargetWithSep = $resolvedLinkTarget.TrimEnd('\', '/') + $sep
-                        if (-not $linkTargetWithSep.StartsWith($boundaryWithSep, [System.StringComparison]::OrdinalIgnoreCase) -or
-                            ($linkTargetWithSep.Length -le $boundaryWithSep.Length)) {
-                            throw "MAINTENANCE CLEANUP REPARSE POINT VIOLATION: Path '$pathToCheck' is a reparse point (symlink/junction) targeting '$resolvedLinkTarget', which escapes allowed boundary '$AllowedBoundaryDirectory'! Cleanup blocked fail-closed."
-                        }
+            [string]$currPath = $pathToCheck
+            [System.Collections.Generic.List[string]]$chainAdded = New-Object 'System.Collections.Generic.List[string]'
+
+            try {
+                while (Test-Path -Path $currPath) {
+                    [string]$resolvedPath = [System.IO.Path]::GetFullPath($currPath)
+
+                    # Node already fully verified safe and contained in earlier check or branch: skip
+                    if ($verifiedPaths.Contains($resolvedPath)) {
+                        break
                     }
+
+                    # Node re-encountered while currently traversing active chain: genuine cycle detected
+                    if ($activeTraversalPaths.Contains($resolvedPath)) {
+                        throw "MAINTENANCE CLEANUP REPARSE POINT VIOLATION: Path '$pathToCheck' contains a circular reparse point reference at '$resolvedPath'! Cleanup blocked fail-closed."
+                    }
+
+                    $item = Get-Item -Path $currPath -Force -ErrorAction SilentlyContinue
+                    if (-not $item) { break }
+
+                    $isReparse = [bool]($item.LinkType -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))
+                    if (-not $isReparse) {
+                        # Verify intermediate ancestors of resolved non-reparse destination up to boundary root
+                        [string]$anc = [System.IO.Path]::GetDirectoryName($resolvedPath)
+                        while (-not [string]::IsNullOrWhiteSpace($anc) -and
+                               $anc.StartsWith($resolvedBoundary, [System.StringComparison]::OrdinalIgnoreCase) -and
+                               ($anc.Length -gt $resolvedBoundary.Length)) {
+                            $ancItem = Get-Item -Path $anc -Force -ErrorAction SilentlyContinue
+                            if ($ancItem -and ($ancItem.LinkType -or ($ancItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint))) {
+                                & $assertNoEscapingReparsePoint $anc
+                            }
+                            $anc = [System.IO.Path]::GetDirectoryName($anc)
+                        }
+                        [void]$verifiedPaths.Add($resolvedPath)
+                        break
+                    }
+
+                    $traversalState.HopCount++
+                    if ($traversalState.HopCount -gt $maxGlobalHops) {
+                        throw "MAINTENANCE CLEANUP REPARSE POINT VIOLATION: Path '$pathToCheck' exceeded maximum total reparse point traversal budget ($maxGlobalHops hops)! Circular symlink or chain cannot be verified. Cleanup blocked fail-closed."
+                    }
+
+                    [void]$activeTraversalPaths.Add($resolvedPath)
+                    $chainAdded.Add($resolvedPath)
+
+                    [string]$linkTarget = $item.Target
+                    if ([string]::IsNullOrWhiteSpace($linkTarget)) {
+                        throw "MAINTENANCE CLEANUP REPARSE POINT VIOLATION: Path '$currPath' is a reparse point whose target cannot be verified! Cleanup blocked fail-closed."
+                    }
+
+                    [string]$resolvedLinkTarget = [System.IO.Path]::GetFullPath($linkTarget)
+                    [string]$linkTargetWithSep = $resolvedLinkTarget.TrimEnd('\', '/') + $sep
+                    if (-not $linkTargetWithSep.StartsWith($boundaryWithSep, [System.StringComparison]::OrdinalIgnoreCase) -or
+                        ($linkTargetWithSep.Length -le $boundaryWithSep.Length)) {
+                        throw "MAINTENANCE CLEANUP REPARSE POINT VIOLATION: Path '$currPath' is a reparse point (symlink/junction) targeting '$resolvedLinkTarget', which escapes allowed boundary '$AllowedBoundaryDirectory'! Cleanup blocked fail-closed."
+                    }
+
+                    # Follow chain to target destination
+                    $currPath = $resolvedLinkTarget
+                }
+
+                # Transition completed chain nodes to verified
+                foreach ($node in $chainAdded) {
+                    [void]$verifiedPaths.Add($node)
+                }
+            }
+            finally {
+                # Always remove active chain nodes from active traversal stack
+                foreach ($node in $chainAdded) {
+                    [void]$activeTraversalPaths.Remove($node)
                 }
             }
         }
@@ -740,6 +804,15 @@ function Clear-DeploymentMaintenanceStateSafe {
         & $assertNoEscapingReparsePoint $targetMaintDir
         & $assertNoEscapingReparsePoint $targetMaintActive
         & $assertNoEscapingReparsePoint $targetMaintFlag
+
+        # Ancestor walk: Traverse all intermediate directory ancestors between target workspace and boundary root
+        [string]$currDir = [System.IO.Path]::GetDirectoryName($resolvedTarget)
+        while (-not [string]::IsNullOrWhiteSpace($currDir) -and
+               $currDir.StartsWith($resolvedBoundary, [System.StringComparison]::OrdinalIgnoreCase) -and
+               ($currDir.Length -gt $resolvedBoundary.Length)) {
+            & $assertNoEscapingReparsePoint $currDir
+            $currDir = [System.IO.Path]::GetDirectoryName($currDir)
+        }
     }
 
     [int]$removedCount = 0

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import authService from '../services/authService'
 import { getErrorMessage } from '../utils/errorMessage'
 import { invalidatePhotoSession } from '../services/photoSession'
+import { useReminderStore } from './reminderStore'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
@@ -156,6 +157,7 @@ export const useAuthStore = defineStore('auth', {
     },
 
     clearAuth(invalidatePhotos = true) {
+      const priorUserId = this.user?.id || this.user?.username || null
       this.user = null
       this.token = null
       this.mustChangePassword = false
@@ -163,19 +165,38 @@ export const useAuthStore = defineStore('auth', {
       this.loading = false
 
       // Defensively remove any legacy persistent storage
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('user')
-      localStorage.removeItem('mustChangePassword')
-      sessionStorage.removeItem('access_token')
-      sessionStorage.removeItem('user')
-      sessionStorage.removeItem('mustChangePassword')
-      
+      try {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('user')
+        localStorage.removeItem('mustChangePassword')
+      } catch (e) {}
+
+      try {
+        sessionStorage.removeItem('access_token')
+        sessionStorage.removeItem('user')
+        sessionStorage.removeItem('mustChangePassword')
+      } catch (e) {}
+
+      // Defensively clean up session-scoped dismissal keys
+      try {
+        if (priorUserId) {
+          sessionStorage.removeItem(`gms_login_reminder_dismissed_${priorUserId}`)
+        }
+        sessionStorage.removeItem('gms_login_reminder_dismissed')
+      } catch (e) {}
+
       import('../services/api').then(({ default: api }) => {
         delete api.defaults.headers.common['Authorization']
       }).catch(() => {})
 
       if (invalidatePhotos) {
         invalidatePhotoSession()
+      }
+
+      try {
+        useReminderStore().resetStore()
+      } catch (e) {
+        // Defensive if Pinia root is not mounted or in isolated test
       }
     },
     

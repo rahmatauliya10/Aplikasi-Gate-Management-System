@@ -27,17 +27,20 @@ export interface PaExemptionResult {
   failureReason?: string;
 }
 
+export interface PaExemptionContext {
+  productCatalogId?: string | null;
+  processType?: string | null;
+  cargoType?: string | null;
+  cargoSubType?: string | null;
+}
+
 /**
  * Evaluates PA Exemption strictly from a verified ProductCatalog entity.
  * Any missing, inactive, mismatched, or PA-required catalog returns isExempt: false.
  */
 export function evaluatePaExemption(
   catalog: ProductCatalogSnapshot | null | undefined,
-  context?: {
-    processType?: string | null;
-    cargoType?: string | null;
-    cargoSubType?: string | null;
-  },
+  context?: PaExemptionContext,
 ): PaExemptionResult {
   // 1. Missing Catalog — Free-text products can NEVER bypass PA
   if (!catalog) {
@@ -64,19 +67,32 @@ export function evaluatePaExemption(
     };
   }
 
-  // 4. Cargo / SubType Mismatch — Detect fraudulent or inconsistent pairing
-  if (context?.cargoSubType && catalog.name) {
-    const normTx = context.cargoSubType.trim().toLowerCase();
-    const normCatName = catalog.name.trim().toLowerCase();
-    const normSubCat = (catalog.subCategory || '').trim().toLowerCase();
-
-    const isMatch =
-      normTx === normCatName || (normSubCat && normTx === normSubCat);
-    if (!isMatch) {
+  // 4. Catalog Identity & Cargo / SubType Verification
+  if (context?.productCatalogId) {
+    // If context provides an authoritative productCatalogId from transaction record,
+    // verify exact UUID match against master catalog entity.
+    if (context.productCatalogId !== catalog.id) {
       return {
         isExempt: false,
-        failureReason: `NAME_MISMATCH: Subtipe kargo transaksi (${context.cargoSubType}) tidak sesuai dengan nama katalog master (${catalog.name}).`,
+        failureReason: `CATALOG_ID_MISMATCH: ID katalog transaksi (${context.productCatalogId}) tidak cocok dengan ID katalog master (${catalog.id}). Pengecualian PA ditolak.`,
       };
+    }
+    // Authoritative entity ID matched: supersedes literal name matching to tolerate administrative renames.
+  } else {
+    // Fallback for legacy callers without productCatalogId: enforce strict literal name match.
+    if (context?.cargoSubType && catalog.name) {
+      const normTx = context.cargoSubType.trim().toLowerCase();
+      const normCatName = catalog.name.trim().toLowerCase();
+      const normSubCat = (catalog.subCategory || '').trim().toLowerCase();
+
+      const isMatch =
+        normTx === normCatName || (normSubCat && normTx === normSubCat);
+      if (!isMatch) {
+        return {
+          isExempt: false,
+          failureReason: `NAME_MISMATCH: Subtipe kargo transaksi (${context.cargoSubType}) tidak sesuai dengan nama katalog master (${catalog.name}).`,
+        };
+      }
     }
   }
 
@@ -102,11 +118,7 @@ export function evaluatePaExemption(
  */
 export function isProductPaExempt(
   catalog: ProductCatalogSnapshot | null | undefined,
-  context?: {
-    processType?: string | null;
-    cargoType?: string | null;
-    cargoSubType?: string | null;
-  },
+  context?: PaExemptionContext,
 ): boolean {
   return evaluatePaExemption(catalog, context).isExempt;
 }

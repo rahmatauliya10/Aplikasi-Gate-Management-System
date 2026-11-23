@@ -153,7 +153,8 @@ export class CompleteWarehouseDto {
   suratJalanNumber?: string;
 
   @ApiPropertyOptional({
-    description: 'Optional Delivery Checklist JSON payload',
+    description:
+      'Optional Delivery Checklist JSON payload (strictly for GBJ process completion)',
     type: () => DeliveryChecklistDto,
   })
   @IsOptional()

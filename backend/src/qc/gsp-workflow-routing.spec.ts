@@ -48,6 +48,9 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       findUnique: jest.fn(),
       findFirst: jest.fn(),
     },
+    warehouseProcess: {
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     $transaction: jest.fn(),
   };
 
@@ -386,7 +389,10 @@ describe('GSP Workflow Routing by Locked Analysis Profile (Section 31 vectors 18
       // Verify profile snapshot was updated to RAPID_KLEN_PA
       expect(mockPrismaService.transaction.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'tx-amend-target', revision: 3 },
+          where: expect.objectContaining({
+            id: 'tx-amend-target',
+            revision: 3,
+          }),
           data: expect.objectContaining({
             cargoType: 'Chemical PROD',
             cargoSubType: 'Rapid Klen',

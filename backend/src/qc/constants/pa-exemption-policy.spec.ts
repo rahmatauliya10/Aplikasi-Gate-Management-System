@@ -135,4 +135,116 @@ describe('Strict Catalog-Driven PA Exemption Policy', () => {
       }),
     ).toBe(false);
   });
+
+  describe('COR-05: Product Catalog Rename & Authoritative ID Matching', () => {
+    const renamedSolarCatalog: ProductCatalogSnapshot = {
+      id: 'prod-solar-001',
+      code: 'SOLAR-001',
+      name: 'Solar Industri B35',
+      category: 'Fuel',
+      subCategory: 'B35',
+      processType: 'GSP',
+      isPaRequired: false,
+      policyVersion: 'SOP-GSP-2026.1',
+      isActive: true,
+    };
+
+    it('7. allows catalog rename when productCatalogId matches authoritative master catalog entity', () => {
+      const res = evaluatePaExemption(renamedSolarCatalog, {
+        productCatalogId: 'prod-solar-001',
+        processType: 'GSP',
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar',
+      });
+      expect(res.isExempt).toBe(true);
+      expect(res.policyVersion).toBe('SOP-GSP-2026.1');
+      expect(
+        isProductPaExempt(renamedSolarCatalog, {
+          productCatalogId: 'prod-solar-001',
+          processType: 'GSP',
+          cargoSubType: 'Solar',
+        }),
+      ).toBe(true);
+    });
+
+    it('8. strictly rejects when productCatalogId does not match catalog.id (no fallback to matching name)', () => {
+      const res = evaluatePaExemption(validSolarCatalog, {
+        productCatalogId: 'prod-solar-different-id',
+        processType: 'GSP',
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar',
+      });
+      expect(res.isExempt).toBe(false);
+      expect(res.failureReason).toContain('CATALOG_ID_MISMATCH');
+      expect(
+        isProductPaExempt(validSolarCatalog, {
+          productCatalogId: 'prod-solar-different-id',
+          processType: 'GSP',
+          cargoSubType: 'Solar',
+        }),
+      ).toBe(false);
+    });
+
+    it('9. strictly rejects renamed catalog if catalog is deactivated, even with matching productCatalogId', () => {
+      const inactiveRenamedSolar: ProductCatalogSnapshot = {
+        ...renamedSolarCatalog,
+        isActive: false,
+      };
+      const res = evaluatePaExemption(inactiveRenamedSolar, {
+        productCatalogId: 'prod-solar-001',
+        processType: 'GSP',
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar',
+      });
+      expect(res.isExempt).toBe(false);
+      expect(res.failureReason).toContain('CATALOG_INACTIVE');
+      expect(
+        isProductPaExempt(inactiveRenamedSolar, {
+          productCatalogId: 'prod-solar-001',
+          processType: 'GSP',
+          cargoSubType: 'Solar',
+        }),
+      ).toBe(false);
+    });
+
+    it('10. strictly rejects renamed catalog if catalog requires PA, even with matching productCatalogId', () => {
+      const paRequiredRenamedSolar: ProductCatalogSnapshot = {
+        ...renamedSolarCatalog,
+        isPaRequired: true,
+      };
+      const res = evaluatePaExemption(paRequiredRenamedSolar, {
+        productCatalogId: 'prod-solar-001',
+        processType: 'GSP',
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar',
+      });
+      expect(res.isExempt).toBe(false);
+      expect(res.failureReason).toContain('PA_REQUIRED');
+      expect(
+        isProductPaExempt(paRequiredRenamedSolar, {
+          productCatalogId: 'prod-solar-001',
+          processType: 'GSP',
+          cargoSubType: 'Solar',
+        }),
+      ).toBe(false);
+    });
+
+    it('11. strictly rejects renamed catalog if processType mismatches, even with matching productCatalogId', () => {
+      const res = evaluatePaExemption(renamedSolarCatalog, {
+        productCatalogId: 'prod-solar-001',
+        processType: 'GBB',
+        cargoType: 'Fuel',
+        cargoSubType: 'Solar',
+      });
+      expect(res.isExempt).toBe(false);
+      expect(res.failureReason).toContain('PROCESS_MISMATCH');
+      expect(
+        isProductPaExempt(renamedSolarCatalog, {
+          productCatalogId: 'prod-solar-001',
+          processType: 'GBB',
+          cargoSubType: 'Solar',
+        }),
+      ).toBe(false);
+    });
+  });
 });

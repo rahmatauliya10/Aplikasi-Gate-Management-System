@@ -266,6 +266,8 @@ export class WarehouseService {
       });
     }
 
+    let gspPreliminaryTargetRevision: number | null = null;
+
     // ─── Guard: GSP vs Non-GSP Verification (Defense-in-Depth Proof-of-PA Gate) ───
     if (tx.processType === 'GSP') {
       // P1-01: Hard Gate - Snapshot receiptUnit is mandatory before starting GSP unloading
@@ -289,6 +291,7 @@ export class WarehouseService {
       }
 
       const exemptionEval = evaluatePaExemption(tx.productCatalog, {
+        productCatalogId: tx.productCatalogId,
         processType: tx.processType,
         cargoType: tx.cargoType,
         cargoSubType: tx.cargoSubType,
@@ -539,6 +542,23 @@ export class WarehouseService {
         });
       }
 
+      // Compute preliminary target revision for GSP pre-unload checklist:
+      const preliminaryMaxRev = await this.prisma.warehouseProcess.aggregate({
+        where: { transactionId },
+        _max: { revision: true },
+      });
+      gspPreliminaryTargetRevision =
+        (preliminaryMaxRev?._max?.revision ?? 0) + 1;
+
+      // Strict preliminary input validation (notes >= 5 chars for NOT_OK, photo format/magic-bytes/scoped attachment for all provided evidences)
+      await this.validateNotOkItemEvidences(
+        transactionId,
+        submittedItems,
+        gspPreliminaryTargetRevision,
+        this.prisma,
+        { validateOnly: true },
+      );
+
       const failedItems = submittedItems.filter(
         (item) => item.result === 'NOT_OK',
       );
@@ -549,15 +569,6 @@ export class WarehouseService {
         failedItems.forEach((item) => {
           if (item.notes) failedItemNotes[item.code] = item.notes;
         });
-
-        // Strict preliminary input validation (notes >= 5 chars, valid photo data URI / attachment ID format, magic bytes) without persisting files/DB yet
-        await this.validateNotOkItemEvidences(
-          transactionId,
-          submittedItems,
-          tx.revision,
-          this.prisma,
-          { validateOnly: true },
-        );
 
         // 1. Direct concession / rejection decision provided in payload
         if (dto.checklistDisposition) {
@@ -607,6 +618,24 @@ export class WarehouseService {
           } | null = null;
           try {
             const updated = await this.prisma.$transaction(async (prismaTx) => {
+              const maxRevision = await prismaTx.warehouseProcess.aggregate({
+                where: { transactionId },
+                _max: { revision: true },
+              });
+              const nextRevision = (maxRevision._max.revision ?? 0) + 1;
+
+              if (
+                gspPreliminaryTargetRevision !== null &&
+                nextRevision !== gspPreliminaryTargetRevision
+              ) {
+                throw new ConflictException({
+                  success: false,
+                  message:
+                    'Gagal memproses checklist: Terjadi perubahan revisi checklist bersamaan oleh proses lain.',
+                  errors: ['CONCURRENT_CHECKLIST_MODIFICATION_DETECTED'],
+                });
+              }
+
               const claimed = await prismaTx.transaction.updateMany({
                 where: {
                   id: transactionId,
@@ -629,12 +658,6 @@ export class WarehouseService {
                   errors: [],
                 });
               }
-
-              const maxRevision = await prismaTx.warehouseProcess.aggregate({
-                where: { transactionId },
-                _max: { revision: true },
-              });
-              const nextRevision = (maxRevision._max.revision ?? 0) + 1;
 
               photoEvidencesResult = await this.validateNotOkItemEvidences(
                 transactionId,
@@ -821,6 +844,18 @@ export class WarehouseService {
         });
         const nextRevision = (maxRev._max.revision ?? 0) + 1;
 
+        if (
+          gspPreliminaryTargetRevision !== null &&
+          nextRevision !== gspPreliminaryTargetRevision
+        ) {
+          throw new ConflictException({
+            success: false,
+            message:
+              'Gagal memproses checklist: Terjadi perubahan revisi checklist bersamaan oleh proses lain.',
+            errors: ['CONCURRENT_CHECKLIST_MODIFICATION_DETECTED'],
+          });
+        }
+
         if (tx.processType === 'GSP' && dto.preUnloadChecklist) {
           photoEvidencesResult = await this.validateNotOkItemEvidences(
             transactionId,
@@ -969,7 +1004,7 @@ export class WarehouseService {
   }
 
   normalizeDeliveryChecklist(rawChecklist: any): any {
-    if (!rawChecklist) return null;
+    if (rawChecklist === undefined || rawChecklist === null) return null;
     let checklist = rawChecklist;
     if (typeof checklist === 'string') {
       try {
@@ -1202,30 +1237,33 @@ export class WarehouseService {
 
     assertValidStatusTransition(tx.status, nextStatus);
 
+    const hasDeliveryChecklist =
+      dto.deliveryChecklist !== undefined && dto.deliveryChecklist !== null;
+
+    if (hasDeliveryChecklist && tx.processType !== 'GBJ') {
+      throw new BadRequestException({
+        success: false,
+        message: 'deliveryChecklist hanya diperbolehkan untuk proses GBJ.',
+        errors: ['DELIVERY_CHECKLIST_NOT_ALLOWED_FOR_PROCESS'],
+      });
+    }
+
     let normalizedDeliveryChecklist: any = null;
-    if (dto.deliveryChecklist) {
+    if (tx.processType === 'GBJ' && hasDeliveryChecklist) {
       normalizedDeliveryChecklist = this.normalizeDeliveryChecklist(
         dto.deliveryChecklist,
       );
     }
 
     const updated = await this.prisma.$transaction(async (prismaTx) => {
-      // Serialize deliveryChecklist if present and append to remarks
+      // Serialize deliveryChecklist if present and append to remarks (GBJ only)
       let finalRemarks = dto.remarks || '';
-      if (normalizedDeliveryChecklist) {
+      if (tx.processType === 'GBJ' && normalizedDeliveryChecklist) {
         const prodSummary =
           normalizedDeliveryChecklist.productTypes.join(' & ');
         finalRemarks = finalRemarks
           ? `${finalRemarks} | Products: [${prodSummary}]`
           : `Products: [${prodSummary}]`;
-      } else if (dto.deliveryChecklist) {
-        const checklistStr =
-          typeof dto.deliveryChecklist === 'object'
-            ? JSON.stringify(dto.deliveryChecklist)
-            : String(dto.deliveryChecklist);
-        finalRemarks = finalRemarks
-          ? `${finalRemarks} | Checklist: ${checklistStr}`
-          : `Checklist: ${checklistStr}`;
       }
 
       const claimed = await prismaTx.transaction.updateMany({
@@ -1255,9 +1293,10 @@ export class WarehouseService {
           ...(dto.suratJalanNumber && {
             suratJalanNumber: dto.suratJalanNumber,
           }),
-          ...(normalizedDeliveryChecklist && {
-            deliveryChecklist: normalizedDeliveryChecklist,
-          }),
+          ...(tx.processType === 'GBJ' &&
+            normalizedDeliveryChecklist && {
+              deliveryChecklist: normalizedDeliveryChecklist,
+            }),
           remarks: tx.remarks
             ? finalRemarks
               ? `${tx.remarks} | ${finalRemarks}`
@@ -1277,6 +1316,7 @@ export class WarehouseService {
 
       const activeProcess = await prismaTx.warehouseProcess.findFirst({
         where: { transactionId, isCurrent: true, endAt: null },
+        orderBy: { revision: 'desc' },
       });
 
       if (activeProcess) {
@@ -1299,11 +1339,10 @@ export class WarehouseService {
             bagCount: dto.bagCount,
             rollCount: dto.rollCount,
             condition: dto.condition,
-            checklistItems:
-              normalizedDeliveryChecklist ||
-              dto.deliveryChecklist ||
-              activeProcess.checklistItems ||
-              undefined,
+            ...(tx.processType === 'GBJ' &&
+              normalizedDeliveryChecklist && {
+                checklistItems: normalizedDeliveryChecklist,
+              }),
             remarks: finalRemarks || null,
           },
         });
@@ -1340,8 +1379,10 @@ export class WarehouseService {
             bagCount: dto.bagCount,
             rollCount: dto.rollCount,
             condition: dto.condition,
-            checklistItems:
-              normalizedDeliveryChecklist || dto.deliveryChecklist || undefined,
+            ...(tx.processType === 'GBJ' &&
+              normalizedDeliveryChecklist && {
+                checklistItems: normalizedDeliveryChecklist,
+              }),
             remarks: finalRemarks || null,
           },
         });
@@ -1865,8 +1906,10 @@ export class WarehouseService {
 
   /**
    * Validate that all NOT_OK items have notes (>= 5 chars) and verified photo evidence.
+   * For OK items, notes and photo are optional, but if photo evidence is provided, it is strictly
+   * validated (format, magic bytes, size 64B-10MB, or scoped existing attachment) and persisted canonically.
    * Fail-closed persistence: enforces storage write, attachment creation, de-duplication,
-   * size, magic bytes verification, and compensation cleanup on transaction failure.
+   * size, magic bytes verification, client isolation, and compensation cleanup on transaction failure.
    */
   private async validateNotOkItemEvidences(
     transactionId: string,
@@ -1881,7 +1924,6 @@ export class WarehouseService {
     client: any = this.prisma,
     options?: { validateOnly?: boolean },
   ): Promise<{ createdFiles: string[]; cleanupFiles: () => void }> {
-    const failedItems = items.filter((item) => item.result === 'NOT_OK');
     const createdFiles: string[] = [];
 
     const cleanupFiles = () => {
@@ -1897,21 +1939,31 @@ export class WarehouseService {
     };
 
     try {
-      for (const item of failedItems) {
-        if (!item.notes || item.notes.trim().length < 5) {
-          throw new BadRequestException({
-            success: false,
-            message: `Setiap item pemeriksaan NOT_OK (${item.code}) wajib mencantumkan catatan temuan ketidaksesuaian (minimal 5 karakter).`,
-            errors: ['PREUNLOAD_CHECKLIST_MISSING_NOTES'],
-          });
+      for (const item of items) {
+        const isFailed = item.result === 'NOT_OK';
+
+        // 1. Mandatory notes for NOT_OK items (trimmed length >= 5)
+        if (isFailed) {
+          if (!item.notes || item.notes.trim().length < 5) {
+            throw new BadRequestException({
+              success: false,
+              message: `Setiap item pemeriksaan NOT_OK (${item.code}) wajib mencantumkan catatan temuan ketidaksesuaian (minimal 5 karakter).`,
+              errors: ['PREUNLOAD_CHECKLIST_MISSING_NOTES'],
+            });
+          }
         }
 
-        const photoRef = item.photoAttachmentId || item.photoUrl;
-        if (
-          !photoRef ||
-          typeof photoRef !== 'string' ||
-          photoRef.trim().length === 0
-        ) {
+        // 2. Evaluate photo input fields
+        const rawAttId = item.photoAttachmentId;
+        const rawPhotoUrl = item.photoUrl;
+
+        const hasAttId =
+          typeof rawAttId === 'string' && rawAttId.trim().length > 0;
+        const hasPhotoUrl =
+          typeof rawPhotoUrl === 'string' && rawPhotoUrl.trim().length > 0;
+
+        // For NOT_OK items, photo evidence is mandatory
+        if (isFailed && !hasAttId && !hasPhotoUrl) {
           throw new BadRequestException({
             success: false,
             message: `Setiap item pemeriksaan NOT_OK (${item.code}) wajib menyertakan bukti foto lampiran yang valid dan terverifikasi pada sistem.`,
@@ -1919,22 +1971,96 @@ export class WarehouseService {
           });
         }
 
-        // If photoRef is data URL, validate format, decode base64, validate magic bytes and size, and persist as attachment
-        if (photoRef.startsWith('data:image/')) {
-          const matches = photoRef.match(
-            /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/,
-          );
-          if (!matches || !matches[2]) {
+        // For non-failed items (e.g. OK) with no photo evidence provided, proceed to next item
+        if (!hasAttId && !hasPhotoUrl) {
+          continue;
+        }
+
+        // 3. Parse and strictly validate photoAttachmentId if provided
+        let parsedAttId: string | null = null;
+        if (hasAttId) {
+          const trimmedAttId = rawAttId.trim();
+          if (!/^[a-zA-Z0-9_-]+$/.test(trimmedAttId)) {
             throw new BadRequestException({
               success: false,
-              message: `Format data URI bukti foto item ${item.code} tidak valid atau rusak.`,
-              errors: ['INVALID_PHOTO_DATA_URI_FORMAT'],
+              message: `Format photoAttachmentId untuk item ${item.code} tidak valid.`,
+              errors: ['INVALID_PHOTO_ATTACHMENT_FORMAT'],
             });
           }
+          parsedAttId = trimmedAttId;
+        }
 
+        // 4. Parse and strictly validate photoUrl if provided
+        let parsedPhotoType: 'DATA_URI' | 'DOWNLOAD_URL' | 'IDENTIFIER' | null =
+          null;
+        let parsedIdFromUrl: string | null = null;
+        let dataUriMatches: RegExpMatchArray | null = null;
+
+        if (hasPhotoUrl) {
+          const trimmedUrl = rawPhotoUrl.trim();
+          if (trimmedUrl.startsWith('data:image/')) {
+            dataUriMatches = trimmedUrl.match(
+              /^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/,
+            );
+            if (!dataUriMatches || !dataUriMatches[2]) {
+              throw new BadRequestException({
+                success: false,
+                message: `Format data URI bukti foto item ${item.code} tidak valid atau rusak.`,
+                errors: ['INVALID_PHOTO_DATA_URI_FORMAT'],
+              });
+            }
+            parsedPhotoType = 'DATA_URI';
+          } else {
+            // Supported download URL formats:
+            // Canonical: /api/attachments/:id/download
+            // Compatibility: /attachments/:id/download
+            const downloadMatch = trimmedUrl.match(
+              /^\/(?:api\/)?attachments\/([a-zA-Z0-9_-]+)\/download$/,
+            );
+            if (downloadMatch && downloadMatch[1]) {
+              parsedPhotoType = 'DOWNLOAD_URL';
+              parsedIdFromUrl = downloadMatch[1];
+            } else if (/^[a-zA-Z0-9_-]+$/.test(trimmedUrl)) {
+              // Direct identifier supplied in photoUrl field
+              parsedPhotoType = 'IDENTIFIER';
+              parsedIdFromUrl = trimmedUrl;
+            } else {
+              throw new BadRequestException({
+                success: false,
+                message: `Format URL bukti foto lampiran untuk item ${item.code} tidak valid.`,
+                errors: ['INVALID_PHOTO_ATTACHMENT_FORMAT'],
+              });
+            }
+          }
+        }
+
+        // 5. Detect and reject conflicting references
+        if (hasAttId && hasPhotoUrl) {
+          if (parsedPhotoType === 'DATA_URI') {
+            throw new BadRequestException({
+              success: false,
+              message: `Item ${item.code} tidak boleh menyertakan photoAttachmentId bersamaan dengan data URI foto baru.`,
+              errors: ['CONFLICTING_PHOTO_EVIDENCE'],
+            });
+          }
+          if (
+            parsedAttId &&
+            parsedIdFromUrl &&
+            parsedAttId !== parsedIdFromUrl
+          ) {
+            throw new BadRequestException({
+              success: false,
+              message: `Item ${item.code} memiliki referensi bukti foto yang saling bertentangan (${parsedAttId} vs ${parsedIdFromUrl}).`,
+              errors: ['CONFLICTING_PHOTO_EVIDENCE'],
+            });
+          }
+        }
+
+        // 6. Processing Data URI
+        if (parsedPhotoType === 'DATA_URI') {
           let buffer: Buffer;
           try {
-            buffer = Buffer.from(matches[2], 'base64');
+            buffer = Buffer.from(dataUriMatches![2], 'base64');
           } catch {
             throw new BadRequestException({
               success: false,
@@ -1943,7 +2069,6 @@ export class WarehouseService {
             });
           }
 
-          // Validate buffer size: min 64 bytes (prevent mock/fake strings), max 10MB
           if (buffer.length < 64) {
             throw new BadRequestException({
               success: false,
@@ -1959,7 +2084,6 @@ export class WarehouseService {
             });
           }
 
-          // Validate magic bytes
           const isPng =
             buffer.length >= 8 &&
             buffer[0] === 0x89 &&
@@ -1988,9 +2112,19 @@ export class WarehouseService {
             });
           }
 
-          // If validateOnly is requested (e.g. preliminary check before entering rejection gate), do not persist files/DB
           if (options?.validateOnly) {
             continue;
+          }
+
+          const attachmentClient = client?.attachment;
+          if (!attachmentClient) {
+            cleanupFiles();
+            throw new InternalServerErrorException({
+              success: false,
+              message:
+                'Layanan database Attachment tidak tersedia untuk menyimpan bukti foto.',
+              errors: ['ATTACHMENT_SERVICE_UNAVAILABLE'],
+            });
           }
 
           const sha256 = crypto
@@ -2001,16 +2135,8 @@ export class WarehouseService {
           const uploadBase = process.env.UPLOAD_DIR || './uploads';
           const ext = isPng ? 'png' : isJpeg ? 'jpg' : 'webp';
 
-          // De-duplication check: if identical evidence already exists on this transaction,
-          // rigorously verify:
-          // 1) File physically exists on disk
-          // 2) SHA-256 hash matches buffer
-          // 3) Checklist item code matches
-          // 4) Revision matches
-          const attachmentClient =
-            client?.attachment ?? (this.prisma as any)?.attachment;
           let reusableAttachment: any = null;
-          if (attachmentClient?.findFirst) {
+          if (attachmentClient.findFirst) {
             const existingAtt = await attachmentClient.findFirst({
               where: {
                 transactionId,
@@ -2076,36 +2202,7 @@ export class WarehouseService {
             });
           }
 
-          // Persist Attachment record to DB with fail-closed guarantee (using client / prismaTx)
-          if (attachmentClient?.create) {
-            try {
-              const att = await attachmentClient.create({
-                data: {
-                  transactionId,
-                  module: 'WAREHOUSE',
-                  attachmentType: 'PHOTO',
-                  originalName: `${item.code}_evidence.${ext}`,
-                  fileName,
-                  filePath: path.relative(uploadBase, fullPath),
-                  mimeType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
-                  size: buffer.length,
-                  description: `Bukti foto temuan pra-bongkar GSP ${item.code} (Rev ${checklistRevision})`,
-                  revision: checklistRevision,
-                  isCurrent: true,
-                  sha256,
-                },
-              });
-              item.photoAttachmentId = att.id;
-              item.photoUrl = `/api/attachments/${att.id}/download`;
-            } catch (dbErr: any) {
-              cleanupFiles();
-              throw new InternalServerErrorException({
-                success: false,
-                message: `Gagal mencatat data lampiran bukti foto (${item.code}) ke database: ${dbErr?.message}`,
-                errors: ['PHOTO_ATTACHMENT_RECORD_FAILED'],
-              });
-            }
-          } else {
+          if (!attachmentClient.create) {
             cleanupFiles();
             throw new InternalServerErrorException({
               success: false,
@@ -2115,96 +2212,171 @@ export class WarehouseService {
             });
           }
 
+          try {
+            const att = await attachmentClient.create({
+              data: {
+                transactionId,
+                module: 'WAREHOUSE',
+                attachmentType: 'PHOTO',
+                originalName: `${item.code}_evidence.${ext}`,
+                fileName,
+                filePath: path.relative(uploadBase, fullPath),
+                mimeType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
+                size: buffer.length,
+                description: `Bukti foto temuan pra-bongkar GSP ${item.code} (Rev ${checklistRevision})`,
+                revision: checklistRevision,
+                isCurrent: true,
+                sha256,
+              },
+            });
+            item.photoAttachmentId = att.id;
+            item.photoUrl = `/api/attachments/${att.id}/download`;
+          } catch (dbErr: any) {
+            cleanupFiles();
+            throw new InternalServerErrorException({
+              success: false,
+              message: `Gagal mencatat data lampiran bukti foto (${item.code}) ke database: ${dbErr?.message}`,
+              errors: ['PHOTO_ATTACHMENT_RECORD_FAILED'],
+            });
+          }
+
           continue;
         }
 
-        // Resolve attachment ID from item or photoRef
-        let attachmentId = item.photoAttachmentId;
-        if (!attachmentId) {
-          const apiMatch = photoRef.match(
-            /\/api\/attachments\/([a-zA-Z0-9_-]+)/i,
-          );
-          if (apiMatch) {
-            attachmentId = apiMatch[1];
-          } else {
-            const uuidMatch = photoRef.match(
-              /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
-            );
-            const attPrefixMatch = photoRef.match(/^att-[a-z0-9_-]+$/i);
-            attachmentId = uuidMatch
-              ? uuidMatch[0]
-              : attPrefixMatch
-                ? attPrefixMatch[0]
-                : null;
-          }
-        }
-
-        const existingAttachmentClient =
-          client?.attachment ?? (this.prisma as any)?.attachment;
-
-        if (attachmentId && existingAttachmentClient?.findFirst) {
-          const att = await existingAttachmentClient.findFirst({
-            where: {
-              id: attachmentId,
-              transactionId,
-              isCurrent: true,
-            },
-          });
-
-          if (!att) {
-            throw new BadRequestException({
-              success: false,
-              message: `Bukti foto lampiran untuk item ${item.code} tidak ditemukan atau tidak terikat pada transaksi ${transactionId}.`,
-              errors: ['INVALID_PHOTO_ATTACHMENT'],
-            });
-          }
-
-          // Verify item code alignment
-          if (
-            att.originalName &&
-            !att.originalName.startsWith(`${item.code}_`)
-          ) {
-            throw new BadRequestException({
-              success: false,
-              message: `Bukti foto lampiran ${att.id} terikat pada item lain (${att.originalName}), bukan item ${item.code}.`,
-              errors: ['ATTACHMENT_ITEM_CODE_MISMATCH'],
-            });
-          }
-
-          // Verify revision compatibility (must match current checklist revision)
-          if (
-            att.revision !== undefined &&
-            att.revision !== null &&
-            att.revision !== checklistRevision
-          ) {
-            throw new BadRequestException({
-              success: false,
-              message: `Bukti foto lampiran ${att.id} berasal dari revisi lama (Rev ${att.revision}) dan tidak sah untuk revisi saat ini (Rev ${checklistRevision}).`,
-              errors: ['STALE_CHECKLIST_ATTACHMENT_REVISION'],
-            });
-          }
-
-          if (att.filePath) {
-            const uploadBase = process.env.UPLOAD_DIR || './uploads';
-            const fullPath = path.resolve(uploadBase, att.filePath);
-            if (!fs.existsSync(fullPath)) {
-              throw new BadRequestException({
-                success: false,
-                message: `Berkas fisik foto lampiran untuk item ${item.code} tidak ditemukan pada penyimpanan server.`,
-                errors: ['MISSING_PHYSICAL_PHOTO_FILE'],
-              });
-            }
-          }
-
-          item.photoAttachmentId = att.id;
-          item.photoUrl = `/api/attachments/${att.id}/download`;
-        } else if (!attachmentId) {
+        // 7. Processing Existing Attachment Reference
+        const targetAttachmentId = parsedAttId || parsedIdFromUrl;
+        if (!targetAttachmentId) {
           throw new BadRequestException({
             success: false,
             message: `Format bukti foto lampiran untuk item ${item.code} tidak valid. Wajib menyertakan ID lampiran terverifikasi.`,
             errors: ['INVALID_PHOTO_ATTACHMENT_FORMAT'],
           });
         }
+
+        const attachmentClient = client?.attachment;
+        if (!attachmentClient || !attachmentClient.findFirst) {
+          cleanupFiles();
+          throw new InternalServerErrorException({
+            success: false,
+            message:
+              'Layanan database Attachment tidak tersedia untuk memverifikasi bukti foto.',
+            errors: ['ATTACHMENT_SERVICE_UNAVAILABLE'],
+          });
+        }
+
+        const att = await attachmentClient.findFirst({
+          where: {
+            id: targetAttachmentId,
+            transactionId,
+            module: 'WAREHOUSE',
+            attachmentType: 'PHOTO',
+            isCurrent: true,
+          },
+        });
+
+        if (!att) {
+          throw new BadRequestException({
+            success: false,
+            message: `Bukti foto lampiran untuk item ${item.code} tidak ditemukan atau tidak terikat pada transaksi ${transactionId}.`,
+            errors: ['INVALID_PHOTO_ATTACHMENT'],
+          });
+        }
+
+        // Verify item code alignment: originalName must be non-empty string and start with `${item.code}_`
+        if (
+          typeof att.originalName !== 'string' ||
+          !att.originalName.startsWith(`${item.code}_`)
+        ) {
+          throw new BadRequestException({
+            success: false,
+            message: `Bukti foto lampiran ${att.id} terikat pada item lain (${att.originalName}), bukan item ${item.code}.`,
+            errors: ['ATTACHMENT_ITEM_CODE_MISMATCH'],
+          });
+        }
+
+        // Verify revision compatibility: revision must be a number and match target checklist revision
+        if (
+          typeof att.revision !== 'number' ||
+          att.revision !== checklistRevision
+        ) {
+          throw new BadRequestException({
+            success: false,
+            message: `Bukti foto lampiran ${att.id} berasal dari revisi lama (Rev ${att.revision}) dan tidak sah untuk revisi saat ini (Rev ${checklistRevision}).`,
+            errors: ['STALE_CHECKLIST_ATTACHMENT_REVISION'],
+          });
+        }
+
+        // Verify filePath is a non-empty string
+        if (
+          typeof att.filePath !== 'string' ||
+          att.filePath.trim().length === 0
+        ) {
+          throw new BadRequestException({
+            success: false,
+            message: `Metadata jalur berkas fisik foto lampiran ${att.id} tidak valid.`,
+            errors: ['MISSING_PHYSICAL_PHOTO_FILE'],
+          });
+        }
+
+        // Verify physical file exists on disk and is not empty or corrupted
+        const uploadBase = process.env.UPLOAD_DIR || './uploads';
+        const fullPath = path.resolve(uploadBase, att.filePath);
+        if (!fs.existsSync(fullPath)) {
+          throw new BadRequestException({
+            success: false,
+            message: `Berkas fisik foto lampiran untuk item ${item.code} tidak ditemukan pada penyimpanan server.`,
+            errors: ['MISSING_PHYSICAL_PHOTO_FILE'],
+          });
+        }
+
+        let fileBuffer: Buffer | null = null;
+        try {
+          const stat = fs.statSync(fullPath);
+          if (stat.size <= 0) {
+            throw new Error('ZERO_BYTE_FILE');
+          }
+          fileBuffer = fs.readFileSync(fullPath) as Buffer;
+          if (!fileBuffer || fileBuffer.length === 0) {
+            throw new Error('EMPTY_BUFFER');
+          }
+        } catch (readErr: any) {
+          throw new BadRequestException({
+            success: false,
+            message: `Berkas fisik foto lampiran untuk item ${item.code} rusak atau kosong.`,
+            errors: ['CORRUPTED_PHYSICAL_PHOTO_FILE'],
+          });
+        }
+
+        const isPng =
+          fileBuffer.length >= 8 &&
+          fileBuffer[0] === 0x89 &&
+          fileBuffer[1] === 0x50 &&
+          fileBuffer[2] === 0x4e &&
+          fileBuffer[3] === 0x47 &&
+          fileBuffer[4] === 0x0d &&
+          fileBuffer[5] === 0x0a &&
+          fileBuffer[6] === 0x1a &&
+          fileBuffer[7] === 0x0a;
+        const isJpeg =
+          fileBuffer.length >= 3 &&
+          fileBuffer[0] === 0xff &&
+          fileBuffer[1] === 0xd8 &&
+          fileBuffer[2] === 0xff;
+        const isWebp =
+          fileBuffer.length >= 12 &&
+          fileBuffer.toString('ascii', 0, 4) === 'RIFF' &&
+          fileBuffer.toString('ascii', 8, 12) === 'WEBP';
+
+        if (!isPng && !isJpeg && !isWebp) {
+          throw new BadRequestException({
+            success: false,
+            message: `Berkas fisik foto lampiran untuk item ${item.code} rusak atau format gambar tidak valid.`,
+            errors: ['INVALID_PHOTO_MAGIC_BYTES'],
+          });
+        }
+
+        item.photoAttachmentId = att.id;
+        item.photoUrl = `/api/attachments/${att.id}/download`;
       }
 
       return { createdFiles, cleanupFiles };
@@ -2433,6 +2605,9 @@ export class WarehouseService {
         );
 
         // Atomic Conditional Update (CAS)
+        const now = new Date();
+        const effectiveWarehouseStartAt = tx.warehouseStartAt || now;
+
         const updateResult = await prismaTx.transaction.updateMany({
           where: {
             id: transactionId,
@@ -2443,7 +2618,7 @@ export class WarehouseService {
             status: nextStatus,
             revision: { increment: 1 },
             ...(dto.action === 'ACCEPT_WITH_NOTE' && {
-              warehouseStartAt: tx.warehouseStartAt || new Date(),
+              warehouseStartAt: effectiveWarehouseStartAt,
               warehouseStartById: user.id,
             }),
           },
@@ -2480,7 +2655,7 @@ export class WarehouseService {
             remarks: dto.remarks || null,
             decidedById: user.id,
             decidedByName: user.name || user.email,
-            decidedAt: new Date().toISOString(),
+            decidedAt: now.toISOString(),
           },
         };
 
@@ -2488,6 +2663,10 @@ export class WarehouseService {
           where: { id: latestProc.id },
           data: {
             checklistItems: updatedChecklist,
+            ...(dto.action === 'ACCEPT_WITH_NOTE' && {
+              startAt: effectiveWarehouseStartAt,
+              startById: user.id,
+            }),
           },
         });
 

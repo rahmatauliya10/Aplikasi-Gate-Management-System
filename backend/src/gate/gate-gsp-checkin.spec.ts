@@ -14,6 +14,7 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       count: jest.fn().mockResolvedValue(0),
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(),
     },
     productCatalog: {
@@ -21,11 +22,13 @@ describe('GateService — GSP Canonical Registration & Flow Lock', () => {
       findFirst: jest.fn(),
     },
     dailyArrivalCounter: {
-      upsert: jest
-        .fn()
-        .mockImplementation(() =>
-          Promise.resolve({ dateKey: '20261016', lastSeq: 1 }),
-        ),
+      findUnique: jest.fn().mockResolvedValue(null),
+      upsert: jest.fn().mockImplementation((args: any) =>
+        Promise.resolve({
+          dateKey: args?.where?.dateKey || '20261016',
+          lastSeq: args?.create?.lastSeq ?? args?.update?.lastSeq ?? 1,
+        }),
+      ),
     },
     $transaction: jest.fn(),
     $executeRaw: jest.fn().mockResolvedValue(1),

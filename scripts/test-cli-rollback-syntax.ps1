@@ -25,6 +25,7 @@ Write-Host "====================================================================
 
 [int]$TotalTests = 0
 [int]$PassedTests = 0
+[int]$script:SkippedTests = 0
 [int]$FailedTests = 0
 
 function Run-DeployScript {
@@ -41,7 +42,8 @@ function Run-DeployScript {
         foreach ($arg in $ScriptArguments) {
             if ($arg -match '\s') {
                 $escapedArgs += "`"$arg`""
-            } else {
+            }
+            else {
                 $escapedArgs += $arg
             }
         }
@@ -57,12 +59,13 @@ function Run-DeployScript {
         $process.WaitForExit()
         $exitCode = $process.ExitCode
         $output = "$stdout`n$stderr"
-    } catch {
+    }
+    catch {
         $output = $_.ToString()
         $exitCode = 1
     }
     return [PSCustomObject]@{
-        Output = $output
+        Output   = $output
         ExitCode = $exitCode
     }
 }
@@ -87,17 +90,20 @@ function Test-CommandBinding {
         if ($rejectedTargetTag -or ($exitCode -ne 0 -and $output -match "TargetReleaseTag")) {
             $script:PassedTests++
             Write-Host "  [PASS] Correctly rejected deployment mode without -TargetReleaseTag." -ForegroundColor Green
-        } else {
+        }
+        else {
             $script:FailedTests++
             Write-Host "  [FAIL] Did not enforce -TargetReleaseTag for deployment mode." -ForegroundColor Red
             Write-Host "  Output: $output" -ForegroundColor DarkGray
         }
-    } else {
+    }
+    else {
         if ($promptedForTargetTag) {
             $script:FailedTests++
             Write-Host "  [FAIL] Interactive prompt for TargetReleaseTag occurred in rollback mode!" -ForegroundColor Red
             Write-Host "  Output: $output" -ForegroundColor DarkGray
-        } else {
+        }
+        else {
             $script:PassedTests++
             Write-Host "  [PASS] Successfully executed rollback mode without TargetReleaseTag prompt." -ForegroundColor Green
         }
@@ -112,27 +118,27 @@ Test-CommandBinding -TestName "[REL-01] Deploy Mode without TargetReleaseTag mus
 # 2. REL-02: Prosedur B: Image-Only Rollback syntax from runbook -> Must NOT prompt for TargetReleaseTag
 Test-CommandBinding -TestName "[REL-02] Prosedur B (Image-Only Rollback) must NOT prompt for TargetReleaseTag" `
     -ScriptArguments @(
-        "-RollbackOnly",
-        "-NoSchemaChangeVerified",
-        "-PreviousReleaseTag", "stable",
-        "-PreviousBackendDigest", "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-        "-PreviousFrontendDigest", "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-        "-PreviousMigratorDigest", "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-        "-ComposeFile", "docker-compose.prod.yml"
-    ) `
+    "-RollbackOnly",
+    "-NoSchemaChangeVerified",
+    "-PreviousReleaseTag", "stable",
+    "-PreviousBackendDigest", "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "-PreviousFrontendDigest", "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "-PreviousMigratorDigest", "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "-ComposeFile", "docker-compose.prod.yml"
+) `
     -ExpectTargetReleaseTagRequired $false
 
 # 3. REL-03: Prosedur C: Full Recovery Rollback syntax -> Must REJECT nonexistent manifest before mutation
 Test-CommandBinding -TestName "[REL-03] Prosedur C (Full Recovery Rollback) with nonexistent manifest must REJECT before mutation" `
     -ScriptArguments @(
-        "-RollbackOnly",
-        "-RollbackManifestPath", "nonexistent_manifest_test.json",
-        "-PreviousReleaseTag", "stable",
-        "-PreviousBackendDigest", "sha256:1111111111111111111111111111111111111111111111111111111111111111",
-        "-PreviousFrontendDigest", "sha256:2222222222222222222222222222222222222222222222222222222222222222",
-        "-PreviousMigratorDigest", "sha256:3333333333333333333333333333333333333333333333333333333333333333",
-        "-ComposeFile", "docker-compose.prod.yml"
-    ) `
+    "-RollbackOnly",
+    "-RollbackManifestPath", "nonexistent_manifest_test.json",
+    "-PreviousReleaseTag", "stable",
+    "-PreviousBackendDigest", "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "-PreviousFrontendDigest", "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "-PreviousMigratorDigest", "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "-ComposeFile", "docker-compose.prod.yml"
+) `
     -ExpectTargetReleaseTagRequired $false
 
 # Locate node executable safely
@@ -140,10 +146,12 @@ $NodeExe = "node"
 try {
     if (Get-Command node.exe -ErrorAction SilentlyContinue) {
         $NodeExe = "node.exe"
-    } elseif (Get-Command node -ErrorAction SilentlyContinue) {
+    }
+    elseif (Get-Command node -ErrorAction SilentlyContinue) {
         $NodeExe = "node"
     }
-} catch {
+}
+catch {
     $NodeExe = "node"
 }
 $deployReleasesDir = Join-Path $ProjectRootDir "deploy\releases"
@@ -156,7 +164,8 @@ $res04 = Run-DeployScript -ScriptArguments @("-RollbackOnly", "-NoSchemaChangeVe
 if ($res04.ExitCode -ne 0 -and ($res04.Output -match "does not contain an explicit migration inventory" -or $res04.Output -match "CRITICAL SCHEMA COMPATIBILITY VIOLATION")) {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly rejected image-only rollback with empty migration inventory." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Failed to reject empty migration inventory!" -ForegroundColor Red
     Write-Host "  ExitCode: $($res04.ExitCode)" -ForegroundColor DarkGray
@@ -171,7 +180,8 @@ $res05 = Run-DeployScript -ScriptArguments @("-RollbackOnly", "-NoSchemaChangeVe
 if ($res05.ExitCode -ne 0 -and ($res05.Output -match "invalid checksum format" -or $res05.Output -match "CRITICAL SCHEMA COMPATIBILITY VIOLATION")) {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly rejected image-only rollback with invalid checksum format." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Failed to reject invalid checksum format!" -ForegroundColor Red
     Write-Host "  ExitCode: $($res05.ExitCode)" -ForegroundColor DarkGray
@@ -194,7 +204,8 @@ $res07 = Run-DeployScript -ScriptArguments @(
 if ($res07.ExitCode -ne 0 -and ($res07.Output -match "valid 64-hex SHA-256 digests" -or $res07.Output -match "IMMUTABILITY VIOLATION")) {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly rejected production rollback with invalid image digest format." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Failed to enforce valid SHA-256 image digests in production mode!" -ForegroundColor Red
     Write-Host "  ExitCode: $($res07.ExitCode)" -ForegroundColor DarkGray
@@ -211,7 +222,8 @@ $smokeScript = Join-Path $PSScriptRoot "prod-smoke-readonly.js"
 try {
     $smokeOut = & $NodeExe $smokeScript --require-passed 2>&1 | Out-String
     $smokeExit = $LASTEXITCODE
-} catch {
+}
+catch {
     $smokeOut = $_.ToString()
     $smokeExit = 1
 }
@@ -219,7 +231,8 @@ try {
 if ($smokeExit -ne 0) {
     $script:PassedTests++
     Write-Host "  [PASS] Smoke test fail-closed enforcement verified: Exited with code $smokeExit (no open traffic)." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Smoke test exited 0 without verified passes under --require-passed!" -ForegroundColor Red
     Write-Host "  ExitCode: $smokeExit" -ForegroundColor DarkGray
@@ -233,7 +246,8 @@ $res16 = Run-DeployScript -ScriptArguments @("-TargetReleaseTag", "v1.0.0", "-Fa
 if ($res16.ExitCode -ne 0 -and ($res16.Output -match "Fault injection .* is unconditionally blocked on production" -or $res16.Output -match "CRITICAL GOVERNANCE VIOLATION")) {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly blocked fault injection against production compose target." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Allowed fault injection against production compose target!" -ForegroundColor Red
     Write-Host "  ExitCode: $($res16.ExitCode)" -ForegroundColor DarkGray
@@ -247,7 +261,8 @@ $res17 = Run-DeployScript -ScriptArguments @("-TargetReleaseTag", "v1.2.3", "-Re
 if ($res17.ExitCode -ne 0 -and $res17.Output -match "GMS IMMUTABILITY VIOLATION") {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly blocked production deploy without SHA-256 image digests." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Allowed production deploy without SHA-256 image digests!" -ForegroundColor Red
     Write-Host "  ExitCode: $($res17.ExitCode)" -ForegroundColor DarkGray
@@ -261,7 +276,8 @@ $res18 = Run-DeployScript -ScriptArguments @("-TargetReleaseTag", "invalid;tag!#
 if ($res18.ExitCode -ne 0 -and ($res18.Output -match "Invalid -TargetReleaseTag" -or $res18.Output -match "CRITICAL")) {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly blocked deploy with invalid TargetReleaseTag characters." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Allowed deploy with invalid TargetReleaseTag characters!" -ForegroundColor Red
     Write-Host "  ExitCode: $($res18.ExitCode)" -ForegroundColor DarkGray
@@ -280,7 +296,7 @@ try {
     # Simulate latest-predeploy.json pointing to an OLD snapshot ID
     [string]$stalePointer = Join-Path $tempBackupTestDir "latest-predeploy.json"
     $stalePointerData = @{
-        backupId = "BKP-STALE-OLD-SNAPSHOT-123"
+        backupId     = "BKP-STALE-OLD-SNAPSHOT-123"
         manifestFile = "gms_STALE-OLD-SNAPSHOT-123_manifest.json"
     }
     Set-Content -Path $stalePointer -Value ($stalePointerData | ConvertTo-Json) -Encoding utf8
@@ -295,19 +311,22 @@ try {
     [string]$rel19Error = ""
     try {
         Resolve-PredeployBackupManifest -FreshBackupId $freshId -BackupDir $tempBackupTestDir | Out-Null
-    } catch {
+    }
+    catch {
         $rel19Error = $_.ToString()
     }
 
     if ($rel19Error -match "CRITICAL BACKUP INTEGRITY VIOLATION" -and $rel19Error -match "stale backup") {
         $script:PassedTests++
         Write-Host "  [PASS] Correctly rejected stale pointer fallback when pointer ID does not match fresh backup ID." -ForegroundColor Green
-    } else {
+    }
+    else {
         $script:FailedTests++
         Write-Host "  [FAIL] Failed to reject stale backup pointer!" -ForegroundColor Red
         Write-Host "  Captured Error: $rel19Error" -ForegroundColor DarkGray
     }
-} finally {
+}
+finally {
     if (Test-Path $tempBackupTestDir) {
         Remove-Item -Path $tempBackupTestDir -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -323,7 +342,8 @@ try {
         param($cnt, $sql)
         return "3"
     }
-} catch {
+}
+catch {
     $rel20ErrorTimeout = $_.ToString()
 }
 
@@ -334,7 +354,8 @@ try {
         param($cnt, $sql)
         throw "psql connection refused"
     }
-} catch {
+}
+catch {
     $rel20ErrorQueryFail = $_.ToString()
 }
 
@@ -342,7 +363,8 @@ if ($rel20ErrorTimeout -match "CRITICAL TRANSACTION DRAIN FAILURE" -and $rel20Er
     $rel20ErrorQueryFail -match "CRITICAL TRANSACTION DRAIN FAILURE" -and $rel20ErrorQueryFail -match "Cannot verify") {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly enforced fail-closed termination on transaction drain timeout and query failure." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Transaction drain did not fail-closed!" -ForegroundColor Red
     Write-Host "  Timeout Error: $rel20ErrorTimeout" -ForegroundColor DarkGray
@@ -360,9 +382,11 @@ try {
     $env:GMS_RELEASE_COMMIT_SHA = ""
     # Simulate git returning empty/error, non-SHA tag, and no env vars
     Resolve-ReleaseGitSha -TargetReleaseTag "v1.2.3" -GitExecutor { return "" }
-} catch {
+}
+catch {
     $rel21Error = $_.ToString()
-} finally {
+}
+finally {
     $env:GITHUB_SHA = $origGithubSha
     $env:GMS_RELEASE_COMMIT_SHA = $origGmsSha
 }
@@ -373,7 +397,8 @@ try {
 if ($rel21Error -match "CRITICAL PROVENANCE FAILURE" -and $rel21Success -eq $validSha) {
     $script:PassedTests++
     Write-Host "  [PASS] Correctly enforced preflight 40-character Git SHA provenance resolution." -ForegroundColor Green
-} else {
+}
+else {
     $script:FailedTests++
     Write-Host "  [FAIL] Git SHA provenance preflight check did not behave as expected!" -ForegroundColor Red
     Write-Host "  Failure Error: $rel21Error" -ForegroundColor DarkGray
@@ -400,12 +425,12 @@ try {
     Set-Content -Path $noShaManifest -Value (@{ release = "v1.2.3" } | ConvertTo-Json) -Encoding utf8
     Set-Content -Path $missingDigestManifest -Value (@{ release = "v1.2.3"; gitSha = $validSha } | ConvertTo-Json) -Encoding utf8
     Set-Content -Path $validManifest -Value (@{
-        release = "v1.2.3"
-        gitSha = $validSha
-        backend = @{ digest = $validDigest }
-        frontend = @{ digest = $validDigest }
-        migrator = @{ digest = $validDigest }
-    } | ConvertTo-Json) -Encoding utf8
+            release  = "v1.2.3"
+            gitSha   = $validSha
+            backend  = @{ digest = $validDigest }
+            frontend = @{ digest = $validDigest }
+            migrator = @{ digest = $validDigest }
+        } | ConvertTo-Json) -Encoding utf8
 
     [string]$s1Err = ""; [string]$s2Err = ""; [string]$s3Err = ""; [string]$s4Err = ""
     [string]$s5Err = ""; [string]$s6Err = ""; [string]$s7Err = ""; [string]$s8Err = ""
@@ -414,39 +439,46 @@ try {
     # S1: Missing manifest file when RequireManifest is set
     try {
         Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath (Join-Path $rel22TempDir "nonexistent.json") -RequireManifest | Out-Null
-    } catch { $s1Err = $_.ToString() }
+    }
+    catch { $s1Err = $_.ToString() }
 
     # S2: Corrupt manifest
     try {
         Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $corruptManifest | Out-Null
-    } catch { $s2Err = $_.ToString() }
+    }
+    catch { $s2Err = $_.ToString() }
 
     # S3: Missing gitSha in manifest
     try {
         Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $noShaManifest | Out-Null
-    } catch { $s3Err = $_.ToString() }
+    }
+    catch { $s3Err = $_.ToString() }
 
     # S4: Mismatched gitSha
     try {
         Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $dummyManifest | Out-Null
-    } catch { $s4Err = $_.ToString() }
+    }
+    catch { $s4Err = $_.ToString() }
 
     # S5: Missing digests when RequireManifest is set
     try {
         Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $missingDigestManifest -RequireManifest | Out-Null
-    } catch { $s5Err = $_.ToString() }
+    }
+    catch { $s5Err = $_.ToString() }
 
     # S6: Mismatched image digest against manifest
     try {
         Assert-ReleaseProvenance -ExpectedGitSha $validSha -TargetManifestPath $validManifest -ExpectedBackendDigest "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" | Out-Null
-    } catch { $s6Err = $_.ToString() }
+    }
+    catch { $s6Err = $_.ToString() }
 
     # S7: Mismatched Image label
     try {
         Assert-ReleaseProvenance -ExpectedGitSha $validSha -BackendImageTag "gms-backend:v1.2.3" -ImageInspector {
             param($tag) return '{"org.opencontainers.image.revision": "3333333333333333333333333333333333333333"}'
         } | Out-Null
-    } catch { $s7Err = $_.ToString() }
+    }
+    catch { $s7Err = $_.ToString() }
 
     # S8: Missing image labels when RequireImageLabels is set
     [string]$s8Err = ""
@@ -458,9 +490,10 @@ try {
             -MigratorImageTag "gms-migrator:v1.2.3" `
             -RequireImageLabels `
             -ImageInspector {
-                param($tag) return '{}'
-            } | Out-Null
-    } catch { $s8Err = $_.ToString() }
+            param($tag) return '{}'
+        } | Out-Null
+    }
+    catch { $s8Err = $_.ToString() }
 
     # S9: Frontend image has mismatched commit SHA
     [string]$s9Err = ""
@@ -472,13 +505,14 @@ try {
             -MigratorImageTag "gms-migrator:v1.2.3" `
             -RequireImageLabels `
             -ImageInspector {
-                param($tag)
-                if ($tag -like "*frontend*") {
-                    return "{`"org.opencontainers.image.revision`": `"0000000000000000000000000000000000000000`"}"
-                }
-                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
-            } | Out-Null
-    } catch { $s9Err = $_.ToString() }
+            param($tag)
+            if ($tag -like "*frontend*") {
+                return "{`"org.opencontainers.image.revision`": `"0000000000000000000000000000000000000000`"}"
+            }
+            return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+        } | Out-Null
+    }
+    catch { $s9Err = $_.ToString() }
 
     # S10: Migrator image has empty labels
     [string]$s10Err = ""
@@ -490,13 +524,14 @@ try {
             -MigratorImageTag "gms-migrator:v1.2.3" `
             -RequireImageLabels `
             -ImageInspector {
-                param($tag)
-                if ($tag -like "*migrator*") {
-                    return "{}"
-                }
-                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
-            } | Out-Null
-    } catch { $s10Err = $_.ToString() }
+            param($tag)
+            if ($tag -like "*migrator*") {
+                return "{}"
+            }
+            return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+        } | Out-Null
+    }
+    catch { $s10Err = $_.ToString() }
 
     # S11: Docker inspect failure on one image
     [string]$s11Err = ""
@@ -508,13 +543,14 @@ try {
             -MigratorImageTag "gms-migrator:v1.2.3" `
             -RequireImageLabels `
             -ImageInspector {
-                param($tag)
-                if ($tag -like "*backend*") {
-                    throw "daemon connection failed"
-                }
-                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
-            } | Out-Null
-    } catch { $s11Err = $_.ToString() }
+            param($tag)
+            if ($tag -like "*backend*") {
+                throw "daemon connection failed"
+            }
+            return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+        } | Out-Null
+    }
+    catch { $s11Err = $_.ToString() }
 
     # S12: Fully valid manifest and all 3 image labels
     $s12Success = Assert-ReleaseProvenance `
@@ -529,8 +565,8 @@ try {
         -RequireManifest `
         -RequireImageLabels `
         -ImageInspector {
-            param($tag) return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
-        }
+        param($tag) return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+    }
 
     # S13: Exact immutable digest target inspection (inspects repository@digest, fails if digest labels mismatch)
     [string]$s13Err = ""
@@ -544,37 +580,39 @@ try {
             -ExpectedBackendDigest $validDigest `
             -RequireImageLabels `
             -ImageInspector {
-                param($target)
-                if ($target -like "*backend*") {
-                    $script:s13InspectTargetObserved = $target
-                }
-                if ($target -eq "gms-backend@$validDigest") {
-                    return "{`"org.opencontainers.image.revision`": `"9999999999999999999999999999999999999999`"}"
-                }
-                return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
-            } | Out-Null
-    } catch { $s13Err = $_.ToString() }
+            param($target)
+            if ($target -like "*backend*") {
+                $script:s13InspectTargetObserved = $target
+            }
+            if ($target -eq "gms-backend@$validDigest") {
+                return "{`"org.opencontainers.image.revision`": `"9999999999999999999999999999999999999999`"}"
+            }
+            return "{`"org.opencontainers.image.revision`": `"$validSha`"}"
+        } | Out-Null
+    }
+    catch { $s13Err = $_.ToString() }
 
     $allPassed = ($s1Err -match "does not exist") -and `
-                 ($s2Err -match "corrupted or invalid JSON") -and `
-                 ($s3Err -match "missing valid 40-character gitSha") -and `
-                 ($s4Err -match "CRITICAL PROVENANCE MISMATCH") -and `
-                 ($s5Err -match "missing valid 64-hex SHA-256 backend digest") -and `
-                 ($s6Err -match "CRITICAL PROVENANCE MISMATCH") -and `
-                 ($s7Err -match "CRITICAL PROVENANCE MISMATCH") -and `
-                 ($s8Err -match "Missing required revision provenance label") -and `
-                 ($s9Err -match "CRITICAL PROVENANCE MISMATCH: frontend image") -and `
-                 ($s10Err -match "migrator image .* has no labels or metadata") -and `
-                 ($s11Err -match "Docker inspect failed on backend image") -and `
-                 ($s12Success -eq $true) -and `
-                 ($script:s13InspectTargetObserved -eq "gms-backend@$validDigest") -and `
-                 ($s13Err -match "CRITICAL PROVENANCE MISMATCH: backend image") -and `
-                 ($s13Err -match "gms-backend@sha256")
+    ($s2Err -match "corrupted or invalid JSON") -and `
+    ($s3Err -match "missing valid 40-character gitSha") -and `
+    ($s4Err -match "CRITICAL PROVENANCE MISMATCH") -and `
+    ($s5Err -match "missing valid 64-hex SHA-256 backend digest") -and `
+    ($s6Err -match "CRITICAL PROVENANCE MISMATCH") -and `
+    ($s7Err -match "CRITICAL PROVENANCE MISMATCH") -and `
+    ($s8Err -match "Missing required revision provenance label") -and `
+    ($s9Err -match "CRITICAL PROVENANCE MISMATCH: frontend image") -and `
+    ($s10Err -match "migrator image .* has no labels or metadata") -and `
+    ($s11Err -match "Docker inspect failed on backend image") -and `
+    ($s12Success -eq $true) -and `
+    ($script:s13InspectTargetObserved -eq "gms-backend@$validDigest") -and `
+    ($s13Err -match "CRITICAL PROVENANCE MISMATCH: backend image") -and `
+    ($s13Err -match "gms-backend@sha256")
 
     if ($allPassed) {
         $script:PassedTests++
         Write-Host "  [PASS] Correctly enforced all 13 fail-closed provenance assertion gates across 3 images (backend, frontend, migrator)." -ForegroundColor Green
-    } else {
+    }
+    else {
         $script:FailedTests++
         Write-Host "  [FAIL] Release provenance assertion did not enforce all expected checks!" -ForegroundColor Red
         Write-Host "  S1 (Missing Manifest):    $s1Err" -ForegroundColor DarkGray
@@ -591,7 +629,8 @@ try {
         Write-Host "  S12 (Valid Provenance):   $s12Success" -ForegroundColor DarkGray
         Write-Host "  S13 (Exact Digest Fail):  $s13Err" -ForegroundColor DarkGray
     }
-} finally {
+}
+finally {
     if (Test-Path $rel22TempDir) {
         Remove-Item -Path $rel22TempDir -Recurse -Force -ErrorAction SilentlyContinue
     }
@@ -612,27 +651,30 @@ try {
         Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
             -StatExecutor { param($c, $p) return "" } `
             -DfExecutor { param($c, $p) return "10000000" } | Out-Null
-    } catch { $c1Err = $_.ToString() }
+    }
+    catch { $c1Err = $_.ToString() }
 
     # C2: Df failure -> fail-closed
     try {
         Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
             -StatExecutor { param($c, $p) return "10485760" } `
             -DfExecutor { param($c, $p) return "" } | Out-Null
-    } catch { $c2Err = $_.ToString() }
+    }
+    catch { $c2Err = $_.ToString() }
 
     # C3: Insufficient capacity (dump 50MB -> required 150MB, available only 50MB) -> fail-closed
     try {
         Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
             -StatExecutor { param($c, $p) return (50 * 1024 * 1024).ToString() } `
             -DfExecutor { param($c, $p) return (50 * 1024).ToString() } | Out-Null
-    } catch { $c3Err = $_.ToString() }
+    }
+    catch { $c3Err = $_.ToString() }
 
     # C4: Valid capacity (dump 10MB -> required max(30MB, 100MB) = 100MB, available 500MB) -> pass
     $c4Res = Assert-RestoreStorageCapacity -Container "dummy" -DumpPathInContainer "/tmp/dump.bin" `
         -StatExecutor { param($c, $p) return (10 * 1024 * 1024).ToString() } `
         -DfExecutor { param($c, $p) return (500 * 1024).ToString() }
-    if ($c4Res -and $c4Res.DumpBytes -eq (10*1024*1024) -and $c4Res.RequiredBytes -eq 104857600) {
+    if ($c4Res -and $c4Res.DumpBytes -eq (10 * 1024 * 1024) -and $c4Res.RequiredBytes -eq 104857600) {
         $c4Pass = $true
     }
 
@@ -650,57 +692,58 @@ try {
 
     $now = (Get-Date).ToUniversalTime()
     $mockMeta = @{
-        "/tmp/gms_restore_active" = @{ operationId = "op-active"; status = "IN_PROGRESS"; createdAt = $now.ToString("o") } | ConvertTo-Json -Compress
-        "/tmp/gms_restore_completed_verified" = @{ operationId = "op-comp-verified"; status = "COMPLETED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_active"               = @{ operationId = "op-active"; status = "IN_PROGRESS"; createdAt = $now.ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_completed_verified"   = @{ operationId = "op-comp-verified"; status = "COMPLETED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
         "/tmp/gms_restore_completed_unverified" = @{ operationId = "op-comp-unverified"; status = "COMPLETED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
-        "/tmp/gms_restore_failed_recent" = @{ operationId = "op-fail-rec"; status = "FAILED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
-        "/tmp/gms_restore_failed_expired" = @{ operationId = "op-fail-exp"; status = "FAILED"; createdAt = $now.AddHours(-26).ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_failed_recent"        = @{ operationId = "op-fail-rec"; status = "FAILED"; createdAt = $now.AddHours(-2).ToString("o") } | ConvertTo-Json -Compress
+        "/tmp/gms_restore_failed_expired"       = @{ operationId = "op-fail-exp"; status = "FAILED"; createdAt = $now.AddHours(-26).ToString("o") } | ConvertTo-Json -Compress
     }
 
     Clear-StaleGmsRestoreArtifacts -Container "dummy" -CurrentOperationId "op-active" `
         -LedgerInspector { param($op) return ($op -eq "op-comp-verified") } `
         -CommandExecutor {
-            param($cont, $cmd)
-            if ($cmd -like "find /tmp*") {
-                return ($mockDirs -join "`n")
-            }
-            if ($cmd -like "*cat *stage.meta.json*") {
-                foreach ($key in $mockMeta.Keys) {
-                    if ($cmd -like "*$key/*") {
-                        return $mockMeta[$key]
-                    }
+        param($cont, $cmd)
+        if ($cmd -like "find /tmp*") {
+            return ($mockDirs -join "`n")
+        }
+        if ($cmd -like "*cat *stage.meta.json*") {
+            foreach ($key in $mockMeta.Keys) {
+                if ($cmd -like "*$key/*") {
+                    return $mockMeta[$key]
                 }
-                return ""
-            }
-            if ($cmd -like "*rm -rf *") {
-                $matched = $mockDirs | Where-Object { $cmd -like "*$_*" } | Select-Object -First 1
-                if ($matched) {
-                    $prunedDirs.Add($matched)
-                }
-                return ""
             }
             return ""
         }
+        if ($cmd -like "*rm -rf *") {
+            $matched = $mockDirs | Where-Object { $cmd -like "*$_*" } | Select-Object -First 1
+            if ($matched) {
+                $prunedDirs.Add($matched)
+            }
+            return ""
+        }
+        return ""
+    }
 
     $c5ArtifactGovernancePass = (-not $prunedDirs.Contains("/tmp/gms_restore_active")) -and `
-                                ($prunedDirs.Contains("/tmp/gms_restore_completed_verified")) -and `
-                                (-not $prunedDirs.Contains("/tmp/gms_restore_completed_unverified")) -and `
-                                (-not $prunedDirs.Contains("/tmp/gms_restore_failed_recent")) -and `
-                                (-not $prunedDirs.Contains("/tmp/gms_restore_failed_expired")) -and `
-                                (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_old")) -and `
-                                (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_recent")) -and `
-                                ($prunedDirs.Count -eq 1)
+    ($prunedDirs.Contains("/tmp/gms_restore_completed_verified")) -and `
+    (-not $prunedDirs.Contains("/tmp/gms_restore_completed_unverified")) -and `
+    (-not $prunedDirs.Contains("/tmp/gms_restore_failed_recent")) -and `
+    (-not $prunedDirs.Contains("/tmp/gms_restore_failed_expired")) -and `
+    (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_old")) -and `
+    (-not $prunedDirs.Contains("/tmp/gms_restore_legacy_recent")) -and `
+    ($prunedDirs.Count -eq 1)
 
     $allRel23Passed = ($c1Err -match "Failed to determine dump file size") -and `
-                      ($c2Err -match "Failed to determine storage capacity") -and `
-                      ($c3Err -match "Insufficient storage capacity") -and `
-                      $c4Pass -and `
-                      $c5ArtifactGovernancePass
+    ($c2Err -match "Failed to determine storage capacity") -and `
+    ($c3Err -match "Insufficient storage capacity") -and `
+        $c4Pass -and `
+        $c5ArtifactGovernancePass
 
     if ($allRel23Passed) {
         $script:PassedTests++
         Write-Host "  [PASS] Restore storage preflight fail-closed checks and forensic artifact governance verified." -ForegroundColor Green
-    } else {
+    }
+    else {
         $script:FailedTests++
         Write-Host "  [FAIL] Restore storage preflight or artifact governance failed verification!" -ForegroundColor Red
         Write-Host "  C1 (Stat Fail):           $c1Err" -ForegroundColor DarkGray
@@ -709,7 +752,8 @@ try {
         Write-Host "  C4 (Valid Space Pass):    $c4Pass" -ForegroundColor DarkGray
         Write-Host "  C5 (Artifact Governance): $c5ArtifactGovernancePass (Pruned: $($prunedDirs -join ', '))" -ForegroundColor DarkGray
     }
-} catch {
+}
+catch {
     $script:FailedTests++
     Write-Host "  [FAIL] REL-23 threw unexpected error: $_" -ForegroundColor Red
 }
@@ -760,15 +804,16 @@ try {
     [string]$hashLedgerPost = if ($ledgerStillExists) { (Get-FileHash -Path $sentinelLedger -Algorithm SHA256).Hash } else { "" }
 
     [bool]$hashesIdentical = ($hashFlagPre -eq $hashFlagPost) -and `
-                             ($hashActivePre -eq $hashActivePost) -and `
-                             ($hashLedgerPre -eq $hashLedgerPost)
+    ($hashActivePre -eq $hashActivePost) -and `
+    ($hashLedgerPre -eq $hashLedgerPost)
 
     # 6. Negative tests: Production Clear-DeploymentMaintenanceStateSafe boundary enforcement
     [bool]$negativeBoundaryOutsideBlocked = $false
     try {
         # Attempt to prune mockRoot while restricting boundary to isolatedWorkDir
         Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $mockRoot -AllowedBoundaryDirectory $isolatedWorkDir
-    } catch {
+    }
+    catch {
         if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
             $negativeBoundaryOutsideBlocked = $true
         }
@@ -778,7 +823,8 @@ try {
     try {
         # Attempt to prune actual project root while restricting boundary to test fixture directory
         Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $ProjectRootDir -AllowedBoundaryDirectory $script:TestFixtureDir
-    } catch {
+    }
+    catch {
         if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
             $negativeOperationalRootBlocked = $true
         }
@@ -789,7 +835,8 @@ try {
     try {
         # Sibling directory starting with same prefix must be blocked by separator boundary check
         Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $siblingCollisionDir -AllowedBoundaryDirectory $isolatedWorkDir
-    } catch {
+    }
+    catch {
         if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
             $negativeSiblingPrefixBlocked = $true
         }
@@ -799,7 +846,8 @@ try {
     try {
         # Exact boundary root itself must be rejected (must be strictly contained inside boundary)
         Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $script:TestFixtureDir -AllowedBoundaryDirectory $script:TestFixtureDir
-    } catch {
+    }
+    catch {
         if ($_ -match "MAINTENANCE CLEANUP BOUNDARY VIOLATION") {
             $negativeExactBoundaryRootBlocked = $true
         }
@@ -808,54 +856,319 @@ try {
     [bool]$negativeEmptyTargetBlocked = $false
     try {
         Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot ""
-    } catch {
+    }
+    catch {
         if ($_ -match "MAINTENANCE CLEANUP GUARD") {
             $negativeEmptyTargetBlocked = $true
         }
     }
 
-    [bool]$negativeReparsePointBlocked = $false
-    [string]$junctionLink = Join-Path $isolatedWorkDir "escaping_junction"
-    try {
-        # Create a junction inside isolatedWorkDir pointing OUTSIDE to mockRoot
-        New-Item -ItemType Junction -Path $junctionLink -Target $mockRoot -Force -ErrorAction SilentlyContinue | Out-Null
-        if (Test-Path $junctionLink) {
-            Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $junctionLink -AllowedBoundaryDirectory $isolatedWorkDir
-        } else {
-            # Fallback if unprivileged or non-Windows
-            $negativeReparsePointBlocked = $true
+    # 7. WIN-01: Reparse Point (Junction) Boundary Containment Suite
+    # Evaluates 5 distinct junction scenarios on Windows fail-closed:
+    #   (A) Target Junction: Target workspace itself is an escaping junction pointing outside boundary.
+    #   (B) Maintenance Subdir Junction: Target workspace is inside boundary, but its maintenance/ subdir is an escaping junction.
+    #   (C) Ancestor Junction: Target is an ordinary subdirectory, but an ancestor between target and boundary is an escaping junction.
+    #   (D) Chained Junction: Target workspace is a junction targeting a relay junction that targets outside boundary.
+    #   (E) Ancestor Cycle / Circular Junction: Traversal spans cyclical junction references across intermediate ancestors.
+
+    [string]$currentPsEngine = "$($PSVersionTable.PSEdition) $($PSVersionTable.PSVersion) ($([System.Environment]::OSVersion.VersionString), $env:PROCESSOR_ARCHITECTURE)"
+    Write-Host "    [WIN-01] Executing Reparse Point Boundary Suite on: $currentPsEngine" -ForegroundColor DarkGray
+
+    [bool]$isWindowsPlatform = if ($PSVersionTable.PSVersion.Major -ge 6) { [bool]$IsWindows } else { ($env:OS -like "*Windows*") }
+
+    [bool]$negativeTargetJunctionBlocked = $false
+    [bool]$negativeMaintJunctionBlocked = $false
+    [bool]$negativeAncestorJunctionBlocked = $false
+    [bool]$negativeChainedJunctionBlocked = $false
+    [bool]$negativeCycleBlocked = $false
+    [bool]$childSentinelPreserved = $false
+    [bool]$childHashesIdentical = $false
+    [bool]$chainedSentinelPreserved = $false
+    [bool]$chainedHashesIdentical = $false
+    [bool]$reparseTestingSkipped = $false
+
+    if (-not $isWindowsPlatform) {
+        Write-Host "    [WIN-01 SKIP] NTFS reparse points not supported on non-Windows platform. Explicit SKIP recorded." -ForegroundColor DarkYellow
+        $reparseTestingSkipped = $true
+    }
+    else {
+        # Helper: Create junction and verify [System.IO.FileAttributes]::ReparsePoint fail-closed
+        $createVerifiedJunction = {
+            param([string]$LinkPath, [string]$TargetPath)
+            if (Test-Path $LinkPath) {
+                [System.IO.Directory]::Delete($LinkPath)
+            }
+            New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -Force -ErrorAction Stop | Out-Null
+            if (-not (Test-Path $LinkPath)) {
+                throw "WIN-01 PROVISIONING FAILED: Reparse point '$LinkPath' was not created."
+            }
+            $item = Get-Item -Path $LinkPath -Force
+            if (-not ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                throw "WIN-01 PROVISIONING FAILED: Item '$LinkPath' does not possess ReparsePoint attribute."
+            }
         }
-    } catch {
-        if ($_ -match "MAINTENANCE CLEANUP REPARSE POINT VIOLATION") {
-            $negativeReparsePointBlocked = $true
+
+        # Helper: Safe teardown of junction link without traversing or deleting target contents
+        $safeDeleteJunction = {
+            param([string]$LinkPath)
+            if (Test-Path $LinkPath) {
+                $item = Get-Item -Path $LinkPath -Force -ErrorAction SilentlyContinue
+                if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                    [System.IO.Directory]::Delete($LinkPath)
+                }
+                elseif ($item) {
+                    Remove-Item -Path $LinkPath -Force -Recurse -ErrorAction SilentlyContinue
+                }
+            }
         }
-    } finally {
-        if (Test-Path $junctionLink) {
-            [System.IO.Directory]::Delete($junctionLink)
+
+        # --- Scenario A: Target Junction ---
+        [string]$targetJuncLink = Join-Path $isolatedWorkDir "escaping_target_junction"
+        try {
+            & $createVerifiedJunction $targetJuncLink $mockRoot
+            Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $targetJuncLink -AllowedBoundaryDirectory $isolatedWorkDir
+        }
+        catch {
+            if ($_ -match "MAINTENANCE CLEANUP REPARSE POINT VIOLATION") {
+                $negativeTargetJunctionBlocked = $true
+            }
+        }
+        finally {
+            & $safeDeleteJunction $targetJuncLink
+        }
+
+        # --- Scenario B: Maintenance Subdir Junction ---
+        [string]$maintJuncWorkspace = Join-Path $isolatedWorkDir "workspace_with_maint_junc"
+        [string]$maintJuncLink = Join-Path $maintJuncWorkspace "maintenance"
+        try {
+            New-Item -ItemType Directory -Path $maintJuncWorkspace -Force | Out-Null
+            & $createVerifiedJunction $maintJuncLink $mockRoot
+            Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $maintJuncWorkspace -AllowedBoundaryDirectory $isolatedWorkDir
+        }
+        catch {
+            if ($_ -match "MAINTENANCE CLEANUP REPARSE POINT VIOLATION") {
+                $negativeMaintJunctionBlocked = $true
+            }
+        }
+        finally {
+            & $safeDeleteJunction $maintJuncLink
+            if (Test-Path $maintJuncWorkspace) {
+                Remove-Item -Path $maintJuncWorkspace -Force -Recurse -ErrorAction SilentlyContinue
+            }
+        }
+
+        # --- Scenario C: Ancestor Junction ---
+        [string]$ancestorJunc = Join-Path $isolatedWorkDir "escaping_ancestor_junc"
+        [string]$mockSubfolder = Join-Path $mockRoot "mock_ancestor_child"
+        [string]$childSentinelActive = Join-Path (Join-Path $mockSubfolder "maintenance") "active"
+        [string]$childSentinelFlag = Join-Path $mockSubfolder "maintenance.flag"
+        [string]$childActiveHashPre = ""
+        [string]$childFlagHashPre = ""
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $mockSubfolder "maintenance") -Force | Out-Null
+            Set-Content -Path $childSentinelActive -Value "CHILD_ACTIVE_PRESERVE" -Encoding utf8
+            Set-Content -Path $childSentinelFlag -Value "CHILD_FLAG_PRESERVE" -Encoding utf8
+            $childActiveHashPre = (Get-FileHash -Path $childSentinelActive -Algorithm SHA256).Hash
+            $childFlagHashPre = (Get-FileHash -Path $childSentinelFlag -Algorithm SHA256).Hash
+
+            & $createVerifiedJunction $ancestorJunc $mockRoot
+            [string]$ancestorTarget = Join-Path $ancestorJunc "mock_ancestor_child"
+            Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $ancestorTarget -AllowedBoundaryDirectory $isolatedWorkDir
+        }
+        catch {
+            if ($_ -match "MAINTENANCE CLEANUP REPARSE POINT VIOLATION") {
+                $negativeAncestorJunctionBlocked = $true
+            }
+        }
+        finally {
+            & $safeDeleteJunction $ancestorJunc
+            if (Test-Path $mockSubfolder) {
+                [bool]$childActiveExists = Test-Path $childSentinelActive
+                [bool]$childFlagExists = Test-Path $childSentinelFlag
+                [string]$childActiveHashPost = if ($childActiveExists) { (Get-FileHash -Path $childSentinelActive -Algorithm SHA256).Hash } else { "" }
+                [string]$childFlagHashPost = if ($childFlagExists) { (Get-FileHash -Path $childSentinelFlag -Algorithm SHA256).Hash } else { "" }
+
+                $childSentinelPreserved = $childActiveExists -and $childFlagExists
+                $childHashesIdentical = ($childActiveHashPre -eq $childActiveHashPost) -and ($childFlagHashPre -eq $childFlagHashPost)
+
+                Remove-Item -Path $mockSubfolder -Force -Recurse -ErrorAction SilentlyContinue
+            }
+        }
+
+        # --- Scenario D: Chained / Relay Junction ---
+        [string]$relayJunc = Join-Path $isolatedWorkDir "escaping_relay_junc"
+        [string]$workspaceJunc = Join-Path $isolatedWorkDir "chained_workspace_junc"
+        [string]$mockChainedChild = Join-Path $mockRoot "mock_chained_child"
+        [string]$chainedChildSentinelActive = Join-Path (Join-Path $mockChainedChild "maintenance") "active"
+        [string]$chainedChildSentinelFlag = Join-Path $mockChainedChild "maintenance.flag"
+        [string]$chainedActiveHashPre = ""
+        [string]$chainedFlagHashPre = ""
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $mockChainedChild "maintenance") -Force | Out-Null
+            Set-Content -Path $chainedChildSentinelActive -Value "CHAINED_CHILD_ACTIVE_PRESERVE" -Encoding utf8
+            Set-Content -Path $chainedChildSentinelFlag -Value "CHAINED_CHILD_FLAG_PRESERVE" -Encoding utf8
+            $chainedActiveHashPre = (Get-FileHash -Path $chainedChildSentinelActive -Algorithm SHA256).Hash
+            $chainedFlagHashPre = (Get-FileHash -Path $chainedChildSentinelFlag -Algorithm SHA256).Hash
+
+            # 1. Relay junction inside boundary pointing outside boundary to mockRoot
+            & $createVerifiedJunction $relayJunc $mockRoot
+
+            # 2. Workspace junction inside boundary pointing to relay junction
+            & $createVerifiedJunction $workspaceJunc $relayJunc
+
+            [string]$chainedTarget = Join-Path $workspaceJunc "mock_chained_child"
+            Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $chainedTarget -AllowedBoundaryDirectory $isolatedWorkDir
+        }
+        catch {
+            if ($_ -match "MAINTENANCE CLEANUP REPARSE POINT VIOLATION") {
+                $negativeChainedJunctionBlocked = $true
+            }
+        }
+        finally {
+            & $safeDeleteJunction $workspaceJunc
+            & $safeDeleteJunction $relayJunc
+            if (Test-Path $mockChainedChild) {
+                [bool]$chainedActiveExists = Test-Path $chainedChildSentinelActive
+                [bool]$chainedFlagExists = Test-Path $chainedChildSentinelFlag
+                [string]$chainedActiveHashPost = if ($chainedActiveExists) { (Get-FileHash -Path $chainedChildSentinelActive -Algorithm SHA256).Hash } else { "" }
+                [string]$chainedFlagHashPost = if ($chainedFlagExists) { (Get-FileHash -Path $chainedChildSentinelFlag -Algorithm SHA256).Hash } else { "" }
+
+                $chainedSentinelPreserved = $chainedActiveExists -and $chainedFlagExists
+                $chainedHashesIdentical = ($chainedActiveHashPre -eq $chainedActiveHashPost) -and ($chainedFlagHashPre -eq $chainedFlagHashPost)
+
+                Remove-Item -Path $mockChainedChild -Force -Recurse -ErrorAction SilentlyContinue
+            }
+        }
+
+        # --- Scenario E: True Circular Reparse Point Cycle (Mutual Junction Cycle) ---
+        [string]$cycleJuncA = Join-Path $isolatedWorkDir "cycle_junc_a"
+        [string]$cycleJuncB = Join-Path $isolatedWorkDir "cycle_junc_b"
+        [string]$cycleDummyDir = Join-Path $isolatedWorkDir "cycle_dummy_dir"
+        try {
+            New-Item -ItemType Directory -Path $cycleDummyDir -Force | Out-Null
+            & $createVerifiedJunction $cycleJuncA $cycleDummyDir
+            & $createVerifiedJunction $cycleJuncB $cycleJuncA
+            & $safeDeleteJunction $cycleJuncA
+            & $createVerifiedJunction $cycleJuncA $cycleJuncB
+            if (Test-Path $cycleDummyDir) {
+                Remove-Item -Path $cycleDummyDir -Force -Recurse -ErrorAction SilentlyContinue
+            }
+
+            # Verification of true circular junction: cycleJuncA targets cycleJuncB and cycleJuncB targets cycleJuncA
+            Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $cycleJuncA -AllowedBoundaryDirectory $isolatedWorkDir
+        }
+        catch {
+            if ($_ -match "MAINTENANCE CLEANUP REPARSE POINT VIOLATION" -and $_ -match "circular reparse point reference") {
+                $negativeCycleBlocked = $true
+            }
+        }
+        finally {
+            & $safeDeleteJunction $cycleJuncA
+            & $safeDeleteJunction $cycleJuncB
+            if (Test-Path $cycleDummyDir) {
+                Remove-Item -Path $cycleDummyDir -Force -Recurse -ErrorAction SilentlyContinue
+            }
+        }
+
+        # --- Scenario F: Positive Control (Valid Internal Reparse Point) ---
+        # Workspace is a verified junction pointing to a regular directory inside boundary.
+        # Must succeed and clean both maintenance markers without false circular cycle exception.
+        [string]$validWsReal = Join-Path $isolatedWorkDir "valid_internal_ws_real"
+        [string]$validWsJunc = Join-Path $isolatedWorkDir "valid_internal_ws_junc"
+        [string]$validActive = Join-Path (Join-Path $validWsReal "maintenance") "active"
+        [string]$validFlag = Join-Path $validWsReal "maintenance.flag"
+        [bool]$positiveInternalJunctionPassed = $false
+        try {
+            New-Item -ItemType Directory -Path (Join-Path $validWsReal "maintenance") -Force | Out-Null
+            Set-Content -Path $validActive -Value "VALID_ACTIVE_MARKER" -Encoding utf8
+            Set-Content -Path $validFlag -Value "VALID_FLAG_MARKER" -Encoding utf8
+
+            & $createVerifiedJunction $validWsJunc $validWsReal
+
+            [int]$posRemoved = Clear-DeploymentMaintenanceStateSafe -TargetWorkspaceRoot $validWsJunc -AllowedBoundaryDirectory $isolatedWorkDir
+            [bool]$posActiveCleaned = -not (Test-Path $validActive)
+            [bool]$posFlagCleaned = -not (Test-Path $validFlag)
+
+            if (($posRemoved -eq 2) -and $posActiveCleaned -and $posFlagCleaned) {
+                $positiveInternalJunctionPassed = $true
+            }
+        }
+        catch {
+            Write-Host "    [WARN] Positive control internal junction failed unexpectedly: $_" -ForegroundColor Red
+        }
+        finally {
+            & $safeDeleteJunction $validWsJunc
+            if (Test-Path $validWsReal) {
+                Remove-Item -Path $validWsReal -Force -Recurse -ErrorAction SilentlyContinue
+            }
         }
     }
 
-    [bool]$passed = $scopedCleanupSucceeded -and $flagStillExists -and $activeStillExists -and $ledgerStillExists -and `
-                    $hashesIdentical -and $negativeBoundaryOutsideBlocked -and $negativeOperationalRootBlocked -and `
-                    $negativeSiblingPrefixBlocked -and $negativeExactBoundaryRootBlocked -and $negativeEmptyTargetBlocked -and `
-                    $negativeReparsePointBlocked
+    # Verify cryptographic preservation of external mock root sentinels post-junction testing
+    [bool]$flagStillExistsPostJunc = Test-Path -Path $sentinelFlag
+    [bool]$activeStillExistsPostJunc = Test-Path -Path $sentinelActive
+    [bool]$ledgerStillExistsPostJunc = Test-Path -Path $sentinelLedger
 
-    if ($passed) {
-        $script:PassedTests++
-        Write-Host "  [PASS] Operational maintenance state non-interference invariant verified: SHA-256 hashes 100% identical and boundary containment guards passed." -ForegroundColor Green
-    } else {
-        $script:FailedTests++
-        Write-Host "  [FAIL] Invariant violation: external maintenance flag or ledger was modified, hash diverged, or negative guard failed!" -ForegroundColor Red
-        Write-Host "    Flag Hash Match:         $($hashFlagPre -eq $hashFlagPost)" -ForegroundColor DarkGray
-        Write-Host "    Active Hash Match:       $($hashActivePre -eq $hashActivePost)" -ForegroundColor DarkGray
-        Write-Host "    Ledger Hash Match:       $($hashLedgerPre -eq $hashLedgerPost)" -ForegroundColor DarkGray
-        Write-Host "    Boundary Outside Pass:   $negativeBoundaryOutsideBlocked" -ForegroundColor DarkGray
-        Write-Host "    Operational Root Pass:   $negativeOperationalRootBlocked" -ForegroundColor DarkGray
-        Write-Host "    Sibling Collision Pass:  $negativeSiblingPrefixBlocked" -ForegroundColor DarkGray
-        Write-Host "    Exact Root Boundary Pass:$negativeExactBoundaryRootBlocked" -ForegroundColor DarkGray
-        Write-Host "    Empty Target Pass:       $negativeEmptyTargetBlocked" -ForegroundColor DarkGray
+    [string]$hashFlagFinal = if ($flagStillExistsPostJunc) { (Get-FileHash -Path $sentinelFlag -Algorithm SHA256).Hash } else { "" }
+    [string]$hashActiveFinal = if ($activeStillExistsPostJunc) { (Get-FileHash -Path $sentinelActive -Algorithm SHA256).Hash } else { "" }
+    [string]$hashLedgerFinal = if ($ledgerStillExistsPostJunc) { (Get-FileHash -Path $sentinelLedger -Algorithm SHA256).Hash } else { "" }
+
+    [bool]$finalHashesIdentical = ($hashFlagPre -eq $hashFlagFinal) -and `
+    ($hashActivePre -eq $hashActiveFinal) -and `
+    ($hashLedgerPre -eq $hashLedgerFinal)
+
+    [bool]$allReparsePassed = if ($reparseTestingSkipped) { $false } else {
+        $negativeTargetJunctionBlocked -and $negativeMaintJunctionBlocked -and $negativeAncestorJunctionBlocked -and `
+            $childSentinelPreserved -and $childHashesIdentical -and `
+            $negativeChainedJunctionBlocked -and $chainedSentinelPreserved -and $chainedHashesIdentical -and `
+            $negativeCycleBlocked -and $positiveInternalJunctionPassed
     }
-} catch {
+
+    [bool]$standardPassed = $scopedCleanupSucceeded -and $flagStillExistsPostJunc -and $activeStillExistsPostJunc -and $ledgerStillExistsPostJunc -and `
+        $finalHashesIdentical -and $negativeBoundaryOutsideBlocked -and $negativeOperationalRootBlocked -and `
+        $negativeSiblingPrefixBlocked -and $negativeExactBoundaryRootBlocked -and $negativeEmptyTargetBlocked
+
+    if ($reparseTestingSkipped) {
+        if ($standardPassed) {
+            $script:SkippedTests++
+            Write-Host "  [SKIP] Operational maintenance state non-interference verified for standard directories. Windows reparse point containment suite: SKIPPED (non-Windows platform - NTFS junctions unsupported)." -ForegroundColor DarkYellow
+        }
+        else {
+            $script:FailedTests++
+            Write-Host "  [FAIL] Invariant violation: standard directory boundary guards failed on non-Windows platform!" -ForegroundColor Red
+        }
+    }
+    else {
+        [bool]$passed = $standardPassed -and $allReparsePassed
+        if ($passed) {
+            $script:PassedTests++
+            Write-Host "  [PASS] Operational maintenance state non-interference invariant verified: SHA-256 hashes 100% identical and boundary containment guards passed." -ForegroundColor Green
+        }
+        else {
+            $script:FailedTests++
+            Write-Host "  [FAIL] Invariant violation: external maintenance flag or ledger was modified, hash diverged, or negative guard failed!" -ForegroundColor Red
+            Write-Host "    Flag Hash Match:           $($hashFlagPre -eq $hashFlagFinal)" -ForegroundColor DarkGray
+            Write-Host "    Active Hash Match:         $($hashActivePre -eq $hashActiveFinal)" -ForegroundColor DarkGray
+            Write-Host "    Ledger Hash Match:         $($hashLedgerPre -eq $hashLedgerFinal)" -ForegroundColor DarkGray
+            Write-Host "    Boundary Outside Pass:     $negativeBoundaryOutsideBlocked" -ForegroundColor DarkGray
+            Write-Host "    Operational Root Pass:     $negativeOperationalRootBlocked" -ForegroundColor DarkGray
+            Write-Host "    Sibling Collision Pass:    $negativeSiblingPrefixBlocked" -ForegroundColor DarkGray
+            Write-Host "    Exact Root Boundary Pass:  $negativeExactBoundaryRootBlocked" -ForegroundColor DarkGray
+            Write-Host "    Empty Target Pass:         $negativeEmptyTargetBlocked" -ForegroundColor DarkGray
+            Write-Host "    Target Junction Blocked:   $negativeTargetJunctionBlocked" -ForegroundColor DarkGray
+            Write-Host "    Maint Subdir Blocked:      $negativeMaintJunctionBlocked" -ForegroundColor DarkGray
+            Write-Host "    Ancestor Junction Blocked: $negativeAncestorJunctionBlocked" -ForegroundColor DarkGray
+            Write-Host "    Child Sentinel Preserved:  $childSentinelPreserved" -ForegroundColor DarkGray
+            Write-Host "    Child Hash Match:          $childHashesIdentical" -ForegroundColor DarkGray
+            Write-Host "    Chained Junction Blocked:  $negativeChainedJunctionBlocked" -ForegroundColor DarkGray
+            Write-Host "    Chained Sentinel Preserved:$chainedSentinelPreserved" -ForegroundColor DarkGray
+            Write-Host "    Chained Hash Match:        $chainedHashesIdentical" -ForegroundColor DarkGray
+            Write-Host "    Circular Cycle Blocked:    $negativeCycleBlocked" -ForegroundColor DarkGray
+            Write-Host "    Positive Junc Passed:      $positiveInternalJunctionPassed" -ForegroundColor DarkGray
+        }
+    }
+}
+catch {
     $script:FailedTests++
     Write-Host "  [FAIL] REL-24 threw unexpected error: $_" -ForegroundColor Red
 }
@@ -876,7 +1189,8 @@ try {
             throw "psql: error: could not connect to server: Connection refused"
         }
         Get-LiveTableCountSafe -TableName "User" -QueryExecutor $mockDisconnect
-    } catch {
+    }
+    catch {
         $c1Err = $_.ToString()
     }
     [bool]$c1Pass = ($c1Err -match "could not connect to server")
@@ -890,7 +1204,8 @@ try {
             throw "CRITICAL LIVE DB QUERY FAILURE: Exit code: 1. Error executing SQL: ERROR: syntax error at or near 'SELECT'"
         }
         Get-LiveTableCountSafe -TableName "Transaction" -QueryExecutor $mockSqlError
-    } catch {
+    }
+    catch {
         $c2Err = $_.ToString()
     }
     [bool]$c2Pass = ($c2Err -match "CRITICAL LIVE DB QUERY FAILURE|syntax error")
@@ -904,7 +1219,8 @@ try {
             return "NaN_CORRUPTED_ROW_COUNT_OUTPUT"
         }
         Get-LiveTableCountSafe -TableName "WeighbridgeRecord" -QueryExecutor $mockCorruptOutput
-    } catch {
+    }
+    catch {
         $c3Err = $_.ToString()
     }
     [bool]$c3Pass = ($c3Err -match "Non-numeric or invalid row count")
@@ -918,7 +1234,8 @@ try {
             return "0"
         }
         Get-LiveTableCountSafe -TableName "User" -AllowMissingIfHistorical $false -QueryExecutor $mockMissingTable
-    } catch {
+    }
+    catch {
         $c4Err = $_.ToString()
     }
     [bool]$c4Pass = ($c4Err -match "Mandatory table \[User\] does NOT exist")
@@ -947,7 +1264,8 @@ try {
     if ($allRel25Passed) {
         $script:PassedTests++
         Write-Host "  [PASS] Fail-closed live table count verification passed all 6 negative and positive assertions." -ForegroundColor Green
-    } else {
+    }
+    else {
         $script:FailedTests++
         Write-Host "  [FAIL] REL-25 live table count verification failed!" -ForegroundColor Red
         Write-Host "    C1 (Disconnect Fail-Closed):  $c1Pass ($c1Err)" -ForegroundColor DarkGray
@@ -957,16 +1275,18 @@ try {
         Write-Host "    C5 (Historical Allowed 0):    $c5Pass (Result: $c5Result)" -ForegroundColor DarkGray
         Write-Host "    C6 (Valid Count Exact Match): $c6Pass (Result: $c6Result)" -ForegroundColor DarkGray
     }
-} catch {
+}
+catch {
     $script:FailedTests++
     Write-Host "  [FAIL] REL-25 threw unexpected error: $_" -ForegroundColor Red
 }
 
 Write-Host "`n==============================================================================" -ForegroundColor Cyan
 Write-Host "CLI Syntax & Regression Matrix Verification Summary:" -ForegroundColor Cyan
-Write-Host "  Total:  $TotalTests" -ForegroundColor Cyan
-Write-Host "  Passed: $PassedTests" -ForegroundColor Green
-Write-Host "  Failed: $FailedTests" -ForegroundColor $(if ($FailedTests -eq 0) { "Green" } else { "Red" })
+Write-Host "  Total:   $TotalTests" -ForegroundColor Cyan
+Write-Host "  Passed:  $PassedTests" -ForegroundColor Green
+Write-Host "  Skipped: $script:SkippedTests" -ForegroundColor $(if ($script:SkippedTests -eq 0) { "DarkGray" } else { "DarkYellow" })
+Write-Host "  Failed:  $FailedTests" -ForegroundColor $(if ($FailedTests -eq 0) { "Green" } else { "Red" })
 Write-Host "==============================================================================" -ForegroundColor Cyan
 
 # Cleanup ONLY test-owned fixture directory; NEVER touch root workspace maintenance files
@@ -976,6 +1296,7 @@ if (Test-Path $script:TestFixtureDir) {
 
 if ($FailedTests -eq 0) {
     exit 0
-} else {
+}
+else {
     exit 1
 }
