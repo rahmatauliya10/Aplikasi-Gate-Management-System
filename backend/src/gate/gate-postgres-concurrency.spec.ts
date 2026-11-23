@@ -50,6 +50,7 @@ if (rawTestDbUrl) {
 const isPgTestAvailable = Boolean(
   rawTestDbUrl &&
   process.env.DATABASE_URL === rawTestDbUrl &&
+  rawTestDbUrl.includes('gms_test_cor01') &&
   process.env.GMS_FIXTURE_ISOLATION_UUID &&
   process.env.GMS_FIXTURE_ISOLATION_UUID.startsWith('FIXTURE-'),
 );
