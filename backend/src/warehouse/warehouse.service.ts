@@ -2375,6 +2375,44 @@ export class WarehouseService {
           });
         }
 
+        // Verify attachment size integrity if registered
+        if (
+          typeof att.size === 'number' &&
+          att.size > 0 &&
+          fileBuffer.length !== att.size
+        ) {
+          throw new BadRequestException({
+            success: false,
+            message: `Ukuran berkas fisik foto lampiran ${att.id} (${fileBuffer.length} byte) tidak sesuai ukuran terdaftar (${att.size} byte).`,
+            errors: [
+              'CORRUPTED_PHYSICAL_PHOTO_FILE',
+              'ATTACHMENT_SIZE_MISMATCH',
+            ],
+          });
+        }
+
+        // Verify SHA-256 checksum integrity against registered attachment metadata
+        if (
+          att.sha256 &&
+          typeof att.sha256 === 'string' &&
+          att.sha256.trim().length > 0
+        ) {
+          const actualSha256 = crypto
+            .createHash('sha256')
+            .update(fileBuffer)
+            .digest('hex');
+          if (actualSha256.toLowerCase() !== att.sha256.trim().toLowerCase()) {
+            throw new BadRequestException({
+              success: false,
+              message: `Integritas berkas fisik foto lampiran ${att.id} rusak atau tidak sesuai checksum terdaftar.`,
+              errors: [
+                'CORRUPTED_PHYSICAL_PHOTO_FILE',
+                'ATTACHMENT_CHECKSUM_MISMATCH',
+              ],
+            });
+          }
+        }
+
         item.photoAttachmentId = att.id;
         item.photoUrl = `/api/attachments/${att.id}/download`;
       }

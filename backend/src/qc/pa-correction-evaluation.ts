@@ -165,20 +165,24 @@ export function resolvePaProfile(
     : undefined;
   if (pa.specSnapshot && !snapshotProfile)
     bad('specSnapshot tidak memiliki profil PA valid.');
-  const profiles = [
-    pa.analysisProfile,
-    tx.gspAnalysisProfile,
+  const historicalProfiles = [pa.analysisProfile, tx.gspAnalysisProfile];
+  for (const value of [
+    ...historicalProfiles,
     tx.productCatalog?.gspAnalysisProfile,
-  ];
-  for (const value of profiles)
-    if (value != null && !profileValue(value))
+  ]) {
+    if (value != null && !profileValue(value)) {
       bad('Profil PA tersimpan tidak valid.');
-  const explicitProfiles = profiles
+    }
+  }
+  const explicitHistorical = historicalProfiles
     .map(profileValue)
     .filter((value): value is PaProfile => value !== undefined);
-  if (new Set(explicitProfiles).size > 1)
-    bad('Profil PA, transaksi dan katalog bertentangan.');
-  const explicit = explicitProfiles[0];
+  if (new Set(explicitHistorical).size > 1) {
+    bad('Profil PA dan snapshot transaksi bertentangan.');
+  }
+  const catalogProfile = profileValue(tx.productCatalog?.gspAnalysisProfile);
+  // Historical snapshot always takes precedence over subsequent catalog mutations
+  const explicit = explicitHistorical[0] ?? catalogProfile;
   const inferred = inferProfile([
     pa.productCategory ?? tx.productCatalog?.category ?? tx.cargoType,
     pa.productName ?? tx.productCatalog?.name,

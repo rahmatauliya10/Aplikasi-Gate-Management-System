@@ -1118,6 +1118,21 @@ const triggerStartQc = async (truck) => {
 const showGspPaModal = ref(false);
 const gspTestRound = ref(1);
 
+const determineGspRound = (truck) => {
+  if (!truck) return 1;
+  if (truck.status === 'QC_RETEST_REQUIRED' || truck.gspTestRound === 2) return 2;
+  const analyses = truck.qcProductAnalyses || [];
+  const activeAnalyses = Array.isArray(analyses) ? analyses.filter(a => !a.isVoided) : [];
+  if (activeAnalyses.some(a => Number(a.testRound) >= 1)) {
+    if (truck.status === 'QC_VEHICLE_IN_PROGRESS') return 2;
+  }
+  const history = truck.statusHistory || [];
+  if (Array.isArray(history) && history.some(h => h.newStatus === 'QC_RETEST_REQUIRED' || h.oldStatus === 'QC_RETEST_REQUIRED')) {
+    if (truck.status === 'QC_VEHICLE_IN_PROGRESS') return 2;
+  }
+  return 1;
+};
+
 const openGspPaModal = async (truck, round) => {
   if (!truck) return;
 
@@ -1135,7 +1150,7 @@ const openGspPaModal = async (truck, round) => {
 
   const determinedRound = round !== undefined && round !== null
     ? round
-    : (truck.status === 'QC_RETEST_REQUIRED' || truck.gspTestRound === 2 ? 2 : 1);
+    : determineGspRound(truck);
   gspTestRound.value = determinedRound;
 
   // Canonical PA start for GSP:
@@ -1147,10 +1162,13 @@ const openGspPaModal = async (truck, round) => {
       const updated = response?.data || response;
       const originalId = truck.id || truck.transactionId;
       const authoritativeId = updated?.id || updated?.transactionId || originalId;
+      const effectiveRound = updated?.gspTestRound || determinedRound;
+      gspTestRound.value = effectiveRound;
       const normalizedUpdated = {
         ...truck,
         ...updated,
         id: authoritativeId,
+        gspTestRound: effectiveRound,
       };
       truckStore.upsertTruck(normalizedUpdated);
       selectedTruck.value = truckStore.getTruckById(authoritativeId) || normalizedUpdated;
@@ -1193,7 +1211,7 @@ const openQcStage1Modal = async (truck) => {
   if (!truck) return;
   const pType = getProcessType(truck);
   if (pType === 'GSP') {
-    const round = truck.status === 'QC_RETEST_REQUIRED' || truck.gspTestRound === 2 ? 2 : 1;
+    const round = determineGspRound(truck);
     await openGspPaModal(truck, round);
     return;
   }

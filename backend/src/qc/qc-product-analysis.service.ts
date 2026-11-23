@@ -247,7 +247,13 @@ export class QcProductAnalysisService {
   async startProductAnalysis(transactionId: string, user: JwtPayloadUser) {
     const tx = await this.prisma.transaction.findUnique({
       where: { id: transactionId },
-      include: { productCatalog: true },
+      include: {
+        productCatalog: true,
+        qcProductAnalyses: {
+          where: { isVoided: false },
+          orderBy: [{ testRound: 'desc' }, { revision: 'desc' }],
+        },
+      },
     });
 
     if (!tx) {
@@ -262,27 +268,51 @@ export class QcProductAnalysisService {
 
     this.authorizationScopeService.assertProcessAccess(user, tx.processType);
 
-    const isExempt = isProductPaExempt(tx.productCatalog, {
-      processType: tx.processType,
-      cargoType: tx.cargoType,
-      cargoSubType: tx.cargoSubType,
-    });
-    if (
+    // Authoritative check on transaction's snapshot profile:
+    // If the transaction snapshot profile is explicitly PA_EXEMPT or status is PA_NOT_REQUIRED, reject lab PA.
+    // In-flight transactions that already hold a non-exempt profile must not be blocked
+    // by subsequent administrative changes to the master product catalog.
+    const isSnapshotExempt =
       tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT ||
-      tx.status === TransactionStatus.PA_NOT_REQUIRED ||
-      isExempt
-    ) {
+      tx.status === TransactionStatus.PA_NOT_REQUIRED;
+
+    if (isSnapshotExempt) {
       throw new BadRequestException(
         `Komoditas bebas PA (${tx.cargoSubType || 'Solar'}) tidak memerlukan proses analisis laboratorium.`,
       );
     }
+
+    if (!tx.gspAnalysisProfile) {
+      const isExempt = isProductPaExempt(tx.productCatalog, {
+        productCatalogId: tx.productCatalogId,
+        processType: tx.processType,
+        cargoType: tx.cargoType,
+        cargoSubType: tx.cargoSubType,
+      });
+      if (isExempt) {
+        throw new BadRequestException(
+          `Komoditas bebas PA (${tx.cargoSubType || 'Solar'}) tidak memerlukan proses analisis laboratorium.`,
+        );
+      }
+    }
+
+    // Determine authoritative test round from active history
+    const historyList = tx.qcProductAnalyses || [];
+    const currentPa = selectCurrentPa(historyList);
+    const currentMaxRound =
+      currentPa?.testRound ??
+      (historyList.length > 0 ? historyList[0].testRound : 0);
+    const authoritativeTestRound = currentMaxRound + 1;
 
     // Idempotent check: if already in progress, safely return existing authoritative state without overwriting qcStartAt
     if (tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
       return {
         success: true,
         message: 'Proses analisis laboratorium sudah berjalan (in-progress).',
-        data: tx,
+        data: {
+          ...tx,
+          gspTestRound: authoritativeTestRound,
+        },
       };
     }
 
@@ -339,7 +369,13 @@ export class QcProductAnalysisService {
 
       return prismaTx.transaction.findUnique({
         where: { id: transactionId },
-        include: { productCatalog: true },
+        include: {
+          productCatalog: true,
+          qcProductAnalyses: {
+            where: { isVoided: false },
+            orderBy: [{ testRound: 'desc' }, { revision: 'desc' }],
+          },
+        },
       });
     });
 
@@ -357,11 +393,14 @@ export class QcProductAnalysisService {
     return {
       success: true,
       message: 'Proses analisis laboratorium berhasil dimulai',
-      data: updated || {
-        ...tx,
-        status: nextStatus,
-        revision: tx.revision + 1,
-        qcStartAt: tx.qcStartAt || now,
+      data: {
+        ...(updated || {
+          ...tx,
+          status: nextStatus,
+          revision: tx.revision + 1,
+          qcStartAt: tx.qcStartAt || now,
+        }),
+        gspTestRound: authoritativeTestRound,
       },
     };
   }

@@ -543,4 +543,72 @@ describe('QCVerification.vue — GSP PA Start Response Contract, State Preservat
       expect.stringContaining('PA_NOT_REQUIRED'),
     );
   });
+
+  it('Round 2 Retest: reopening modal when status is QC_VEHICLE_IN_PROGRESS preserves Round 2 and does not reset to Round 1 (P1-09)', async () => {
+    const inProgressRound2Truck = {
+      id: 'tx-coal-reopen-2',
+      plateNumber: 'B 9999 COAL',
+      driverName: 'Driver Coal Reopen',
+      processType: 'GSP',
+      cargoType: 'Coal',
+      cargoSubType: 'Batubara',
+      status: 'QC_VEHICLE_IN_PROGRESS',
+      grossWeight: 25000,
+      weighInAt: '2026-10-05T07:55:00.000Z',
+      revision: 3,
+      qcProductAnalyses: [
+        {
+          id: 'pa-round-1',
+          testRound: 1,
+          isVoided: false,
+          status: 'RETEST',
+        },
+      ],
+    };
+    truckStore.trucks = [{ ...inProgressRound2Truck }];
+
+    const wrapper = mount(QCVerification, {
+      global: {
+        plugins: [pinia],
+        stubs: { teleport: true },
+      },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    // Select the truck card
+    const card = wrapper.find('[data-testid="truck-card-tx-coal-reopen-2"]');
+    expect(card.exists()).toBe(true);
+    await card.trigger('click');
+    await flushPromises();
+
+    // Click "Analisis PA Laboratorium" button (openQcStage1Modal)
+    const actionBtn = wrapper.find('#btn-start-qc-action');
+    expect(actionBtn.exists()).toBe(true);
+    await actionBtn.trigger('click');
+    await flushPromises();
+
+    // Verify CoalAnalysisForm is rendered for Round 2 (NOT Round 1)
+    const coalForm = wrapper.find('[data-testid="coal-analysis-form"]').exists()
+      ? wrapper.find('[data-testid="coal-analysis-form"]')
+      : document.body.querySelector('[data-testid="coal-analysis-form"]');
+    expect(Boolean(coalForm)).toBe(true);
+
+    const fullContent = (wrapper.text() + ' ' + (document.body.textContent || '')).replace(/\s+/g, ' ');
+    expect(fullContent).toContain('Round 2');
+
+    // Submit and assert payload carries testRound: 2
+    const submitBtn = wrapper.find('#btn-mock-coal-submit').exists()
+      ? wrapper.find('#btn-mock-coal-submit')
+      : document.body.querySelector('#btn-mock-coal-submit');
+    await triggerClick(submitBtn);
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/qc/product-analysis/tx-coal-reopen-2',
+      expect.objectContaining({
+        testRound: 2,
+        revision: 3,
+      }),
+    );
+  });
 });

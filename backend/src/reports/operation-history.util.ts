@@ -305,9 +305,40 @@ export function getOperationHistoryFraud(
   const fraudNet = rawFraudNet !== null && rawFraudNet > 0 ? rawFraudNet : null;
   const fraudRoll = asNumber(latestFraud?.warehouseActualWeight);
   const net = fraudNet ?? getNetWeight(tx, quality);
+
+  const rawUnit = String(
+    tx.receiptUnit ??
+      tx.receivedUnit ??
+      latestCurrent(tx.warehouseProcesses)?.receivedUnit ??
+      latestCurrent(tx.warehouseProcesses)?.unit ??
+      tx.warehouseUnit ??
+      '',
+  )
+    .trim()
+    .toUpperCase();
+
+  const isNonKgUnit = rawUnit !== '' && rawUnit !== 'KG';
   const rawWarehouseReceived =
     asNumber(tx.receivedQuantity) ??
     asNumber(latestCurrent(tx.warehouseProcesses)?.receivedQuantity);
+
+  // Non-KG units (e.g. LITER or PALLET) cannot be directly compared against weighbridge KG without density conversion
+  if (isNonKgUnit) {
+    quality.push('INVALID_WEIGHT');
+    const nonKgRoll =
+      fraudRoll ?? rawWarehouseReceived ?? asNumber(tx.actualWeight);
+    return {
+      net,
+      roll: nonKgRoll !== null && nonKgRoll > 0 ? nonKgRoll : null,
+      diff: null,
+      ratioPercent: null,
+      deviationPercent: null,
+      direction: null,
+      status: 'PENDING',
+      dataQuality: [...new Set(quality)],
+    };
+  }
+
   const rawRoll =
     fraudRoll ?? rawWarehouseReceived ?? asNumber(tx.actualWeight);
   const roll = rawRoll !== null && rawRoll > 0 ? rawRoll : null;

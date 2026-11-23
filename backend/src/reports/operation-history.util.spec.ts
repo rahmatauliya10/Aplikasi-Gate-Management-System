@@ -316,4 +316,44 @@ describe('operation history normalization', () => {
     expect(fraud.deviationPercent).toBeNull();
     expect(fraud.dataQuality).toContain('REJECTED_NOT_EVALUATED');
   });
+
+  it('rejects direct reconciliation when receivedUnit is LITER and records INVALID_WEIGHT (P1-10)', () => {
+    const fraud = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 10000,
+      receivedQuantity: '10000.000',
+      receivedUnit: 'LITER',
+    });
+
+    expect(fraud.status).toBe('PENDING');
+    expect(fraud.diff).toBeNull();
+    expect(fraud.ratioPercent).toBeNull();
+    expect(fraud.deviationPercent).toBeNull();
+    expect(fraud.dataQuality).toContain('INVALID_WEIGHT');
+  });
+
+  it('correctly reconciles batubara receivedQuantity in KG against netWeight (P1-10)', () => {
+    const fraudSafe = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 10000,
+      receivedQuantity: '10000.000',
+      receivedUnit: 'KG',
+    });
+
+    expect(fraudSafe.status).toBe('SAFE');
+    expect(fraudSafe.diff).toBe(0);
+    expect(fraudSafe.deviationPercent).toBe(0);
+    expect(fraudSafe.dataQuality).not.toContain('INVALID_WEIGHT');
+
+    const fraudCritical = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 9000,
+      receivedQuantity: '10000.000',
+      receivedUnit: 'KG',
+    });
+
+    expect(fraudCritical.status).toBe('CRITICAL');
+    expect(fraudCritical.diff).toBe(1000);
+    expect(fraudCritical.deviationPercent).toBeGreaterThan(5);
+  });
 });

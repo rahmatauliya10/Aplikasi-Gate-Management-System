@@ -716,9 +716,27 @@ export class WeighbridgeService {
         },
       });
 
-      // Fraud Detection Logic
-      if (tx.actualWeight !== null && tx.actualWeight !== undefined) {
-        const deviation = Math.abs(netWeight - tx.actualWeight);
+      // Fraud Detection Logic: Net Weight (KG) vs Warehouse Actual Weight (KG)
+      const rawUnit = String(
+        tx.receiptUnit ?? tx.warehouseUnit ?? (tx as any).receivedUnit ?? '',
+      )
+        .trim()
+        .toUpperCase();
+      const isNonKg = rawUnit !== '' && rawUnit !== 'KG';
+
+      const warehouseWeightKg =
+        !isNonKg &&
+        tx.receivedQuantity !== null &&
+        tx.receivedQuantity !== undefined
+          ? Number(tx.receivedQuantity)
+          : !isNonKg &&
+              tx.actualWeight !== null &&
+              tx.actualWeight !== undefined
+            ? tx.actualWeight
+            : null;
+
+      if (warehouseWeightKg !== null && warehouseWeightKg !== undefined) {
+        const deviation = Math.abs(netWeight - warehouseWeightKg);
         const deviationPercent =
           netWeight > 0 ? (deviation / netWeight) * 100 : 0;
 
@@ -729,11 +747,13 @@ export class WeighbridgeService {
           riskLevel = 'WARNING';
         }
 
-        const fraudNotes = `Deviation: ${deviationPercent.toFixed(2)}% (${deviation} kg). Net Weight: ${netWeight} kg, Actual Weight: ${tx.actualWeight} kg.`;
+        const fraudNotes = `Deviation: ${deviationPercent.toFixed(2)}% (${deviation.toFixed(2)} kg). Net Weight: ${netWeight} kg, Actual Weight: ${warehouseWeightKg} kg.`;
 
         await prismaTx.fraudCheck.create({
           data: {
             transactionId: transactionId,
+            netWeight: netWeight,
+            warehouseActualWeight: warehouseWeightKg,
             riskLevel: riskLevel,
             deviationKg: deviation,
             deviationPercent: deviationPercent,

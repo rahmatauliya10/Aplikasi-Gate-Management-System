@@ -109,6 +109,13 @@ export class QcService {
         },
         ...scope,
       },
+      include: {
+        qcProductAnalyses: {
+          where: { isCurrent: true, isVoided: false },
+          orderBy: [{ testRound: 'desc' }, { revision: 'desc' }],
+        },
+        productCatalog: true,
+      },
       orderBy: { createdAt: 'asc' },
     });
 

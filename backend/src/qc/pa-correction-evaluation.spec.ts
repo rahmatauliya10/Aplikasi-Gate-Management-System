@@ -23,7 +23,7 @@ describe('PA correction evaluation', () => {
         { gspAnalysisProfile: 'PAC_PA' },
       ),
     ).toThrow(/bertentangan/);
-    expect(() =>
+    expect(
       resolvePaProfile(
         {},
         {
@@ -31,7 +31,7 @@ describe('PA correction evaluation', () => {
           productCatalog: { gspAnalysisProfile: 'RAPID_KLEN_PA' },
         },
       ),
-    ).toThrow(/bertentangan/);
+    ).toBe('PAC_PA');
     expect(() =>
       resolvePaProfile({ productCategory: 'COAL', productName: 'PAC' }, {}),
     ).toThrow(/ambigu/);
