@@ -2329,6 +2329,8 @@ export class DatabaseBackupService
             '--single-transaction',
             '-v',
             'ON_ERROR_STOP=1',
+            '-f',
+            '-',
           ],
           {
             env: { ...process.env, PGPASSWORD: password },

@@ -19,8 +19,8 @@ import * as path from 'path';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-jest.mock('child_process', () => ({
-  execFile: jest.fn((cmd: string, args: string[], opts: any, callback: any) => {
+const mockExecFile = jest.fn(
+  (cmd: string, args: string[], opts: any, callback: any) => {
     const cb = typeof opts === 'function' ? opts : callback;
     if (cmd === 'pg_dump' && Array.isArray(args)) {
       const fileArg = args.find((a) => a.startsWith('--file='));
@@ -34,8 +34,31 @@ jest.mock('child_process', () => ({
       }
     }
     if (cb) cb(null, { stdout: '', stderr: '' }, '');
-  }),
+  },
+);
+
+const mockSpawn = jest.fn();
+
+jest.mock('child_process', () => ({
+  execFile: (...args: any[]) => mockExecFile(...args),
+  spawn: (...args: any[]) => mockSpawn(...args),
 }));
+
+class MockProcess extends EventEmitter implements StreamingChildProcessLike {
+  stdout: PassThrough | null = new PassThrough();
+  stderr: PassThrough | null = new PassThrough();
+  stdin: PassThrough | null = new PassThrough();
+  killed = false;
+
+  kill(signal?: NodeJS.Signals | number): boolean {
+    this.killed = true;
+    return true;
+  }
+
+  simulateClose(code: number | null, signal: string | null = null) {
+    this.emit('close', code, signal);
+  }
+}
 
 describe('DatabaseBackupService', () => {
   let service: DatabaseBackupService;
@@ -51,6 +74,26 @@ describe('DatabaseBackupService', () => {
   };
 
   beforeEach(async () => {
+    mockExecFile.mockClear();
+    mockSpawn.mockClear();
+    mockExecFile.mockImplementation(
+      (cmd: string, args: string[], opts: any, callback: any) => {
+        const cb = typeof opts === 'function' ? opts : callback;
+        if (cmd === 'pg_dump' && Array.isArray(args)) {
+          const fileArg = args.find((a) => a.startsWith('--file='));
+          if (fileArg) {
+            const filePath = fileArg.replace('--file=', '');
+            try {
+              fs.writeFileSync(filePath, 'dummy_pg_dump_binary');
+            } catch (e) {
+              // ignore
+            }
+          }
+        }
+        if (cb) cb(null, { stdout: '', stderr: '' }, '');
+      },
+    );
+
     process.env.DATABASE_URL =
       'postgresql://postgres:postgres@localhost:5432/gms_test_db';
     process.env.BACKUP_SIGNATURE_SECRET = 'test_secret_key';
@@ -663,25 +706,6 @@ describe('DatabaseBackupService', () => {
   });
 
   describe('executeStreamingRestorePipeline', () => {
-    class MockProcess
-      extends EventEmitter
-      implements StreamingChildProcessLike
-    {
-      stdout: PassThrough | null = new PassThrough();
-      stderr: PassThrough | null = new PassThrough();
-      stdin: PassThrough | null = new PassThrough();
-      killed = false;
-
-      kill(signal?: NodeJS.Signals | number): boolean {
-        this.killed = true;
-        return true;
-      }
-
-      simulateClose(code: number | null, signal: string | null = null) {
-        this.emit('close', code, signal);
-      }
-    }
-
     let restoreProc: MockProcess;
     let psqlProc: MockProcess;
 
@@ -851,5 +875,288 @@ describe('DatabaseBackupService', () => {
       expect(restoreProc.killed).toBe(true);
       expect(psqlProc.killed).toBe(true);
     });
+  });
+
+  describe('COR-02: Fallback Restore CLI Argument & Process Execution', () => {
+    const dumpPath = '/tmp/gms_test_dump.pgcustom';
+    const host = '127.0.0.1';
+    const port = '5432';
+    const username = 'gms_user';
+    const dbName = 'gms_db';
+    const password = 'test_password_123';
+
+    beforeEach(() => {
+      mockExecFile.mockClear();
+      mockSpawn.mockClear();
+    });
+
+    it('COR02-01: does not invoke spawn fallback when initial pg_restore succeeds', async () => {
+      mockExecFile.mockImplementationOnce((cmd, args, opts, cb) => {
+        cb(null, { stdout: '', stderr: '' }, '');
+      });
+
+      await expect(
+        service['executePgRestoreWithFallback'](
+          dumpPath,
+          host,
+          port,
+          username,
+          dbName,
+          password,
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(mockExecFile).toHaveBeenCalledTimes(1);
+      expect(mockExecFile).toHaveBeenCalledWith(
+        'pg_restore',
+        expect.arrayContaining([
+          '--clean',
+          '--if-exists',
+          '--single-transaction',
+          '--exit-on-error',
+          '--no-owner',
+          '--no-acl',
+          `--host=${host}`,
+          `--port=${port}`,
+          `--username=${username}`,
+          `--dbname=${dbName}`,
+          dumpPath,
+        ]),
+        expect.any(Object),
+        expect.any(Function),
+      );
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it('COR02-02: invokes streaming fallback when initial pg_restore fails with transaction_timeout', async () => {
+      mockExecFile.mockImplementationOnce((cmd, args, opts, cb) => {
+        const err: any = new Error(
+          'pg_restore: error: unrecognized configuration parameter "transaction_timeout"',
+        );
+        err.stderr =
+          'pg_restore: error: unrecognized configuration parameter "transaction_timeout"';
+        cb(err, { stdout: '', stderr: err.stderr }, '');
+      });
+
+      const restoreProc = new MockProcess();
+      const psqlProc = new MockProcess();
+
+      mockSpawn.mockImplementation((cmd: string) => {
+        if (cmd === 'pg_restore') return restoreProc;
+        if (cmd === 'psql') return psqlProc;
+        throw new Error(`Unexpected command: ${cmd}`);
+      });
+
+      const promise = service['executePgRestoreWithFallback'](
+        dumpPath,
+        host,
+        port,
+        username,
+        dbName,
+        password,
+      );
+
+      // Simulate streaming pipeline completion
+      process.nextTick(() => {
+        restoreProc.stdout?.write('SET statement_timeout = 0;\n');
+        restoreProc.stdout?.end();
+        restoreProc.simulateClose(0);
+        process.nextTick(() => {
+          psqlProc.simulateClose(0);
+        });
+      });
+
+      await expect(promise).resolves.toBeUndefined();
+
+      expect(mockSpawn).toHaveBeenCalledTimes(2);
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'pg_restore',
+        expect.arrayContaining(['-f', '-', '--clean', '--if-exists', dumpPath]),
+        expect.objectContaining({
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'psql',
+        expect.anything(),
+        expect.objectContaining({
+          stdio: ['pipe', 'ignore', 'pipe'],
+        }),
+      );
+    });
+
+    it('COR02-03: binds psql consumer spawn arguments to include --single-transaction, ON_ERROR_STOP=1, and sequential "-f", "-"', async () => {
+      mockExecFile.mockImplementationOnce((cmd, args, opts, cb) => {
+        const err: any = new Error(
+          'pg_restore: error: unrecognized configuration parameter "transaction_timeout"',
+        );
+        err.stderr =
+          'pg_restore: error: unrecognized configuration parameter "transaction_timeout"';
+        cb(err, { stdout: '', stderr: err.stderr }, '');
+      });
+
+      const restoreProc = new MockProcess();
+      const psqlProc = new MockProcess();
+
+      mockSpawn.mockImplementation((cmd: string) => {
+        if (cmd === 'pg_restore') return restoreProc;
+        if (cmd === 'psql') return psqlProc;
+        throw new Error(`Unexpected command: ${cmd}`);
+      });
+
+      const promise = service['executePgRestoreWithFallback'](
+        dumpPath,
+        host,
+        port,
+        username,
+        dbName,
+        password,
+      );
+
+      process.nextTick(() => {
+        restoreProc.stdout?.end();
+        restoreProc.simulateClose(0);
+        process.nextTick(() => {
+          psqlProc.simulateClose(0);
+        });
+      });
+
+      await promise;
+
+      // Extract specific spawn call for psql (not pg_restore)
+      const psqlCall = mockSpawn.mock.calls.find((c) => c[0] === 'psql');
+      expect(psqlCall).toBeDefined();
+
+      const psqlArgs: string[] = psqlCall[1];
+      expect(psqlArgs).toEqual(
+        expect.arrayContaining([
+          `--host=${host}`,
+          `--port=${port}`,
+          `--username=${username}`,
+          `--dbname=${dbName}`,
+          '--single-transaction',
+          '-v',
+          'ON_ERROR_STOP=1',
+        ]),
+      );
+
+      // Verify exact ordered pair '-f', '-' (required by PostgreSQL psql contract for --single-transaction stdin streaming)
+      const fIndex = psqlArgs.indexOf('-f');
+      expect(fIndex).toBeGreaterThanOrEqual(0);
+      expect(psqlArgs[fIndex + 1]).toBe('-');
+    });
+
+    it('COR02-04: propagates authentication / connection errors without invoking fallback spawn', async () => {
+      mockExecFile.mockImplementationOnce((cmd, args, opts, cb) => {
+        const err: any = new Error(
+          'pg_restore: error: connection to server on socket failed: Connection refused',
+        );
+        err.stderr = 'Connection refused';
+        cb(err, { stdout: '', stderr: err.stderr }, '');
+      });
+
+      await expect(
+        service['executePgRestoreWithFallback'](
+          dumpPath,
+          host,
+          port,
+          username,
+          dbName,
+          password,
+        ),
+      ).rejects.toThrow(/Connection refused/);
+
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it('COR02-05: propagates non-timeout restore errors without invoking fallback spawn', async () => {
+      mockExecFile.mockImplementationOnce((cmd, args, opts, cb) => {
+        const err: any = new Error(
+          'pg_restore: error: input file appears to be a text format dump. Please use psql.',
+        );
+        err.stderr =
+          'pg_restore: error: input file appears to be a text format dump';
+        cb(err, { stdout: '', stderr: err.stderr }, '');
+      });
+
+      await expect(
+        service['executePgRestoreWithFallback'](
+          dumpPath,
+          host,
+          port,
+          username,
+          dbName,
+          password,
+        ),
+      ).rejects.toThrow(/input file appears to be a text format dump/);
+
+      expect(mockSpawn).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'producer (pg_restore)',
+        'pg_restore',
+        1,
+        null,
+        /pg_restore streaming process exited with code 1/,
+      ],
+      [
+        'consumer (psql)',
+        'psql',
+        1,
+        null,
+        /psql streaming execution exited with code 1/,
+      ],
+    ])(
+      'COR02-06: rejects promise fail-closed when %s process fails with exit code 1',
+      async (_desc, failingTarget, exitCode, signal, expectedErrRegex) => {
+        mockExecFile.mockImplementationOnce((cmd, args, opts, cb) => {
+          const err: any = new Error(
+            'pg_restore: error: unrecognized configuration parameter "transaction_timeout"',
+          );
+          err.stderr =
+            'pg_restore: error: unrecognized configuration parameter "transaction_timeout"';
+          cb(err, { stdout: '', stderr: err.stderr }, '');
+        });
+
+        const restoreProc = new MockProcess();
+        const psqlProc = new MockProcess();
+
+        mockSpawn.mockImplementation((cmd: string) => {
+          if (cmd === 'pg_restore') return restoreProc;
+          if (cmd === 'psql') return psqlProc;
+          throw new Error(`Unexpected command: ${cmd}`);
+        });
+
+        const promise = service['executePgRestoreWithFallback'](
+          dumpPath,
+          host,
+          port,
+          username,
+          dbName,
+          password,
+        );
+
+        process.nextTick(() => {
+          if (failingTarget === 'pg_restore') {
+            restoreProc.stderr?.write(
+              'pg_restore: error: producer read error\n',
+            );
+            restoreProc.stdout?.end();
+            restoreProc.simulateClose(exitCode, signal);
+          } else {
+            psqlProc.stderr?.write('psql: error: consumer execution error\n');
+            restoreProc.stdout?.end();
+            restoreProc.simulateClose(0);
+            process.nextTick(() => {
+              psqlProc.simulateClose(exitCode, signal);
+            });
+          }
+        });
+
+        await expect(promise).rejects.toThrow(expectedErrRegex);
+      },
+    );
   });
 });
