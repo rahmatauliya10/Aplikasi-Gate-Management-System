@@ -713,6 +713,11 @@ export class ReportsService {
           metrics.*,
           CASE
             WHEN metrics.is_non_kg_unit THEN NULL
+            WHEN metrics."status" IN ('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED')
+              OR metrics.vehicle_result = 'REJECT' OR metrics.incoming_result = 'REJECT'
+            THEN NULL
+            WHEN metrics.net IS NULL OR metrics.roll IS NULL
+            THEN NULL
             ELSE ABS(metrics.roll - metrics.net)
           END AS diff,
           CASE
