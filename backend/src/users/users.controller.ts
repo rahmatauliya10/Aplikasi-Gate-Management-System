@@ -51,8 +51,12 @@ export class UsersController {
   @Patch(':id')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Update user (ADMIN only)' })
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @CurrentUser() currentUser: JwtPayloadUser,
+  ) {
+    return this.usersService.update(id, dto, currentUser);
   }
 
   @Delete(':id')

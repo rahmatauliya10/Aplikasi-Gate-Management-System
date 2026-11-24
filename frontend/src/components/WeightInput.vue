@@ -84,7 +84,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   label: { type: String, default: 'Scale Input' },
@@ -92,8 +92,9 @@ const props = defineProps({
   isSubmitting: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['save'])
+const emit = defineEmits(['save', 'dirty-change'])
 const weightValue = ref(null)
+watch(weightValue, value => emit('dirty-change', value !== null && value !== ''))
 const isValid = computed(() => weightValue.value !== null && weightValue.value > 0)
 
 const deviationValue = computed(() => {

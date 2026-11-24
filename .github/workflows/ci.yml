@@ -19,7 +19,7 @@ jobs:
         db_state: [fresh, upgraded]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_test_db
           POSTGRES_USER: postgres
@@ -58,6 +58,9 @@ jobs:
         working-directory: ./backend
         env:
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          DATABASE_URL_TEST: postgres://postgres:testpassword@localhost:5432/gms_test_db?schema=public
+          GMS_FIXTURE_ISOLATION_UUID: FIXTURE-CI-E2E-TEST-DB-UUID-01
+          GMS_ENVIRONMENT_ID: GMS-TEST-E2E-FIXTURE
         run: |
           npx prisma generate
           npm run prisma:preflight -- --report-only --fail-on-duplicates
@@ -67,6 +70,9 @@ jobs:
             npx prisma migrate resolve --applied 20260714030729_init || true
           fi
           npx prisma migrate deploy
+          node scripts/verify-migration-invariants.js
+          node scripts/enforce-audit-immutability.js
+          npm run fixture:provision
 
       - name: Verify Migration Checksums (P0-01 Evidence)
         working-directory: ./backend
@@ -97,6 +103,8 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
           BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test
+          GMS_FIXTURE_ISOLATION_UUID: FIXTURE-CI-E2E-TEST-DB-UUID-01
+          GMS_ENVIRONMENT_ID: GMS-TEST-E2E-FIXTURE
         run: npm run test:cov
 
       - name: Execute Real Backend E2E Test Suite in CI (P1-10)
@@ -108,6 +116,8 @@ jobs:
           JWT_REFRESH_SECRET: test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long
           BACKUP_SIGNATURE_SECRET: test-backup-signature-secret-for-ci-pipeline-min-32-chars-long
           NODE_ENV: test
+          GMS_FIXTURE_ISOLATION_UUID: FIXTURE-CI-E2E-TEST-DB-UUID-01
+          GMS_ENVIRONMENT_ID: GMS-TEST-E2E-FIXTURE
         run: npm run test:e2e
 
   frontend-verification:
@@ -149,16 +159,136 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Node.js Environment
         uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with:
           node-version: '22'
 
-      - name: Execute Gitleaks Secret Detection Scan
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      - name: Install and Execute Gitleaks Secret Detection Scan (Full PR Range & Working Tree)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p artifacts/release-proof
+
+          echo "=============================================================================="
+          echo "Installing Gitleaks Standalone Binary (v8.21.2)..."
+          echo "=============================================================================="
+          GITLEAKS_VERSION="8.21.2"
+          mkdir -p /tmp/bin
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz -C /tmp/bin gitleaks
+          chmod +x /tmp/bin/gitleaks
+          export PATH="/tmp/bin:$PATH"
+          echo "/tmp/bin" >> "$GITHUB_PATH"
+          gitleaks version
+
+          echo "=============================================================================="
+          echo "Resolving Target Git Range & Commit Boundary Assertions..."
+          echo "=============================================================================="
+          CURRENT_HEAD=$(git rev-parse HEAD)
+          echo "Current local Git HEAD: ${CURRENT_HEAD}"
+
+          TARGET_HEAD=""
+          TARGET_BASE=""
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            TARGET_BASE="$PR_BASE_SHA"
+            TARGET_HEAD="$PR_HEAD_SHA"
+            echo "Pull Request Event: Base SHA = ${TARGET_BASE}, Head SHA = ${TARGET_HEAD}"
+            
+            # Fetch base ref from remote to ensure the merge base exists locally
+            git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1000 || true
+          else
+            TARGET_HEAD="$EVENT_SHA"
+            if [ -n "$PUSH_BEFORE_SHA" ] && [ "$PUSH_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+              TARGET_BASE="$PUSH_BEFORE_SHA"
+            else
+              TARGET_BASE="${TARGET_HEAD}~1"
+            fi
+            echo "Push Event: Base SHA = ${TARGET_BASE}, Head SHA = ${TARGET_HEAD}"
+          fi
+
+          # Assert that local HEAD matches target HEAD commit exactly
+          if [ -n "$TARGET_HEAD" ] && [ "$CURRENT_HEAD" != "$TARGET_HEAD" ]; then
+            echo "::error::Target HEAD mismatch! Expected ${TARGET_HEAD}, but local repository is at ${CURRENT_HEAD}."
+            exit 1
+          fi
+          echo "Assertion passed: Local HEAD matches target HEAD (${CURRENT_HEAD})."
+
+          # Compute commit count to scan with strict fail-closed enforcement for pull requests
+          COMMIT_COUNT=$(git rev-list --count "${TARGET_BASE}..${TARGET_HEAD}" 2>/dev/null || echo "-1")
+          echo "Commits in scan range [${TARGET_BASE}..${TARGET_HEAD}]: ${COMMIT_COUNT}"
+          if [ "$COMMIT_COUNT" -le 0 ]; then
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "::error::CRITICAL PROVENANCE FAILURE: Pull request commit range [${TARGET_BASE}..${TARGET_HEAD}] yielded ${COMMIT_COUNT} commits! PR must contain at least 1 verifiable commit. Fallback scan rejected to prevent silent coverage reduction. Aborting fail-closed."
+              exit 1
+            else
+              echo "::warning::Commit count in push range is 0. Ensuring at least HEAD commit is verified."
+              SCAN_LOG_OPTS="-n 1 ${TARGET_HEAD}"
+            fi
+          else
+            SCAN_LOG_OPTS="${TARGET_BASE}..${TARGET_HEAD}"
+          fi
+
+          echo "=============================================================================="
+          echo "Executing Gitleaks Scan across Git Log Range (${SCAN_LOG_OPTS})..."
+          echo "=============================================================================="
+          gitleaks git \
+            --log-opts="${SCAN_LOG_OPTS}" \
+            --config=.gitleaks.toml \
+            --verbose \
+            --redact \
+            --report-format=json \
+            --report-path=artifacts/release-proof/gitleaks-commits-report.json
+
+          echo "Git commit range scan completed with 0 leaks."
+
+          echo "=============================================================================="
+          echo "Executing Gitleaks Scan across Full Working Tree (dir .)..."
+          echo "=============================================================================="
+          gitleaks dir . \
+            --config=.gitleaks.toml \
+            --verbose \
+            --redact \
+            --report-format=json \
+            --report-path=artifacts/release-proof/gitleaks-dir-report.json
+
+          echo "Working tree scan completed with 0 leaks."
+
+          # Generate evidence summary file
+          cat <<EOF > artifacts/release-proof/gitleaks-scan-evidence.json
+          {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "eventName": "${EVENT_NAME}",
+            "baseSha": "${TARGET_BASE}",
+            "headSha": "${TARGET_HEAD}",
+            "currentHead": "${CURRENT_HEAD}",
+            "commitsScanned": ${COMMIT_COUNT},
+            "scanRange": "${SCAN_LOG_OPTS}",
+            "headMatched": true,
+            "commitScanStatus": "PASSED",
+            "dirScanStatus": "PASSED",
+            "gitleaksVersion": "$GITLEAKS_VERSION"
+          }
+          EOF
+          cat artifacts/release-proof/gitleaks-scan-evidence.json
+
+      - name: Archive Gitleaks Scan Evidence
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        if: always()
+        with:
+          name: gitleaks-scan-evidence
+          path: |
+            artifacts/release-proof/gitleaks-commits-report.json
+            artifacts/release-proof/gitleaks-dir-report.json
+            artifacts/release-proof/gitleaks-scan-evidence.json
+          retention-days: 14
 
       - name: Execute Production Security Audit (Backend)
         working-directory: ./backend
@@ -174,7 +304,7 @@ jobs:
     needs: [backend-verification]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_rehearsal_db
           POSTGRES_USER: postgres
@@ -308,21 +438,27 @@ jobs:
           echo "Step 3: Running production preflight duplicate audit on rehearsal DB..."
           cd backend
           npm run prisma:preflight -- --report-only --fail-on-duplicates
-          echo "Step 4: Executing Prisma migration deployment on rehearsal DB (upgrading schema 6 -> 20)..."
+          echo "Step 4: Executing Prisma migration deployment on rehearsal DB..."
           npx prisma migrate deploy
+          node scripts/verify-migration-invariants.js
+          node scripts/enforce-audit-immutability.js
           cd ..
 
-          echo "Step 4.5: Verifying upgraded migration count (= 20)..."
+          echo "Step 4.5: Verifying upgraded migration count..."
           node -e "
             const { execSync } = require('child_process');
+            const fs = require('fs');
+            const path = require('path');
+            const migrationsDir = 'backend/prisma/migrations';
+            const expectedCount = fs.readdirSync(migrationsDir).filter(f => fs.statSync(path.join(migrationsDir, f)).isDirectory() && fs.existsSync(path.join(migrationsDir, f, 'migration.sql'))).length;
             const out = execSync('psql -h localhost -p 5432 -U postgres -d gms_rehearsal_db -t -A -c \"SELECT COUNT(*) FROM \\\"_prisma_migrations\\\" WHERE finished_at IS NOT NULL;\"').toString().trim();
             const postUpgradeCount = parseInt(out, 10);
-            console.log('Post-upgrade migration count:', postUpgradeCount);
-            if (postUpgradeCount !== 20) {
-              console.error('FATAL: Post-upgrade migration count is not 20! Found: ' + postUpgradeCount);
+            console.log('Post-upgrade migration count:', postUpgradeCount, 'Expected:', expectedCount);
+            if (postUpgradeCount !== expectedCount) {
+              console.error('FATAL: Post-upgrade migration count is not ' + expectedCount + '! Found: ' + postUpgradeCount);
               process.exit(1);
             }
-            console.log('Schema upgrade from historical baseline to 20 migrations succeeded [PASS].');
+            console.log('Schema upgrade from historical baseline to ' + expectedCount + ' migrations succeeded [PASS].');
           "
 
           echo "Step 5: Verifying migration checksums..."
@@ -357,7 +493,7 @@ jobs:
     needs: [historical-migration-rehearsal-gate]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_rehearsal_db
           POSTGRES_USER: postgres
@@ -405,10 +541,20 @@ jobs:
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
         run: |
           set -Eeuo pipefail
-          mkdir -p artifacts/release-proof
+          mkdir -p artifacts/release-proof backups/local
           node tests/fixtures/historical/generate-test-fixtures.js
 
-      - name: Execute 6-Phase DR Failure-Injection & Operator Restore Drill
+      - name: Execute Smoke Test Strict Assertion Suite (P1-03)
+        run: |
+          set -Eeuo pipefail
+          node scripts/test-prod-smoke.js
+
+      - name: Execute Target Guard Policy & Integration Suite (P1-04)
+        run: |
+          set -Eeuo pipefail
+          node scripts/test-target-guard.js
+
+      - name: Execute 6-Phase DR Failure-Injection Native Node CI Gate (P0-02)
         env:
           NODE_ENV: test
           DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
@@ -416,10 +562,60 @@ jobs:
         run: |
           set -Eeuo pipefail
           node scripts/ci-restore-failure-drill.js
-          if command -v pwsh &> /dev/null; then
-            echo "Executing PowerShell operator DR drill..."
-            pwsh -ExecutionPolicy Bypass -File scripts/run-restore-failure-drill.ps1 || true
-          fi
+
+      - name: Execute 6-Phase DR Failure-Injection & Operator PowerShell Drill (P1-01)
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://postgres:testpassword@localhost:5432/gms_rehearsal_db?schema=public
+          PGPASSWORD: testpassword
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/run-restore-failure-drill.ps1
+
+      - name: Validate PowerShell Scripts AST Syntax Across Repository
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/verify-powershell-ast.ps1
+
+      - name: Execute Target Guard PowerShell Policy Verification (P0-C / P0-D)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-target-guard.ps1
+
+      - name: Execute DR Isolation Guard & Ephemeral Fixture Governance Suite (FIX-01 / FIX-02)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-dr-isolation-guard.ps1
+
+      - name: Execute CLI Rollback Syntax & Regression Suite (REL-01..REL-22)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-cli-rollback-syntax.ps1
+
+      - name: Execute PostgreSQL Multi-Version Compatibility Suite (MERGE-04)
+        run: |
+          set -Eeuo pipefail
+          pwsh -ExecutionPolicy Bypass -File scripts/test-postgres-compatibility.ps1
+
+      - name: Verify Strict CI Drill & Target Guard Evidence (FIX-04)
+        run: |
+          set -Eeuo pipefail
+          node -e "
+            const fs = require('fs');
+            const raw = fs.readFileSync('artifacts/release-proof/dr-isolation-guard-evidence.json', 'utf8').replace(/^\uFEFF/, '');
+            const drEv = JSON.parse(raw);
+            if (drEv.status !== 'PASSED' || drEv.summary.failed !== 0 || drEv.summary.passed < 13) {
+              throw new Error('DR isolation guard evidence not PASSED: ' + JSON.stringify(drEv.summary));
+            }
+            console.log('DR isolation guard evidence verified: PASSED (' + drEv.summary.passed + '/' + drEv.summary.total + ')');
+
+            const pgRaw = fs.readFileSync('artifacts/release-proof/postgres-compatibility-evidence.json', 'utf8').replace(/^\uFEFF/, '');
+            const pgEv = JSON.parse(pgRaw);
+            if (pgEv.status !== 'PASSED' || pgEv.summary.failed !== 0 || pgEv.summary.passed < 2) {
+              throw new Error('PostgreSQL compatibility evidence not PASSED: ' + JSON.stringify(pgEv.summary));
+            }
+            console.log('PostgreSQL compatibility evidence verified: PASSED (' + pgEv.summary.passed + '/' + pgEv.summary.total + ')');
+          "
 
       - name: Upload Restore Failure Drill Proof Artifacts (P0-02 Evidence)
         if: always()
@@ -436,7 +632,7 @@ jobs:
     needs: [historical-migration-rehearsal-gate]
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_DB: gms_rehearsal_db
           POSTGRES_USER: postgres
@@ -656,6 +852,14 @@ jobs:
                 EXECUTE 'GRANT ALL ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_owner;';
                 EXECUTE 'GRANT USAGE, SELECT, UPDATE ON SEQUENCE public.' || quote_ident(r.sequence_name) || ' TO gms_app;';
               END LOOP;
+              FOR r IN (
+                SELECT t.typname
+                FROM pg_type t
+                JOIN pg_namespace n ON n.oid = t.typnamespace
+                WHERE n.nspname = 'public' AND t.typtype = 'e'
+              ) LOOP
+                EXECUTE 'ALTER TYPE public.' || quote_ident(r.typname) || ' OWNER TO gms_owner;';
+              END LOOP;
             END \$\$;
           "
 
@@ -679,7 +883,63 @@ jobs:
           echo "4E: Deploying Forward Migrations via Migrator Container..."
           docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate deploy
           docker compose -f docker-compose.prod.yml run --rm migrator npx prisma migrate status
+          docker compose -f docker-compose.prod.yml run --rm migrator node scripts/verify-migration-invariants.js
           docker compose -f docker-compose.prod.yml run --rm migrator node scripts/enforce-audit-immutability.js
+
+          echo "4F: Executing Deterministic Negative Production Compose Dependency Proof (P1-06 / NEG-001)..."
+          echo "Injecting invalid ACTIVE GSP catalog with NULL profile and receiptUnit into live database..."
+          docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+            INSERT INTO \"ProductCatalog\" (\"id\", \"code\", \"name\", \"category\", \"subCategory\", \"processType\", \"isActive\", \"gspAnalysisProfile\", \"receiptUnit\", \"policyVersion\", \"createdAt\", \"updatedAt\")
+            VALUES ('neg-cat-invalid-001', 'NEG-INVALID-GSP', 'Invalid Active GSP Master Proof', 'Chemical', 'PAC', 'GSP', true, NULL, NULL, 'SOP-GSP-2026.1', now(), now());
+          "
+
+          echo "Attempting to boot stack via docker compose (migrator default CMD must fail and block backend)..."
+          docker compose -f docker-compose.prod.yml rm -fs migrator backend 2>/dev/null || true
+          
+          set +e
+          docker compose -f docker-compose.prod.yml up --no-build migrator backend
+          COMPOSE_NEG_EXIT=$?
+          set -e
+
+          echo "Compose exited with code: $COMPOSE_NEG_EXIT (non-zero expected)"
+          if [ "$COMPOSE_NEG_EXIT" -eq 0 ]; then
+            echo "FATAL: Docker compose should have failed due to migrator invariant violation, but exited 0!"
+            exit 1
+          fi
+
+          MIGRATOR_STATE=$(docker inspect -f '{{.State.ExitCode}}' gate-system-migrator 2>/dev/null || echo "unknown")
+          BACKEND_RUNNING=$(docker inspect -f '{{.State.Running}}' gate-system-backend 2>/dev/null || echo "false")
+
+          echo "gate-system-migrator exit code: $MIGRATOR_STATE"
+          echo "gate-system-backend running state: $BACKEND_RUNNING"
+
+          if [ "$MIGRATOR_STATE" != "1" ]; then
+            echo "FATAL: Expected migrator to exit with code 1, got $MIGRATOR_STATE"
+            exit 1
+          fi
+
+          if [ "$BACKEND_RUNNING" = "true" ]; then
+            echo "FATAL: gate-system-backend started despite migrator failure! service_completed_successfully dependency was bypassed!"
+            exit 1
+          fi
+
+          echo "Negative dependency proof verified: migrator exited 1, backend blocked from starting [PASS]."
+
+          echo "Repairing database state: removing invalid catalog..."
+          docker exec -i gate-system-postgres psql -U postgres -d gms -v ON_ERROR_STOP=1 -c "
+            DELETE FROM \"ProductCatalog\" WHERE \"id\" = 'neg-cat-invalid-001';
+          "
+
+          echo "Verifying repair: running migrator default CMD..."
+          docker compose -f docker-compose.prod.yml rm -fs migrator backend 2>/dev/null || true
+          docker compose -f docker-compose.prod.yml up --no-build migrator
+          REPAIR_MIGRATOR_EXIT=$(docker inspect -f '{{.State.ExitCode}}' gate-system-migrator 2>/dev/null || echo "unknown")
+          if [ "$REPAIR_MIGRATOR_EXIT" != "0" ]; then
+            echo "FATAL: Migrator failed after repair with exit code $REPAIR_MIGRATOR_EXIT"
+            docker logs gate-system-migrator
+            exit 1
+          fi
+          echo "Repaired migrator completed successfully with exit code 0 [PASS]."
 
           echo "Step 5: Booting Full Application Stack (--no-build)..."
           docker compose -f docker-compose.prod.yml up -d --no-build
@@ -735,6 +995,8 @@ jobs:
           DEFAULT_WAREHOUSE_PASSWORD: test-wh-password-12345
           DEFAULT_SECURITY_PASSWORD: test-sec-password-12345
           E2E_API_URL: http://localhost:3001
+          ENABLE_TEST_SPEC_FIXTURES: "true"
+          GMS_TEST_HARNESS: "true"
           SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           TESTED_MERGE_SHA: ${{ github.sha }}
         run: |
@@ -746,12 +1008,20 @@ jobs:
           echo "JWT_ACCESS_SECRET=test-jwt-access-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "JWT_REFRESH_SECRET=test-jwt-refresh-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
           echo "BACKUP_SIGNATURE_SECRET=test-backup-signature-secret-for-ci-pipeline-min-32-chars-long" >> backend/.env
+          echo "ENABLE_TEST_SPEC_FIXTURES=true" >> backend/.env
+          echo "ENABLE_TEST_SPEC_FIXTURES=true" >> .env
+          echo "GMS_TEST_HARNESS=true" >> backend/.env
+          echo "GMS_TEST_HARNESS=true" >> .env
           docker compose -f docker-compose.yml up -d postgres
           sleep 5
           docker compose -f docker-compose.yml run --rm migrator npx prisma migrate deploy
+          docker compose -f docker-compose.yml run --rm migrator node scripts/verify-migration-invariants.js
+          docker compose -f docker-compose.yml run --rm migrator node scripts/enforce-audit-immutability.js
           docker compose -f docker-compose.yml up -d --build
           sleep 5
           docker compose -f docker-compose.yml exec -T -e NODE_ENV=test -e SEED_ALL_USERS=true -e DEFAULT_ADMIN_PASSWORD=test-admin-password-12345 -e DEFAULT_QC_PASSWORD=test-qc-password-12345 -e DEFAULT_WAREHOUSE_PASSWORD=test-wh-password-12345 -e DEFAULT_SECURITY_PASSWORD=test-sec-password-12345 backend node dist/prisma/seed.js
+          docker compose -f docker-compose.yml exec -T backend node scripts/verify-canonical-seed.js
+          docker compose -f docker-compose.yml exec -T backend node scripts/verify-migration-invariants.js
           sleep 5
           docker compose ps
           echo "Executing Cross-Stack E2E API & Business Matrix Smoke Verification..."
@@ -772,6 +1042,20 @@ jobs:
           # 1. Versioned Release Manifest with actual image digests/IDs
           node -e "
             const fs = require('fs');
+            const crypto = require('crypto');
+            const migrationDirs = fs.existsSync('backend/prisma/migrations')
+              ? fs.readdirSync('backend/prisma/migrations', { withFileTypes: true })
+                  .filter(d => d.isDirectory() && /^\d{14}_/.test(d.name))
+                  .map(d => d.name)
+                  .sort()
+              : [];
+            const migrationInventory = migrationDirs.map(m => {
+              const sqlFile = 'backend/prisma/migrations/' + m + '/migration.sql';
+              const checksum = fs.existsSync(sqlFile)
+                ? crypto.createHash('sha256').update(fs.readFileSync(sqlFile)).digest('hex')
+                : '';
+              return { migration_name: m, checksum };
+            });
             const manifest = {
               manifestType: 'CI_TEST_EVIDENCE',
               release: process.env.SOURCE_HEAD_SHA || process.env.GITHUB_SHA || 'local-sha',
@@ -780,7 +1064,9 @@ jobs:
               testedMergeSha: process.env.TESTED_MERGE_SHA || process.env.GITHUB_SHA || 'local-sha',
               timestamp: '$CI_TIMESTAMP',
               backend: { image: 'gms-backend', digest: '$BACKEND_IMAGE_ID', ciLocalImageId: '$BACKEND_IMAGE_ID' },
-              frontend: { image: 'gms-frontend', digest: '$FRONTEND_IMAGE_ID', ciLocalImageId: '$FRONTEND_IMAGE_ID' }
+              frontend: { image: 'gms-frontend', digest: '$FRONTEND_IMAGE_ID', ciLocalImageId: '$FRONTEND_IMAGE_ID' },
+              migrations: migrationDirs,
+              migrationInventory: migrationInventory
             };
             fs.writeFileSync('deploy/release_manifest.json', JSON.stringify(manifest, null, 2), 'utf8');
             if (process.env.GITHUB_SHA) {
@@ -949,6 +1235,33 @@ jobs:
       - name: Scan Backend Migrator Image with Trivy (Blocking Security Gate)
         run: |
           echo "Executing Trivy vulnerability scan against gms-backend-migrator:ci..."
+          echo "### Trivy Scan Results: gms-backend-migrator:ci" >> $GITHUB_STEP_SUMMARY
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/workspace \
+            -w /workspace \
+            aquasec/trivy:0.58.2 image \
+            --severity CRITICAL,HIGH \
+            --exit-code 0 \
+            --ignore-unfixed \
+            --show-suppressed \
+            --format json \
+            --output /workspace/trivy-migrator.json \
+            --ignorefile /workspace/.trivyignore.yaml \
+            gms-backend-migrator:ci
+
+          node -e '
+            const fs = require("fs");
+            if (fs.existsSync("trivy-migrator.json")) {
+              const data = JSON.parse(fs.readFileSync("trivy-migrator.json", "utf8"));
+              for (const target of data.Results || []) {
+                for (const vuln of target.Vulnerabilities || []) {
+                  console.log(`::error file=.trivyignore.yaml,title=${vuln.VulnerabilityID} in ${vuln.PkgName}@${vuln.InstalledVersion}::Trivy Security Failure: ${vuln.VulnerabilityID} (${vuln.Severity}) in target ${target.Target} package ${vuln.PkgName}@${vuln.InstalledVersion} - ${vuln.Title}`);
+                }
+              }
+            }
+          '
+
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v ${{ github.workspace }}:/workspace \

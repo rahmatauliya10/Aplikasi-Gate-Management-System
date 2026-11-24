@@ -76,6 +76,19 @@ function verifyComposeConfig(configJsonStr) {
       }
     }
 
+    // Check test fixture isolation flags are explicitly forced to false in production
+    const envEntries = Array.isArray(envObj)
+      ? envObj
+      : Object.entries(envObj).map(([k, v]) => `${k}=${v}`);
+    const fixtureEntry = envEntries.find((e) => e.startsWith('ENABLE_TEST_SPEC_FIXTURES='));
+    if (!fixtureEntry || !fixtureEntry.endsWith('=false')) {
+      errors.push('Backend production compose must explicitly set ENABLE_TEST_SPEC_FIXTURES=false.');
+    }
+    const harnessEntry = envEntries.find((e) => e.startsWith('GMS_TEST_HARNESS='));
+    if (!harnessEntry || !harnessEntry.endsWith('=false')) {
+      errors.push('Backend production compose must explicitly set GMS_TEST_HARNESS=false.');
+    }
+
     // Check healthcheck
     if (!backend.healthcheck || !backend.healthcheck.test) {
       errors.push('Backend must have a defined healthcheck.');

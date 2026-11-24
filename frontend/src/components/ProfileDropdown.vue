@@ -17,7 +17,7 @@
              :class="{ 'rotate-[360deg]': isOpen, 'group-hover:rotate-[360deg]': !isOpen }"
              style="background: linear-gradient(135deg, #4A8BDF, #A0006D);">
           <img v-if="user.avatarUrl" :src="user.avatarUrl" class="w-full h-full object-cover" />
-          <span v-else>{{ user.avatarInitial || (user.name ? user.name.substring(0,2).toUpperCase() : '?') }}</span>
+          <span v-else>{{ avatarInitials }}</span>
         </div>
         <div class="absolute -bottom-1 -right-1 w-3.5 h-3.5 md:w-4 md:h-4 rounded-full bg-emerald-500 border-2 border-white shadow-sm" title="Online"></div>
       </div>
@@ -33,7 +33,7 @@
             <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-white text-sm font-black shadow-md overflow-hidden"
                  style="background: linear-gradient(135deg, #4A8BDF, #A0006D);">
               <img v-if="user.avatarUrl" :src="user.avatarUrl" class="w-full h-full object-cover" />
-              <span v-else>{{ user.avatarInitial || '?' }}</span>
+              <span v-else>{{ avatarInitials }}</span>
             </div>
             <div>
               <h4 class="text-[14px] font-black text-slate-900 leading-tight">{{ user.name }}</h4>
@@ -88,7 +88,7 @@
                 <div class="w-24 h-24 rounded-full flex items-center justify-center text-white text-3xl font-black shadow-lg border-4 border-white overflow-hidden"
                      style="background: linear-gradient(135deg, #4A8BDF, #A0006D);">
                   <img v-if="user.avatarUrl" :src="user.avatarUrl" class="w-full h-full object-cover" />
-                  <span v-else>{{ user.avatarInitial || '?' }}</span>
+                  <span v-else>{{ avatarInitials }}</span>
                 </div>
               </div>
               
@@ -298,6 +298,7 @@ import { useNotificationStore } from '../stores/notificationStore'
 import UserGuideModal from './UserGuideModal.vue'
 import FaqModal from './FaqModal.vue'
 import api from '../services/api'
+import { getAvatarInitials } from '../utils/avatarInitials'
 
 
 const router = useRouter()
@@ -338,6 +339,8 @@ const defaultDummyUser = reactive({
 const user = computed(() => {
   return authStore.user || defaultDummyUser
 })
+
+const avatarInitials = computed(() => getAvatarInitials(user.value))
 
 const formatDate = (dateStr) => {
   if (!dateStr) return '—'
@@ -596,11 +599,11 @@ const confirmLogout = async () => {
 }
 
 .menu-item {
-  @apply w-full flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 transition-colors text-left;
+  @apply w-full min-w-0 flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 transition-colors text-left;
 }
 
 .menu-icon {
-  @apply text-[18px] text-slate-400 transition-colors;
+  @apply shrink-0 text-[18px] text-slate-400 transition-colors;
 }
 
 .menu-text {

@@ -39,17 +39,18 @@ Orchestrator akan menjalankan verifikasi bertahap:
    - Membongkar dan merekonsiliasi berkas fisik lampiran (SHA-256 integrity match).
    - Menghancurkan container sementara secara bersih.
 
-3. **Deployment Rollback Drill (`run-deployment-rollback-drill.ps1`)**:
-   - Melakukan simulasi kegagalan setelah migrasi forward (`AFTER_MIGRATION`).
+3. **Deployment Rollback Drill (`run-deployment-rollback-drill.ps1`)** *(STAGING / CI HARNESS ONLY — DILARANG DI PRODUKSI)*:
+   - Melakukan simulasi kegagalan terkontrol setelah migrasi forward (`AFTER_MIGRATION`).
    - Membekukan transaksi (`maintenance mode`).
    - Mengembalikan skema database dan physical uploads ke baseline pre-deploy.
    - Memverifikasi kesehatan container (`Backend`, `Frontend`, `Nginx` = healthy).
    - Memastikan Nginx fail-closed verdict gate aktif.
 
-4. **Cross-Stack Business Smoke (`ci-e2e-smoke.js`)**:
-   - Menguji alur otentikasi login.
-   - Menguji transaksi penuh GBB, GSP, GBJ.
-   - Menguji operasi koreksi log (happy-path).
+4. **Cross-Stack Business Smoke (`ci-e2e-smoke.js`)** *(CI & STAGING ONLY: Mutatif — DILARANG DI PRODUKSI)*:
+   - Memvalidasi alur otentikasi login.
+   - Menguji transaksi penuh GBB, GSP, GBJ (menghasilkan transaksi uji dan mutasi workflow).
+   - Menguji operasi koreksi log dan enforce fail-closed matrix.
+   - *Catatan Produksi:* Untuk pengujian produksi pasca-deploy, gunakan `scripts/prod-smoke-readonly.js` (non-mutating).
 
 ---
 

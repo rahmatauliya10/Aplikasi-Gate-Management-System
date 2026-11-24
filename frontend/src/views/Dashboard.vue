@@ -42,12 +42,13 @@
             <span class="material-icons text-xl group-hover:scale-110 transition-transform">speed</span>
           </div>
           <div class="text-right">
-             <span class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] block">Target TAT</span>
+             <span class="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] block">Configured TAT Target</span>
+             <span class="text-[9px] font-bold text-slate-400 block">Display setting · not formal SLA approval</span>
              <span class="text-[10px] sm:text-xs font-bold text-[#A0006D] block font-mono">{{ targetTat }}m</span>
           </div>
         </div>
         <div>
-           <p class="text-3xl sm:text-4xl font-black tracking-tighter font-mono" :class="avgTotalTAT > targetTat ? 'text-red-500' : 'text-slate-900'">{{ avgTotalTAT }}<span class="text-lg sm:text-xl font-bold ml-1 text-slate-500">m</span></p>
+           <p class="text-3xl sm:text-4xl font-black tracking-tighter font-mono" :class="typeof avgTotalTAT === 'number' && avgTotalTAT > targetTat ? 'text-red-500' : 'text-slate-900'">{{ formatMinutes(avgTotalTAT) }}<span v-if="typeof avgTotalTAT === 'number'" class="text-lg sm:text-xl font-bold ml-1 text-slate-500">m</span></p>
           <p class="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 uppercase tracking-wider">Turnaround Time</p>
         </div>
       </div>
@@ -89,7 +90,8 @@
                <p class="text-[10px] sm:text-xs font-bold text-slate-500 ml-0 sm:ml-11 mt-2 sm:mt-0">Real-time deviation check between Weighbridge and Area Scale.</p>
              </div>
              <div class="text-left sm:text-right shrink-0">
-               <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Tolerance Limit</span>
+               <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Configured Display Threshold</span>
+               <span class="text-[9px] font-bold text-slate-400 block mb-1.5">Not formal policy approval</span>
                <div class="px-3 py-1.5 rounded-lg text-xs font-black inline-block" style="background:rgba(239,68,68,0.06);color:#EF4444;border:1px solid rgba(239,68,68,0.12)">
                  &gt; {{ targetDeviation }}% Deviation
                </div>
@@ -180,8 +182,8 @@
                    <div class="w-14 h-14 mx-auto rounded-2xl flex items-center justify-center mb-3" style="background:rgba(74,139,223,0.06);border:1px solid rgba(74,139,223,0.1)">
                      <span class="material-icons text-[#4A8BDF] text-2xl">verified_user</span>
                    </div>
-                   <p class="text-sm font-black text-slate-700">No Critical Deviations Detected</p>
-                   <p class="text-xs font-bold text-slate-400 mt-1">All weighbridge data is within safe tolerance limits.</p>
+                   <p class="text-sm font-black text-slate-700">No Active Alerts</p>
+                   <p class="text-xs font-bold text-slate-400 mt-1">No active alerts in the selected period and filters.</p>
                 </div>
              </div>
            </div>
@@ -202,37 +204,37 @@
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">Gate → WB IN</span>
-                <span class="text-lg font-black text-slate-800 font-mono">{{ avgStageTimes.waitingIn }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                <span class="text-lg font-black text-slate-800 font-mono">{{ formatMinutes(avgStageTimes.waitingIn) }}<span v-if="typeof avgStageTimes.waitingIn === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000 animate-fill" style="background:linear-gradient(90deg,#818CF8,#3A6ABF)" :style="{ width: Math.min(avgStageTimes.waitingIn * 5, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000 animate-fill" style="background:linear-gradient(90deg,#818CF8,#3A6ABF)" :style="{ width: stageBarWidth(avgStageTimes.waitingIn, 5) }"></div>
               </div>
             </div>
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">Warehouse</span>
-                <span class="text-lg font-black text-orange-600 font-mono">{{ avgStageTimes.warehouse }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                <span class="text-lg font-black text-orange-600 font-mono">{{ formatMinutes(avgStageTimes.warehouse) }}<span v-if="typeof avgStageTimes.warehouse === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000 animate-fill stagger-2" style="background:linear-gradient(90deg,#FBBF24,#A0006D)" :style="{ width: Math.min(avgStageTimes.warehouse * 2, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000 animate-fill stagger-2" style="background:linear-gradient(90deg,#FBBF24,#A0006D)" :style="{ width: stageBarWidth(avgStageTimes.warehouse, 2) }"></div>
               </div>
             </div>
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">QC Verify</span>
-                <span class="text-lg font-black text-indigo-600 font-mono">{{ avgStageTimes.qc }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                <span class="text-lg font-black text-indigo-600 font-mono">{{ formatMinutes(avgStageTimes.qc) }}<span v-if="typeof avgStageTimes.qc === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#818CF8,#4338CA)" :style="{ width: Math.min(avgStageTimes.qc * 5, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#818CF8,#4338CA)" :style="{ width: stageBarWidth(avgStageTimes.qc, 5) }"></div>
               </div>
             </div>
             <div class="group">
               <div class="flex justify-between items-end mb-2">
                 <span class="text-xs font-black text-slate-700 uppercase tracking-wider">QC → Gate OUT</span>
-                 <span class="text-lg font-black text-[#3A6ABF] font-mono">{{ avgStageTimes.waitingOut }} <span class="text-[10px] text-slate-600 font-bold">MIN</span></span>
+                 <span class="text-lg font-black text-[#3A6ABF] font-mono">{{ formatMinutes(avgStageTimes.waitingOut) }}<span v-if="typeof avgStageTimes.waitingOut === 'number'" class="text-[10px] text-slate-600 font-bold ml-1">MIN</span></span>
               </div>
               <div class="w-full h-2.5 rounded-full overflow-hidden" style="background:#F1F5F9">
-                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#34D399,#4A8BDF)" :style="{ width: Math.min(avgStageTimes.waitingOut * 5, 100) + '%' }"></div>
+                <div class="h-full rounded-full transition-all duration-1000" style="background:linear-gradient(90deg,#34D399,#4A8BDF)" :style="{ width: stageBarWidth(avgStageTimes.waitingOut, 5) }"></div>
               </div>
             </div>
           </div>
@@ -259,24 +261,29 @@
         <table class="w-full min-w-[700px] border-collapse">
           <thead>
             <tr style="background:#FAFBFF;border-bottom:1px solid #E8EEF7">
-              <th class="px-4 sm:px-6 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Plate / Driver</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Type / Vendor</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Status / Location</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Registered (WIB)</th>
-              <th class="px-3 sm:px-4 py-3.5 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest">Current Stage SLA</th>
-              <th class="px-3 sm:px-4 py-3.5 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">Action</th>
+              <th class="px-4 sm:px-6 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Plate / Driver</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Type / Vendor</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Status / Location</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Registered (WIB)</th>
+              <th class="px-3 sm:px-4 py-3.5 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Current Stage SLA</th>
+              <th class="px-3 sm:px-4 py-3.5 text-center text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Action</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-for="truck in activeTrucks" :key="truck.id" class="transition-colors hover:bg-slate-50/80">
               <td class="px-4 sm:px-6 py-3 border-y border-l border-slate-100 rounded-l-2xl">
                 <div>
-                  <span class="font-black text-slate-900 text-xs sm:text-sm font-mono tracking-tight block">{{ truck?.plateNumber || truck?.licensePlate || '-' }}</span>
+                  <div class="flex items-center space-x-1.5">
+                    <span class="font-bold text-slate-900 text-xs sm:text-sm font-sans tracking-wide block">{{ truck?.plateNumber || truck?.licensePlate || '-' }}</span>
+                    <span v-if="truck?.dailySequence" class="px-1.5 py-0.5 rounded text-[10px] font-semibold font-sans bg-indigo-50 text-indigo-700 border border-indigo-200 tabular-nums">
+                      #{{ String(truck.dailySequence).padStart(3, '0') }}
+                    </span>
+                  </div>
                   <span class="text-[10px] text-slate-600 block">{{ truck?.driverName || 'No Driver' }}</span>
                 </div>
               </td>
               <td class="px-2 sm:px-4 py-3 border-y border-slate-100">
-                <span class="text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-0.5" 
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-0.5"
                   :style="(truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType) === 'GBB' ? 'color:#A0006D;background:rgba(160,0,109,0.06)' : (truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType) === 'GBJ' ? 'color:#4A8BDF;background:rgba(74,139,223,0.06)' : 'color:#059669;background:rgba(5,150,105,0.06)'">
                   {{ truck?.destination?.warehouseCode || truck?.warehouseCode || truck?.processType || '-' }}
                 </span>
@@ -290,12 +297,12 @@
                   <span class="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider truncate max-w-[180px] sm:max-w-[220px]" :class="getStatusTextClass(truck.status)">{{ getStatusLabel(truck?.status, truck?.processType) }}</span>
                 </div>
               </td>
-              <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-[10px] sm:text-[11px] font-bold text-slate-500 font-mono border-y border-slate-100">{{ formatPlantDateTime(truck?.gateInAt || truck?.createdAt) }}</td>
+              <td class="px-2 sm:px-4 py-3 whitespace-nowrap text-[10px] sm:text-[11px] font-medium text-slate-600 font-sans tabular-nums border-y border-slate-100">{{ formatPlantDateTime(truck?.gateInAt || truck?.createdAt) }}</td>
               <td class="px-2 sm:px-4 py-3 whitespace-nowrap border-y border-slate-100">
                 <ProcessTimerBadge 
                   :start-time="truck.warehouseStartAt || truck.qcStartAt || truck.weighInAt || truck.gateInAt || truck.createdAt" 
                   :end-time="truck.completedAt || truck.cancelledAt"
-                  :sla-minutes="60"
+                  :sla-minutes="null"
                   :compact="true"
                 />
               </td>
@@ -342,6 +349,7 @@ import { useTruckStore } from '../stores/truckStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import dashboardService from '../services/dashboardService'
 import TruckDetailsModal from '../components/TruckDetailsModal.vue'
+import { useTransactionDeepLink } from '../composables/useTransactionDeepLink'
 import ProcessTimerBadge from '../components/ProcessTimerBadge.vue'
 import PageHeader from '../components/PageHeader.vue'
 import DashboardFilterBar from '../components/DashboardFilterBar.vue'
@@ -412,12 +420,14 @@ const handleFilterChange = (newFilter) => {
   fetchDashboardStats(newFilter)
 }
 
+useTransactionDeepLink({
+  fetchTrucks: truckStore.fetchTrucks,
+  trucks: computed(() => truckStore.trucks),
+  selectedTruck,
+  selectTruck: (truck) => { selectedTruck.value = truck; showDetailsModal.value = true },
+})
+
 onMounted(async () => {
-  try {
-    await truckStore.fetchTrucks()
-  } catch (err) {
-    console.warn('[Dashboard] Mount-time fetch failed, using store cache:', err.message)
-  }
   await fetchDashboardStats(filterState.value)
   
   // Refresh stats every 30 seconds respecting active filter
@@ -469,8 +479,10 @@ const activeTruckCount = computed(() => {
 })
 const completedTruckCount = computed(() => stats.value?.summary?.totalCompleted || 0)
 
-const avgTotalTAT = computed(() => stats.value?.avgTotalTAT || 0)
-const avgStageTimes = computed(() => stats.value?.avgStageTimes || { waitingIn: 0, warehouse: 0, qc: 0, waitingOut: 0 })
+const avgTotalTAT = computed(() => stats.value?.avgTotalTAT ?? null)
+const avgStageTimes = computed(() => stats.value?.avgStageTimes || { waitingIn: null, warehouse: null, qc: null, waitingOut: null })
+const formatMinutes = (value) => typeof value === 'number' ? value : '—'
+const stageBarWidth = (value, multiplier) => typeof value === 'number' ? `${Math.min(value * multiplier, 100)}%` : '0%'
 
 const alertList = computed(() => {
   const list = stats.value?.activeFraudAlerts || []

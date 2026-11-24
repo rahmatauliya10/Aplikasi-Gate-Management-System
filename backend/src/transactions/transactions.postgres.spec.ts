@@ -7,8 +7,8 @@ import {
   CorrectionTargetModule,
   ProcessType,
 } from '@prisma/client';
-import { execSync } from 'child_process';
 import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+import { verifyTargetDatabaseFixtureIdentity } from '../settings/destructive-target-guard';
 
 // Ensure test database isolation before Prisma or Nest services are instantiated
 const rawTestDbUrl = process.env.DATABASE_URL_TEST?.replace(/^"|"$/g, '');
@@ -47,7 +47,10 @@ if (rawTestDbUrl) {
 }
 
 const isPgTestAvailable = Boolean(
-  rawTestDbUrl && process.env.DATABASE_URL === rawTestDbUrl,
+  rawTestDbUrl &&
+  process.env.DATABASE_URL === rawTestDbUrl &&
+  process.env.GMS_FIXTURE_ISOLATION_UUID &&
+  process.env.GMS_FIXTURE_ISOLATION_UUID.startsWith('FIXTURE-'),
 );
 
 const describePgTest = isPgTestAvailable ? describe : describe.skip;
@@ -57,16 +60,37 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
   let prisma: PrismaService;
   let activityLogsService: ActivityLogsService;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     if (isPgTestAvailable) {
-      try {
-        execSync('npx prisma db push --accept-data-loss --skip-generate', {
-          env: process.env,
-          stdio: 'ignore',
-        });
-      } catch {
-        // Fallback gracefully if db push already run
+      // 1. Mandatory expected identity validation: fail-closed if run config is missing/incomplete
+      const expectedFixtureUuid =
+        process.env.GMS_FIXTURE_ISOLATION_UUID?.trim();
+      const expectedEnvId = process.env.GMS_ENVIRONMENT_ID?.trim();
+
+      if (!expectedFixtureUuid || !expectedFixtureUuid.startsWith('FIXTURE-')) {
+        throw new Error(
+          `INTEGRATION TARGET REJECTION: GMS_FIXTURE_ISOLATION_UUID is required and must start with 'FIXTURE-'. Found: '${expectedFixtureUuid || '<empty>'}'. Explicit fixture identity proof is required before running integration tests.`,
+        );
       }
+
+      if (
+        !expectedEnvId ||
+        expectedEnvId === '' ||
+        expectedEnvId.toUpperCase().includes('PROD')
+      ) {
+        throw new Error(
+          `INTEGRATION TARGET REJECTION: GMS_ENVIRONMENT_ID is required and must be an explicit non-production environment. Found: '${expectedEnvId || '<empty>'}'.`,
+        );
+      }
+
+      // 2. Formal preflight verification: ensures target database has been migrated
+      // and stamped with positive proof of isolated fixture ownership.
+      // Explicitly forbids implicit schema mutations (db push).
+      await verifyTargetDatabaseFixtureIdentity(process.env.DATABASE_URL!, {
+        expectedDbName: 'gms_test_db',
+        expectedFixtureUuid,
+        expectedEnvId,
+      });
     }
   });
 
@@ -102,26 +126,20 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
     let testTxId: string | undefined;
     let adminUserId: string | undefined;
 
-    try {
-      await prisma.$connect();
-    } catch (e: any) {
-      console.warn(
-        'Physical PostgreSQL test database is offline; skipping live PG rollback test.',
-      );
-      return;
-    }
+    // Strict fail-closed: physical connection must succeed without silent return
+    await prisma.$connect();
+
+    const runSuffix = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     try {
-      // Create a real Admin user fixture in test database for FK relation
-      const adminUser = await prisma.user.upsert({
-        where: { email: 'admin.pg.test@gms.local' },
-        update: {},
-        create: {
-          id: 'admin-pg-uuid-fixture',
-          email: 'admin.pg.test@gms.local',
-          username: 'admin_pg_test',
+      // Create a unique Admin user fixture in test database for FK relation
+      const adminUser = await prisma.user.create({
+        data: {
+          id: `admin-pg-${runSuffix}`,
+          email: `admin.pg.test.${runSuffix}@gms.local`,
+          username: `admin_pg_${runSuffix}`,
           passwordHash: '$argon2id$v=19$m=65536,t=3,p=4$fixturehash',
-          name: 'Admin PG Test',
+          name: `Admin PG Test ${runSuffix}`,
           role: 'ADMIN',
         },
       });
@@ -130,10 +148,10 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
       // Create a real transaction record in test database with valid Prisma schema fields
       const testTx = await prisma.transaction.create({
         data: {
-          transactionNumber: `TRX-PG-TEST-${Date.now()}`,
+          transactionNumber: `TRX-PG-TEST-${runSuffix}`,
           driverName: 'Driver PG Test',
           driverPhone: '08123456789',
-          plateNumber: 'B 9999 PG',
+          plateNumber: `B ${Math.floor(1000 + Math.random() * 9000)} PG`,
           vendorName: 'Vendor PG Test',
           vehicleType: 'TRUCK',
           processType: ProcessType.GBB,
@@ -186,7 +204,7 @@ describePgTest('OperationLogCorrectionService PG Rollback Integration', () => {
       });
       expect(corrections).toHaveLength(0);
     } finally {
-      // Guaranteed cleanup of fixture records
+      // Guaranteed cleanup of fixture records created during this run
       if (prisma && testTxId) {
         await prisma.transactionCorrection
           ?.deleteMany({

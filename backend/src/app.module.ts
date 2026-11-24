@@ -15,6 +15,7 @@ import { SettingsModule } from './settings/settings.module';
 import { ActivityLogsModule } from './activity-logs/activity-logs.module';
 import { SystemIssuesModule } from './system-issues/system-issues.module';
 import { AttachmentsModule } from './attachments/attachments.module';
+import { ProductCatalogModule } from './product-catalog/product-catalog.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 
@@ -43,6 +44,7 @@ import { APP_GUARD } from '@nestjs/core';
     ActivityLogsModule,
     SystemIssuesModule,
     AttachmentsModule,
+    ProductCatalogModule,
   ],
   controllers: [AppController],
   providers: [

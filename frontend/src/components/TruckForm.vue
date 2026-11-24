@@ -63,6 +63,17 @@
 
         <!-- STEP 2: VEHICLE & CARGO -->
         <div v-else-if="currentStep === 2" class="col-start-1 row-start-1 w-full px-4 sm:px-7 pt-2 pb-5 sm:pb-7" key="step2">
+          <!-- Destination Process Read-only Lock Indicator (Section 8) -->
+          <div class="flex items-center justify-between px-3.5 py-2.5 mb-4 rounded-xl bg-slate-50 border border-slate-200">
+            <div class="flex items-center space-x-2">
+              <span class="text-[10px] font-black uppercase tracking-wider text-slate-500">Destination Process:</span>
+              <span class="px-2.5 py-0.5 rounded-md text-xs font-black bg-indigo-100 text-indigo-700 border border-indigo-200">{{ form.processType }}</span>
+            </div>
+            <span class="text-[10px] font-bold text-slate-400 italic flex items-center">
+              <span class="material-icons text-xs mr-1">lock</span> Locked from Step 1
+            </span>
+          </div>
+
           <h3 class="text-xs sm:text-sm font-black text-slate-800 mb-4 tracking-tight">Vehicle Data</h3>
           
           <div class="space-y-5">
@@ -132,14 +143,12 @@
                   </div>
                 </div>
 
-
-
-                <!-- Process Type -->
+                <!-- Cargo Movement / Direction -->
                 <div class="relative">
-                  <label class="text-[10px] font-black text-slate-700 uppercase tracking-widest block mb-1.5">Process Type *</label>
+                  <label class="text-[10px] font-black text-slate-700 uppercase tracking-widest block mb-1.5">Cargo Operation *</label>
                   <div class="relative">
                     <select v-model="form.cargoProcessType" class="w-full h-12 px-4 rounded-xl text-sm font-bold text-slate-900 bg-slate-50 border-2 border-slate-200 outline-none appearance-none focus:border-[#4A8BDF] focus:bg-white transition-all">
-                      <option value="" disabled>Select Process Type</option>
+                      <option value="" disabled>Select Operation</option>
                       <option value="INBOUND">Unloading (Bongkar)</option>
                       <option value="OUTBOUND">Loading (Memuat)</option>
                     </select>
@@ -149,8 +158,47 @@
               </div>
             </div>
 
-            <!-- Cargo Sub Type List -->
-            <div>
+            <!-- GSP: Strictly Single Sub Type / Material (Section 11 & 29) -->
+            <div v-if="form.processType === 'GSP'" class="mt-3">
+              <label class="text-[10px] font-black text-slate-700 uppercase tracking-widest block mb-1.5">Cargo Sub Type *</label>
+              <div class="relative">
+                <select :value="form.productCatalogId" @change="onSelectGspProduct($event.target.value)" :disabled="!form.cargoType" class="w-full h-12 pl-10 pr-10 rounded-xl text-sm font-bold text-slate-900 bg-white border-2 border-slate-200 outline-none appearance-none focus:border-[#4A8BDF] transition-all disabled:bg-slate-100 disabled:cursor-not-allowed">
+                  <option value="" disabled>{{ !form.cargoType ? 'Select Cargo Type first' : 'Select Cargo Sub Type / Material' }}</option>
+                  <option v-for="prod in availableGspProducts" :key="prod.id" :value="prod.id">
+                    {{ prod.name }}
+                  </option>
+                </select>
+                <span class="material-icons absolute left-3 top-1/2 -translate-y-1/2 text-slate-600 text-[18px] pointer-events-none">inventory_2</span>
+                <span class="material-icons absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">expand_more</span>
+              </div>
+
+              <!-- Read-only small info banner (Section 29) -->
+              <div v-if="selectedGspProduct" class="mt-2.5 p-3 rounded-xl border flex items-center justify-between text-xs transition-all"
+                :class="selectedGspProduct.gspAnalysisProfile === 'PA_EXEMPT' ? 'bg-emerald-50/70 border-emerald-200 text-emerald-800' : 'bg-indigo-50/70 border-indigo-200 text-indigo-800'">
+                <div class="flex items-center space-x-2">
+                  <span class="material-icons text-base" :class="selectedGspProduct.gspAnalysisProfile === 'PA_EXEMPT' ? 'text-emerald-600' : 'text-indigo-600'">
+                    {{ selectedGspProduct.gspAnalysisProfile === 'PA_EXEMPT' ? 'verified' : 'biotech' }}
+                  </span>
+                  <div>
+                    <div class="font-black text-[11px] leading-tight">
+                      {{ selectedGspProduct.gspAnalysisProfile === 'PA_EXEMPT' ? 'PA Exempt (No Lab PA Required)' : 'QC / Product Analysis Required' }}
+                    </div>
+                    <div class="text-[10px] opacity-75 font-mono mt-0.5">
+                      Profile: <span class="font-bold">{{ selectedGspProduct.gspAnalysisProfile }}</span> &bull; Policy: {{ selectedGspProduct.policyVersion || 'SOP-GSP-2026.1' }}
+                    </div>
+                  </div>
+                </div>
+                <span class="text-[9px] uppercase tracking-wider font-black px-2 py-0.5 rounded-full"
+                  :class="selectedGspProduct.gspAnalysisProfile === 'PA_EXEMPT' ? 'bg-emerald-200/60 text-emerald-800' : 'bg-indigo-200/60 text-indigo-800'">
+                  Server Governed
+                </span>
+              </div>
+              <p v-if="!form.cargoType" class="text-[10px] text-slate-500 italic mt-2">Select Cargo Type first to select sub type.</p>
+              <p v-else-if="!form.productCatalogId" class="text-[10px] text-red-500 italic mt-2">Please select a cargo sub type.</p>
+            </div>
+
+            <!-- Legacy Cargo Sub Type List for Non-GSP (GBB / GBJ) -->
+            <div v-else>
               <div class="flex items-center justify-between mb-2">
                 <label class="text-[10px] font-black text-slate-700 uppercase tracking-widest">Cargo Sub Type List *</label>
                 <button type="button" @click.prevent="addCargoSubType" :disabled="!form.cargoType || form.cargoSubTypes.length >= currentSubTypes.length" class="text-[10px] font-bold text-[#4A8BDF] hover:text-indigo-700 bg-[#E6F0FA] hover:bg-indigo-100 px-3 py-1.5 rounded-lg flex items-center transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
@@ -322,15 +370,77 @@ const form = reactive({
   permitCard: '', idType: 'KTP', guestId: '',
   processType: null, driverName: '', driverPhone: '',
   cargoType: '', cargoProcessType: '',
-  cargoSubTypes: []
+  cargoSubTypes: [],
+  productCatalogId: null
 })
 
-// Cargo Type → Sub Type mapping
-const cargoTypeOptions = computed(() => Object.keys(masterStore.cargoSubTypeMap))
-const currentSubTypes = computed(() => masterStore.cargoSubTypeMap[form.cargoType] || [])
+// Canonical GSP Categories (Section 10)
+const GSP_CARGO_CATEGORIES = ['Coal', 'Fuel', 'Chemical UTL', 'Chemical PROD']
 
-// Reset sub type when cargo type changes
-watch(() => form.cargoType, () => { form.cargoSubTypes = [] })
+// Cargo Type → Sub Type mapping (Section 7, 10)
+const cargoTypeOptions = computed(() => {
+  if (form.processType === 'GSP') {
+    return GSP_CARGO_CATEGORIES
+  }
+  return Object.keys(masterStore.cargoSubTypeMap).filter(
+    k => !['Coal', 'Chemical UTL', 'Chemical PROD'].includes(k)
+  )
+})
+
+const availableGspProducts = computed(() => {
+  if (form.processType !== 'GSP' || !form.cargoType) return []
+  return masterStore.gspProducts.filter(
+    p => p.category === form.cargoType && p.isActive !== false
+  )
+})
+
+const selectedGspProduct = computed(() => {
+  if (form.processType !== 'GSP' || !form.productCatalogId) return null
+  return masterStore.gspProducts.find(p => p.id === form.productCatalogId) || null
+})
+
+const onSelectGspProduct = (productId) => {
+  form.productCatalogId = productId
+  const prod = masterStore.gspProducts.find(p => p.id === productId)
+  if (prod) {
+    form.cargoSubTypes = [{ id: prod.id, name: prod.name }]
+  } else {
+    form.cargoSubTypes = []
+  }
+}
+
+const currentSubTypes = computed(() => {
+  if (form.processType === 'GSP') {
+    return availableGspProducts.value.map(p => p.name)
+  }
+  return masterStore.cargoSubTypeMap[form.cargoType] || []
+})
+
+// Section 9: Reset selection if process destination changes
+watch(() => form.processType, (newVal, oldVal) => {
+  if (oldVal !== undefined && oldVal !== null && newVal !== oldVal) {
+    form.cargoType = ''
+    form.cargoSubTypes = []
+    form.productCatalogId = null
+  }
+})
+
+// Reset sub type when cargo type changes to a mismatched category
+watch(() => form.cargoType, (newVal, oldVal) => {
+  if (oldVal !== undefined && oldVal !== null && newVal !== oldVal) {
+    if (form.processType === 'GSP') {
+      if (form.productCatalogId) {
+        const prod = masterStore.gspProducts.find(p => p.id === form.productCatalogId)
+        if (!prod || prod.category !== newVal) {
+          form.cargoSubTypes = []
+          form.productCatalogId = null
+        }
+      }
+    } else {
+      form.cargoSubTypes = []
+    }
+  }
+})
 
 // Phone validation
 const formattedPhone = computed({
@@ -367,7 +477,14 @@ const getAvailableSubTypes = (currentValue) => {
 // Validations
 const canProceed = computed(() => {
   if (currentStep.value === 1) return !!form.processType
-  if (currentStep.value === 2) return !!form.vehicleType && !!form.plateNumber && !!form.vendor && !!form.driverName && isPhoneValid.value && !!form.cargoType && form.cargoSubTypes.length > 0 && form.cargoSubTypes.every(st => !!st.name) && !!form.cargoProcessType
+  if (currentStep.value === 2) {
+    const basicValid = !!form.vehicleType && !!form.plateNumber && !!form.vendor && !!form.driverName && isPhoneValid.value && !!form.cargoType && !!form.cargoProcessType
+    if (!basicValid) return false
+    if (form.processType === 'GSP') {
+      return !!form.productCatalogId && form.cargoSubTypes.length === 1 && !!form.cargoSubTypes[0].name
+    }
+    return form.cargoSubTypes.length > 0 && form.cargoSubTypes.every(st => !!st.name)
+  }
   return true
 })
 
@@ -409,6 +526,7 @@ const submitForm = () => {
       processType: form.processType,
       cargoType: form.cargoType,
       cargoSubType: form.cargoSubTypes.map(c => c.name).filter(Boolean).join(', '),
+      productCatalogId: form.processType === 'GSP' ? form.productCatalogId : (form.productCatalogId || undefined),
       cargoProcessType: form.cargoProcessType,
       suratJalanNumber: form.suratJalanNumber || undefined,
       poNumber: form.poNumber || undefined,

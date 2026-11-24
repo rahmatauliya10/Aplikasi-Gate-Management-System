@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../stores/authStore'
 import authService from '../services/authService'
+import { getPhotoSessionEpoch } from '../services/photoSession'
 
 describe('authStore Enterprise In-Memory Security', () => {
   beforeEach(() => {
@@ -88,14 +89,28 @@ describe('authStore Enterprise In-Memory Security', () => {
     expect(authStore.isAuthenticated).toBe(false)
   })
 
-  it('should clear all in-memory state on logout', async () => {
+  it('should invalidate photo session before waiting for logout API', async () => {
     const authStore = useAuthStore()
     authStore.token = 'existing-token'
     authStore.user = { id: 'usr-1' }
-    vi.spyOn(authService, 'logout').mockResolvedValue({ data: { success: true } })
 
-    await authStore.logout()
+    let resolveLogout
+    vi.spyOn(authService, 'logout').mockReturnValue(
+      new Promise((resolve) => {
+        resolveLogout = resolve
+      })
+    )
 
+    const epochBeforeLogout = getPhotoSessionEpoch()
+    const pendingLogout = authStore.logout()
+
+    expect(getPhotoSessionEpoch()).toBe(epochBeforeLogout + 1)
+    expect(authStore.token).toBe('existing-token')
+
+    resolveLogout({ data: { success: true } })
+    await pendingLogout
+
+    expect(getPhotoSessionEpoch()).toBe(epochBeforeLogout + 1)
     expect(authStore.token).toBeNull()
     expect(authStore.user).toBeNull()
     expect(authStore.isAuthenticated).toBe(false)

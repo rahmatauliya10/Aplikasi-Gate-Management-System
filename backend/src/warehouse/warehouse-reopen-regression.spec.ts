@@ -149,13 +149,14 @@ describe('Warehouse CANCELLED→REOPEN Regression (P0-02)', () => {
       warehouseUser,
     );
 
-    // ASSERT: findFirst was called with isCurrent: true
+    // ASSERT: findFirst was called with isCurrent: true and deterministic ordering
     expect(mockTxClient.warehouseProcess.findFirst).toHaveBeenCalledWith({
       where: {
         transactionId: 'tx-reopen-1',
         isCurrent: true,
         endAt: null,
       },
+      orderBy: { revision: 'desc' },
     });
 
     // ASSERT: update was called on rev2 (current), NOT rev1 (historical)

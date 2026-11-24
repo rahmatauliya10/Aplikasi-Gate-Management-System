@@ -3,14 +3,21 @@ import {
   BadRequestException,
   NotFoundException,
   ConflictException,
+  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { CreateGateCheckInDto } from './dto/create-gate-check-in.dto';
 import { GateQueryDto } from './dto/gate-query.dto';
-import { TransactionStatus, Prisma } from '@prisma/client';
+import {
+  TransactionStatus,
+  Prisma,
+  GspAnalysisProfile,
+  WarehouseUnit,
+} from '@prisma/client';
 import { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { assertValidGspProfileInvariant } from '../qc/constants/gsp-analysis-profile';
 
 import { GATE_DETAIL_CURRENT_RELATIONS_INCLUDE } from '../prisma/prisma-include.helpers';
 import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
@@ -67,11 +74,204 @@ export class GateService {
           // Database-level concurrency lock on unspaced raw plate number hash
           try {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${rawPlate}))`;
-          } catch (e) {
-            // Fallback for non-postgres database environments in testing
+          } catch (e: any) {
+            // Fail closed in production; fallback only for unit tests
+            if (process.env.NODE_ENV !== 'test') {
+              this.logger.error(
+                `Advisory lock failed for plate ${rawPlate}: ${e.message}. Aborting fail-closed.`,
+                e.stack,
+              );
+              throw new InternalServerErrorException(
+                'Penguncian plate number gagal; pendaftaran dibatalkan secara fail-closed.',
+              );
+            }
           }
 
-          const transactionNumber = await this.generateTransactionNumber(tx);
+          // Atomic daily arrival sequence counter for plant day (WIB) - Strictly Fail-Closed
+          const plantDay = getPlantDay();
+
+          // 2. Transaction-scoped daily advisory lock to serialize arrival sequence allocation per dateKey
+          try {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'gate_arrival_counter_' + plantDay.dateKey}))`;
+          } catch (lockErr: any) {
+            this.logger.error(
+              `Daily arrival advisory lock failed for dateKey ${plantDay.dateKey}: ${lockErr.message}. Aborting fail-closed.`,
+              lockErr.stack,
+            );
+            throw new InternalServerErrorException(
+              'Penguncian nomor urut harian gagal; pendaftaran dibatalkan secara fail-closed.',
+            );
+          }
+
+          if (
+            !tx.dailyArrivalCounter ||
+            typeof tx.dailyArrivalCounter.findUnique !== 'function' ||
+            typeof tx.dailyArrivalCounter.upsert !== 'function' ||
+            !tx.transaction ||
+            typeof tx.transaction.findMany !== 'function'
+          ) {
+            throw new InternalServerErrorException(
+              'Layanan database arrival counter tidak tersedia dalam konteks transaksi.',
+            );
+          }
+
+          let existingCounter: any;
+          try {
+            existingCounter = await tx.dailyArrivalCounter.findUnique({
+              where: { dateKey: plantDay.dateKey },
+            });
+          } catch (err: any) {
+            this.logger.error(
+              `Gagal membaca dailyArrivalCounter untuk ${plantDay.dateKey}: ${err.message}`,
+              err.stack,
+            );
+            throw new InternalServerErrorException(
+              'Gagal memverifikasi counter kedatangan harian secara fail-closed.',
+            );
+          }
+
+          const MAX_INT32 = 2147483647;
+          let counterExisting = 0;
+
+          if (existingCounter !== null && existingCounter !== undefined) {
+            if (
+              typeof existingCounter.lastSeq !== 'number' ||
+              !Number.isInteger(existingCounter.lastSeq) ||
+              existingCounter.lastSeq < 0 ||
+              existingCounter.lastSeq > MAX_INT32
+            ) {
+              throw new InternalServerErrorException(
+                `Nilai counter kedatangan harian di database tidak valid atau rusak (${existingCounter.lastSeq}).`,
+              );
+            }
+            counterExisting = existingCounter.lastSeq;
+          }
+
+          const prefix = `GMS-${plantDay.dateKey}-`;
+          let existingTxs: Array<{
+            transactionNumber: string;
+            dailySequence: number | null;
+          }>;
+          try {
+            existingTxs = await tx.transaction.findMany({
+              where: {
+                transactionNumber: { startsWith: prefix },
+              },
+              select: {
+                transactionNumber: true,
+                dailySequence: true,
+              },
+            });
+          } catch (err: any) {
+            this.logger.error(
+              `Gagal membaca transaksi existing untuk ${prefix}: ${err.message}`,
+              err.stack,
+            );
+            throw new InternalServerErrorException(
+              'Gagal memeriksa transaksi existing untuk alokasi nomor urut.',
+            );
+          }
+
+          const CANONICAL_TX_REGEX = /^GMS-\d{8}-(\d{4,})$/;
+          let highestExistingSequence = 0;
+
+          for (const rec of existingTxs) {
+            let recDailySeq: number | null = null;
+            if (rec.dailySequence !== null && rec.dailySequence !== undefined) {
+              if (
+                typeof rec.dailySequence !== 'number' ||
+                !Number.isInteger(rec.dailySequence) ||
+                rec.dailySequence < 1 ||
+                rec.dailySequence > MAX_INT32
+              ) {
+                throw new InternalServerErrorException(
+                  `Data dailySequence (${rec.dailySequence}) pada transaksi ${rec.transactionNumber} tidak valid atau melampaui batas penyimpanan.`,
+                );
+              }
+              recDailySeq = rec.dailySequence;
+            }
+
+            let recSuffixSeq: number | null = null;
+            if (typeof rec.transactionNumber === 'string') {
+              const match = rec.transactionNumber.match(CANONICAL_TX_REGEX);
+              if (match && match[1]) {
+                try {
+                  const bigSuffix = BigInt(match[1]);
+                  if (bigSuffix > BigInt(MAX_INT32)) {
+                    throw new InternalServerErrorException(
+                      `Suffix nomor transaksi ${rec.transactionNumber} melampaui batas maksimum integer 32-bit (${MAX_INT32}).`,
+                    );
+                  }
+                  if (bigSuffix < 1n) {
+                    throw new InternalServerErrorException(
+                      `Suffix nomor transaksi ${rec.transactionNumber} tidak boleh kurang dari 1.`,
+                    );
+                  }
+                  recSuffixSeq = Number(bigSuffix);
+                } catch (parseErr: any) {
+                  if (parseErr instanceof InternalServerErrorException) {
+                    throw parseErr;
+                  }
+                  throw new InternalServerErrorException(
+                    `Gagal memproses suffix numerik transaksi ${rec.transactionNumber}: ${parseErr.message}`,
+                  );
+                }
+              }
+              // Non-canonical suffix without dailySequence is ignored according to contract
+            }
+
+            // Reconciliation per transaction row
+            let effectiveSeq: number | null = null;
+            if (recDailySeq !== null && recSuffixSeq !== null) {
+              effectiveSeq =
+                recDailySeq > recSuffixSeq ? recDailySeq : recSuffixSeq;
+            } else if (recDailySeq !== null) {
+              effectiveSeq = recDailySeq;
+            } else if (recSuffixSeq !== null) {
+              effectiveSeq = recSuffixSeq;
+            }
+
+            if (
+              effectiveSeq !== null &&
+              effectiveSeq > highestExistingSequence
+            ) {
+              highestExistingSequence = effectiveSeq;
+            }
+          }
+
+          const baseline =
+            counterExisting > highestExistingSequence
+              ? counterExisting
+              : highestExistingSequence;
+
+          if (baseline >= MAX_INT32) {
+            throw new InternalServerErrorException(
+              `Nomor urut kedatangan harian telah mencapai batas maksimum integer 32-bit (${MAX_INT32}). Alokasi baru ditolak secara fail-closed.`,
+            );
+          }
+
+          const nextSequence = baseline + 1;
+          let dailySequence: number;
+
+          try {
+            await tx.dailyArrivalCounter.upsert({
+              where: { dateKey: plantDay.dateKey },
+              create: { dateKey: plantDay.dateKey, lastSeq: nextSequence },
+              update: { lastSeq: nextSequence },
+            });
+            dailySequence = nextSequence;
+          } catch (counterErr: any) {
+            this.logger.error(
+              `Failed to allocate atomic dailyArrivalCounter for ${plantDay.dateKey}: ${counterErr.message}. Aborting transaction fail-closed.`,
+              counterErr.stack,
+            );
+            throw new InternalServerErrorException(
+              'Gagal mengalokasikan nomor urut kedatangan harian secara atomik. Transaksi pendaftaran dibatalkan secara aman.',
+            );
+          }
+
+          const sequenceStr = dailySequence.toString().padStart(4, '0');
+          const transactionNumber = `GMS-${plantDay.dateKey}-${sequenceStr}`;
 
           const activeTransaction = await tx.transaction.findFirst({
             where: {
@@ -98,17 +298,148 @@ export class GateService {
             });
           }
 
+          let resolvedCatalogId: string | null = null;
+          let authoritativeCargoType = dto.cargoType;
+          let authoritativeCargoSubType = dto.cargoSubType;
+          let gspAnalysisProfile: GspAnalysisProfile | null = null;
+          let paPolicyVersion: string | null = null;
+          let paExemptionReason: string | null = null;
+          let receiptUnit: WarehouseUnit | null = null;
+
+          if (dto.processType === 'GSP') {
+            // Fail-closed enforcement for GSP check-in:
+            if (!dto.productCatalogId) {
+              throw new BadRequestException({
+                success: false,
+                message:
+                  'productCatalogId wajib disertakan untuk registrasi transaksi proses GSP.',
+                errors: ['MISSING_PRODUCT_CATALOG_ID'],
+              });
+            }
+
+            const catalog = await tx.productCatalog.findUnique({
+              where: { id: dto.productCatalogId },
+            });
+
+            if (!catalog) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk dengan ID '${dto.productCatalogId}' tidak ditemukan.`,
+                errors: ['CATALOG_NOT_FOUND'],
+              });
+            }
+
+            if (!catalog.isActive) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' (${catalog.code}) berstatus nonaktif dan tidak dapat digunakan untuk registrasi.`,
+                errors: ['CATALOG_INACTIVE'],
+              });
+            }
+
+            if (catalog.processType !== 'GSP') {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' bertipe proses ${catalog.processType}, tidak sesuai dengan proses transaksi GSP.`,
+                errors: ['PROCESS_MISMATCH'],
+              });
+            }
+
+            if (!catalog.gspAnalysisProfile) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' belum memiliki profil analisis PA terkonfigurasi.`,
+                errors: ['MISSING_ANALYSIS_PROFILE'],
+              });
+            }
+
+            if (!catalog.receiptUnit) {
+              throw new BadRequestException({
+                success: false,
+                message: `Katalog produk '${catalog.name}' belum memiliki satuan penerimaan (receiptUnit) terkonfigurasi.`,
+                errors: ['MISSING_GSP_RECEIPT_UNIT'],
+              });
+            }
+
+            receiptUnit = catalog.receiptUnit;
+
+            // Invariant verification between profile and isPaRequired
+            assertValidGspProfileInvariant(
+              catalog.gspAnalysisProfile,
+              catalog.isPaRequired,
+            );
+
+            // Server-Authoritative Cargo Identity & Anti-tamper check (Section 18)
+            if (dto.cargoType) {
+              const clientCat = dto.cargoType.trim().toLowerCase();
+              const canonCat = catalog.category.trim().toLowerCase();
+              if (clientCat !== canonCat) {
+                throw new BadRequestException({
+                  success: false,
+                  message: `Kategori kargo '${dto.cargoType}' tidak sesuai dengan data katalog master '${catalog.category}'.`,
+                  errors: ['CARGO_IDENTITY_CONFLICT'],
+                });
+              }
+            }
+
+            if (dto.cargoSubType) {
+              const clientSub = dto.cargoSubType.trim().toLowerCase();
+              const canonName = catalog.name.trim().toLowerCase();
+              const canonSub = (catalog.subCategory || '').trim().toLowerCase();
+              if (clientSub !== canonName && clientSub !== canonSub) {
+                throw new BadRequestException({
+                  success: false,
+                  message: `Subtipe kargo '${dto.cargoSubType}' tidak sesuai dengan data katalog master '${catalog.name}'.`,
+                  errors: ['CARGO_IDENTITY_CONFLICT'],
+                });
+              }
+            }
+
+            resolvedCatalogId = catalog.id;
+            authoritativeCargoType = catalog.category;
+            authoritativeCargoSubType = catalog.name;
+            gspAnalysisProfile = catalog.gspAnalysisProfile;
+            paPolicyVersion = catalog.policyVersion || 'SOP-GSP-2026.1';
+            if (catalog.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT) {
+              paExemptionReason = `SOP Exemption Rule [${paPolicyVersion}]: Produk ${catalog.name} (${catalog.code}) terverifikasi dari katalog master resmi bebas analisis PA laboratorium.`;
+            }
+          } else {
+            // Non-GSP processes (GBB / GBJ): preserve transitional catalog resolution if present
+            if (dto.productCatalogId && tx.productCatalog) {
+              const cat = await tx.productCatalog.findUnique({
+                where: { id: dto.productCatalogId },
+              });
+              if (cat) {
+                if (cat.processType !== dto.processType) {
+                  throw new BadRequestException({
+                    success: false,
+                    message: `Katalog produk '${cat.name}' bertipe proses ${cat.processType}, tidak sesuai dengan transaksi ${dto.processType}.`,
+                    errors: ['PROCESS_MISMATCH'],
+                  });
+                }
+                resolvedCatalogId = cat.id;
+              }
+            }
+          }
+
           return tx.transaction.create({
             data: {
               transactionNumber,
+              dailySequence,
               plateNumber: normalizedPlate,
+              plateNumberNormalized: rawPlate,
               driverName: dto.driverName,
               driverPhone: dto.driverPhone,
               vendorName: dto.vendorName,
               vehicleType: dto.vehicleType,
               processType: dto.processType,
-              cargoType: dto.cargoType,
-              cargoSubType: dto.cargoSubType,
+              cargoType: authoritativeCargoType,
+              cargoSubType: authoritativeCargoSubType,
+              productCatalogId: resolvedCatalogId,
+              gspAnalysisProfile,
+              paPolicyVersion,
+              paExemptionReason,
+              receiptUnit,
               cargoProcessType: dto.cargoProcessType,
               suratJalanNumber: dto.suratJalanNumber,
               poNumber: dto.poNumber,
@@ -160,7 +491,7 @@ export class GateService {
       action: 'GATE_CHECK_IN',
       module: 'GATE',
       referenceId: transaction.id,
-      description: `Vehicle ${dto.plateNumber} checked in`,
+      description: `Vehicle ${normalizedPlate} checked in`,
       status: 'SUCCESS',
     });
 

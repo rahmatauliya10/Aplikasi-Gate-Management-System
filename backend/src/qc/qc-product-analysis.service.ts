@@ -1,0 +1,1403 @@
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { AuthorizationScopeService } from '../auth/authorization-scope.service';
+import {
+  SubmitProductAnalysisDto,
+  AnalysisDecision,
+} from './dto/submit-product-analysis.dto';
+import {
+  SubmitGspDispositionDto,
+  GspDispositionAction,
+} from './dto/submit-gsp-disposition.dto';
+import {
+  QcResult,
+  TransactionStatus,
+  GspAnalysisProfile,
+} from '@prisma/client';
+import {
+  OPERATIONAL_COAL_SPEC_METADATA,
+  SpecificationRuleStatus,
+  CoalVisualParameters,
+  evaluateCoalAnalysis,
+} from './constants/coal-specification';
+import {
+  OPERATIONAL_PAC_SPEC_METADATA,
+  OPERATIONAL_RAPID_KLEN_SPEC_METADATA,
+  evaluatePacAnalysis,
+  evaluateRapidKlenAnalysis,
+  PacAnalysisParameters,
+  RapidKlenAnalysisParameters,
+} from './constants/chemical-specification';
+import { isProductPaExempt } from './constants/pa-exemption-policy';
+import { assertValidStatusTransition } from '../common/state-machine/workflow-state-machine';
+import type { JwtPayloadUser } from '../common/decorators/current-user.decorator';
+import { SpecificationProvider } from './providers/specification.provider';
+import { selectCurrentPa } from './pa-current-selection';
+import { createPaSpecSnapshot } from './pa-correction-evaluation';
+
+/**
+ * Strictly parses and validates that an input parameter is a valid finite number.
+ * Explicitly rejects:
+ * - null or undefined
+ * - boolean values (true, false)
+ * - arrays (e.g. [40], ["40"])
+ * - objects (e.g. { value: 40 })
+ * - hexadecimal strings (e.g. "0x28", "0x2F")
+ * - octal/binary strings (e.g. "0o10", "0b101")
+ * - whitespace-only or empty strings
+ * - non-numeric strings
+ * - non-finite strings ("Infinity", "-Infinity", "NaN")
+ * - scientific/exponent notation (e.g. "1e2", "4.6e1", "1e309")
+ *
+ * Accepts ONLY:
+ * - JavaScript finite numbers (typeof value === 'number' && Number.isFinite(value) && !Number.isNaN(value))
+ * - Standard decimal strings (e.g. "40", "40.5", "0.14", ".5", "-5")
+ */
+export function parseStrictFiniteNumber(
+  value: unknown,
+  fieldName: string,
+): number {
+  if (value === null || value === undefined) {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' wajib diisi dan harus berupa angka numerik finite valid.`,
+    );
+  }
+
+  if (typeof value === 'boolean') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak boleh bertipe boolean. Nilai harus berupa angka numerik finite valid.`,
+    );
+  }
+
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak valid (tipe data ${typeof value}). Nilai harus berupa angka numerik finite valid.`,
+    );
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || Number.isNaN(value)) {
+      throw new BadRequestException(
+        `Parameter '${fieldName}' harus berupa angka numerik finite valid (tidak boleh non-finite, NaN, atau overflow).`,
+      );
+    }
+    return value;
+  }
+
+  // At this point, typeof value === 'string'
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak boleh kosong dan harus berupa angka numerik finite valid.`,
+    );
+  }
+
+  if (/^[+-]?infinity$/i.test(trimmed) || trimmed.toLowerCase() === 'nan') {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak valid (non-finite atau NaN). Nilai harus berupa angka finite.`,
+    );
+  }
+
+  // Support local Indonesian decimal comma ("1,17" -> "1.17") if string contains exactly one comma and no dot
+  let normalizedStr = trimmed;
+  if (trimmed.includes(',') && !trimmed.includes('.')) {
+    const commaCount = (trimmed.match(/,/g) || []).length;
+    if (commaCount === 1) {
+      normalizedStr = trimmed.replace(',', '.');
+    }
+  }
+
+  // Reject hexadecimal ("0x..."), octal ("0o..."), binary ("0b..."), scientific notation ("1e2"), and any non-decimal representations
+  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(normalizedStr)) {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' tidak valid ('${value}'). Format harus berupa angka desimal standar (tidak mendukung notasi ilmiah/eksponensial atau heksadesimal).`,
+    );
+  }
+
+  const num = Number(normalizedStr);
+  if (!Number.isFinite(num) || Number.isNaN(num)) {
+    throw new BadRequestException(
+      `Parameter '${fieldName}' harus berupa angka numerik finite valid (tidak boleh non-finite, NaN, atau overflow).`,
+    );
+  }
+
+  return num;
+}
+
+/**
+ * Strictly parses and validates Coal total moisture parameter.
+ * Preserves the exact existing strict decimal grammar (no comma allowed).
+ */
+export function parseCoalMoistureValue(
+  val: unknown,
+  fieldName = 'total moisture',
+): number {
+  if (val === undefined || val === null) {
+    throw new BadRequestException({
+      message:
+        'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  if (typeof val === 'boolean') {
+    throw new BadRequestException({
+      message:
+        'Kadar air (total moisture) batubara tidak boleh bertipe boolean. Nilai harus berupa angka finite antara 0% dan 100%.',
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  if (typeof val !== 'number' && typeof val !== 'string') {
+    throw new BadRequestException({
+      message:
+        'Kadar air (total moisture) batubara tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.',
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  let parsed: number;
+
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val) || Number.isNaN(val)) {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+    parsed = val;
+  } else {
+    const trimmed = val.trim();
+    if (trimmed === '') {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+    if (/^[+-]?infinity$/i.test(trimmed) || trimmed.toLowerCase() === 'nan') {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite atau NaN).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+
+    // Reject comma, hex ("0x..."), octal ("0o..."), binary ("0b..."), scientific notation ("1e2"), and any non-decimal representations
+    if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) {
+      throw new BadRequestException({
+        message: `Kadar air (total moisture) batubara ('${val}') tidak valid. Format harus berupa angka desimal standar (tidak mendukung notasi ilmiah/eksponensial atau heksadesimal).`,
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+
+    const num = Number(trimmed);
+    if (!Number.isFinite(num) || Number.isNaN(num)) {
+      throw new BadRequestException({
+        message:
+          'Kadar air (total moisture) batubara harus berupa angka finite valid (tidak boleh non-finite, NaN, atau overflow).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+    parsed = num;
+  }
+
+  if (parsed < 0 || parsed > 100) {
+    throw new BadRequestException({
+      message: `Kadar air (total moisture) batubara (${val}) tidak valid. Nilai harus berupa angka finite antara 0% dan 100%.`,
+      error: 'INVALID_MOISTURE_MEASUREMENT',
+    });
+  }
+
+  return parsed;
+}
+
+@Injectable()
+export class QcProductAnalysisService {
+  private readonly logger = new Logger(QcProductAnalysisService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly activityLogsService: ActivityLogsService,
+    private readonly authorizationScopeService: AuthorizationScopeService,
+    private readonly specProvider: SpecificationProvider,
+  ) {}
+
+  /**
+   * Canonical Start Product Analysis event.
+   * Transitions QC_VEHICLE_PENDING -> QC_VEHICLE_IN_PROGRESS and records actual qcStartAt.
+   * Enforces:
+   * 1. GSP process-scope authorization
+   * 2. Transaction must be GSP processType
+   * 3. Solar/PA-exempt commodities are rejected (HTTP 400)
+   * 4. Initial start: QC_VEHICLE_PENDING -> QC_VEHICLE_IN_PROGRESS
+   * 5. Idempotent: repeated start on QC_VEHICLE_IN_PROGRESS does not overwrite original qcStartAt
+   * 6. Requires valid weigh-in (weighInAt != null, grossWeight > 0)
+   */
+  async startProductAnalysis(transactionId: string, user: JwtPayloadUser) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: {
+        productCatalog: true,
+        qcProductAnalyses: {
+          where: { isVoided: false },
+          orderBy: [{ testRound: 'desc' }, { revision: 'desc' }],
+        },
+      },
+    });
+
+    if (!tx) {
+      throw new NotFoundException('Transaksi tidak ditemukan');
+    }
+
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Analisis PA laboratorium hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+
+    // Authoritative check on transaction's snapshot profile:
+    // If the transaction snapshot profile is explicitly PA_EXEMPT or status is PA_NOT_REQUIRED, reject lab PA.
+    // In-flight transactions that already hold a non-exempt profile must not be blocked
+    // by subsequent administrative changes to the master product catalog.
+    const isSnapshotExempt =
+      tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT ||
+      tx.status === TransactionStatus.PA_NOT_REQUIRED;
+
+    if (isSnapshotExempt) {
+      throw new BadRequestException(
+        `Komoditas bebas PA (${tx.cargoSubType || 'Solar'}) tidak memerlukan proses analisis laboratorium.`,
+      );
+    }
+
+    if (!tx.gspAnalysisProfile) {
+      const isExempt = isProductPaExempt(tx.productCatalog, {
+        productCatalogId: tx.productCatalogId,
+        processType: tx.processType,
+        cargoType: tx.cargoType,
+        cargoSubType: tx.cargoSubType,
+      });
+      if (isExempt) {
+        throw new BadRequestException(
+          `Komoditas bebas PA (${tx.cargoSubType || 'Solar'}) tidak memerlukan proses analisis laboratorium.`,
+        );
+      }
+    }
+
+    // Determine authoritative test round from active history
+    const historyList = tx.qcProductAnalyses || [];
+    const currentPa = selectCurrentPa(historyList);
+    const currentMaxRound =
+      currentPa?.testRound ??
+      (historyList.length > 0 ? historyList[0].testRound : 0);
+    const authoritativeTestRound = currentMaxRound + 1;
+
+    // Idempotent check: if already in progress, safely return existing authoritative state without overwriting qcStartAt
+    if (tx.status === TransactionStatus.QC_VEHICLE_IN_PROGRESS) {
+      return {
+        success: true,
+        message: 'Proses analisis laboratorium sudah berjalan (in-progress).',
+        data: {
+          ...tx,
+          gspTestRound: authoritativeTestRound,
+        },
+      };
+    }
+
+    if (
+      tx.status !== TransactionStatus.QC_VEHICLE_PENDING &&
+      tx.status !== TransactionStatus.QC_RETEST_REQUIRED
+    ) {
+      throw new BadRequestException(
+        `Tidak dapat memulai analisis produk pada transaksi dengan status ${tx.status}. Wajib berstatus QC_VEHICLE_PENDING atau QC_RETEST_REQUIRED.`,
+      );
+    }
+
+    if (
+      !tx.weighInAt ||
+      tx.grossWeight == null ||
+      Number(tx.grossWeight) <= 0
+    ) {
+      throw new BadRequestException(
+        'Penimbangan masuk (weigh-in) belum selesai atau berat kotor (gross weight) tidak valid.',
+      );
+    }
+
+    const now = new Date();
+    const nextStatus = TransactionStatus.QC_VEHICLE_IN_PROGRESS;
+
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    const updated = await this.prisma.$transaction(async (prismaTx) => {
+      const claimed = await prismaTx.transaction.updateMany({
+        where: { id: transactionId, revision: tx.revision },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+          qcStartAt: tx.qcStartAt || now, // Never overwrite existing qcStartAt
+        },
+      });
+
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          'Transaksi telah diperbarui oleh pengguna lain (konflik konkurensi).',
+        );
+      }
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes:
+            'Analis memulai pemeriksaan dan pengujian laboratorium (PA Start)',
+        },
+      });
+
+      return prismaTx.transaction.findUnique({
+        where: { id: transactionId },
+        include: {
+          productCatalog: true,
+          qcProductAnalyses: {
+            where: { isVoided: false },
+            orderBy: [{ testRound: 'desc' }, { revision: 'desc' }],
+          },
+        },
+      });
+    });
+
+    await this.activityLogsService
+      .logAction({
+        userId: user.id,
+        action: 'QC_PA_STARTED',
+        module: 'QC',
+        referenceId: transactionId,
+        description: `Proses analisis laboratorium dimulai oleh ${user.email}`,
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
+
+    return {
+      success: true,
+      message: 'Proses analisis laboratorium berhasil dimulai',
+      data: {
+        ...(updated || {
+          ...tx,
+          status: nextStatus,
+          revision: tx.revision + 1,
+          qcStartAt: tx.qcStartAt || now,
+        }),
+        gspTestRound: authoritativeTestRound,
+      },
+    };
+  }
+
+  /**
+   * Submit initial or retest lab analysis for a cargo transaction.
+   * Server-authoritative evaluation:
+   * 1. Product identity resolved from Transaction + ProductCatalog
+   * 2. Test round derived from active analysis history
+   * 3. Result and decision evaluated by server specifications
+   * 4. Enforces process-scope authorization (GSP scope)
+   */
+  async submitProductAnalysis(
+    transactionId: string,
+    dto: SubmitProductAnalysisDto,
+    user: JwtPayloadUser,
+  ) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      include: { productCatalog: true },
+    });
+
+    if (!tx) {
+      throw new NotFoundException('Transaksi tidak ditemukan');
+    }
+
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Analisis PA laboratorium hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+
+    // Authoritative check on transaction's snapshot profile:
+    // If the transaction snapshot profile is explicitly PA_EXEMPT or status is PA_NOT_REQUIRED, reject lab PA.
+    // In-flight transactions that already hold a non-exempt profile must not be blocked
+    // by subsequent administrative changes to the master product catalog.
+    const isSnapshotExempt =
+      tx.gspAnalysisProfile === GspAnalysisProfile.PA_EXEMPT ||
+      tx.status === TransactionStatus.PA_NOT_REQUIRED;
+
+    if (isSnapshotExempt) {
+      throw new BadRequestException(
+        `Produk ini (${tx.cargoSubType || 'Solar'}) berizin bypass PA. Analisis PA tidak diperlukan.`,
+      );
+    }
+
+    if (!tx.gspAnalysisProfile) {
+      const isExempt = isProductPaExempt(tx.productCatalog, {
+        productCatalogId: tx.productCatalogId,
+        processType: tx.processType,
+        cargoType: tx.cargoType,
+        cargoSubType: tx.cargoSubType,
+      });
+      if (isExempt) {
+        throw new BadRequestException(
+          `Produk ini (${tx.cargoSubType || 'Solar'}) berizin bypass PA. Analisis PA tidak diperlukan.`,
+        );
+      }
+    }
+
+    // ─── 1. Authoritative Product Identity ───
+    const authoritativeCatalogId = tx.productCatalogId;
+    if (
+      dto.productCatalogId &&
+      dto.productCatalogId !== authoritativeCatalogId
+    ) {
+      throw new BadRequestException(
+        'Katalog produk pada payload tidak sesuai dengan transaksi aktif.',
+      );
+    }
+
+    const authoritativeProductName =
+      tx.productCatalog?.name || tx.cargoSubType || 'Unknown Product';
+    const authoritativeProductCategory =
+      tx.productCatalog?.category || tx.cargoType || 'Unknown Category';
+
+    // Validate client-provided product identity if sent (reject mismatch)
+    if (dto.productCategory) {
+      const clientCat = dto.productCategory.toUpperCase();
+      const authCat = authoritativeProductCategory.toUpperCase();
+      const authSub = (tx.cargoSubType || '').toUpperCase();
+      const isUtlClient =
+        clientCat.includes('UTL') || clientCat.includes('UTILITY');
+      const isProdClient = clientCat.includes('PROD');
+      const isUtlAuth = authCat.includes('UTL') || authCat.includes('UTILITY');
+      const isProdAuth = authCat.includes('PROD');
+
+      if ((isUtlClient && isProdAuth) || (isProdClient && isUtlAuth)) {
+        throw new BadRequestException(
+          `Kategori produk (${dto.productCategory}) tidak sesuai dengan transaksi (${authoritativeProductCategory}).`,
+        );
+      }
+
+      const isChemicalMatch =
+        (clientCat.startsWith('CHEMICAL') && authCat.startsWith('CHEMICAL')) ||
+        (clientCat === 'CHEMICALS' && authCat.startsWith('CHEMICAL')) ||
+        (clientCat.startsWith('CHEMICAL') && authCat === 'CHEMICALS');
+
+      if (
+        !authCat.includes(clientCat) &&
+        !clientCat.includes(authCat) &&
+        !authSub.includes(clientCat) &&
+        !isChemicalMatch
+      ) {
+        throw new BadRequestException(
+          `Kategori produk (${dto.productCategory}) tidak sesuai dengan transaksi (${authoritativeProductCategory}).`,
+        );
+      }
+    }
+
+    if (dto.productName) {
+      const clientName = dto.productName.toUpperCase().replace(/\s+/g, '');
+      const authName = authoritativeProductName
+        .toUpperCase()
+        .replace(/\s+/g, '');
+      const authSub = (tx.cargoSubType || '').toUpperCase().replace(/\s+/g, '');
+      const normClient = clientName.replace(/EE/g, 'E');
+      const normAuth = authName.replace(/EE/g, 'E');
+      const normSub = authSub.replace(/EE/g, 'E');
+
+      const isPacClient =
+        normClient.includes('PAC') || normClient.includes('POLYCOR');
+      const isRkClient =
+        normClient.includes('RAPID') ||
+        normClient.includes('KLEN') ||
+        normClient.includes('PROCIP');
+      const isPacAuth =
+        normAuth.includes('PAC') ||
+        normAuth.includes('POLYCOR') ||
+        normSub.includes('PAC');
+      const isRkAuth =
+        normAuth.includes('RAPID') ||
+        normAuth.includes('KLEN') ||
+        normAuth.includes('PROCIP') ||
+        normSub.includes('RAPID') ||
+        normSub.includes('KLEN');
+
+      if ((isPacClient && isRkAuth) || (isRkClient && isPacAuth)) {
+        throw new BadRequestException(
+          `Nama produk (${dto.productName}) tidak sesuai dengan spesifikasi komoditas transaksi (${authoritativeProductName}).`,
+        );
+      }
+
+      if (
+        !normAuth.includes(normClient) &&
+        !normClient.includes(normAuth) &&
+        !normSub.includes(normClient) &&
+        !normClient.includes(normSub)
+      ) {
+        throw new BadRequestException(
+          `Nama produk (${dto.productName}) tidak sesuai dengan transaksi (${authoritativeProductName}).`,
+        );
+      }
+    }
+
+    // ─── 2. Authoritative Test Round Determination ───
+    const activeHistory = await this.prisma.qcProductAnalysis.findMany({
+      where: { transactionId, isVoided: false },
+      orderBy: { testRound: 'desc' },
+    });
+    const historyList = activeHistory || [];
+    const currentPa = selectCurrentPa(historyList);
+    const currentMaxRound =
+      currentPa?.testRound ??
+      (historyList.length > 0 ? historyList[0].testRound : 0);
+    const authoritativeTestRound = currentMaxRound + 1;
+
+    if (authoritativeTestRound > 2) {
+      throw new BadRequestException(
+        `Batas maksimum pengujian laboratorium (2 ronde) telah tercapai. Tidak dapat melakukan pengujian ronde ke-${authoritativeTestRound}.`,
+      );
+    }
+
+    if (dto.testRound != null && dto.testRound !== authoritativeTestRound) {
+      throw new BadRequestException(
+        `Nomor ronde uji tidak valid (${dto.testRound}). Ronde yang diharapkan oleh sistem: ${authoritativeTestRound}`,
+      );
+    }
+
+    // Validate status according to authoritative test round
+    if (
+      authoritativeTestRound === 1 &&
+      tx.status !== TransactionStatus.QC_VEHICLE_PENDING &&
+      tx.status !== TransactionStatus.QC_VEHICLE_IN_PROGRESS
+    ) {
+      throw new BadRequestException(
+        `Analisis awal (Round 1) hanya dapat diproses saat status transaksi QC_VEHICLE_PENDING (saat ini: ${tx.status})`,
+      );
+    }
+
+    if (
+      authoritativeTestRound > 1 &&
+      tx.status !== TransactionStatus.QC_RETEST_REQUIRED &&
+      tx.status !== TransactionStatus.QC_VEHICLE_IN_PROGRESS
+    ) {
+      throw new BadRequestException(
+        `Uji ulang (Round ${authoritativeTestRound}) hanya dapat diproses saat status transaksi QC_RETEST_REQUIRED atau QC_VEHICLE_IN_PROGRESS (saat ini: ${tx.status})`,
+      );
+    }
+
+    // ─── 3. Server-Authoritative Result & Decision Evaluation ───
+    const specStatus = this.getSpecificationRuleStatus(
+      authoritativeProductCategory,
+      authoritativeProductName,
+    );
+
+    let evalResult: {
+      result?: 'PASS' | 'REJECT';
+      decision?:
+        | 'RELEASE'
+        | 'RETEST_REQUIRED'
+        | 'PENDING_DISPOSITION'
+        | 'WAITING_DISPOSITION'
+        | 'REJECT';
+      notes?: string;
+      isConfigured?: boolean;
+      error?: string;
+    };
+
+    // ─── 3. Determine Evaluator by Snapshot Profile (Section 23) ───
+    let targetProfile = tx.gspAnalysisProfile;
+
+    // LEGACY COMPATIBILITY FALLBACK: for historical transactions where gspAnalysisProfile == null
+    if (!targetProfile) {
+      const isCoalLegacy =
+        authoritativeProductCategory.toUpperCase().includes('COAL') ||
+        authoritativeProductName.toUpperCase().includes('BATUBARA') ||
+        (tx.cargoSubType || '').toUpperCase().includes('BATUBARA');
+
+      const isPacLegacy =
+        authoritativeProductName.toUpperCase().includes('PAC') ||
+        authoritativeProductName.toUpperCase().includes('POLYCOR') ||
+        authoritativeProductName.toUpperCase().includes('IPAC') ||
+        (tx.cargoSubType || '').toUpperCase().includes('PAC');
+
+      const isRapidKlenLegacy =
+        authoritativeProductName.toUpperCase().includes('RAPID') ||
+        authoritativeProductName.toUpperCase().includes('KLEN') ||
+        authoritativeProductName.toUpperCase().includes('PRO-CIP') ||
+        (tx.cargoSubType || '').toUpperCase().includes('RAPID') ||
+        (tx.cargoSubType || '').toUpperCase().includes('KLEN');
+
+      if (isCoalLegacy) targetProfile = GspAnalysisProfile.COAL_PA;
+      else if (isPacLegacy) targetProfile = GspAnalysisProfile.PAC_PA;
+      else if (isRapidKlenLegacy)
+        targetProfile = GspAnalysisProfile.RAPID_KLEN_PA;
+    }
+
+    if (!targetProfile) {
+      throw new BadRequestException(
+        `Tidak dapat menentukan profil analisis laboratorium untuk produk '${authoritativeProductName}'.`,
+      );
+    }
+
+    if ((targetProfile as any) === GspAnalysisProfile.PA_EXEMPT) {
+      throw new BadRequestException(
+        'Produk dengan profil PA_EXEMPT tidak dapat menjalankan analisis PA laboratorium.',
+      );
+    }
+
+    const rawParams = (dto.parameters || {}) as any;
+    let sanitizedParameters: Record<string, any> = { ...rawParams };
+
+    if (targetProfile === GspAnalysisProfile.COAL_PA) {
+      const coalSpecMeta = this.specProvider.getCoalSpec();
+
+      const visualInput: CoalVisualParameters | undefined =
+        typeof rawParams.visual === 'object' && rawParams.visual !== null
+          ? rawParams.visual
+          : rawParams.kondisi ||
+              rawParams.warna ||
+              rawParams.levelRank ||
+              rawParams.kilap ||
+              rawParams.bahanPengotor
+            ? {
+                kondisi: rawParams.kondisi,
+                warna: rawParams.warna,
+                levelRank: rawParams.levelRank,
+                kilap: rawParams.kilap,
+                bahanPengotor: rawParams.bahanPengotor,
+              }
+            : undefined;
+
+      const hasMoisture =
+        rawParams.moisture !== undefined && rawParams.moisture !== null;
+      const hasTotalMoisture =
+        rawParams.totalMoisture !== undefined &&
+        rawParams.totalMoisture !== null;
+
+      if (!hasMoisture && !hasTotalMoisture) {
+        throw new BadRequestException({
+          message:
+            'Kadar air (total moisture) batubara wajib diisi dan berupa angka valid antara 0% dan 100%.',
+          error: 'INVALID_MOISTURE_MEASUREMENT',
+        });
+      }
+
+      let parsedMoisture: number;
+      if (hasMoisture && hasTotalMoisture) {
+        const m1 = parseCoalMoistureValue(rawParams.moisture, 'moisture');
+        const m2 = parseCoalMoistureValue(
+          rawParams.totalMoisture,
+          'totalMoisture',
+        );
+        if (m1 !== m2) {
+          throw new BadRequestException({
+            message: `Konflik nilai parameter kadar air batubara: moisture (${rawParams.moisture}) dan totalMoisture (${rawParams.totalMoisture}) memiliki nilai yang berbeda.`,
+            error: 'INVALID_MOISTURE_MEASUREMENT',
+          });
+        }
+        parsedMoisture = m1;
+      } else if (hasMoisture) {
+        parsedMoisture = parseCoalMoistureValue(rawParams.moisture, 'moisture');
+      } else {
+        parsedMoisture = parseCoalMoistureValue(
+          rawParams.totalMoisture,
+          'totalMoisture',
+        );
+      }
+
+      evalResult = evaluateCoalAnalysis(
+        {
+          targetCalorie: rawParams.calorieBand || undefined,
+          totalMoisture: parsedMoisture,
+          testRound: authoritativeTestRound,
+          sensoryPassed: rawParams.sensoryPassed,
+          visualPassed: rawParams.visualPassed,
+          visual: visualInput,
+        },
+        coalSpecMeta,
+      );
+
+      sanitizedParameters = {
+        ...rawParams,
+        totalMoisture: parsedMoisture,
+        ...(rawParams.moisture !== undefined
+          ? { moisture: parsedMoisture }
+          : {}),
+      };
+    } else if (targetProfile === GspAnalysisProfile.PAC_PA) {
+      const pacSpecMeta = this.specProvider.getPacSpec();
+
+      const ph = parseStrictFiniteNumber(rawParams.ph, 'ph');
+      const density = parseStrictFiniteNumber(rawParams.density, 'density');
+      const hasAlumina =
+        rawParams.aluminaContent != null &&
+        (typeof rawParams.aluminaContent !== 'string' ||
+          rawParams.aluminaContent.trim() !== '');
+      const aluminaContent = hasAlumina
+        ? parseStrictFiniteNumber(rawParams.aluminaContent, 'aluminaContent')
+        : undefined;
+
+      evalResult = evaluatePacAnalysis(
+        {
+          sensory: {
+            visual: rawParams.sensory?.visual,
+            foreignMatters: rawParams.sensory?.foreignMatters,
+            packagingLabel: rawParams.sensory?.packagingLabel,
+          },
+          ph,
+          density,
+          aluminaContent,
+        },
+        authoritativeProductName,
+        pacSpecMeta,
+      );
+
+      sanitizedParameters = {
+        ...rawParams,
+        ph,
+        density,
+      };
+      if (aluminaContent !== undefined) {
+        sanitizedParameters.aluminaContent = aluminaContent;
+      } else {
+        delete sanitizedParameters.aluminaContent;
+      }
+    } else if (targetProfile === GspAnalysisProfile.RAPID_KLEN_PA) {
+      const rkSpecMeta = this.specProvider.getRapidKlenSpec();
+
+      let alkalinityNa2O: number;
+      const hasNa2O =
+        rawParams.alkalinityNa2O !== undefined &&
+        rawParams.alkalinityNa2O !== null;
+      const hasNa2o =
+        rawParams.alkalinityNa2o !== undefined &&
+        rawParams.alkalinityNa2o !== null;
+
+      if (hasNa2O && hasNa2o) {
+        const val1 = parseStrictFiniteNumber(
+          rawParams.alkalinityNa2O,
+          'alkalinityNa2O',
+        );
+        const val2 = parseStrictFiniteNumber(
+          rawParams.alkalinityNa2o,
+          'alkalinityNa2o',
+        );
+        if (val1 !== val2) {
+          throw new BadRequestException(
+            `Konflik nilai parameter Rapid Klen: alkalinityNa2O (${rawParams.alkalinityNa2O}) dan alkalinityNa2o (${rawParams.alkalinityNa2o}) memiliki nilai yang berbeda.`,
+          );
+        }
+        alkalinityNa2O = val1;
+      } else {
+        alkalinityNa2O = parseStrictFiniteNumber(
+          rawParams.alkalinityNa2O ?? rawParams.alkalinityNa2o,
+          'alkalinityNa2O',
+        );
+      }
+
+      let alkalinityNaOH: number;
+      const hasNaOH =
+        rawParams.alkalinityNaOH !== undefined &&
+        rawParams.alkalinityNaOH !== null;
+      const hasNaoh =
+        rawParams.alkalinityNaoh !== undefined &&
+        rawParams.alkalinityNaoh !== null;
+
+      if (hasNaOH && hasNaoh) {
+        const val1 = parseStrictFiniteNumber(
+          rawParams.alkalinityNaOH,
+          'alkalinityNaOH',
+        );
+        const val2 = parseStrictFiniteNumber(
+          rawParams.alkalinityNaoh,
+          'alkalinityNaoh',
+        );
+        if (val1 !== val2) {
+          throw new BadRequestException(
+            `Konflik nilai parameter Rapid Klen: alkalinityNaOH (${rawParams.alkalinityNaOH}) dan alkalinityNaoh (${rawParams.alkalinityNaoh}) memiliki nilai yang berbeda.`,
+          );
+        }
+        alkalinityNaOH = val1;
+      } else {
+        alkalinityNaOH = parseStrictFiniteNumber(
+          rawParams.alkalinityNaOH ?? rawParams.alkalinityNaoh,
+          'alkalinityNaOH',
+        );
+      }
+
+      const ph = parseStrictFiniteNumber(rawParams.ph, 'ph');
+      const density = parseStrictFiniteNumber(rawParams.density, 'density');
+
+      evalResult = evaluateRapidKlenAnalysis(
+        {
+          sensory: {
+            visual: rawParams.sensory?.visual,
+            foreignMatters: rawParams.sensory?.foreignMatters,
+            packagingLabel: rawParams.sensory?.packagingLabel,
+          },
+          alkalinityNa2O,
+          alkalinityNaOH,
+          ph,
+          density,
+        },
+        authoritativeProductName,
+        rkSpecMeta,
+      );
+
+      sanitizedParameters = {
+        ...rawParams,
+        alkalinityNa2O,
+        alkalinityNaOH,
+        ph,
+        density,
+        ...(rawParams.alkalinityNa2o !== undefined
+          ? { alkalinityNa2o: alkalinityNa2O }
+          : {}),
+        ...(rawParams.alkalinityNaoh !== undefined
+          ? { alkalinityNaoh: alkalinityNaOH }
+          : {}),
+      };
+    } else {
+      // Fallback: Unverified product specification
+      evalResult = {
+        result: 'PASS',
+        decision: 'PENDING_DISPOSITION',
+        notes: `Produk ${authoritativeProductName} belum memiliki spesifikasi operasional teresahkan. Dialihkan ke PENDING_DISPOSITION.`,
+      };
+    }
+
+    if (evalResult.error === 'INVALID_MOISTURE_MEASUREMENT') {
+      throw new BadRequestException({
+        message:
+          evalResult.notes ||
+          'Pengukuran kadar air batubara tidak valid (wajib numerik finite 0-100%).',
+        error: 'INVALID_MOISTURE_MEASUREMENT',
+      });
+    }
+
+    if (evalResult.isConfigured === false) {
+      if (targetProfile === GspAnalysisProfile.COAL_PA) {
+        await this.activityLogsService
+          .logAction({
+            userId: user.id,
+            action: 'COAL_SPEC_NOT_CONFIGURED',
+            module: 'QC',
+            referenceId: transactionId,
+            description: `Spesifikasi Coal tidak terkonfigurasi untuk calorieBand: '${rawParams.calorieBand || 'MISSING'}'. Operator: ${user.email}`,
+            status: 'FAILED',
+          })
+          .catch(() => {});
+      }
+      throw new UnprocessableEntityException({
+        error: 'SPEC_NOT_CONFIGURED',
+        message:
+          evalResult.notes ||
+          `Spesifikasi mutu untuk produk '${authoritativeProductName}' belum dikonfigurasi.`,
+      });
+    }
+
+    const serverQcResult: QcResult =
+      evalResult.result === 'PASS' ? QcResult.PASS : QcResult.REJECT;
+
+    const normalizedClientResult =
+      dto.result === (QcResult.PASS as any) ||
+      (dto.result as string) === 'PASSED'
+        ? QcResult.PASS
+        : dto.result === (QcResult.REJECT as any) ||
+            (dto.result as string) === 'REJECTED'
+          ? QcResult.REJECT
+          : null;
+
+    // Validate client submitted values if sent (reject forging/tampering)
+    if (dto.result && normalizedClientResult !== serverQcResult) {
+      throw new BadRequestException(
+        `Hasil analisis client (${dto.result}) tidak sesuai dengan hasil evaluasi server (${serverQcResult}). Keputusan server bersifat otoritatif.`,
+      );
+    }
+
+    if (
+      dto.decision &&
+      (dto.decision as string) !== (evalResult.decision as string)
+    ) {
+      throw new BadRequestException(
+        `Keputusan analisis client (${dto.decision}) tidak sesuai dengan evaluasi spesifikasi server (${evalResult.decision}). Keputusan server bersifat otoritatif.`,
+      );
+    }
+
+    const authoritativeDecision = evalResult.decision as AnalysisDecision;
+
+    let nextStatus: TransactionStatus;
+    switch (authoritativeDecision) {
+      case AnalysisDecision.RELEASE:
+        nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
+        break;
+      case AnalysisDecision.REJECT:
+        nextStatus = TransactionStatus.QC_VEHICLE_REJECTED;
+        break;
+      case AnalysisDecision.RETEST_REQUIRED:
+        nextStatus = TransactionStatus.QC_RETEST_REQUIRED;
+        break;
+      case AnalysisDecision.WAITING_DISPOSITION:
+        nextStatus = TransactionStatus.WAITING_GSP_DISPOSITION;
+        break;
+      case AnalysisDecision.PENDING_DISPOSITION:
+        // NEW canonical GSP transactions must NEVER enter WAITING_UTILITY_DISPOSITION
+        // Fail-closed governance blocker without routing to Utility disposition
+        throw new BadRequestException(
+          `Pengujian laboratorium untuk ${authoritativeProductName} tidak dapat diproses rilis: Spesifikasi operasional berstatus ${specStatus.ruleStatus} (${specStatus.documentSource}). Kebijakan mutu memblokir rilis muatan tanpa spesifikasi teresahkan.`,
+        );
+      default:
+        throw new BadRequestException(
+          `Keputusan analisis tidak valid: ${authoritativeDecision}`,
+        );
+    }
+
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    const now = new Date();
+    await this.prisma.$transaction(async (prismaTx) => {
+      // 1. Guard against duplicate active test rounds (Concurrency defense)
+      const duplicateRound = await prismaTx.qcProductAnalysis.findFirst({
+        where: {
+          transactionId,
+          testRound: authoritativeTestRound,
+          isVoided: false,
+          isCurrent: true,
+        },
+      });
+      if (duplicateRound) {
+        throw new ConflictException(
+          `Ronde uji ${authoritativeTestRound} aktif sudah pernah dicatat untuk transaksi ini.`,
+        );
+      }
+
+      if (!tx.qcStartAt) {
+        this.logger.warn(
+          `[submitProductAnalysis] Transaction ${transactionId} submitted without preceding startProductAnalysis event. Falling back qcStartAt to submission time.`,
+        );
+      }
+
+      // 2. CAS claim on Transaction (Preserve existing qcStartAt if recorded at start event)
+      const claimed = await prismaTx.transaction.updateMany({
+        where: { id: transactionId, revision: dto.revision },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+          qcStartAt: tx.qcStartAt || now,
+          qcEndAt: now,
+        },
+      });
+
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          'Transaksi telah diperbarui oleh pengguna lain (konflik konkurensi)',
+        );
+      }
+
+      // 3. Create authoritative QcProductAnalysis
+      await prismaTx.qcProductAnalysis.create({
+        data: {
+          transactionId,
+          productCatalogId: authoritativeCatalogId,
+          testRound: authoritativeTestRound,
+          productCategory: authoritativeProductCategory,
+          productName: authoritativeProductName,
+          parameters: sanitizedParameters as any,
+          result: serverQcResult,
+          status: authoritativeDecision,
+          testedById: user.id,
+          testedAt: now,
+          revision: 1,
+          isCurrent: true,
+          analysisProfile: targetProfile,
+          specSnapshot: createPaSpecSnapshot(targetProfile, this.specProvider, {
+            allowTestFixture: this.specProvider.isTestFixtureActive(),
+          }) as any,
+          evaluationProvenance: {
+            evaluationSource: 'TEST_TIME_SPEC',
+            evaluatedById: user.id,
+            evaluatedAt: now.toISOString(),
+          },
+        },
+      });
+
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes:
+            dto.notes ||
+            (authoritativeDecision === AnalysisDecision.WAITING_DISPOSITION
+              ? `Analisis PA Round ${authoritativeTestRound}: Menunggu Disposisi Gudang GSP (${(evalResult as any).violations?.length || 0} parameter OOS)`
+              : `Analisis PA Round ${authoritativeTestRound}: Evaluasi Otoritatif Server ${authoritativeDecision} (${serverQcResult})`),
+        },
+      });
+    });
+
+    await this.activityLogsService
+      .logAction({
+        userId: user.id,
+        action: 'QC_PRODUCT_ANALYSIS_SUBMITTED',
+        module: 'QC',
+        referenceId: transactionId,
+        description: `Analisis PA Round ${authoritativeTestRound} dievaluasi untuk ${authoritativeProductName}. Hasil: ${serverQcResult}, Keputusan: ${authoritativeDecision}`,
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
+
+    const successMsg =
+      authoritativeDecision === AnalysisDecision.WAITING_DISPOSITION
+        ? `Analisis produk Round ${authoritativeTestRound} dicatat: Hasil OOS, menunggu disposisi Gudang GSP`
+        : `Analisis produk Round ${authoritativeTestRound} berhasil dicatat`;
+
+    return {
+      success: true,
+      message: successMsg,
+      data: {
+        transactionId,
+        testRound: authoritativeTestRound,
+        newStatus: nextStatus,
+        result: serverQcResult,
+        decision: authoritativeDecision,
+      },
+    };
+  }
+
+  /**
+   * Helper to get specification rule status.
+   * Authoritative operational rules operate under ACTIVE_CONFIGURED.
+   */
+  getSpecificationRuleStatus(
+    productCategory: string,
+    productName?: string,
+  ): {
+    ruleStatus: SpecificationRuleStatus;
+    documentSource: string;
+  } {
+    const cat = (productCategory || '').toUpperCase();
+    const name = (productName || '').toUpperCase();
+
+    if (
+      cat === 'COAL' ||
+      cat.includes('BATUBARA') ||
+      name.includes('BATUBARA')
+    ) {
+      const spec = this.specProvider.getCoalSpec();
+      return {
+        ruleStatus: spec.ruleStatus,
+        documentSource: spec.documentSource,
+      };
+    }
+    if (name.includes('PAC')) {
+      const spec = this.specProvider.getPacSpec();
+      return {
+        ruleStatus: spec.ruleStatus,
+        documentSource: spec.documentSource,
+      };
+    }
+    if (name.includes('RAPID') || name.includes('KLEN')) {
+      const spec = this.specProvider.getRapidKlenSpec();
+      return {
+        ruleStatus: spec.ruleStatus,
+        documentSource: spec.documentSource,
+      };
+    }
+    return {
+      ruleStatus: 'UNCONFIGURED',
+      documentSource: 'Unverified Product Specification',
+    };
+  }
+
+  /**
+   * Retrieve all PA Analysis rounds and history for a transaction.
+   * Enforces role and process scope authorization.
+   */
+  async getAnalysisHistory(transactionId: string, user: JwtPayloadUser) {
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      select: { id: true, processType: true },
+    });
+
+    if (!tx) {
+      throw new NotFoundException('Transaksi tidak ditemukan');
+    }
+
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Analisis PA laboratorium hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    this.authorizationScopeService.assertProcessAccess(user, tx.processType);
+
+    const records = await this.prisma.qcProductAnalysis.findMany({
+      where: { transactionId },
+      include: {
+        testedBy: { select: { id: true, name: true, role: true } },
+        dispositionBy: { select: { id: true, name: true, role: true } },
+      },
+      orderBy: [{ testRound: 'asc' }, { revision: 'asc' }],
+    });
+
+    return {
+      success: true,
+      data: records,
+      current: selectCurrentPa(records),
+    };
+  }
+
+  /**
+   * Submit controlled GSP warehouse disposition for held/OOS chemical transaction.
+   * Actions: ACCEPT_WITH_NOTE, REQUEST_RETEST, REJECT.
+   * Authority: Strictly WAREHOUSE role with explicit GSP process scope.
+   */
+  async submitGspDisposition(
+    transactionId: string,
+    dto: SubmitGspDispositionDto,
+    user: JwtPayloadUser,
+  ) {
+    // P0 / Phase 1: ADMIN has full operational access across all GMS scopes.
+    // WAREHOUSE role requires explicit GSP warehouseAccess scope.
+    // QC, Security, and non-GSP Warehouse remain strictly forbidden.
+    const isAdmin = user.role === 'ADMIN';
+    const isGspWarehouse =
+      user.role === 'WAREHOUSE' && (user.warehouseAccess || []).includes('GSP');
+
+    if (!isAdmin && !isGspWarehouse) {
+      throw new ForbiddenException({
+        success: false,
+        message:
+          'Hanya personel operasional Gudang GSP atau Administrator yang memiliki kewenangan memberikan disposisi mutu penerimaan.',
+        errors: ['FORBIDDEN_DISPOSITION_ROLE'],
+      });
+    }
+
+    const tx = await this.prisma.transaction.findUnique({
+      where: { id: transactionId },
+      select: {
+        id: true,
+        status: true,
+        processType: true,
+        cargoType: true,
+        cargoSubType: true,
+        gspAnalysisProfile: true,
+        productCatalogId: true,
+        revision: true,
+      },
+    });
+
+    if (!tx) {
+      throw new NotFoundException('Transaksi tidak ditemukan');
+    }
+
+    if (tx.processType !== 'GSP') {
+      throw new BadRequestException(
+        'Disposisi mutu hanya berlaku untuk transaksi proses GSP.',
+      );
+    }
+
+    if (tx.status !== TransactionStatus.WAITING_GSP_DISPOSITION) {
+      throw new BadRequestException({
+        success: false,
+        message: `Disposisi ditolak: Transaksi berstatus ${tx.status}, bukan WAITING_GSP_DISPOSITION. Status historis WAITING_UTILITY_DISPOSITION bersifat read-only.`,
+        errors: ['INVALID_TRANSACTION_STATUS'],
+      });
+    }
+
+    // Disposition must be based on an explicitly current, non-voided PA.
+    // Do not fall back to an arbitrary historical row: a superseded analysis
+    // must never authorize a new warehouse disposition.
+    let activePa: any = null;
+    const paRows = await this.prisma.qcProductAnalysis.findMany?.({
+      where: { transactionId, isVoided: false },
+    });
+    if (Array.isArray(paRows)) {
+      activePa = selectCurrentPa(paRows);
+    } else {
+      activePa = await this.prisma.qcProductAnalysis.findFirst?.({
+        where: { transactionId, isVoided: false },
+        orderBy: { testRound: 'desc' },
+      });
+    }
+
+    if (!activePa) {
+      throw new BadRequestException({
+        success: false,
+        message:
+          'Catatan analisis laboratorium (PA) aktif tidak ditemukan untuk transaksi ini.',
+        errors: ['MISSING_ACTIVE_PA'],
+      });
+    }
+
+    let nextStatus: TransactionStatus;
+    let paStatus: string;
+    let dispositionReason: string;
+
+    if (dto.action === GspDispositionAction.ACCEPT_WITH_NOTE) {
+      const trimmedReason = (dto.reason || '').trim();
+      if (trimmedReason.length < 5) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Alasan penerimaan dengan catatan (disposisi mutu) wajib diisi minimal 5 karakter.',
+          errors: ['REASON_REQUIRED'],
+        });
+      }
+
+      // Enforce critical defect non-waivability
+      const rawParams: any = activePa.parameters;
+      const sensory = rawParams?.sensory;
+      const isForeignOk = sensory?.foreignMatters === 'Tidak ada kontaminasi';
+      const isPackagingOk =
+        sensory?.packagingLabel === 'Kemasan & label tidak rusak';
+
+      if (!isForeignOk || !isPackagingOk) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Penyimpangan kritis (kontaminasi benda asing atau kerusakan kemasan/label) tidak dapat diterima dengan catatan. Muatan harus DITOLAK (REJECT).',
+          errors: ['CRITICAL_DEFECT_NOT_WAIVABLE'],
+        });
+      }
+
+      nextStatus = TransactionStatus.QC_VEHICLE_PASSED;
+      paStatus = 'ACCEPT_WITH_NOTE';
+      dispositionReason = trimmedReason;
+    } else if (dto.action === GspDispositionAction.REQUEST_RETEST) {
+      if (activePa.testRound >= 2) {
+        throw new BadRequestException({
+          success: false,
+          message:
+            'Batas maksimum pengujian kimia (2 ronde) telah tercapai. Keputusan hanya dapat berupa Terima dengan Catatan (jika non-kritis) atau Tolak (REJECT).',
+          errors: ['MAX_RETEST_ROUNDS_REACHED'],
+        });
+      }
+
+      nextStatus = TransactionStatus.QC_RETEST_REQUIRED;
+      paStatus = 'RETEST_REQUIRED';
+      dispositionReason =
+        (dto.reason || '').trim() ||
+        `Permintaan Uji Ulang (Retest Ronde ${activePa.testRound + 1}) oleh Gudang GSP`;
+    } else if (dto.action === GspDispositionAction.REJECT) {
+      nextStatus = TransactionStatus.QC_VEHICLE_REJECTED;
+      paStatus = 'REJECT';
+      dispositionReason =
+        (dto.reason || '').trim() || 'Ditolak oleh Gudang GSP (OOS Mutu)';
+    } else {
+      throw new BadRequestException(
+        `Aksi disposisi tidak valid: ${dto.action}`,
+      );
+    }
+
+    assertValidStatusTransition(tx.status, nextStatus);
+
+    const now = new Date();
+    const expectedRevision = dto.revision ?? tx.revision;
+
+    await this.prisma.$transaction(async (prismaTx) => {
+      // 1. CAS update transaction
+      const claimed = await prismaTx.transaction.updateMany({
+        where: { id: transactionId, revision: expectedRevision },
+        data: {
+          status: nextStatus,
+          revision: { increment: 1 },
+        },
+      });
+
+      if (claimed.count === 0) {
+        throw new ConflictException(
+          'Transaksi telah diperbarui oleh pengguna lain (konflik konkurensi).',
+        );
+      }
+
+      // Claim exactly the current PA revision; a superseded approval cannot authorize its successor.
+      // Production Prisma must expose updateMany so the current/non-voided/revision
+      // predicates remain part of the atomic claim. A single-row update fallback
+      // would turn a stale approval into a write, so fail closed instead.
+      if (typeof prismaTx.qcProductAnalysis?.updateMany !== 'function') {
+        throw new ConflictException(
+          'Disposisi dibatalkan: dukungan klaim PA atomik tidak tersedia.',
+        );
+      }
+
+      // The checked-in generated client may lag the lineage migration in a
+      // source checkout. Keep the runtime contract explicit at this boundary;
+      // production Prisma is generated from the current schema before deploy.
+      const paModel = prismaTx.qcProductAnalysis as any;
+      const paClaim = await paModel.updateMany({
+        where: {
+          id: activePa.id,
+          revision: activePa.revision,
+          isCurrent: true,
+          isVoided: false,
+        },
+        data: {
+          status: paStatus,
+          dispositionAction: dto.action,
+          dispositionReason,
+          dispositionById: user.id,
+          dispositionAt: now,
+          dispositionRequiresReview: false,
+        },
+      });
+      if (paClaim.count !== 1)
+        throw new ConflictException(
+          'Revisi PA telah berubah; disposisi dibatalkan.',
+        );
+
+      // 3. Insert transaction status history
+      await prismaTx.transactionStatusHistory.create({
+        data: {
+          transactionId,
+          oldStatus: tx.status,
+          newStatus: nextStatus,
+          changedById: user.id,
+          notes: `Disposisi Gudang GSP (${dto.action}): ${dispositionReason}`,
+        },
+      });
+    });
+
+    await this.activityLogsService
+      .logAction({
+        userId: user.id,
+        action: `GSP_DISPOSITION_${dto.action}`,
+        module: 'WAREHOUSE',
+        referenceId: transactionId,
+        description: `Gudang GSP menetapkan disposisi ${dto.action} untuk transaksi ${transactionId} (Ronde ${activePa.testRound}). Alasan: ${dispositionReason}`,
+        status: 'SUCCESS',
+      })
+      .catch(() => {});
+
+    return {
+      success: true,
+      message: `Disposisi Gudang GSP berhasil dicatat: ${dto.action}`,
+      data: {
+        transactionId,
+        action: dto.action,
+        newStatus: nextStatus,
+        paStatus,
+        dispositionReason,
+      },
+    };
+  }
+}

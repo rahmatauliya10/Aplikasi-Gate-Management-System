@@ -89,6 +89,7 @@ export class ActivityLogsService {
   async logAction(
     data: CreateActivityLogDto,
     prismaTx?: Prisma.TransactionClient,
+    options?: { requireDb?: boolean },
   ) {
     let logData: any = { ...data };
     try {
@@ -102,7 +103,7 @@ export class ActivityLogsService {
 
       const client = prismaTx || this.prisma;
 
-      if (data.userId && (!userName || !role)) {
+      if (data.userId && (!userName || !role) && client.user?.findFirst) {
         const user = await client.user.findFirst({
           where: { id: data.userId },
         });
@@ -119,11 +120,12 @@ export class ActivityLogsService {
         role,
       };
 
-      await client.activityLog.create({
+      const record = await client.activityLog.create({
         data: logData,
       });
+      return record;
     } catch (error: any) {
-      if (prismaTx) {
+      if (prismaTx || options?.requireDb) {
         throw error;
       }
       this.logger.error(
@@ -132,6 +134,18 @@ export class ActivityLogsService {
       );
       this.writeFallbackLog(logData, error.message || 'Unknown database error');
     }
+  }
+
+  /**
+   * Strictly records an activity log to the database.
+   * If database persistence fails, throws an error immediately without routing to fallback sink.
+   * Used for mandatory compliance checkpoints (e.g. failed pre-unload checklist audit).
+   */
+  async logActionStrict(
+    data: CreateActivityLogDto,
+    prismaTx?: Prisma.TransactionClient,
+  ) {
+    return this.logAction(data, prismaTx, { requireDb: true });
   }
 
   async findAll(query: ActivityLogQueryDto) {

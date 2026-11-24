@@ -1,0 +1,80 @@
+{
+  "reportTitle": "Production Non-Mutating Smoke Test Evidence (P1-04 Hardened)",
+  "timestamp": "2026-11-18T07:05:49.703Z",
+  "apiBaseUrl": "http://localhost:3001",
+  "frontendBaseUrl": "http://localhost:8081",
+  "officialCorsOrigin": "http://localhost:8081",
+  "overallVerdict": "FAILED",
+  "summary": {
+    "totalChecks": 10,
+    "passed": 0,
+    "pending": 2,
+    "skipped": 1,
+    "failed": 7
+  },
+  "checks": [
+    {
+      "name": "API Hello & Route Index",
+      "status": "FAILED",
+      "durationMs": 138,
+      "isRequired": true
+    },
+    {
+      "name": "API Liveness Probe",
+      "status": "FAILED",
+      "durationMs": 13,
+      "isRequired": true
+    },
+    {
+      "name": "API Readiness Probe (Database & Storage)",
+      "status": "FAILED",
+      "durationMs": 7,
+      "isRequired": true
+    },
+    {
+      "name": "API Dependencies Probe (Database & NAS)",
+      "status": "FAILED",
+      "durationMs": 7,
+      "isRequired": true
+    },
+    {
+      "name": "Frontend Route & HTML Document Structure",
+      "status": "FAILED",
+      "durationMs": 6,
+      "isRequired": true
+    },
+    {
+      "name": "TLS / HTTPS & HSTS Enforcement",
+      "status": "SKIPPED",
+      "durationMs": 0,
+      "isRequired": false,
+      "detail": "Endpoints are HTTP / local topology; TLS/HSTS inspection skipped for non-HTTPS environment"
+    },
+    {
+      "name": "CORS Preflight Allowlist Enforcement (Official Origin)",
+      "status": "FAILED",
+      "durationMs": 7,
+      "isRequired": true
+    },
+    {
+      "name": "CORS Preflight Rejection (Unlisted Origin)",
+      "status": "FAILED",
+      "durationMs": 6,
+      "isRequired": true
+    },
+    {
+      "name": "Authenticated Read-Only Session Contract (GET /api/auth/me)",
+      "status": "PENDING",
+      "durationMs": 0,
+      "isRequired": false,
+      "detail": "PENDING OPERATOR TOKEN: No SMOKE_ACCESS_TOKEN supplied. Authenticated check deferred to maintain zero-mutation guarantee."
+    },
+    {
+      "name": "Authenticated Read-Only Business Query (GET /api/transactions/active)",
+      "status": "PENDING",
+      "durationMs": 1,
+      "isRequired": false,
+      "detail": "PENDING OPERATOR TOKEN: No SMOKE_ACCESS_TOKEN supplied. Business query probe deferred."
+    }
+  ]
+}

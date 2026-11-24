@@ -261,7 +261,9 @@ async function main() {
       console.log('User security already exists, skipped.');
     }
   } else {
-    console.log('Production or non-development environment detected, skipping non-admin user seeding.');
+    console.log(
+      'Production or non-development environment detected, skipping non-admin user seeding.',
+    );
   }
 
   // 5. Default Anti-Fraud Warning Announcement
@@ -284,6 +286,116 @@ async function main() {
         backgroundColor: '#EF4444',
         createdBy: adminId
       }
+    });
+  }
+
+  // 6. GSP Product Catalog (Master Data)
+  console.log('Seeding GSP Product Catalog...');
+  const gspProducts = [
+    {
+      code: 'SOLAR-001',
+      name: 'Solar',
+      category: 'Fuel',
+      subCategory: 'Solar',
+      processType: 'GSP' as const,
+      gspAnalysisProfile: 'PA_EXEMPT' as const,
+      receiptUnit: 'LITER' as const,
+      isPaRequired: false,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'COAL-001',
+      name: 'Batubara',
+      category: 'Coal',
+      subCategory: 'Batubara',
+      processType: 'GSP' as const,
+      gspAnalysisProfile: 'COAL_PA' as const,
+      receiptUnit: 'KG' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'PAC-001',
+      name: 'PAC 280 AC',
+      category: 'Chemical UTL',
+      subCategory: 'PAC 280 AC',
+      processType: 'GSP' as const,
+      gspAnalysisProfile: 'PAC_PA' as const,
+      receiptUnit: 'LITER' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'PAC-002',
+      name: 'POLYCOR P9',
+      category: 'Chemical UTL',
+      subCategory: 'POLYCOR P9',
+      processType: 'GSP' as const,
+      gspAnalysisProfile: 'PAC_PA' as const,
+      receiptUnit: 'LITER' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'PAC-003',
+      name: 'IPAC CIP A200',
+      category: 'Chemical UTL',
+      subCategory: 'IPAC CIP A200',
+      processType: 'GSP' as const,
+      gspAnalysisProfile: 'PAC_PA' as const,
+      receiptUnit: 'LITER' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'RPD-001',
+      name: 'Rapid Klen',
+      category: 'Chemical PROD',
+      subCategory: 'Rapid Klen',
+      processType: 'GSP' as const,
+      gspAnalysisProfile: 'RAPID_KLEN_PA' as const,
+      receiptUnit: 'LITER' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+    {
+      code: 'RPD-002',
+      name: 'PRO-CIP B++',
+      category: 'Chemical PROD',
+      subCategory: 'PRO-CIP B++',
+      processType: 'GSP' as const,
+      gspAnalysisProfile: 'RAPID_KLEN_PA' as const,
+      receiptUnit: 'LITER' as const,
+      isPaRequired: true,
+      policyVersion: 'SOP-GSP-2026.1',
+    },
+  ];
+
+  for (const prod of gspProducts) {
+    await prisma.productCatalog.upsert({
+      where: { code: prod.code },
+      update: {
+        name: prod.name,
+        category: prod.category,
+        subCategory: prod.subCategory,
+        gspAnalysisProfile: prod.gspAnalysisProfile,
+        receiptUnit: prod.receiptUnit,
+        isPaRequired: prod.isPaRequired,
+        policyVersion: prod.policyVersion,
+        isActive: true,
+      },
+      create: {
+        code: prod.code,
+        name: prod.name,
+        category: prod.category,
+        subCategory: prod.subCategory,
+        processType: prod.processType,
+        gspAnalysisProfile: prod.gspAnalysisProfile,
+        receiptUnit: prod.receiptUnit,
+        isPaRequired: prod.isPaRequired,
+        policyVersion: prod.policyVersion,
+        isActive: true,
+      },
     });
   }
 

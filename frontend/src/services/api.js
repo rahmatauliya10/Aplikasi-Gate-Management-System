@@ -14,8 +14,67 @@
 import axios from 'axios'
 import { getErrorMessage } from '../utils/errorMessage'
 
+/**
+ * Resolves the immutable trusted API origin from application configuration.
+ * Must NOT be computed dynamically from request-level config overrides.
+ * Rejects invalid, malformed, or protocol-relative configurations fail-closed.
+ */
+export function resolveConfiguredApiOrigin(rawBaseUrl = import.meta.env.VITE_API_BASE_URL) {
+  const currentOrigin = typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : 'http://localhost'
+
+  // Default to '/api' only when configuration is omitted (undefined or null)
+  const effectiveConfig = rawBaseUrl === undefined || rawBaseUrl === null ? '/api' : rawBaseUrl
+
+  if (typeof effectiveConfig !== 'string') {
+    throw new Error('Konfigurasi VITE_API_BASE_URL tidak valid: harus berupa string.')
+  }
+
+  if (/[\0\r\n\t\\]/.test(effectiveConfig)) {
+    throw new Error('Konfigurasi VITE_API_BASE_URL tidak valid: karakter kontrol atau backslash tidak diizinkan.')
+  }
+
+  const trimmed = effectiveConfig.trim()
+  if (!trimmed) {
+    throw new Error('Konfigurasi VITE_API_BASE_URL tidak valid: string kosong tidak diizinkan.')
+  }
+
+  // Handle valid relative paths
+  if (trimmed.startsWith('/')) {
+    if (trimmed.startsWith('//')) {
+      throw new Error('Konfigurasi VITE_API_BASE_URL tidak valid: bentuk protocol-relative (//) tidak diizinkan.')
+    }
+    return currentOrigin
+  }
+
+  // Handle absolute URLs
+  let parsed
+  try {
+    parsed = new URL(trimmed)
+  } catch (e) {
+    throw new Error(`Konfigurasi VITE_API_BASE_URL tidak valid: format URL malformed (${trimmed}).`)
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`Konfigurasi VITE_API_BASE_URL tidak valid: skema protokol (${parsed.protocol}) harus http: atau https:.`)
+  }
+
+  if (!parsed.hostname) {
+    throw new Error('Konfigurasi VITE_API_BASE_URL tidak valid: hostname tidak ditemukan.')
+  }
+
+  return parsed.origin
+}
+
+const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+const TRUSTED_API_ORIGIN = resolveConfiguredApiOrigin(RAW_API_BASE_URL)
+const EFFECTIVE_API_BASE_URL = RAW_API_BASE_URL === undefined || RAW_API_BASE_URL === null
+  ? '/api'
+  : RAW_API_BASE_URL.trim()
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: EFFECTIVE_API_BASE_URL,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
@@ -24,9 +83,78 @@ const api = axios.create({
   withCredentials: true
 })
 
+/**
+ * Validates request destination before dispatch.
+ * Prevents credential leakage (Bearer token and cookies) to unapproved origins.
+ * Resolves URI against the actual runtime page context (currentOrigin) and verifies
+ * it against the immutable trusted API origin (expectedOrigin).
+ */
+export function assertSafeRequestDestination(config, expectedOrigin = TRUSTED_API_ORIGIN) {
+  const currentOrigin = typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : 'http://localhost'
+
+  const requestedUrl = typeof config?.url === 'string' ? config.url : ''
+  const requestedBase = typeof config?.baseURL === 'string' ? config.baseURL : ''
+
+  // 1. Reject control characters, newlines, tabs, and backslashes in URL or baseURL
+  if (/[\0\r\n\t\\]/.test(requestedUrl) || /[\0\r\n\t\\]/.test(requestedBase)) {
+    throw new Error('Permintaan ditolak: URL memuat karakter tidak valid atau ambigu.')
+  }
+
+  // 2. Reject unsupported schemes on requested URL or requested baseURL
+  const urlSchemeMatch = requestedUrl.match(/^([a-z][a-z0-9+.-]*):/i)
+  if (urlSchemeMatch) {
+    const scheme = urlSchemeMatch[1].toLowerCase()
+    if (scheme !== 'http' && scheme !== 'https') {
+      throw new Error('Permintaan ditolak: Skema protokol URL tidak diizinkan.')
+    }
+  }
+
+  const baseSchemeMatch = requestedBase.match(/^([a-z][a-z0-9+.-]*):/i)
+  if (baseSchemeMatch) {
+    const scheme = baseSchemeMatch[1].toLowerCase()
+    if (scheme !== 'http' && scheme !== 'https') {
+      throw new Error('Permintaan ditolak: Skema protokol URL tidak diizinkan.')
+    }
+  }
+
+  // 3. Calculate full effective URI using the Axios instance's effective configuration
+  let resolvedUri
+  try {
+    resolvedUri = api.getUri(config)
+  } catch (e) {
+    throw new Error('Permintaan ditolak: Format URL target tidak valid.')
+  }
+
+  // 4. Resolve effective target URL against the ACTUAL BROWSER PAGE ORIGIN (currentOrigin), NOT expectedOrigin!
+  let targetUrl
+  try {
+    targetUrl = new URL(resolvedUri, currentOrigin)
+  } catch (e) {
+    throw new Error('Permintaan ditolak: Format URL target tidak valid.')
+  }
+
+  // 5. Enforce allowed schemes on resolved target
+  if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
+    throw new Error('Permintaan ditolak: Skema protokol URL tidak diizinkan.')
+  }
+
+  // 6. Strict Origin Confinement: Target origin MUST match expectedOrigin exactly
+  if (targetUrl.origin !== expectedOrigin) {
+    throw new Error('Permintaan ditolak: Tujuan transport berada di luar origin API resmi.')
+  }
+
+  return targetUrl
+}
+
 // Attach access_token from in-memory Pinia store to every request
 api.interceptors.request.use(
   async (config) => {
+    // 1. Strictly validate request destination BEFORE credentials or tokens are attached
+    assertSafeRequestDestination(config)
+
+    // 2. Attach access_token only AFTER destination is proven safe
     try {
       const { useAuthStore } = await import('../stores/authStore')
       const authStore = useAuthStore()

@@ -1,7 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Reflector } from '@nestjs/core';
 import { AuthController, getRefreshCookieOptions } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UnauthorizedException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { ActivityLogsService } from '../activity-logs/activity-logs.service';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
 describe('AuthController & Cookie Fail-Closed Security', () => {
   let controller: AuthController;
@@ -15,12 +20,23 @@ describe('AuthController & Cookie Fail-Closed Security', () => {
       getMe: jest.fn(),
       changePassword: jest.fn(),
       updateProfile: jest.fn(),
+      unlockUser: jest.fn().mockResolvedValue(undefined),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
-      providers: [{ provide: AuthService, useValue: authService }],
-    }).compile();
+      providers: [
+        { provide: AuthService, useValue: authService },
+        { provide: PrismaService, useValue: {} },
+        { provide: ActivityLogsService, useValue: { logAction: jest.fn() } },
+        { provide: Reflector, useValue: { getAllAndOverride: jest.fn() } },
+      ],
+    })
+      .overrideGuard(RolesGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<AuthController>(AuthController);
   });
@@ -147,6 +163,28 @@ describe('AuthController & Cookie Fail-Closed Security', () => {
       );
       expect(authService.logout).toHaveBeenCalledWith('usr-1');
       expect(result.success).toBe(true);
+    });
+  });
+
+  describe('unlockUser', () => {
+    it('should invoke authService.unlockUser with targetUserId, adminId, and audit reason', async () => {
+      const adminUser: any = {
+        id: 'admin-1',
+        email: 'admin@gms.local',
+        role: 'ADMIN',
+      };
+      const res = await controller.unlockUser('target-user-99', adminUser, {
+        reason: 'Permintaan reset operator oleh Supervisor',
+      });
+
+      expect(authService.unlockUser).toHaveBeenCalledWith(
+        'target-user-99',
+        'admin-1',
+        'Permintaan reset operator oleh Supervisor',
+      );
+      expect(res.success).toBe(true);
+      expect(res.data.userId).toBe('target-user-99');
+      expect(res.data.unlockedBy).toBe('admin-1');
     });
   });
 });

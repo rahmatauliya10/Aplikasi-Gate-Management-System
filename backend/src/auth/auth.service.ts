@@ -66,11 +66,24 @@ export class AuthService {
 
     // DB-Backed Account Lockout Check (5 failed attempts within 15 mins -> lockout)
     const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const latestUnlock = await this.prisma.activityLog.findFirst({
+      where: {
+        userId: user.id,
+        action: 'ACCOUNT_UNLOCKED',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const windowStart =
+      latestUnlock && latestUnlock.createdAt > fifteenMinutesAgo
+        ? latestUnlock.createdAt
+        : fifteenMinutesAgo;
+
     const recentFailedCount = await this.prisma.activityLog.count({
       where: {
         userId: user.id,
         action: 'LOGIN_FAILED',
-        createdAt: { gte: fifteenMinutesAgo },
+        createdAt: { gte: windowStart },
       },
     });
 
@@ -494,6 +507,25 @@ export class AuthService {
       message: 'Password berhasil diubah. Silakan login kembali.',
       data: null,
     };
+  }
+
+  /**
+   * Audit-compliant account unlock.
+   * Records an immutable ACCOUNT_UNLOCKED audit event instead of deleting LOGIN_FAILED logs.
+   */
+  async unlockUser(
+    userId: string,
+    unlockedById?: string,
+    reason = 'Administrative account unlock',
+  ): Promise<void> {
+    await this.auditLog(userId, 'ACCOUNT_UNLOCKED', {
+      unlockedById: unlockedById || 'SYSTEM',
+      reason,
+      unlockedAt: new Date().toISOString(),
+    });
+    this.logger.log(
+      `Account ${userId} unlocked audit-compliantly by ${unlockedById || 'SYSTEM'}`,
+    );
   }
 
   private async auditLog(userId: string | null, action: string, details: any) {

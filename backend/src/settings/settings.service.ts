@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityLogsService } from '../activity-logs/activity-logs.service';
 import { UpsertSettingDto } from './dto/upsert-setting.dto';
@@ -44,6 +49,26 @@ export class SettingsService {
   async upsert(dto: UpsertSettingDto, user: JwtPayloadUser) {
     this.logger.log(`Setting upsert: ${dto.key} by ${user.email}`);
 
+    // Self-grant guard for UTILITY_DISPOSITION_AUTHORIZED_USERS
+    if (dto.key === 'UTILITY_DISPOSITION_AUTHORIZED_USERS' && dto.value) {
+      const authorizedList = dto.value
+        .split(',')
+        .map((s) => s.trim().toLowerCase());
+      const selfIdentifiers = [
+        user.email?.toLowerCase(),
+        user.id?.toLowerCase(),
+        (user as any).username?.toLowerCase(),
+      ].filter(Boolean);
+      if (selfIdentifiers.some((ident) => authorizedList.includes(ident))) {
+        throw new ForbiddenException({
+          success: false,
+          message:
+            'Menambahkan akun sendiri ke dalam daftar otorisasi disposisi Utility dilarang (Self-privilege escalation prohibited).',
+          errors: [],
+        });
+      }
+    }
+
     const setting = await this.prisma.appSetting.upsert({
       where: { key: dto.key },
       update: { value: dto.value },
@@ -56,7 +81,7 @@ export class SettingsService {
       module: 'SETTINGS',
 
       referenceId: setting.id,
-      description: `Setting '${dto.key}' updated to '${dto.value}'`,
+      description: `Setting '${dto.key}' updated to '${dto.value}' by actor '${user.email || user.name || user.id}'`,
       status: 'SUCCESS',
     });
 

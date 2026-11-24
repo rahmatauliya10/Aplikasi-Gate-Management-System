@@ -58,6 +58,23 @@ export const useWarehouseStore = defineStore('warehouse', {
       } finally {
         this.loading = false;
       }
+    },
+
+    async submitChecklistDisposition(id, payload) {
+      this.loading = true;
+      this.error = null;
+      const notificationStore = useNotificationStore();
+      try {
+        const response = await warehouseService.submitChecklistDisposition(id, payload);
+        return response.data;
+      } catch (error) {
+        const parsedError = handleApiError(error);
+        this.error = parsedError.message;
+        notificationStore.addNotification('Error', this.error, 'error');
+        throw error;
+      } finally {
+        this.loading = false;
+      }
     }
   }
 });

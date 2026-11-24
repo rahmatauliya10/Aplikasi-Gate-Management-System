@@ -240,6 +240,9 @@ const handleLogin = async () => {
       statusMsg.value = 'Login Berhasil! Mengalihkan...'
       statusClass.value = 'status-success'
       statusIcon.value = '✅'
+      try {
+        sessionStorage.removeItem('gms_login_reminder_dismissed')
+      } catch (e) {}
       notificationStore.addNotification('Login Success', `Selamat datang kembali, ${authStore.user.name || 'User'}!`, 'success')
       setTimeout(() => { 
         if (authStore.user.role === 'SECURITY') {

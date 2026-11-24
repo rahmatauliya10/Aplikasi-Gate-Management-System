@@ -2,6 +2,8 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
+  IsObject,
   IsDefined,
   IsEnum,
   IsInt,
@@ -64,6 +66,47 @@ export class CorrectionItemDto {
   @IsString()
   @MaxLength(500)
   itemRemark?: string;
+
+  @ApiPropertyOptional({ description: 'Expected current PA record revision' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedRecordRevision?: number;
+
+  @ApiPropertyOptional({
+    description: 'Server PA evaluation preview fingerprint',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @MinLength(64)
+  evaluationFingerprint?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Explicit correction-time specification acknowledgement for legacy PA',
+  })
+  @IsOptional()
+  @IsBoolean()
+  acknowledgeCurrentSpec?: boolean;
+}
+
+export class PreviewPaCorrectionDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  targetRecordId: string;
+
+  @IsInt()
+  @Min(1)
+  expectedRevision: number;
+
+  @IsInt()
+  @Min(1)
+  expectedPaRevision: number;
+
+  @IsObject()
+  parameters: Record<string, unknown>;
 }
 
 export class CreateOperationLogCorrectionDto {

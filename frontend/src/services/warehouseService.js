@@ -58,6 +58,15 @@ const warehouseService = {
    */
   completeQcAnalysis(truckId, data = {}) {
     return api.post(`/warehouse/complete-qc-analysis/${truckId}`, data)
+  },
+
+  /**
+   * Submit GSP Pre-Unload Checklist Disposition (Concession or Reject)
+   * @param {Number|String} truckId
+   * @param {Object} data - { action: 'ACCEPT_WITH_NOTE'|'REJECT', reason, remarks, revision }
+   */
+  submitChecklistDisposition(truckId, data) {
+    return api.post(`/warehouse/${truckId}/checklist-disposition`, data)
   }
 }
 

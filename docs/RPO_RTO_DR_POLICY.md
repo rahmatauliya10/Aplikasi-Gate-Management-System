@@ -18,20 +18,23 @@ Kebijakan ini menetapkan batas toleransi kehilangan data (*Recovery Point Object
 | Parameter SLA | Target Resmi | Mekanisme Penjaminan Teknis | Eskalasi Pelanggaran SLA |
 |:---|:---:|:---|:---|
 | **RPO (Recovery Point Objective)** | **≤ 6 Jam** | - Jadwal backup otomatis setiap 6 jam via `DatabaseBackupService`<br>- Backup snapshot manual sebelum setiap migrasi/deployment (`MANUAL_PRE_UPDATE`)<br>- Replikasi ganda: Local Storage + Remote NAS Offsite Storage | Jika backup terakhir > 6 jam, `gms-health-monitor.ps1` memicu alert **HIGH/CRITICAL**. |
-| **RTO (Recovery Time Objective)** | **≤ 30 Menit** | - Script pemulihan terotomatisasi `run-nas-restore-drill.ps1`<br>- Arsitektur containerized Docker Compose (zero external dependency compile)<br>- Prosedur otomatis *Cold-Boot Recovery* pasca mati listrik | Jika waktu pemulihan > 30 menit, status kesiapan DR dinyatakan **DEGRADED**. |
+| **RTO (Recovery Time Objective)** | **≤ 30 Menit** *(PENDING IT APPROVAL; default target script = 600s / 10 min)* | - Script pemulihan terotomatisasi `run-nas-restore-drill.ps1`<br>- Arsitektur containerized Docker Compose (zero external dependency compile)<br>- Prosedur otomatis *Cold-Boot Recovery* pasca mati listrik | Jika waktu pemulihan > 30 menit, status kesiapan DR dinyatakan **DEGRADED**. |
 
 ---
 
 ## 3. Jadwal & Protokol Disaster Recovery Drill
 
+> [!WARNING]
+> Seluruh kegiatan drill / failure injection (Fault Injection Phase) **HANYA** boleh dijalankan di environment staging / test harness terisolasi. Dilarang keras menjalankan drill pada host atau database produksi aktif.
+
 Pengujian pemulihan bencana wajib dilaksanakan secara berkala, bukan hanya satu kali sebelum go-live:
 
 | Frekuensi | Jenis Pengujian | Penanggung Jawab | Prosedur Eksekusi |
 |:---|:---|:---|:---|
-| **Setiap Release / Deployment** | Deployment Rollback Drill | SRE / Release Engineer | `scripts/run-deployment-rollback-drill.ps1` |
-| **Bulanan (Monthly)** | Automated Failure-Injection Drill | DevOps / SRE | `scripts/run-restore-failure-drill.ps1` |
-| **Kuartalan (Quarterly)** | Actual NAS Physical Restore Drill | Database Admin & IT Sec | `scripts/run-nas-restore-drill.ps1` |
-| **Semesteran (Semi-Annual)** | Blackout & Cold-Boot Power-Cut Test | Plant IT & Infrastructure | `scripts/run-cold-boot-test.ps1` |
+| **Setiap Release / Deployment** | Deployment Rollback Drill | SRE / Release Engineer | `scripts/run-deployment-rollback-drill.ps1` *(Staging / CI Harness Only)* |
+| **Bulanan (Monthly)** | Automated Failure-Injection Drill | DevOps / SRE | `scripts/run-restore-failure-drill.ps1` *(Staging / CI Harness Only)* |
+| **Kuartalan (Quarterly)** | Actual NAS Physical Restore Drill | Database Admin & IT Sec | `scripts/run-nas-restore-drill.ps1` *(Target Terisolasi)* |
+| **Semesteran (Semi-Annual)** | Blackout & Cold-Boot Power-Cut Test | Plant IT & Infrastructure | `scripts/run-cold-boot-test.ps1` *(Staging / Test Bench)* |
 
 ---
 
