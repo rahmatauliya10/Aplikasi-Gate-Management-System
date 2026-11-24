@@ -516,7 +516,8 @@ function fixtureRelations() {
         "warehouseStartAt" timestamp, "warehouseEndAt" timestamp,
         "qcStartAt" timestamp, "qcEndAt" timestamp, "weighOutAt" timestamp,
         "grossWeight" double precision, "tareWeight" double precision,
-        "netWeight" double precision, "actualWeight" double precision
+        "netWeight" double precision, "actualWeight" double precision,
+        "warehouseUnit" text, "receiptUnit" text, "receivedQuantity" double precision
       )
     ), "FraudCheck" AS (
       SELECT * FROM jsonb_to_recordset(${JSON.stringify(checks)}::jsonb) AS f(
@@ -528,7 +529,8 @@ function fixtureRelations() {
     ), "WarehouseProcess" AS (
       SELECT * FROM jsonb_to_recordset(${JSON.stringify(warehouse)}::jsonb) AS wp(
         id text, "transactionId" text, revision int, "createdAt" timestamp,
-        "isCurrent" boolean, "startAt" timestamp, "endAt" timestamp
+        "isCurrent" boolean, "startAt" timestamp, "endAt" timestamp,
+        "receivedUnit" text, "unit" text, "receivedQuantity" double precision
       )
     ), "QcVehicleCheck" AS (
       SELECT * FROM jsonb_to_recordset(${JSON.stringify(qcVehicle)}::jsonb) AS qc(
