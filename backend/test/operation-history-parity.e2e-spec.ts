@@ -117,6 +117,50 @@ const fixtures: any[] = [
     fraudChecks: [],
   },
 
+  // Parity fixture: Non-KG (LITER) transaction with historical FraudCheck (SAFE) and actualWeight
+  {
+    id: 'liter-historical-fraud-safe',
+    receiptUnit: 'LITER',
+    netWeight: 10000,
+    actualWeight: 10000,
+    fraudChecks: [
+      fraud({
+        id: 'fraud-liter-old',
+        netWeight: 10000,
+        warehouseActualWeight: 10000,
+        deviationPercent: 0,
+        riskLevel: 'SAFE',
+      }),
+    ],
+  },
+
+  // Parity fixture: Non-KG (LITER) transaction without FraudCheck but with actualWeight
+  {
+    id: 'liter-historical-actual-weight',
+    receiptUnit: 'LITER',
+    netWeight: 10000,
+    actualWeight: 9800,
+    fraudChecks: [],
+  },
+
+  // Parity fixture: KG commodity with receivedQuantity in WarehouseProcess
+  {
+    id: 'coal-received-quantity-kg',
+    receiptUnit: 'KG',
+    netWeight: 10000,
+    warehouseProcesses: [
+      {
+        id: 'wh-coal-kg',
+        revision: 1,
+        isCurrent: true,
+        receivedUnit: 'KG',
+        receivedQuantity: 9900,
+        createdAt: timestamp,
+      },
+    ],
+    fraudChecks: [],
+  },
+
   // Parity fixture: GBJ process-aware weighbridge derivation (OUT=gross, IN=tare)
   {
     id: 'gbj-process-aware',
@@ -584,6 +628,7 @@ describePostgres(
             id,
             net,
             roll,
+            diff,
             deviation_percent,
             fraud_status,
             waiting_in,
@@ -615,6 +660,7 @@ describePostgres(
         // 1. Fraud & Weight Evidence Parity
         expect(actual.net).toBe(expectedFraud.net);
         expect(actual.roll).toBe(expectedFraud.roll);
+        expect(actual.diff).toBe(expectedFraud.diff);
         expect(actual.fraud_status).toBe(expectedFraud.status);
         if (expectedFraud.deviationPercent === null) {
           expect(actual.deviation_percent).toBeNull();

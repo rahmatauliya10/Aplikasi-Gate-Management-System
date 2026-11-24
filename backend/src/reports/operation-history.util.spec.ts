@@ -332,6 +332,30 @@ describe('operation history normalization', () => {
     expect(fraud.dataQuality).toContain('INVALID_WEIGHT');
   });
 
+  it('preserves PENDING status for LITER even with historical FraudCheck (SAFE) or actualWeight', () => {
+    const fraudWithHistorical = getOperationHistoryFraud({
+      status: 'COMPLETED',
+      netWeight: 10000,
+      actualWeight: 10000,
+      receiptUnit: 'LITER',
+      fraudChecks: [
+        {
+          id: 'old-fraud-safe',
+          riskLevel: 'SAFE',
+          deviationPercent: 0,
+          calculatedAt: '2026-01-01T00:00:00.000Z',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(fraudWithHistorical.status).toBe('PENDING');
+    expect(fraudWithHistorical.diff).toBeNull();
+    expect(fraudWithHistorical.ratioPercent).toBeNull();
+    expect(fraudWithHistorical.deviationPercent).toBeNull();
+    expect(fraudWithHistorical.dataQuality).toContain('INVALID_WEIGHT');
+  });
+
   it('correctly reconciles batubara receivedQuantity in KG against netWeight (P1-10)', () => {
     const fraudSafe = getOperationHistoryFraud({
       status: 'COMPLETED',

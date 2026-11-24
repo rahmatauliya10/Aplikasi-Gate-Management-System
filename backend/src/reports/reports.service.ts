@@ -640,13 +640,12 @@ export class ReportsService {
           END AS net,
           CASE
             WHEN fraud."warehouseActualWeight" > 0 THEN fraud."warehouseActualWeight"
-            WHEN (COALESCE(t."receiptUnit"::text, wp."receivedUnit"::text, t."warehouseUnit"::text, wp."unit"::text) = 'KG'
-                  OR COALESCE(t."receiptUnit"::text, wp."receivedUnit"::text, t."warehouseUnit"::text, wp."unit"::text) IS NULL)
-                 AND COALESCE(t."receivedQuantity", wp."receivedQuantity") > 0
+            WHEN COALESCE(t."receivedQuantity", wp."receivedQuantity") > 0
             THEN CAST(COALESCE(t."receivedQuantity", wp."receivedQuantity") AS DOUBLE PRECISION)
             WHEN t."actualWeight" > 0 THEN t."actualWeight"
             ELSE NULL
           END AS roll,
+          (UPPER(TRIM(COALESCE(t."receiptUnit"::text, wp."receivedUnit"::text, t."warehouseUnit"::text, wp."unit"::text, ''))) NOT IN ('', 'KG')) AS is_non_kg_unit,
           fraud."id" AS fraud_id,
           fraud."riskLevel"::text AS risk_level,
           vehicle."result" AS vehicle_result,
@@ -712,8 +711,12 @@ export class ReportsService {
       ), scored AS (
         SELECT
           metrics.*,
-          ABS(metrics.roll - metrics.net) AS diff,
           CASE
+            WHEN metrics.is_non_kg_unit THEN NULL
+            ELSE ABS(metrics.roll - metrics.net)
+          END AS diff,
+          CASE
+            WHEN metrics.is_non_kg_unit THEN NULL
             WHEN metrics."status" IN ('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED')
               OR metrics.vehicle_result = 'REJECT' OR metrics.incoming_result = 'REJECT'
             THEN NULL
@@ -723,6 +726,7 @@ export class ReportsService {
                 ELSE NULL END)
           END AS deviation_percent,
           CASE
+            WHEN metrics.is_non_kg_unit THEN 'PENDING'
             WHEN metrics."status" IN ('INCOMING_CHECK_REJECTED', 'QC_VEHICLE_REJECTED')
               OR metrics.vehicle_result = 'REJECT' OR metrics.incoming_result = 'REJECT'
             THEN 'PENDING'
